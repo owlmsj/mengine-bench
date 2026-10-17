@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -204,3 +205,55 @@ def test_unrendered_ranks_apart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     assert report.ok, [(i.name, i.detail) for i in report.items if i.status == "FAIL"]
     from test_bundle_verify import board_as_complete
     assert "## FAST, no judge, visual unrendered (scoring" in board_as_complete(out, tmp_path)
+
+
+# Chrome on the ubuntu-latest runner could not screenshot (CI run
+# 39049869312) and the failure said only "render failed".
+LINUX_ONLY = ("--disable-dev-shm-usage", "--disable-gpu")
+COMMON = ("--headless=new", "--hide-scrollbars", "--window-size=1440,900")
+
+
+def test_headless_flags_linux_ci_adds_container_flags() -> None:
+    flags = visual.headless_browser_flags("Linux", {"CI": "true"}, is_root=False)
+    assert "--no-sandbox" in flags
+    assert set(LINUX_ONLY + COMMON) <= set(flags)
+
+
+def test_headless_flags_linux_sandbox_only_for_root_or_ci() -> None:
+    desktop = visual.headless_browser_flags("Linux", {}, is_root=False)
+    assert "--no-sandbox" not in desktop and set(LINUX_ONLY + COMMON) <= set(desktop)
+    assert "--no-sandbox" in visual.headless_browser_flags("Linux", {}, is_root=True)
+
+
+@pytest.mark.parametrize("system", ["Windows", "Darwin"])
+def test_headless_flags_windows_and_mac_unchanged(system: str) -> None:
+    flags = visual.headless_browser_flags(system, {"CI": "true"}, is_root=True)
+    assert flags == ["--headless=new", "--no-first-run", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
+                     "--hide-scrollbars", "--window-size=1440,900", "--virtual-time-budget=8000"]
+
+
+FAILING_BROWSER = r"""
+import sys
+sys.stderr.write("[0101/000000.0:FATAL:zygote_host_impl_linux.cc] No usable sandbox!\n")
+sys.stderr.write("token " + sys.argv[1] + "\n")
+for n in range(50):
+    sys.stderr.write(f"noise line {n}\n")
+sys.exit(1)
+"""
+
+
+def test_render_failure_reason_carries_redacted_browser_stderr(tmp_path: Path) -> None:
+    from fakes import fake_secret
+
+    script = tmp_path / "fakes" / "bad_browser.py"
+    script.parent.mkdir()
+    script.write_text(FAILING_BROWSER, encoding="utf-8")
+    html = write(tmp_path, "page.html", "<html></html>")
+    secret = fake_secret("github")
+    status = visual.render_headless(html, tmp_path / "shot.png",
+                                    browser_argv=[sys.executable, "-I", str(script), secret])
+    assert status.startswith(visual.RENDER_FAILED + ":")
+    assert "No usable sandbox" in status and "exit code 1" in status
+    assert secret not in status
+    assert "noise line 49" not in status, "only the first stderr lines"
+    assert visual.is_render_failure(status) and not visual.is_render_failure(visual.RENDERED)

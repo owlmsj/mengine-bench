@@ -24,11 +24,12 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import IO, Protocol
 
 import psutil
 
 from mengine_bench.core import CheckResult
+from mengine_bench.redact import PathScope, local_names, redact_paths, redact_text
 from mengine_bench.runner.process import kill_tree
 
 PASS_RATIO = 0.7
@@ -49,6 +50,15 @@ PROFILE_RENDERED = "rendered"
 PROFILE_UNRENDERED = "unrendered"
 PROFILE_CHECK = "graded rendered: browser screenshot and vision judge"
 _UNRENDERED_CAUSES = (NO_BROWSER, NO_JUDGE)
+STDERR_REASON_LINES = 8
+STDERR_REASON_LINE_CHARS = 300
+# SwiftShader keeps WebGL scenes rendering on GPU-less CI hosts; the virtual
+# time budget lets animation loops and fonts settle before the capture.
+_HEADLESS_FLAGS = ("--headless=new", "--no-first-run", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
+                   "--hide-scrollbars", "--window-size=1440,900", "--virtual-time-budget=8000")
+# Containers and CI runners have a tiny /dev/shm and no GPU; Chrome on the
+# ubuntu-latest runner failed to screenshot without these (CI run 39049869312).
+_LINUX_FLAGS = ("--disable-dev-shm-usage", "--disable-gpu")
 
 
 class JudgeUnavailable(RuntimeError):
@@ -99,13 +109,35 @@ def find_browser() -> str | None:
     return None
 
 
-def render_headless(html: Path, png: Path, browser_argv: Sequence[str] | None = None) -> str:
-    """Screenshot `html` at 1440x900; returns RENDERED, NO_BROWSER or RENDER_FAILED.
+def headless_browser_flags(system: str, env: Mapping[str, str], is_root: bool) -> list[str]:
+    """Chromium flags for one OS, without the per-call profile, screenshot and URL."""
+    if system != "Linux":
+        return list(_HEADLESS_FLAGS)
+    flags = [*_HEADLESS_FLAGS, *_LINUX_FLAGS]
+    # Chrome refuses to start as root with the sandbox, and CI runners (Ubuntu
+    # 24.04 AppArmor) block the user-namespace sandbox; desktops keep it.
+    if is_root or env.get("CI"):
+        flags.append("--no-sandbox")
+    return flags
 
+
+def _running_as_root() -> bool:
+    geteuid = getattr(os, "geteuid", None)
+    return geteuid is not None and geteuid() == 0
+
+
+def is_render_failure(status: str) -> bool:
+    return status == RENDER_FAILED or status.startswith(RENDER_FAILED + ":")
+
+
+def render_headless(html: Path, png: Path, browser_argv: Sequence[str] | None = None) -> str:
+    """Screenshot `html` at 1440x900; returns RENDERED, NO_BROWSER or a RENDER_FAILED reason.
+
+    A failure reads "render failed: <cause>" so CI logs explain themselves.
     `browser_argv` replaces the discovered browser executable (tests use a fake).
     """
     if not html.is_file():
-        return RENDER_FAILED
+        return f"{RENDER_FAILED}: no html file {html.name}"
     if browser_argv is None:
         browser = find_browser()
         if browser is None:
@@ -123,26 +155,36 @@ def render_headless(html: Path, png: Path, browser_argv: Sequence[str] | None = 
 
 
 def _screenshot(browser_argv: list[str], profile: Path, html: Path, png: Path) -> str:
-    # SwiftShader keeps WebGL scenes rendering on GPU-less CI hosts; the virtual
-    # time budget lets animation loops and fonts settle before the capture.
-    argv = [*browser_argv, "--headless=new", f"--user-data-dir={profile}",
-            "--no-first-run", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
-            "--hide-scrollbars", "--window-size=1440,900", "--virtual-time-budget=8000",
-            f"--screenshot={png.resolve()}", html.resolve().as_uri()]
-    try:
-        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL)
-    except OSError:
-        return RENDER_FAILED
-    try:
-        returncode = proc.wait(timeout=RENDER_TIMEOUT_S)
-    except subprocess.TimeoutExpired:
-        kill_tree(proc.pid)
-        proc.wait()
-        return RENDER_FAILED
-    if returncode or not png.is_file():
-        return RENDER_FAILED
+    flags = headless_browser_flags(platform.system(), os.environ, _running_as_root())
+    argv = [*browser_argv, *flags, f"--user-data-dir={profile}", f"--screenshot={png.resolve()}",
+            html.resolve().as_uri()]
+    # stderr goes to a file, not a pipe: orphaned helpers inherit the handle
+    # and a pipe would never reach EOF while they live.
+    with tempfile.TemporaryFile() as stderr_log:
+        try:
+            proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=stderr_log)
+        except OSError as exc:
+            return f"{RENDER_FAILED}: cannot start browser: {type(exc).__name__}"
+        try:
+            returncode = proc.wait(timeout=RENDER_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
+            kill_tree(proc.pid)
+            proc.wait()
+            return _failure_reason(f"timeout after {RENDER_TIMEOUT_S}s", stderr_log, profile, html)
+        if returncode:
+            return _failure_reason(f"exit code {returncode}", stderr_log, profile, html)
+        if not png.is_file():
+            return _failure_reason("exit code 0 but no screenshot", stderr_log, profile, html)
     return RENDERED
+
+
+def _failure_reason(cause: str, stderr_log: IO[bytes], profile: Path, html: Path) -> str:
+    stderr_log.seek(0)
+    lines = stderr_log.read().decode("utf-8", errors="replace").split("\n")
+    head = [line.strip()[:STDERR_REASON_LINE_CHARS] for line in lines if line.strip()][:STDERR_REASON_LINES]
+    scope = PathScope(workdirs=(profile, html.parent), names=local_names())
+    stderr_text = redact_paths(redact_text(" | ".join(head)), scope)
+    return f"{RENDER_FAILED}: {cause}; stderr: {stderr_text or '(empty)'}"
 
 
 def _profile_processes(profile: Path) -> list[psutil.Process]:
