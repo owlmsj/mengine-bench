@@ -1,0 +1,409 @@
+"""Agent adapters: one interface over Claude Code, Codex CLI, opencode and any command.
+
+Flags were read from each CLI's `--help` (claude 2.1, codex-cli 0.162,
+opencode 2.0). Adapters only build argv lists (never shell strings) and parse
+output; `process.run_process` launches them. Long prompts go through stdin
+because inlined long-context documents exceed the Windows command-line limit.
+
+A step succeeds only with exit 0 AND the adapter's terminal completion event
+(claude `result` success, codex `turn.completed`, opencode `step_finish`
+reason `stop`); a success-looking prefix of a truncated stream is a crash
+(release review R16).
+
+`judge_invocation` is the judge's argv (release review R17): judges read
+agent-written evidence, so they run with tools, approvals and session
+persistence off wherever the CLI allows it (flags read from claude 2.1.302,
+codex-cli 0.162.1 and opencode 2.0.29 `--help`).
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+import mimetypes
+import shlex
+import shutil
+import subprocess
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Protocol
+
+AGENT_NAMES = ("claude", "codex", "opencode", "cmd")
+# Stay well under the 32767-char Windows command line with flags and paths.
+ARGV_PROMPT_LIMIT = 24_000
+VERSION_TIMEOUT_S = 20
+
+
+class AgentError(RuntimeError):
+    """The agent ran but its output is not a successful final answer."""
+
+
+@dataclass(frozen=True)
+class Invocation:
+    argv: list[str]
+    stdin_text: str | None
+    # Extra environment on top of the caller's; None keeps it unchanged.
+    env: Mapping[str, str] | None = None
+
+
+@dataclass(frozen=True)
+class Parsed:
+    answer: str
+    session_id: str | None
+
+
+class Agent(Protocol):
+    name: str
+    model: str
+    effort: str | None
+    supports_resume: bool
+    supports_compact: bool
+    compact_prompt: str
+
+    def invocation(self, prompt: str, prompt_file: Path, workspace: Path, session_id: str | None,
+                   attachments: Sequence[str]) -> Invocation: ...
+
+    def judge_invocation(self, prompt: str, workdir: Path, attachments: Sequence[str],
+                         prompt_file: Path | None = None) -> Invocation: ...
+
+    def parse(self, stdout: str, exit_code: int) -> Parsed: ...
+
+    def version(self) -> str | None: ...
+
+
+def split_jsonl(stdout: str) -> list[dict[str, object]]:
+    """Parse JSONL on "\\n" only: str.splitlines would also split on U+2028
+    inside JSON strings and corrupt the events."""
+    events: list[dict[str, object]] = []
+    for line in stdout.split("\n"):
+        line = line.removesuffix("\r").strip()
+        if not line.startswith("{"):
+            continue  # CLIs interleave banners and warnings with the events.
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict):
+            events.append(event)
+    return events
+
+
+def _require_exit_zero(exit_code: int) -> None:
+    if exit_code != 0:
+        raise AgentError(f"received exit={exit_code}; expected exit=0")
+
+
+def parse_claude_stream(stdout: str, exit_code: int) -> Parsed:
+    _require_exit_zero(exit_code)
+    events = split_jsonl(stdout)
+    results = [event for event in events if event.get("type") == "result"]
+    if not results:
+        raise AgentError(f"received no result event in {len(events)} events (exit={exit_code}); "
+                         "expected a stream-json result")
+    final = results[-1]
+    if final.get("is_error") is not False or final.get("subtype") != "success":
+        raise AgentError(f"received result subtype={final.get('subtype')!r} is_error={final.get('is_error')!r}; "
+                         "expected subtype=success, is_error=false")
+    answer = final.get("result")
+    if not isinstance(answer, str):
+        raise AgentError(f"received result={answer!r:.80}; expected answer text")
+    session = final.get("session_id")
+    return Parsed(answer=answer, session_id=session if isinstance(session, str) else None)
+
+
+def parse_codex_jsonl(stdout: str, exit_code: int) -> Parsed:
+    events = split_jsonl(stdout)
+    failed = [event for event in events if event.get("type") in ("turn.failed", "error")]
+    if failed:
+        raise AgentError(f"received {failed[-1].get('type')} event {json.dumps(failed[-1])[:200]}; "
+                         "expected a completed turn")
+    _require_exit_zero(exit_code)
+    turns = [event.get("type") for event in events if event.get("type") in ("turn.started", "turn.completed")]
+    if not turns or turns[-1] != "turn.completed":
+        raise AgentError(f"received turn events {turns[-3:]} in {len(events)} events; "
+                         "expected the stream to end with turn.completed")
+    session = next((event.get("thread_id") for event in events if event.get("type") == "thread.started"), None)
+    texts = [item.get("text") for event in events if event.get("type") == "item.completed"
+             for item in [event.get("item")] if isinstance(item, dict) and item.get("type") == "agent_message"]
+    answers = [text for text in texts if isinstance(text, str)]
+    if not answers:
+        raise AgentError(f"received no agent_message in {len(events)} events; expected a final message")
+    return Parsed(answer=answers[-1], session_id=session if isinstance(session, str) else None)
+
+
+def parse_opencode_jsonl(stdout: str, exit_code: int) -> Parsed:
+    _require_exit_zero(exit_code)
+    events = split_jsonl(stdout)
+    errors = [event for event in events if event.get("type") == "error"]
+    if errors:
+        raise AgentError(f"received error event {json.dumps(errors[-1])[:200]}; expected successful JSONL")
+    parts = [event.get("part") for event in events]
+    finishes = [part for event, part in zip(events, parts) if event.get("type") == "step_finish"]
+    if any(isinstance(part, dict) and part.get("reason") == "length" for part in finishes):
+        raise AgentError("received step_finish reason=length; expected a complete answer")
+    last = finishes[-1].get("reason") if finishes and isinstance(finishes[-1], dict) else None
+    if last != "stop":
+        raise AgentError(f"received last step_finish reason={last!r} in {len(events)} events; "
+                         "expected a terminal step_finish with reason=stop")
+    texts = [part.get("text") for event, part in zip(events, parts)
+             if event.get("type") == "text" and isinstance(part, dict)]
+    answer = "".join(text for text in texts if isinstance(text, str))
+    if not answer.strip():
+        raise AgentError(f"received no text in {len(events)} events; expected a non-empty answer")
+    session = next((event.get("sessionID") for event in events if isinstance(event.get("sessionID"), str)), None)
+    return Parsed(answer=answer, session_id=session)
+
+
+def _image_block(path: Path) -> dict[str, object]:
+    media_type = mimetypes.guess_type(path.name)[0]
+    if media_type not in ("image/png", "image/jpeg", "image/gif", "image/webp"):
+        raise ValueError(f"received attachment {path.name!r} of type {media_type!r}; "
+                         "expected a png/jpeg/gif/webp image")
+    data = base64.b64encode(path.read_bytes()).decode("ascii")
+    return {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}}
+
+
+def _executable(name: str) -> str:
+    # Windows installs agent CLIs as .cmd/.exe shims that Popen cannot find by bare name.
+    return shutil.which(name) or name
+
+
+def _cli_version(name: str) -> str | None:
+    try:
+        proc = subprocess.run([_executable(name), "--version"], capture_output=True, text=True,
+                              timeout=VERSION_TIMEOUT_S, check=False, encoding="utf-8", errors="replace")
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    lines = proc.stdout.strip().splitlines()
+    return lines[0] if proc.returncode == 0 and lines else None
+
+
+@dataclass
+class ClaudeAgent:
+    """Claude Code in print mode; stream-json requires --verbose."""
+
+    model: str
+    effort: str | None
+    name: str = "claude"
+    supports_resume: bool = True
+    supports_compact: bool = True
+    compact_prompt: str = "/compact"
+
+    def invocation(self, prompt: str, prompt_file: Path, workspace: Path, session_id: str | None,
+                   attachments: Sequence[str]) -> Invocation:
+        # Attachments are named in the prompt; Claude Code reads images with its Read tool.
+        argv = [_executable("claude"), "-p", "--output-format", "stream-json", "--verbose", "--model", self.model]
+        if self.effort:
+            argv += ["--effort", self.effort]
+        argv += ["--permission-mode", "bypassPermissions"]
+        if session_id:
+            argv += ["--resume", session_id]
+        return Invocation(argv=argv, stdin_text=prompt)
+
+    def judge_invocation(self, prompt: str, workdir: Path, attachments: Sequence[str],
+                         prompt_file: Path | None = None) -> Invocation:
+        # --tools "" removes every built-in tool; --restricted also drops user,
+        # project and local settings (hooks) and --strict-mcp-config every MCP
+        # server. Without a Read tool, images travel inline as stream-json
+        # content blocks.
+        argv = [_executable("claude"), "-p", "--output-format", "stream-json", "--verbose", "--model", self.model]
+        if self.effort:
+            argv += ["--effort", self.effort]
+        argv += ["--tools", "", "--restricted", "--strict-mcp-config", "--permission-mode", "dontAsk",
+                 "--no-session-persistence"]
+        if not attachments:
+            return Invocation(argv=argv, stdin_text=prompt)
+        blocks: list[dict[str, object]] = [{"type": "text", "text": prompt}]
+        blocks += [_image_block(workdir / attachment) for attachment in attachments]
+        message = {"type": "user", "message": {"role": "user", "content": blocks}}
+        return Invocation(argv=[*argv, "--input-format", "stream-json"], stdin_text=json.dumps(message) + "\n")
+
+    def parse(self, stdout: str, exit_code: int) -> Parsed:
+        return parse_claude_stream(stdout, exit_code)
+
+    def version(self) -> str | None:
+        return _cli_version("claude")
+
+
+CODEX_JUDGE_DISABLED_FEATURES = ("shell_tool", "unified_exec", "apps", "browser_use", "browser_use_external",
+                                 "computer_use", "in_app_browser")
+# opencode has no tool-off flag; an inline config denies every tool permission
+# and `run` without --auto rejects anything that would ask.
+OPENCODE_JUDGE_CONFIG = {"permission": {"edit": "deny", "bash": "deny", "webfetch": "deny", "websearch": "deny",
+                                        "external_directory": "deny", "task": "deny"}}
+
+
+@dataclass
+class CodexAgent:
+    """`codex exec --json`; `exec resume <thread>` continues a session.
+
+    Codex exec has no compaction command, so compact_before is unsupported.
+    """
+
+    model: str
+    effort: str | None
+    name: str = "codex"
+    supports_resume: bool = True
+    supports_compact: bool = False
+    compact_prompt: str = ""
+
+    def invocation(self, prompt: str, prompt_file: Path, workspace: Path, session_id: str | None,
+                   attachments: Sequence[str]) -> Invocation:
+        argv = [_executable("codex"), "exec"]
+        if session_id:
+            argv.append("resume")
+        argv += ["--json", "--skip-git-repo-check", "-m", self.model]
+        if self.effort:
+            argv += ["-c", f'model_reasoning_effort="{self.effort}"']
+        # Parity with Claude's bypassPermissions: the task workspace is the sandbox.
+        argv.append("--dangerously-bypass-approvals-and-sandbox")
+        for attachment in attachments:
+            argv += ["-i", attachment]
+        if session_id:
+            argv.append(session_id)
+        argv.append("-")
+        return Invocation(argv=argv, stdin_text=prompt)
+
+    def judge_invocation(self, prompt: str, workdir: Path, attachments: Sequence[str],
+                         prompt_file: Path | None = None) -> Invocation:
+        # Codex cannot drop every tool: read-only sandbox (no writes, no
+        # network), no user config/MCP/rules, no session files, and the
+        # command, app and browser features off.
+        argv = [_executable("codex"), "exec", "--json", "--skip-git-repo-check", "--ephemeral",
+                "--ignore-user-config", "--ignore-rules", "--sandbox", "read-only"]
+        for feature in CODEX_JUDGE_DISABLED_FEATURES:
+            argv += ["--disable", feature]
+        argv += ["-m", self.model]
+        if self.effort:
+            argv += ["-c", f'model_reasoning_effort="{self.effort}"']
+        for attachment in attachments:
+            argv += ["-i", attachment]
+        argv.append("-")
+        return Invocation(argv=argv, stdin_text=prompt)
+
+    def parse(self, stdout: str, exit_code: int) -> Parsed:
+        return parse_codex_jsonl(stdout, exit_code)
+
+    def version(self) -> str | None:
+        return _cli_version("codex")
+
+
+@dataclass
+class OpencodeAgent:
+    """`opencode run --format json`; effort maps to the model variant (`model#effort`).
+
+    --standalone keeps runs off any shared background server. opencode has no
+    non-interactive compaction, so compact_before is unsupported.
+    """
+
+    model: str
+    effort: str | None
+    name: str = "opencode"
+    supports_resume: bool = True
+    supports_compact: bool = False
+    compact_prompt: str = ""
+
+    def invocation(self, prompt: str, prompt_file: Path, workspace: Path, session_id: str | None,
+                   attachments: Sequence[str]) -> Invocation:
+        model = f"{self.model}#{self.effort}" if self.effort else self.model
+        argv = [_executable("opencode"), "run", "--standalone", "--auto", "--format", "json", "-m", model]
+        if session_id:
+            argv += ["--session", session_id]
+        for attachment in attachments:
+            argv += ["--file", attachment]
+        if len(prompt) > ARGV_PROMPT_LIMIT:
+            return Invocation(argv=argv, stdin_text=prompt)
+        return Invocation(argv=[*argv, prompt], stdin_text=None)
+
+    def judge_invocation(self, prompt: str, workdir: Path, attachments: Sequence[str],
+                         prompt_file: Path | None = None) -> Invocation:
+        model = f"{self.model}#{self.effort}" if self.effort else self.model
+        argv = [_executable("opencode"), "run", "--standalone", "--format", "json", "-m", model]
+        for attachment in attachments:
+            argv += ["--file", attachment]
+        env = {"OPENCODE_CONFIG_CONTENT": json.dumps(OPENCODE_JUDGE_CONFIG)}
+        if len(prompt) > ARGV_PROMPT_LIMIT:
+            return Invocation(argv=argv, stdin_text=prompt, env=env)
+        return Invocation(argv=[*argv, prompt], stdin_text=None, env=env)
+
+    def parse(self, stdout: str, exit_code: int) -> Parsed:
+        return parse_opencode_jsonl(stdout, exit_code)
+
+    def version(self) -> str | None:
+        return _cli_version("opencode")
+
+
+CMD_PLACEHOLDERS = ("{prompt_file}", "{workspace}", "{model}", "{effort}")
+
+
+@dataclass
+class CmdAgent:
+    """Any command: the template is a JSON argv list or a POSIX-quoted string.
+
+    Placeholders are substituted per argument after splitting, so paths with
+    spaces stay one argument. The answer is the trimmed stdout. No sessions:
+    continuation steps are reported unsupported.
+    """
+
+    template: str
+    model: str
+    effort: str | None
+    name: str = "cmd"
+    supports_resume: bool = False
+    supports_compact: bool = False
+    compact_prompt: str = ""
+
+    def __post_init__(self) -> None:
+        argv = self._split()
+        if not argv or not any("{prompt_file}" in arg for arg in argv):
+            raise ValueError(f"received cmd template {self.template!r}; expected an argv containing {{prompt_file}}")
+
+    def _split(self) -> list[str]:
+        if self.template.lstrip().startswith("["):
+            parsed = json.loads(self.template)
+            if not isinstance(parsed, list) or not all(isinstance(arg, str) for arg in parsed):
+                raise ValueError(f"received cmd template {self.template!r}; expected a JSON list of strings")
+            return parsed
+        return shlex.split(self.template)
+
+    def invocation(self, prompt: str, prompt_file: Path, workspace: Path, session_id: str | None,
+                   attachments: Sequence[str]) -> Invocation:
+        values = {"{prompt_file}": str(prompt_file), "{workspace}": str(workspace),
+                  "{model}": self.model, "{effort}": self.effort or ""}
+        argv = []
+        for arg in self._split():
+            for placeholder, value in values.items():
+                arg = arg.replace(placeholder, value)
+            argv.append(arg)
+        return Invocation(argv=argv, stdin_text=None)
+
+    def judge_invocation(self, prompt: str, workdir: Path, attachments: Sequence[str],
+                         prompt_file: Path | None = None) -> Invocation:
+        # A user command's tool policy is the user's own; judge.py still runs
+        # it in an empty cwd with the prompt file outside that cwd.
+        if prompt_file is None:
+            raise ValueError("received no prompt_file for a cmd judge; expected the {prompt_file} path")
+        return self.invocation(prompt, prompt_file, workdir, None, attachments)
+
+    def parse(self, stdout: str, exit_code: int) -> Parsed:
+        _require_exit_zero(exit_code)
+        return Parsed(answer=stdout.strip(), session_id=None)
+
+    def version(self) -> str | None:
+        # A user command has no reliable version flag; results record "cmd" only.
+        return None
+
+
+def make_agent(name: str, model: str, effort: str | None, cmd_template: str | None) -> Agent:
+    if name == "claude":
+        return ClaudeAgent(model=model, effort=effort)
+    if name == "codex":
+        return CodexAgent(model=model, effort=effort)
+    if name == "opencode":
+        return OpencodeAgent(model=model, effort=effort)
+    if name == "cmd":
+        if not cmd_template:
+            raise ValueError("received agent 'cmd' without a template; expected --cmd TEMPLATE")
+        return CmdAgent(template=cmd_template, model=model, effort=effort)
+    raise ValueError(f"received agent {name!r}; expected one of {AGENT_NAMES}")

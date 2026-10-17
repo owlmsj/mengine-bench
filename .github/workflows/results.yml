@@ -1,0 +1,155 @@
+name: results
+
+# Pull requests that add a result bundle are verified with the BASE branch's
+# bench code (never the PR's), read-only, so a submission cannot change the
+# rules it is judged by. The workflow file itself comes from the PR, which is
+# why .github/ is CODEOWNERS-protected and result PRs may touch nothing else.
+# Merges to main regenerate LEADERBOARD.md in two jobs:
+# verify-main runs the submitted code read-only and uploads a JSON report;
+# publish holds the write token and only reads result.json plus that report.
+# Size limit per bundle: 25 MiB (docs/SUBMITTING.md).
+
+on:
+  pull_request:
+    paths: ["results/**", "LEADERBOARD.md"]
+  push:
+    branches: [main]
+    paths: ["results/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: results-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      BUNDLE_SIZE_CAP: "26214400"
+    steps:
+      - name: Bench code from the base branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: bench
+          persist-credentials: false
+      - name: Submission from the pull request
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: submission
+          persist-credentials: false
+      - name: Results-only policy
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$REPO/pulls/$PR/files" --paginate \
+            --jq '.[] | [.status, .filename, (.previous_filename // "")] | @tsv' > "$RUNNER_TEMP/changed.tsv"
+          if ! python3 bench/.github/scripts/check_submission.py "$RUNNER_TEMP/changed.tsv" \
+              > "$RUNNER_TEMP/bundle.txt" 2> "$RUNNER_TEMP/policy.txt"; then
+            while IFS= read -r line; do echo "::error::$line"; echo "- FAIL: $line" >> "$GITHUB_STEP_SUMMARY"; done < "$RUNNER_TEMP/policy.txt"
+            exit 1
+          fi
+          echo "bundle=$(cat "$RUNNER_TEMP/bundle.txt")" >> "$GITHUB_OUTPUT"
+      - name: Size limit
+        env:
+          BUNDLE: ${{ steps.find.outputs.bundle }}
+        run: |
+          set -euo pipefail
+          size=$(du -sb "submission/$BUNDLE" | cut -f1)
+          echo "bundle size: $size bytes (limit $BUNDLE_SIZE_CAP)"
+          if [ "$size" -gt "$BUNDLE_SIZE_CAP" ]; then
+            echo "- FAIL: $BUNDLE is $size bytes; the limit is $BUNDLE_SIZE_CAP" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - run: uv sync --locked
+        working-directory: bench
+      - name: Verify
+        env:
+          BUNDLE: ${{ steps.find.outputs.bundle }}
+        working-directory: bench
+        run: |
+          set -uo pipefail
+          uv run mengine-bench verify "$GITHUB_WORKSPACE/submission/$BUNDLE" > "$RUNNER_TEMP/verify.txt"
+          status=$?
+          cat "$RUNNER_TEMP/verify.txt"
+          {
+            echo "## mengine-bench verify: \`$BUNDLE\`"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/verify.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
+  verify-main:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - run: uv sync --locked
+      - name: Verify every bundle (executes submission code; no write token here)
+        run: |
+          set -euo pipefail
+          uv run mengine-bench leaderboard --write-report "$RUNNER_TEMP/verification.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verification-report
+          path: ${{ runner.temp }}/verification.json
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: verify-main
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verification-report
+          path: ${{ runner.temp }}/report
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+      - run: uv sync --locked
+      - name: Regenerate LEADERBOARD.md from result.json and the report (runs no task check)
+        run: |
+          set -euo pipefail
+          uv run mengine-bench leaderboard --from-report "$RUNNER_TEMP/report/verification.json" \
+            | tee "$RUNNER_TEMP/leaderboard.txt"
+          { echo '```'; cat "$RUNNER_TEMP/leaderboard.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Commit LEADERBOARD.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add LEADERBOARD.md
+          if git diff --cached --quiet; then
+            echo "LEADERBOARD.md unchanged"
+            exit 0
+          fi
+          git commit -m "chore: regenerate LEADERBOARD.md"
+          # The job-scoped token is used only for this push, never persisted on disk.
+          gh auth setup-git
+          git push origin HEAD:main

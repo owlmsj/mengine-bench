@@ -1,0 +1,175 @@
+"""End-to-end `mengine-bench run` with a fake `cmd` agent, plus multi-step semantics."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from conftest import FakeAgent
+from mengine_bench import cli
+from mengine_bench.core import FULL, CheckResult, EvalTask, Step, read
+from mengine_bench.runner.agents import CmdAgent
+from mengine_bench.runner.task_run import run_task
+
+# Applies the task's own reference solution, like a perfect agent would.
+REFERENCE_AGENT = """
+import sys
+from pathlib import Path
+from mengine_bench import catalog
+task = next(t for t in catalog.all_tasks() if t.id == "ds-ab-playtest")
+answers = task.reference(Path(sys.argv[1]))
+sys.stdout.buffer.write(answers[-1].encode("utf-8"))
+"""
+
+
+def test_run_with_reference_agent_scores_full_marks(fake_agent: FakeAgent, tmp_path: Path,
+                                                    monkeypatch: pytest.MonkeyPatch) -> None:
+    template = json.loads(fake_agent("reference", REFERENCE_AGENT))
+    # -I would hide the installed package from the fake agent; drop it.
+    template.remove("-I")
+    out = tmp_path / "results"
+    code = cli.main(["run", "--suite", "fast", "--agent", "cmd", "--cmd", json.dumps(template), "--model", "fake/ref",
+                     "--tasks", "ds-ab-playtest", "--out", str(out), "--work", str(tmp_path / "work")])
+    assert code == 0
+    [result_file] = out.glob("fast/*/result.json")
+    assert "_cmd_fake-ref_none_" in result_file.parent.name
+    assert (result_file.parent / "summary.md").is_file()
+    result = json.loads(result_file.read_text(encoding="utf-8"))
+    [task] = result["tasks"]
+    assert task["status"] == "ok" and task["passed"] and task["c"] == 1.0
+    speed = min(1.0, task["par_s"] / task["agent_s"])
+    assert task["s"] == pytest.approx(speed)
+    assert result["totals"]["objective"] == round(100 * (0.8 + 0.2 * speed), 1)
+    assert result["totals"]["solved"] == 1
+    assert result["suite"] == "fast" and result["scoring_version"] == "1.0"
+    assert result["agent"] == {"name": "cmd", "model": "fake/ref", "effort": None, "version": None}
+    assert {"os", "cpu", "cpu_count", "python"} <= set(result["environment"])
+    assert str(tmp_path) not in result_file.read_text(encoding="utf-8"), "results must not leak local paths"
+
+
+ECHO_AGENT = """
+import sys
+from pathlib import Path
+ws = Path(sys.argv[1])
+prompt = Path(sys.argv[2]).read_text(encoding="utf-8")
+(ws / "seen.txt").write_text(",".join(sorted(p.name for p in ws.iterdir())), encoding="utf-8")
+print(prompt.splitlines()[0])
+"""
+
+
+def _two_step_task(second: Step) -> EvalTask:
+    def setup(ws: Path) -> None:
+        (ws / "secret.md").write_text("42", encoding="utf-8")
+
+    def check(ws: Path, answers: list[str]) -> CheckResult:
+        result = CheckResult()
+        result.add("secret hidden in step 2", "secret.md" not in (read(ws, "seen.txt") or ""))
+        result.add("answers per step", answers == ["first", "second"])
+        return result
+
+    return EvalTask(id="two-step", category="test", suites=frozenset({FULL}), provenance="t", summary="t",
+                    setup=setup, steps=(Step("first\nread {WS}/secret.md"), second), check=check,
+                    reference=lambda ws: [], par_s=10.0)
+
+
+def test_fresh_session_hides_files_and_collects_answers(fake_agent: FakeAgent, tmp_path: Path) -> None:
+    task = _two_step_task(Step("second", fresh_session=True, hide=("secret.md",)))
+    agent = CmdAgent(template=fake_agent("echo", ECHO_AGENT), model="m", effort=None)
+    record = run_task(task, agent, tmp_path / "run")
+    assert record.status == "ok", record.error
+    assert record.answers == ["first", "second"]
+    assert record.check is not None and record.check.passed
+    assert [step.index for step in record.steps] == [0, 1]
+    assert record.agent_s == pytest.approx(sum(step.wall_s for step in record.steps))
+    assert (tmp_path / "run" / "transcripts" / "step-1.stdout.txt").is_file()
+
+
+def test_continuation_without_resume_is_unsupported(fake_agent: FakeAgent, tmp_path: Path) -> None:
+    task = _two_step_task(Step("second", hide=("secret.md",)))
+    agent = CmdAgent(template=fake_agent("echo", ECHO_AGENT), model="m", effort=None)
+    record = run_task(task, agent, tmp_path / "run")
+    assert record.status == "unsupported"
+    assert len(record.steps) == 1
+
+
+def test_crashing_agent_is_reported(fake_agent: FakeAgent, tmp_path: Path) -> None:
+    task = _two_step_task(Step("second", fresh_session=True))
+    agent = CmdAgent(template=fake_agent("crash", "import sys; sys.exit(7)"), model="m", effort=None)
+    record = run_task(task, agent, tmp_path / "run")
+    assert record.status == "crash" and "7" in (record.error or "")
+
+
+# R19 (release review): a fresh session must start from the declared carry-over
+# files only, in a workspace whose ancestors do not hold the earlier steps.
+LISTING_AGENT = """
+import json, os, sys
+from pathlib import Path
+ws = Path(sys.argv[1]).resolve()
+prompt = Path(sys.argv[2]).read_text(encoding="utf-8")
+files = sorted(p.relative_to(ws).as_posix() for p in ws.rglob("*") if p.is_file())
+siblings = sorted(os.listdir(ws.parent))
+(ws / "notes").mkdir(exist_ok=True)
+(ws / "notes" / "summary.md").write_text("kept", encoding="utf-8")
+(ws / "notes" / "scratch.md").write_text("not carried", encoding="utf-8")
+(ws / f"seen-{prompt.splitlines()[0]}.json").write_text(
+    json.dumps({"cwd": str(ws), "files": files, "siblings": siblings}), encoding="utf-8")
+print(prompt.splitlines()[0])
+"""
+
+
+def _carry_task() -> EvalTask:
+    def setup(ws: Path) -> None:
+        (ws / "source.md").write_text("original", encoding="utf-8")
+        (ws / "copy-of-source.md").write_text("original", encoding="utf-8")
+
+    def check(ws: Path, answers: list[str]) -> CheckResult:
+        result = CheckResult()
+        result.add("summary carried", read(ws, "notes/summary.md") == "kept")
+        return result
+
+    return EvalTask(id="carry", category="test", suites=frozenset({FULL}), provenance="t", summary="t",
+                    setup=setup, steps=(Step("first"), Step("second", fresh_session=True, hide=("source.md",),
+                                                              carry=("notes/summary.md",))),
+                    check=check, reference=lambda ws: [], par_s=10.0)
+
+
+def test_fresh_session_sees_only_carried_files_in_an_isolated_root(fake_agent: FakeAgent, tmp_path: Path) -> None:
+    agent = CmdAgent(template=fake_agent("listing", LISTING_AGENT), model="m", effort=None)
+    root = tmp_path / "run"
+    record = run_task(_carry_task(), agent, root)
+    assert record.status == "ok", record.error
+    assert record.workspace is not None and record.check is not None and record.check.passed
+    second = json.loads(read(record.workspace, "seen-second.json") or "{}")
+    assert second["files"] == ["AGENTS.md", "notes/summary.md"]
+    cwd = Path(second["cwd"])
+    assert not cwd.is_relative_to(root.resolve()), "fresh workspace must not live under the run root"
+    assert not any(name.startswith("step-") for name in second["siblings"])
+    # Graded and bundled from the run root once the task is over.
+    assert record.workspace.resolve().is_relative_to(root.resolve())
+    assert not cwd.exists()
+
+
+def test_fresh_session_without_carry_starts_empty(fake_agent: FakeAgent, tmp_path: Path) -> None:
+    task = _two_step_task(Step("second", fresh_session=True))
+    agent = CmdAgent(template=fake_agent("listing", LISTING_AGENT), model="m", effort=None)
+    record = run_task(task, agent, tmp_path / "run")
+    assert record.workspace is not None
+    assert json.loads(read(record.workspace, "seen-second.json") or "{}")["files"] == ["AGENTS.md"]
+
+
+def test_runner_applies_the_unrendered_profile_to_visual_checks(fake_agent: FakeAgent, tmp_path: Path) -> None:
+    from mengine_bench import visual
+
+    def check(ws: Path, answers: list[str]) -> CheckResult:
+        result = visual.VisualCheckResult(mandatory=[("page exists", True)], checks=[("page exists", True)])
+        result.flags.append(visual.NO_BROWSER)
+        return result
+
+    task = EvalTask(id="vis", category="test", suites=frozenset({FULL}), provenance="t", summary="t",
+                    setup=lambda ws: None, steps=(Step("first"),), check=check, reference=lambda ws: [], par_s=1.0)
+    agent = CmdAgent(template=fake_agent("echo", ECHO_AGENT), model="m", effort=None)
+    record = run_task(task, agent, tmp_path / "run")
+    assert record.check is not None and not record.check.passed
+    assert visual.PROFILE_UNRENDERED in getattr(record.check, "flags")
