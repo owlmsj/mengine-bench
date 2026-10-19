@@ -143,8 +143,13 @@ and uploads `verification.json` as an artifact. `publish`, the only job with
 runs `mengine-bench leaderboard --from-report verification.json`, which reads
 `result.json` files and the report only (a bundle whose `result.json` hash
 differs from the report, or that the report does not list, is skipped), then
-commits LEADERBOARD.md. Locally, `mengine-bench leaderboard` does both steps
-in one process.
+updates the long-lived `publish-leaderboard` branch and opens or updates a
+pull request for it. The owner reviews and merges that pull request; `main`
+stays pull-request-only, and no secret or extra credential is involved.
+Because a pull request opened with the Actions token runs no workflows, the
+owner merges it with the repository-admin bypass instead of waiting for
+checks; the ranked data was already verified by `verify-main`. Locally,
+`mengine-bench leaderboard` does both steps in one process.
 
 Git stores `results/**` byte for byte (`.gitattributes`: `-text`), because
 `MANIFEST.sha256` hashes raw bytes and a CRLF checkout (Windows

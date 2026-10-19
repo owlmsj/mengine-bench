@@ -101,6 +101,22 @@ def test_publish_job_never_executes_submission_code() -> None:
     assert "--write-report" in verify_main and "actions/upload-artifact@" in verify_main
 
 
+def test_publish_opens_a_reviewable_pull_request_without_a_bypass() -> None:
+    # main accepts pull requests only, and a personal repository cannot add
+    # the GitHub Actions app to a ruleset bypass list, so publish must not
+    # push to main. It updates a long-lived branch and opens a PR the owner
+    # merges; no secret or extra credential is involved.
+    path = REPO / ".github" / "workflows" / "results.yml"
+    text = path.read_text(encoding="utf-8")
+    publish = _jobs(text)["publish"]
+    assert "ref: main" in publish
+    assert "gh pr create" in publish
+    assert "git push --force origin" in publish
+    assert "HEAD:main" not in publish
+    assert "pull-requests: write" in publish
+    assert "secrets." not in text
+
+
 def test_codeowners_guard_workflows_and_bench_code() -> None:
     rules = [line.split() for line in (REPO / ".github" / "CODEOWNERS").read_text(encoding="utf-8").splitlines()
              if line.strip() and not line.startswith("#")]
