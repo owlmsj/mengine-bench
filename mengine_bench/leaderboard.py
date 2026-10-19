@@ -86,6 +86,9 @@ def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
         if result.get("preflight"):
             unranked.append((_link(bundle, link_base), "started with preflight findings"))
             continue
+        if result.get("judge_pending"):
+            unranked.append((_link(bundle, link_base), "judge pending (`mengine-bench judge`)"))
+            continue
         entry = RankedBundle(result=result, summary_link=_link(bundle / SUMMARY_NAME, link_base))
         groups.setdefault(_group_key(result), []).append(entry)
     order = {suite: index for index, suite in enumerate(SUITES)}

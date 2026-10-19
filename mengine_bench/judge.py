@@ -67,6 +67,23 @@ class JudgeContext:
     transcript_tail: str
     checks: tuple[tuple[str, bool], ...]
 
+    def record(self) -> dict[str, object]:
+        """JSON form, stored in a bundle as judge/<task>.json for `mengine-bench judge`."""
+        return {"task_id": self.task_id, "prompts": list(self.prompts), "answers": list(self.answers),
+                "diff": self.diff, "transcript_tail": self.transcript_tail,
+                "checks": [[name, ok] for name, ok in self.checks]}
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, object]) -> JudgeContext:
+        prompts, answers, checks = record["prompts"], record["answers"], record["checks"]
+        if not (isinstance(prompts, list) and isinstance(answers, list) and isinstance(checks, list)):
+            raise ValueError(f"received judge packet {str(record)[:120]!r}; expected lists of prompts, answers, "
+                             f"checks")
+        return cls(task_id=str(record["task_id"]), prompts=tuple(str(p) for p in prompts),
+                   answers=tuple(str(a) for a in answers), diff=str(record["diff"]),
+                   transcript_tail=str(record["transcript_tail"]),
+                   checks=tuple((str(name), bool(ok)) for name, ok in checks))
+
 
 @dataclass(frozen=True)
 class JudgeResult:

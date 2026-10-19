@@ -17,6 +17,7 @@ from mengine_bench import __version__, catalog, visual
 from mengine_bench.core import FULL, SUITES, EvalTask, scratch_root
 from mengine_bench.judge import DEFAULT_VOTES, JudgeContext, SubjectiveJudge, VisionChecklistJudge, workspace_diff
 from mengine_bench.bundle import bench_commit, bundle_leaks, run_scope, write_bundle
+from mengine_bench.deferred_judge import judge_bundle
 from mengine_bench.leaderboard import build_leaderboard
 from mengine_bench.preflight import contamination
 from mengine_bench.redact import LocalNames, local_names
@@ -29,8 +30,9 @@ from mengine_bench.runner.task_run import TaskRunRecord, run_task, snapshot
 from mengine_bench.scoring import TaskOutcome, score_suite
 from mengine_bench.submit import SubmitError, gh_login, submit
 
-# auto: the recommended Claude judge when the claude CLI is installed, else none.
-JUDGE_CHOICES = ("auto", "none", *AGENT_NAMES)
+# none (default): the run stores the judge's evidence in the bundle and the
+# maintainer judges it on review (`mengine-bench judge`), the same judge for all.
+JUDGE_CHOICES = ("none", *AGENT_NAMES)
 # docs/SCORING.md recommends this judge; reports always state the one used.
 DEFAULT_JUDGE_MODEL = "claude-opus-5-5"
 DEFAULT_JUDGE_EFFORT = "xhigh"
@@ -48,7 +50,8 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--effort")
     run.add_argument("--cmd", help='argv template for --agent cmd: JSON list or quoted string with {prompt_file}')
     run.add_argument("--tasks", default="", help="comma-separated task ids (default: whole suite)")
-    run.add_argument("--judge", choices=JUDGE_CHOICES, default="auto")
+    run.add_argument("--judge", choices=JUDGE_CHOICES, default="none",
+                     help="judge during the run (default none: the maintainer judges on review)")
     run.add_argument("--judge-model", default=DEFAULT_JUDGE_MODEL)
     run.add_argument("--judge-effort", default=DEFAULT_JUDGE_EFFORT)
     run.add_argument("--judge-votes", type=int, default=DEFAULT_VOTES)
@@ -69,6 +72,13 @@ def _parser() -> argparse.ArgumentParser:
     board.add_argument("--output", type=Path, default=Path("LEADERBOARD.md"))
     send = sub.add_parser("submit", help="open the pull request for a clean bundle (needs gh, logged in)")
     send.add_argument("bundle", type=Path)
+    late = sub.add_parser("judge", help="judge a bundle whose run had no judge, then rescore it (maintainer)")
+    late.add_argument("bundle", type=Path)
+    late.add_argument("--judge", choices=AGENT_NAMES, default="claude")
+    late.add_argument("--judge-model", default=DEFAULT_JUDGE_MODEL)
+    late.add_argument("--judge-effort", default=DEFAULT_JUDGE_EFFORT)
+    late.add_argument("--judge-votes", type=int, default=DEFAULT_VOTES)
+    late.add_argument("--judge-cmd", help="argv template for --judge cmd")
     selftest = sub.add_parser("selftest", help="run every task's gold self-test without an agent")
     selftest.add_argument("--tasks", default="")
     doc = sub.add_parser("tasks-doc", help="print (or --write) the docs/TASKS.md table; --readme rewrites the "
@@ -103,11 +113,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _tasks_doc(args.write, args.readme)
     if args.command == "submit":
         return _submit(args.bundle)
+    if args.command == "judge":
+        return _judge_later(args)
     return _run(args)
 
 
-def _auto_judge() -> str:
-    return "claude" if shutil.which("claude") else "none"
+def _judge_later(args: argparse.Namespace) -> int:
+    if args.judge == "cmd" and not args.judge_cmd:
+        raise SystemExit("error: received --judge cmd without --judge-cmd; expected an argv template")
+    judge_agent = make_agent(args.judge, args.judge_model, args.judge_effort, args.judge_cmd)
+    try:
+        result = judge_bundle(args.bundle, judge_agent, args.judge_votes)
+    except ValueError as error:
+        print(f"judge: FAILED: {error}")
+        return 1
+    totals = result["totals"]
+    assert isinstance(totals, dict)
+    print(f"judged {args.bundle.name}: objective {totals['objective']} subjective {totals['subjective']} "
+          f"composite {totals['composite']} solved {totals['solved']}/{totals['total']}")
+    print("updated result.json and summary.md; commit them with LEADERBOARD.md")
+    return 0
 
 
 def _submit(bundle: Path) -> int:
@@ -128,8 +153,6 @@ def _run(args: argparse.Namespace) -> int:
         raise SystemExit("error: received --judge cmd without --judge-cmd; expected an argv template")
     if args.submit and args.allow_unclean:
         raise SystemExit("error: received --submit with --allow-unclean; expected a clean run to publish")
-    if args.judge == "auto":
-        args.judge = _auto_judge()
     if args.submit and not args.dry_run:
         # Fail before the run, not 30 minutes later.
         try:
@@ -137,7 +160,7 @@ def _run(args: argparse.Namespace) -> int:
         except SubmitError as error:
             raise SystemExit(f"error: --submit needs gh logged in: {error}") from error
         args.submitter = args.submitter or login
-    stamp =datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     # Outside the repo by default: an agent working under the bench checkout
     # could read the gold checks in mengine_bench/tasks.
     scratch = scratch_root()
@@ -146,8 +169,8 @@ def _run(args: argparse.Namespace) -> int:
     for problem in problems:
         print(f"preflight: {problem}")
     if args.dry_run:
-        judge = "none" if args.judge == "none" else f"{args.judge} {args.judge_model}@{args.judge_effort} " \
-                                                    f"x{args.judge_votes}"
+        judge = "on review (maintainer)" if args.judge == "none" else \
+            f"{args.judge} {args.judge_model}@{args.judge_effort} x{args.judge_votes}"
         plan = {"suite": args.suite, "agent": args.agent, "model": args.model, "effort": args.effort,
                 "judge": judge, "tasks": [task.id for task in tasks], "dry_run": True, "launches": 0,
                 "preflight": "clean" if not problems else f"{len(problems)} finding(s)"}
@@ -163,14 +186,17 @@ def _run(args: argparse.Namespace) -> int:
     previous_judge = visual.JUDGE
     if judge_agent is not None:
         visual.JUDGE = VisionChecklistJudge(judge_agent, votes=args.judge_votes)
+    packets: dict[str, dict[str, object]] = {}
+    screenshots: dict[str, Path] = {}
     try:
-        results = _run_tasks(tasks, agent, judge_agent, args, work)
+        results = _run_tasks(tasks, agent, judge_agent, args, work, packets, screenshots)
     finally:
         visual.JUDGE = previous_judge
     results["preflight"] = problems
+    results["judge_pending"] = judge_agent is None and bool(packets)
     transcripts = {task.id: work / task.id / "transcripts" for task in tasks}
     scope = run_scope(work, local_names().allowing(args.submitter))
-    bundle = write_bundle(results, args.out, transcripts, scope)
+    bundle = write_bundle(results, args.out, transcripts, scope, packets, screenshots)
     totals = results["totals"]
     print(f"objective {totals['objective']} solved {totals['solved']}/{totals['total']}")  # type: ignore[index]
     print(f"wrote bundle {bundle}")
@@ -207,7 +233,8 @@ def _leaderboard(args: argparse.Namespace) -> int:
 
 
 def _run_tasks(tasks: Sequence[EvalTask], agent: Agent, judge_agent: Agent | None, args: argparse.Namespace,
-               work: Path) -> dict[str, object]:
+               work: Path, packets: dict[str, dict[str, object]], screenshots: dict[str, Path]) -> dict[str, object]:
+    """Run and grade every task; without a judge, `packets` and `screenshots` collect its evidence."""
     started_at = _utc_now()
     subjective = SubjectiveJudge(judge_agent, votes=args.judge_votes) if judge_agent is not None else None
     outcomes: list[TaskOutcome] = []
@@ -222,6 +249,10 @@ def _run_tasks(tasks: Sequence[EvalTask], agent: Agent, judge_agent: Agent | Non
         try:
             record = run_task(task, agent, work / task.id)
             detail = _post_process(task, record, vision, subjective, work / task.id, votes)
+            if subjective is None:
+                packets[task.id], png = _judge_packet(task, record, work / task.id)
+                if png is not None:
+                    screenshots[task.id] = png
         except Exception as error:  # noqa: BLE001 - one task must not abort the suite
             record, detail = _crashed_task(task, record, error)
             votes.pop(task.id, None)
@@ -236,6 +267,16 @@ def _run_tasks(tasks: Sequence[EvalTask], agent: Agent, judge_agent: Agent | Non
                    started_at=started_at, finished_at=_utc_now(), submitter=args.submitter,
                    judge_model=args.judge_model if label else None, judge_effort=args.judge_effort if label else None)
     return build_results(meta, suite, details, votes, collect_environment(), bench_commit())
+
+
+def _judge_packet(task: EvalTask, record: TaskRunRecord, root: Path) -> tuple[dict[str, object], Path | None]:
+    """The evidence `mengine-bench judge` needs later, and the screenshot a visual task left unjudged."""
+    packet = _judge_context(task, record, root).record()
+    pending = getattr(record.check, "pending_vision", None)
+    if pending is None:
+        return packet, None
+    packet["vision"] = pending.record()
+    return packet, pending.png
 
 
 def _post_process(task: EvalTask, record: TaskRunRecord, vision: VisionChecklistJudge | None,
