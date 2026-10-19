@@ -1,4 +1,4 @@
-"""Bundle naming, the shipped JSON schema, and judged bundles on the leaderboard."""
+"""Bundle naming and judged runs."""
 
 from __future__ import annotations
 
@@ -8,10 +8,6 @@ from pathlib import Path
 from conftest import FakeAgent
 from mengine_bench import cli
 from mengine_bench.bundle import bundle_dir_name
-from mengine_bench.verify import load_schema, verify_bundle
-from test_bundle_verify import board_as_complete
-
-ROOT = Path(__file__).resolve().parents[1]
 
 REFERENCE_AGENT = """
 import sys
@@ -33,12 +29,7 @@ def test_bundle_dir_name_slugs_every_part() -> None:
     assert bundle_dir_name("2026-10-17", "claude", "claude-opus-5-5", "x high", "ff").endswith("_x-high_ff")
 
 
-def test_schema_ships_in_package_and_docs() -> None:
-    docs = json.loads((ROOT / "docs" / "result.schema.json").read_text(encoding="utf-8"))
-    assert docs == load_schema(), "docs/result.schema.json must be a copy of the packaged schema"
-
-
-def test_judged_bundle_verifies_and_groups_by_judge(fake_agent: FakeAgent, tmp_path: Path) -> None:
+def test_judged_run_records_votes_and_rationales(fake_agent: FakeAgent, tmp_path: Path) -> None:
     agent = json.loads(fake_agent("reference", REFERENCE_AGENT))
     agent.remove("-I")
     judge = json.loads(fake_agent("judge", JUDGE))
@@ -53,8 +44,3 @@ def test_judged_bundle_verifies_and_groups_by_judge(fake_agent: FakeAgent, tmp_p
     assert task["judge_votes"] == [80, 80, 80] and task["judge_rationales"] == ["solid"] * 3
     assert result["totals"]["subjective"] == 80.0
     assert result["environment"]["judge"] == {"model": "judge-x", "effort": "high", "votes": 3}
-    report = verify_bundle(bundle)
-    assert report.ok, [(i.name, i.detail) for i in report.items if i.status == "FAIL"]
-    assert any(item.status == "SELF-REPORTED" and item.name == "judge" for item in report.items)
-    board = board_as_complete(out, tmp_path)
-    assert "## FAST, judge judge-x@high" in board and "| 80.0 |" in board

@@ -222,8 +222,8 @@ class VisionChecklistJudge:
     votes: int = DEFAULT_VOTES
     retries: int = DEFAULT_RETRIES
     timeout_s: float = JUDGE_TIMEOUT_S
-    # Every call's ballots, so bundles record them and verify redoes the
-    # majority math.
+    # Every call's ballots, so bundles record them and a reviewer can redo
+    # the majority math.
     history: list[dict[str, object]] = field(default_factory=list)
 
     def __call__(self, png: Path, checklist: Sequence[str]) -> dict[str, bool]:

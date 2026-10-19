@@ -9,67 +9,43 @@ leaderboard.
 
 Paste the prompt below into a **new session** of the coding agent you want to
 measure (Claude Code, Codex CLI, opencode, ...). The agent runs the FULL suite
-against its own harness and model, verifies the bundle and opens a pull
-request from your fork. It spends model tokens (the published FULL runs took
-20 to 28 minutes of wall time) and runs agents with permission prompts
-bypassed, so use a disposable machine or account.
+against its own harness and model and opens a pull request from your fork.
+It spends model tokens (the published FULL runs took 20 to 28 minutes of wall
+time) and runs agents with permission prompts bypassed, so use a disposable
+machine or account.
 
 ````text
 You are a coding agent in a fresh session. Benchmark yourself with
 mengine-bench (https://github.com/owlmsj/mengine-bench): the agent under test
 is the harness you are running in plus the model you are running on. Then
-submit the result bundle as a pull request. Everything you report must be
-true and copied from command output or from the bundle's result.json, never
-from memory or estimation. If a value is unknown, write "unknown"; if
-something is unclear or fails, stop and ask me instead of guessing.
+submit the result as a pull request. Report only values copied from command
+output or from result.json; write "unknown" for anything you cannot read.
+If something fails or is unclear, stop and ask me instead of guessing.
 
-1. Identify the run, then confirm it with me before spending tokens:
-   - harness: the bench --agent value (claude, codex or opencode) and the
-     exact CLI version from `claude --version`, `codex --version` or
-     `opencode --version`;
+1. Identify the run and confirm it with me before spending tokens:
+   - harness: claude, codex or opencode, and its exact `--version`;
    - model: the exact model id that CLI accepts (opencode: provider/model)
-     and the effort or variant, if any;
-   - author: my GitHub login from `gh api user --jq .login`;
+     and the effort, if any;
+   - my GitHub login: `gh api user --jq .login`;
    - judge: claude-opus-5-5 at xhigh with 3 votes if the Claude Code CLI is
-     installed and logged in, otherwise none (OBJECTIVE score only);
-   - machine: OS, CPU, RAM, GPU, and whether a Chromium-family browser is
-     installed (visual tasks need it; without it the run is "unrendered").
-   Show me this list and the command you will run, and wait for my "go".
-2. Prepare a clean checkout of my fork:
-   `gh repo fork owlmsj/mengine-bench --clone`, cd into it, `uv sync`,
-   `uv run pytest -q` and `uv run mengine-bench selftest` must pass, and
-   `git status` must be clean (the bundle records a dirty tree). Do not run
-   other heavy jobs on this machine during the run.
-3. Run the suite once, exactly as confirmed, for example:
+     installed and logged in, otherwise none;
+   - whether a Chromium-family browser is installed (visual tasks need it).
+   Show me the command you will run and wait for my "go".
+2. `gh repo fork owlmsj/mengine-bench --clone`, cd into it, `uv sync`.
+3. Run the suite once, exactly as confirmed:
    `uv run mengine-bench run --suite full --agent <agent> --model <model>
    --effort <effort> --judge claude --judge-model claude-opus-5-5
    --judge-effort xhigh --judge-votes 3 --submitter <github login>`
-   (`--judge none` and no judge flags if there is no judge). The bench starts
-   the agent CLI as a separate process per task: do not help it, do not edit
-   its workspaces, do not rerun single tasks. If the run itself crashes
-   (not a task failing), you may rerun the whole suite once and must say so
-   in the PR.
-4. Verify: `uv run mengine-bench verify results/full/<bundle>` must end
-   without FAIL. Read summary.md and skim the transcripts for secrets, tokens
-   or personal data; if you find any, stop and tell me. Never edit files in
-   the bundle (MANIFEST.sha256 seals them); use `mengine-bench rebundle` only
-   as docs/SUBMITTING.md describes.
-5. Open the pull request from the fork: a new branch named
-   results-<agent>-<model>-<date>, adding only the one bundle directory
-   (no other file, not LEADERBOARD.md), then
-   `gh pr create --repo owlmsj/mengine-bench` with the repository template
-   (.github/PULL_REQUEST_TEMPLATE.md) filled in, plus:
-   - author: the GitHub login (equal to result.json `submitter`);
-   - harness: `agent.name` and `agent.version`; model: `agent.model`;
-     effort: `agent.effort`; judge: `judge.label` and `judge.votes`;
-   - time: wall time from `started_at` to `finished_at`, and
-     `totals.total_agent_s`;
-   - scores: `totals.objective`, `accuracy`, `solved`/`total`,
-     `subjective`, `composite`, and any task whose status is not "ok";
-   - bench: `bench_version`, `bench_commit.sha`, `bench_commit.dirty`,
-     `grading.visual`, and the environment block (OS, CPU, RAM, GPU);
-   - the last line of the verify output, verbatim.
-   Reply to me with the PR URL and that same table.
+   (`--judge none` without the other judge flags if there is no judge).
+   Do not help the agent, edit its workspaces or rerun single tasks.
+4. Read summary.md and skim the transcripts for secrets, tokens or personal
+   data; if you find any, stop and tell me. Do not edit the bundle.
+5. On a new branch `results-<agent>-<model>-<date>`, commit only the new
+   `results/full/<bundle>/` directory and open the pull request with
+   `gh pr create --repo owlmsj/mengine-bench`, filling the template from
+   result.json (agent, model, effort, judge, totals, bench version and
+   commit, wall time from started_at to finished_at).
+   Reply to me with the PR URL.
 ````
 
 ## What it measures
@@ -117,7 +93,7 @@ The 2026-10-19 FULL baseline used opencode 2.0.29 with DeepSeek V4 Flash
 | agent time, 2 web build tasks | 142.1 s | 1,077.1 s |
 | misses | bo-reconcile 0.50, ir-server-logs 0.83, 3d-voxel 0.86 | vis-chart 0.00 (image withheld: the opencode config declared the model text-only; the DeepSeek API reads images), ir-server-logs 0.83 |
 
-Both bundles are verified; see [LEADERBOARD.md](LEADERBOARD.md).
+Both runs are on [LEADERBOARD.md](LEADERBOARD.md).
 
 A run declares its suite. Results are only compared within the same suite,
 scoring version, judge and visual grading profile.
@@ -203,7 +179,7 @@ cd mengine-bench
 uv sync
 uv run pytest -q                      # gold self-tests, no model calls
 uv run mengine-bench list --suite fast
-uv run mengine-bench selftest              # every task's gold, no agent
+uv run mengine-bench selftest         # every task's gold, no agent
 uv run mengine-bench run --suite fast --agent claude --model <model-id> --dry-run
 ```
 
@@ -219,9 +195,20 @@ uv run mengine-bench run --suite fast --agent cmd --model <label> --cmd "my-agen
 Add `--judge claude --judge-model claude-opus-5-5 --judge-effort xhigh` for the
 subjective score and the visual checklists (`--judge-votes`, default 3).
 `--tasks a,b` runs a subset. Each run writes one result bundle to
-`results/<suite>/<date>_<agent>_<model>_<effort>_<run id>/` (scores, redacted
-transcripts, final workspaces, a sha256 manifest); check it with
-`uv run mengine-bench verify <bundle>`.
+`results/<suite>/<date>_<agent>_<model>_<effort>_<run id>/`:
+
+| file | content |
+| --- | --- |
+| `result.json` | scores, every check with its result, answers, step timings, judge votes with rationales, vision ballots, environment (OS, CPU, RAM, GPU, agent CLI and version, model, effort, judge), bench version and commit, submitter, start and finish time (UTC) |
+| `summary.md` | human summary |
+| `transcripts/<task>.jsonl.gz` | the raw agent output of every step |
+
+Before writing, transcripts, `summary.md` and `result.json` are redacted:
+secret-looking values become `[REDACTED:<kind>]`, base64 images become a
+hash, third-party e-mail addresses are dropped, and home directories, the run
+directories and this machine's account and host names become `<HOME>`,
+`<WORKSPACE>`, `<WORKDIR>`, `<USER>` and `<HOST>`. Still: run with throwaway
+credentials and read your transcripts before publishing.
 
 Agents run with permission prompts bypassed (Claude `bypassPermissions`,
 Codex `--dangerously-bypass-approvals-and-sandbox`, opencode `--auto`), in
@@ -241,43 +228,27 @@ locations) and a judge. Without both the run's grading profile is
 "unrendered": visual tasks are never solved there (correctness capped at 0.5)
 and the leaderboard ranks such runs in their own table.
 
-## Results and leaderboard
+## Submitting results
 
-[LEADERBOARD.md](LEADERBOARD.md) ranks every submitted run that passes
-`mengine-bench verify`, one table per suite, scoring version, judge and
-visual grading profile. To add
-yours, open a pull request with exactly one bundle directory; the steps are in
-[docs/SUBMITTING.md](docs/SUBMITTING.md).
+Use the prompt above, or do it by hand: fork, run a suite, read `summary.md`
+and the transcripts, and open a pull request that adds only your
+`results/<suite>/<bundle>/` directory. Do not edit LEADERBOARD.md.
 
-The audit model, plainly:
-
-- **Re-verified**: each task's deterministic checks are re-run from the saved
-  final workspace and must match the recorded results; OBJECTIVE, ACCURACY,
-  SUBJECTIVE and COMPOSITE are recomputed from the raw per-task data; the
-  manifest hashes, the JSON schema, the 25 MB size cap and the absence of
-  unredacted secrets are checked. CI does this on every results PR.
-- **Self-reported**: timings, judge votes and vision checklist votes cannot be
-  re-derived without rerunning the models. They are checked for internal
-  consistency (step times sum to the task time, medians and majorities follow
-  from the recorded votes) and sealed by the manifest, but they are trusted.
-  Questions or disputes about a result: open a "Result question" issue.
-- **Partial runs**: a bundle whose tasks are not exactly its declared suite
-  (for example a `--tasks` subset) verifies but is listed apart, never ranked.
+There is no CI and no bot. The maintainer reviews every pull request by hand,
+may edit it, regenerates [LEADERBOARD.md](LEADERBOARD.md) with
+`uv run mengine-bench leaderboard` and merges. Questions about a result: open
+an issue naming the bundle directory.
 
 ## Known limitations
 
-- Timings, agent and model identity, and judge votes are self-reported. Verify
-  checks them for internal consistency only.
-- The manifest is a consistency check, not an attestation: a submitter can
-  regenerate it after editing a bundle, so it proves the files agree with each
-  other, not that the run happened as described.
-- Hidden tests run the submitted workspace code without a hardened sandbox.
-  Run `mengine-bench verify` on other people's submissions only in a
-  disposable environment (a throwaway VM or container).
+- Scores, timings, agent and model identity, and judge votes are
+  self-reported. The bundle records every check, answer and vote, and the
+  transcripts let anyone sanity-check a run, but nothing re-runs it.
+- Runs are only compared within the same suite, scoring version, judge and
+  visual grading profile; a run that is not exactly its suite's task set (a
+  `--tasks` subset) is listed apart and never ranked.
 - Some gold checks are lenient: they accept a few wrong answers that look
   right.
-- Maintainers review each submission pull request by hand before it is
-  merged.
 
 ## License
 

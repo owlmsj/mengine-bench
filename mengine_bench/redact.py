@@ -1,9 +1,7 @@
 """Redaction for published bundles: secrets out, base64 images shrunk to a hash.
 
 Transcripts are raw agent output, and agents echo env dumps, config files and
-tool results. Everything a bundle publishes goes through `redact_text`, and
-`mengine-bench verify` runs `find_secrets` on it again, so a pattern added
-here hardens both writing and auditing.
+tool results. Everything a bundle publishes goes through `redact_text`.
 
 Patterns are spelled with quantifiers (`-{5}`, `{16}`) instead of literal
 key prefixes plus filler, so this file never looks like a leaked key itself.
@@ -15,7 +13,6 @@ import base64
 import binascii
 import getpass
 import hashlib
-import os
 import re
 import socket
 from dataclasses import dataclass, field
@@ -133,9 +130,7 @@ class LocalNames:
 
 
 def local_names() -> LocalNames:
-    """This machine's names; empty on CI, where they belong to the runner, not the submitter."""
-    if os.environ.get("CI"):
-        return LocalNames()
+    """This machine's account and host names."""
     try:
         user: str | None = getpass.getuser()
     except (OSError, KeyError):
