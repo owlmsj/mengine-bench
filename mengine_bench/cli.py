@@ -19,7 +19,8 @@ from mengine_bench.bundle import TaskArtifacts, bench_commit, load_raw_run, run_
 from mengine_bench.leaderboard import build_leaderboard, build_leaderboard_from_report, verification_report
 from mengine_bench.privacy import PRIVATE_TERMS_ENV, PrivateTerms, load_private_terms, scan_repo
 from mengine_bench.report import (
-    RunMeta, TaskDetail, build_results, collect_environment, render_tasks_table, replace_tasks_table,
+    SUMMARIES_BEGIN, SUMMARIES_END, RunMeta, TaskDetail, build_results, collect_environment, render_task_summaries,
+    render_tasks_table, replace_tasks_table,
 )
 from mengine_bench.runner.agents import AGENT_NAMES, Agent, make_agent
 from mengine_bench.runner.task_run import TaskRunRecord, run_task, snapshot
@@ -72,8 +73,10 @@ def _parser() -> argparse.ArgumentParser:
                       help="rank from result.json and this report only; runs no task check")
     selftest = sub.add_parser("selftest", help="run every task's gold self-test without an agent")
     selftest.add_argument("--tasks", default="")
-    doc = sub.add_parser("tasks-doc", help="print (or --write) the docs/TASKS.md table")
+    doc = sub.add_parser("tasks-doc", help="print (or --write) the docs/TASKS.md table; --readme rewrites the "
+                                           "README task summaries")
     doc.add_argument("--write", type=Path, nargs="?", const=Path("docs/TASKS.md"))
+    doc.add_argument("--readme", type=Path, nargs="?", const=Path("README.md"))
     privacy = sub.add_parser("privacy-scan", help="scan the repo (cwd) for personal data and secrets; "
                                                   "prints file and count only, non-zero exit on any hit")
     privacy.add_argument("--private-terms", type=Path,
@@ -107,7 +110,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "selftest":
         return _selftest(_select(catalog.all_tasks(), args.tasks))
     if args.command == "tasks-doc":
-        return _tasks_doc(args.write)
+        return _tasks_doc(args.write, args.readme)
     if args.command == "privacy-scan":
         return _privacy_scan(args.private_terms)
     return _run(args)
@@ -355,14 +358,20 @@ def _gold_problem(task: EvalTask, root: Path) -> str | None:
     return None if result.passed else f"reference fails {result.failed()}"
 
 
-def _tasks_doc(target: Path | None) -> int:
+def _tasks_doc(target: Path | None, readme: Path | None) -> int:
     table = render_tasks_table(catalog.all_tasks())
-    if target is None:
+    if target is None and readme is None:
         sys.stdout.write(table)
         return 0
-    updated = replace_tasks_table(target.read_text(encoding="utf-8"), table)
-    target.write_text(updated, encoding="utf-8", newline="\n")
-    print(f"updated {target}")
+    if target is not None:
+        target.write_text(replace_tasks_table(target.read_text(encoding="utf-8"), table), encoding="utf-8",
+                          newline="\n")
+        print(f"updated {target}")
+    if readme is not None:
+        summaries = render_task_summaries(catalog.all_tasks())
+        updated = replace_tasks_table(readme.read_text(encoding="utf-8"), summaries, SUMMARIES_BEGIN, SUMMARIES_END)
+        readme.write_text(updated, encoding="utf-8", newline="\n")
+        print(f"updated {readme}")
     return 0
 
 
