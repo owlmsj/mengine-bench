@@ -1,4 +1,4 @@
-"""Console entry point: run, list, leaderboard, selftest, tasks-doc."""
+"""Console entry point: run, submit, list, leaderboard, selftest, tasks-doc."""
 
 from __future__ import annotations
 
@@ -27,8 +27,10 @@ from mengine_bench.report import (
 from mengine_bench.runner.agents import AGENT_NAMES, Agent, make_agent
 from mengine_bench.runner.task_run import TaskRunRecord, run_task, snapshot
 from mengine_bench.scoring import TaskOutcome, score_suite
+from mengine_bench.submit import SubmitError, gh_login, submit
 
-JUDGE_CHOICES = ("none", *AGENT_NAMES)
+# auto: the recommended Claude judge when the claude CLI is installed, else none.
+JUDGE_CHOICES = ("auto", "none", *AGENT_NAMES)
 # docs/SCORING.md recommends this judge; reports always state the one used.
 DEFAULT_JUDGE_MODEL = "claude-opus-5-5"
 DEFAULT_JUDGE_EFFORT = "xhigh"
@@ -39,20 +41,22 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mengine-bench")
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command", required=True)
-    run = sub.add_parser("run", help="run a suite against an agent and write results")
-    run.add_argument("--suite", choices=SUITES, required=True)
+    run = sub.add_parser("run", help="run a suite against an agent and write results (--submit opens the PR)")
+    run.add_argument("--suite", choices=SUITES, default=FULL)
     run.add_argument("--agent", choices=AGENT_NAMES, required=True)
     run.add_argument("--model", required=True)
     run.add_argument("--effort")
     run.add_argument("--cmd", help='argv template for --agent cmd: JSON list or quoted string with {prompt_file}')
     run.add_argument("--tasks", default="", help="comma-separated task ids (default: whole suite)")
-    run.add_argument("--judge", choices=JUDGE_CHOICES, default="none")
+    run.add_argument("--judge", choices=JUDGE_CHOICES, default="auto")
     run.add_argument("--judge-model", default=DEFAULT_JUDGE_MODEL)
     run.add_argument("--judge-effort", default=DEFAULT_JUDGE_EFFORT)
     run.add_argument("--judge-votes", type=int, default=DEFAULT_VOTES)
     run.add_argument("--judge-cmd", help="argv template for --judge cmd")
     run.add_argument("--out", type=Path, default=Path("results"), help="bundles go to <out>/<suite>/<run>/")
-    run.add_argument("--submitter", help="free-text credit stored in result.json (optional, public)")
+    run.add_argument("--submitter", help="public credit in result.json (default with --submit: your GitHub login)")
+    run.add_argument("--submit", action="store_true",
+                     help="after a clean run, open the pull request with the bundle (needs gh, logged in)")
     run.add_argument("--work", type=Path, help="workspace root, kept after the run (default: a temp dir, removed "
                                                "once the bundle is written)")
     run.add_argument("--allow-unclean", action="store_true",
@@ -63,6 +67,8 @@ def _parser() -> argparse.ArgumentParser:
     board = sub.add_parser("leaderboard", help="rank results/**/result.json into LEADERBOARD.md")
     board.add_argument("--results", type=Path, default=Path("results"))
     board.add_argument("--output", type=Path, default=Path("LEADERBOARD.md"))
+    send = sub.add_parser("submit", help="open the pull request for a clean bundle (needs gh, logged in)")
+    send.add_argument("bundle", type=Path)
     selftest = sub.add_parser("selftest", help="run every task's gold self-test without an agent")
     selftest.add_argument("--tasks", default="")
     doc = sub.add_parser("tasks-doc", help="print (or --write) the docs/TASKS.md table; --readme rewrites the "
@@ -95,7 +101,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _selftest(_select(catalog.all_tasks(), args.tasks))
     if args.command == "tasks-doc":
         return _tasks_doc(args.write, args.readme)
+    if args.command == "submit":
+        return _submit(args.bundle)
     return _run(args)
+
+
+def _auto_judge() -> str:
+    return "claude" if shutil.which("claude") else "none"
+
+
+def _submit(bundle: Path) -> int:
+    try:
+        url = submit(bundle)
+    except SubmitError as error:
+        print(f"submit: FAILED: {error}")
+        return 1
+    print(f"submitted: {url}")
+    return 0
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -104,7 +126,18 @@ def _run(args: argparse.Namespace) -> int:
         raise SystemExit("error: received --agent cmd without --cmd; expected an argv template with {prompt_file}")
     if args.judge == "cmd" and not args.judge_cmd:
         raise SystemExit("error: received --judge cmd without --judge-cmd; expected an argv template")
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    if args.submit and args.allow_unclean:
+        raise SystemExit("error: received --submit with --allow-unclean; expected a clean run to publish")
+    if args.judge == "auto":
+        args.judge = _auto_judge()
+    if args.submit and not args.dry_run:
+        # Fail before the run, not 30 minutes later.
+        try:
+            login = gh_login()
+        except SubmitError as error:
+            raise SystemExit(f"error: --submit needs gh logged in: {error}") from error
+        args.submitter = args.submitter or login
+    stamp =datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     # Outside the repo by default: an agent working under the bench checkout
     # could read the gold checks in mengine_bench/tasks.
     scratch = scratch_root()
@@ -113,8 +146,10 @@ def _run(args: argparse.Namespace) -> int:
     for problem in problems:
         print(f"preflight: {problem}")
     if args.dry_run:
+        judge = "none" if args.judge == "none" else f"{args.judge} {args.judge_model}@{args.judge_effort} " \
+                                                    f"x{args.judge_votes}"
         plan = {"suite": args.suite, "agent": args.agent, "model": args.model, "effort": args.effort,
-                "judge": args.judge, "tasks": [task.id for task in tasks], "dry_run": True, "launches": 0,
+                "judge": judge, "tasks": [task.id for task in tasks], "dry_run": True, "launches": 0,
                 "preflight": "clean" if not problems else f"{len(problems)} finding(s)"}
         print(json.dumps(plan))
         return 0
@@ -145,7 +180,10 @@ def _run(args: argparse.Namespace) -> int:
         print(f"removed raw run dir {work}" if not work.exists() else f"could not fully remove {work}; delete it")
     else:
         print(f"raw workspaces kept in {work}")
-    return _privacy_check(bundle, scope.names)
+    privacy = _privacy_check(bundle, scope.names)
+    if privacy or not args.submit:
+        return privacy
+    return _submit(bundle)
 
 
 def _privacy_check(bundle: Path, names: LocalNames) -> int:
