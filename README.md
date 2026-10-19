@@ -5,6 +5,73 @@ workstation (mengine), public for contribution and comparison. Run it against
 your own agent and model, add tasks, and compare results on a shared
 leaderboard.
 
+## Benchmark your own agent: copy this prompt
+
+Paste the prompt below into a **new session** of the coding agent you want to
+measure (Claude Code, Codex CLI, opencode, ...). The agent runs the FULL suite
+against its own harness and model, verifies the bundle and opens a pull
+request from your fork. It spends model tokens (the published FULL runs took
+20 to 28 minutes of wall time) and runs agents with permission prompts
+bypassed, so use a disposable machine or account.
+
+````text
+You are a coding agent in a fresh session. Benchmark yourself with
+mengine-bench (https://github.com/owlmsj/mengine-bench): the agent under test
+is the harness you are running in plus the model you are running on. Then
+submit the result bundle as a pull request. Everything you report must be
+true and copied from command output or from the bundle's result.json, never
+from memory or estimation. If a value is unknown, write "unknown"; if
+something is unclear or fails, stop and ask me instead of guessing.
+
+1. Identify the run, then confirm it with me before spending tokens:
+   - harness: the bench --agent value (claude, codex or opencode) and the
+     exact CLI version from `claude --version`, `codex --version` or
+     `opencode --version`;
+   - model: the exact model id that CLI accepts (opencode: provider/model)
+     and the effort or variant, if any;
+   - author: my GitHub login from `gh api user --jq .login`;
+   - judge: claude-opus-5-5 at xhigh with 3 votes if the Claude Code CLI is
+     installed and logged in, otherwise none (OBJECTIVE score only);
+   - machine: OS, CPU, RAM, GPU, and whether a Chromium-family browser is
+     installed (visual tasks need it; without it the run is "unrendered").
+   Show me this list and the command you will run, and wait for my "go".
+2. Prepare a clean checkout of my fork:
+   `gh repo fork owlmsj/mengine-bench --clone`, cd into it, `uv sync`,
+   `uv run pytest -q` and `uv run mengine-bench selftest` must pass, and
+   `git status` must be clean (the bundle records a dirty tree). Do not run
+   other heavy jobs on this machine during the run.
+3. Run the suite once, exactly as confirmed, for example:
+   `uv run mengine-bench run --suite full --agent <agent> --model <model>
+   --effort <effort> --judge claude --judge-model claude-opus-5-5
+   --judge-effort xhigh --judge-votes 3 --submitter <github login>`
+   (`--judge none` and no judge flags if there is no judge). The bench starts
+   the agent CLI as a separate process per task: do not help it, do not edit
+   its workspaces, do not rerun single tasks. If the run itself crashes
+   (not a task failing), you may rerun the whole suite once and must say so
+   in the PR.
+4. Verify: `uv run mengine-bench verify results/full/<bundle>` must end
+   without FAIL. Read summary.md and skim the transcripts for secrets, tokens
+   or personal data; if you find any, stop and tell me. Never edit files in
+   the bundle (MANIFEST.sha256 seals them); use `mengine-bench rebundle` only
+   as docs/SUBMITTING.md describes.
+5. Open the pull request from the fork: a new branch named
+   results-<agent>-<model>-<date>, adding only the one bundle directory
+   (no other file, not LEADERBOARD.md), then
+   `gh pr create --repo owlmsj/mengine-bench` with the repository template
+   (.github/PULL_REQUEST_TEMPLATE.md) filled in, plus:
+   - author: the GitHub login (equal to result.json `submitter`);
+   - harness: `agent.name` and `agent.version`; model: `agent.model`;
+     effort: `agent.effort`; judge: `judge.label` and `judge.votes`;
+   - time: wall time from `started_at` to `finished_at`, and
+     `totals.total_agent_s`;
+   - scores: `totals.objective`, `accuracy`, `solved`/`total`,
+     `subjective`, `composite`, and any task whose status is not "ok";
+   - bench: `bench_version`, `bench_commit.sha`, `bench_commit.dirty`,
+     `grading.visual`, and the environment block (OS, CPU, RAM, GPU);
+   - the last line of the verify output, verbatim.
+   Reply to me with the PR URL and that same table.
+````
+
 ## What it measures
 
 An *agent* here is a harness plus a model (for example Claude Code with a
