@@ -5,8 +5,9 @@ edit by hand. Scores are self-reported by each submitter and reviewed by the
 maintainer before merge; the transcripts are in each bundle. One table per
 suite, scoring version, judge and visual grading profile (rendered: browser +
 vision judge; unrendered: visual tasks not solvable): scores from different
-groups are not comparable. Runs that are not exactly their suite's task set
-are listed as partial and never ranked.
+groups are not comparable. Runs that are not exactly their suite's task set,
+or that started with preflight findings (README, "Run hygiene"), are listed
+apart and never ranked.
 
 ## FULL, judge claude-opus-5-5@xhigh, visual rendered (scoring 1.0)
 

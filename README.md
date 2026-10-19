@@ -11,8 +11,9 @@ Paste the prompt below into a **new session** of the coding agent you want to
 measure (Claude Code, Codex CLI, opencode, ...). The agent runs the FULL suite
 against its own harness and model and opens a pull request from your fork.
 It spends model tokens (the published FULL runs took 20 to 28 minutes of wall
-time) and runs agents with permission prompts bypassed, so use a disposable
-machine or account.
+time) and runs agents with permission prompts bypassed. Read
+[Run hygiene](#run-hygiene) first: the run must start clean, and everything it
+writes becomes public.
 
 ````text
 You are a coding agent in a fresh session. Benchmark yourself with
@@ -21,6 +22,8 @@ is the harness you are running in plus the model you are running on. Then
 submit the result as a pull request. Report only values copied from command
 output or from result.json; write "unknown" for anything you cannot read.
 If something fails or is unclear, stop and ask me instead of guessing.
+Never print, copy or commit credentials, environment variables or my
+personal data (names, e-mails, paths, files outside the bench).
 
 1. Identify the run and confirm it with me before spending tokens:
    - harness: claude, codex or opencode, and its exact `--version`;
@@ -30,16 +33,25 @@ If something fails or is unclear, stop and ask me instead of guessing.
    - judge: claude-opus-5-5 at xhigh with 3 votes if the Claude Code CLI is
      installed and logged in, otherwise none;
    - whether a Chromium-family browser is installed (visual tasks need it).
-   Show me the command you will run and wait for my "go".
-2. `gh repo fork owlmsj/mengine-bench --clone`, cd into it, `uv sync`.
+2. `gh repo fork owlmsj/mengine-bench --clone`, cd into it, `uv sync`, then
+   check the machine with the exact run command plus `--dry-run`. Every
+   `preflight:` line it prints is something that would contaminate the run
+   (my personal instruction files, a git checkout or instruction file above
+   the temp dir, earlier runs on disk). Show me the lines and the command, and
+   wait: I fix them (or move them aside for the run) and say "go". Never
+   delete or edit those files yourself, and never use --allow-unclean.
 3. Run the suite once, exactly as confirmed:
    `uv run mengine-bench run --suite full --agent <agent> --model <model>
    --effort <effort> --judge claude --judge-model claude-opus-5-5
    --judge-effort xhigh --judge-votes 3 --submitter <github login>`
    (`--judge none` without the other judge flags if there is no judge).
-   Do not help the agent, edit its workspaces or rerun single tasks.
-4. Read summary.md and skim the transcripts for secrets, tokens or personal
-   data; if you find any, stop and tell me. Do not edit the bundle.
+   Do not help the agent, edit its workspaces or rerun single tasks. The run
+   must end with `privacy check: clean`; if it prints FAILED, stop and tell
+   me.
+4. Read summary.md (its Preflight line must say "clean") and skim the
+   transcripts for secrets, tokens or personal data the check cannot know
+   (my name, company, clients, private repos or projects); if you find any,
+   stop and tell me. Do not edit the bundle.
 5. On a new branch `results-<agent>-<model>-<date>`, commit only the new
    `results/full/<bundle>/` directory and open the pull request with
    `gh pr create --repo owlmsj/mengine-bench`, filling the template from
@@ -61,6 +73,13 @@ check. Categories:
 - long-context and context-compaction survival across sessions
 - visual output (web pages checked by rendering) and image understanding
 
+The agent may use every tool its harness gives it: shell, web search and
+fetch, browsers, MCP servers, skills, subagents. Nothing is turned off; what
+is measured is the harness plus the model as you configured them. Prompts
+only say where output files go and what the answer must contain. Bench 0.1.0
+prompts told agents to avoid tools on some tasks, so the two 0.1.0 baselines
+below are not strictly comparable with 0.2.0 runs.
+
 Every task ships a reference solution, and the test suite proves without any
 model that the reference passes and the untouched workspace fails.
 
@@ -77,7 +96,8 @@ The 2026-10-17 FULL baseline used Codex gpt-6.1-sol at low effort and a
 judge with 1 vote, as its bundle records (Claude `claude-opus-5-5`, xhigh
 effort). It took 20 min 10 s wall (510 s agent time); judging and grading are
 excluded from agent time.
-Both visual tasks reported "no browser" and used deterministic checks only.
+Both visual tasks were rendered in a browser and graded by the vision judge
+(1 vote each).
 This is one measured configuration, not a duration estimate for other agents.
 
 The 2026-10-19 FULL baseline used opencode 2.0.29 with DeepSeek V4 Flash
@@ -203,18 +223,58 @@ subjective score and the visual checklists (`--judge-votes`, default 3).
 | `summary.md` | human summary |
 | `transcripts/<task>.jsonl.gz` | the raw agent output of every step |
 
-Before writing, transcripts, `summary.md` and `result.json` are redacted:
-secret-looking values become `[REDACTED:<kind>]`, base64 images become a
-hash, third-party e-mail addresses are dropped, and home directories, the run
-directories and this machine's account and host names become `<HOME>`,
-`<WORKSPACE>`, `<WORKDIR>`, `<USER>` and `<HOST>`. Still: run with throwaway
-credentials and read your transcripts before publishing.
-
 Agents run with permission prompts bypassed (Claude `bypassPermissions`,
 Codex `--dangerously-bypass-approvals-and-sandbox`, opencode `--auto`), in
-fresh workspaces under the system temp dir (`--work` to change it). Use a
-disposable machine or account. Each step has the task's timeout; on timeout
-the whole agent process tree is killed.
+fresh workspaces under the system temp dir. Each step has the task's timeout;
+on timeout the whole agent process tree is killed.
+
+## Run hygiene
+
+A run must start clean and publish nothing private. The bench enforces what
+it can; the rest is on you.
+
+**Clean start (enforced).** Before launching anything, `run` (and
+`run --dry-run`) prints a `preflight:` line for each of these and refuses to
+start:
+
+- your harness's personal instructions: `~/.claude/CLAUDE.md` (Claude Code,
+  and opencode reads it too), `~/.codex/AGENTS.md` and `AGENTS.override.md`
+  (Codex, or under `CODEX_HOME`), `~/.config/opencode/AGENTS.md`. They would
+  steer the agent and leak into the transcripts. Move them aside for the run;
+- a `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` or `AGENTS.override.md` in the
+  temp dir or any folder above it, or a git checkout around it: harnesses load
+  those too;
+- earlier runs on disk (`<temp>/mengine-bench/runs/*`,
+  `<temp>/mengine-bench-fresh-*`): an agent could read other solutions.
+  Delete them.
+
+`--allow-unclean` starts anyway, records the findings in `result.json` and
+`summary.md`, and the leaderboard never ranks that run. Each agent also gets an
+`AGENTS.md` in its workspace: use any tool, read and write local files only
+inside the workspace, print no credentials or personal data. Tools are not
+restricted (see "What it measures"), but tools that read your private data
+(mail, drive, chat, password managers) can pull it into the transcripts:
+disconnect them for the run.
+
+**Nothing private is published (enforced, then checked).** Transcripts,
+`summary.md` and `result.json` are redacted before they are written:
+
+- secret-looking values become `[REDACTED:<kind>]`, and so does the exact
+  value of every environment variable whose name marks a secret (`*_API_KEY`,
+  `*_TOKEN`, `*_SECRET`, `*PASSWORD*`, `*_AUTH`, ...), wherever it appears;
+- e-mail addresses are dropped (placeholders and GitHub noreply stay);
+- home directories, the run directories, this machine's account and host
+  names and your git author name become `<HOME>`, `<WORKSPACE>`,
+  `<WORKDIR>`, `<USER>`, `<HOST>` and `<NAME>`; the `--submitter` credit is
+  kept because you chose to publish it;
+- base64 images become a hash.
+
+The raw run directory (unredacted) is deleted once the bundle is written,
+unless you passed `--work`. Then `run` scans the bundle again and ends with
+`privacy check: clean`, or names each file and leak kind (never the leaked
+text) and exits non-zero: do not publish that bundle. Redaction cannot know
+your company, clients or private projects, so still use throwaway API keys
+and skim the transcripts before you open the pull request.
 
 Multi-step tasks: a `fresh_session` step starts a new agent process; any
 other step resumes the session (claude `--resume`, codex `exec resume`,
@@ -246,7 +306,13 @@ an issue naming the bundle directory.
   transcripts let anyone sanity-check a run, but nothing re-runs it.
 - Runs are only compared within the same suite, scoring version, judge and
   visual grading profile; a run that is not exactly its suite's task set (a
-  `--tasks` subset) is listed apart and never ranked.
+  `--tasks` subset) or that started unclean is listed apart and never ranked.
+- The two 0.1.0 baselines predate the preflight: nothing checked that they
+  started clean (their result.json has no `preflight` record).
+- The workspace boundary is an instruction, not a sandbox: an agent with
+  bypassed permissions can still read the rest of the disk, or find this
+  public repo on the web. The transcripts show it if it does, and the
+  maintainer rejects such runs.
 - Some gold checks are lenient: they accept a few wrong answers that look
   right.
 

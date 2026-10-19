@@ -13,9 +13,14 @@ import base64
 import binascii
 import getpass
 import hashlib
+import json
+import os
 import re
+import shutil
 import socket
-from dataclasses import dataclass, field
+import subprocess
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 REDACTED = "[REDACTED:{kind}]"
@@ -101,7 +106,7 @@ def redact_value(value: object) -> object:
 # first public baseline leaked the Windows account name through the Codex
 # shell path; every submitter would leak theirs the same way.
 
-HOME, WORKSPACE, WORKDIR, USER, HOST = "<HOME>", "<WORKSPACE>", "<WORKDIR>", "<USER>", "<HOST>"
+HOME, WORKSPACE, WORKDIR, USER, HOST, PERSON = "<HOME>", "<WORKSPACE>", "<WORKDIR>", "<USER>", "<HOST>", "<NAME>"
 _SEP = r"(?:\\+|/+)"
 _NAME = r"[^\\/\s\"'<>:|*?]+"
 _SEGMENT_END = r"(?![^\\/\s\"'<>:|*?])"
@@ -113,29 +118,70 @@ _TOKEN_BEFORE, _TOKEN_AFTER = r"(?<![A-Za-z0-9_.\-])", r"(?![A-Za-z0-9_\-])"
 _GENERIC_NAMES = frozenset({"localhost", "root", "user", "admin"})
 
 
+# Env var name segments that mark a secret (OPENAI_API_KEY, GH_TOKEN, ...).
+_SECRET_ENV_SEGMENTS = frozenset({"KEY", "KEYS", "APIKEY", "TOKEN", "TOKENS", "SECRET", "SECRETS", "PASSWORD",
+                                  "PASSWD", "CREDENTIAL", "CREDENTIALS", "AUTH"})
+_SECRET_VALUE_MIN = 8
+
+
 @dataclass(frozen=True)
 class LocalNames:
-    """Account and machine names to scrub as whole tokens."""
+    """This machine's identity and secrets: account, host and git author names
+    are scrubbed as whole tokens, secret env values wherever they appear."""
 
     user: str | None = None
     host: str | None = None
+    person: str | None = None
+    secret_values: tuple[str, ...] = ()
+
+    def allowing(self, public: str | None) -> LocalNames:
+        """These names minus `public` (the --submitter credit, published on purpose)."""
+        if not public:
+            return self
+        def kept(name: str | None) -> str | None:
+            return None if name is not None and name.lower() == public.lower() else name
+        return replace(self, user=kept(self.user), host=kept(self.host), person=kept(self.person))
 
     def patterns(self) -> list[tuple[str, str, re.Pattern[str]]]:
-        found = []
-        for kind, label, name in (("user", USER, self.user), ("host", HOST, self.host)):
+        # Secret values first: a value may contain a name token.
+        found = [("env secret", REDACTED.format(kind="env"),
+                  re.compile("|".join(re.escape(form) for form in (value, json.dumps(value)[1:-1]))))
+                 for value in sorted(set(self.secret_values), key=len, reverse=True)]
+        for kind, label, name in (("user", USER, self.user), ("host", HOST, self.host),
+                                  ("person", PERSON, self.person)):
             if name and len(name) >= 3 and name.lower() not in _GENERIC_NAMES:
                 found.append((kind, label, re.compile(_TOKEN_BEFORE + re.escape(name) + _TOKEN_AFTER,
                                                       re.IGNORECASE)))
         return found
 
 
+def secret_env_values(env: Mapping[str, str]) -> tuple[str, ...]:
+    """Values of env vars whose name has a secret-like segment; agents print `env` and config files."""
+    return tuple(value for name, value in env.items()
+                 if _SECRET_ENV_SEGMENTS & set(name.upper().split("_"))
+                 and len(value) >= _SECRET_VALUE_MIN and not any(char.isspace() for char in value))
+
+
+def _git_user_name() -> str | None:
+    git = shutil.which("git")
+    if git is None:
+        return None
+    try:
+        done = subprocess.run([git, "config", "--get", "user.name"], capture_output=True, text=True, timeout=10,
+                              check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return done.stdout.strip() or None
+
+
 def local_names() -> LocalNames:
-    """This machine's account and host names."""
+    """This machine's account, host and git author names and secret env values."""
     try:
         user: str | None = getpass.getuser()
     except (OSError, KeyError):
         user = None
-    return LocalNames(user=user, host=socket.gethostname() or None)
+    return LocalNames(user=user, host=socket.gethostname() or None, person=_git_user_name(),
+                      secret_values=secret_env_values(os.environ))
 
 
 @dataclass(frozen=True)
@@ -169,9 +215,12 @@ def redact_paths(text: str, scope: PathScope) -> str:
     return text
 
 
-def find_path_leaks(text: str, names: LocalNames | None = None) -> dict[str, int]:
-    """Count of unredacted home paths and local name tokens per kind (empty when clean)."""
-    counts = {"home path": len(_WINDOWS_HOME.findall(text)) + len(_UNIX_HOME.findall(text))}
+def find_leaks(text: str, names: LocalNames | None = None) -> dict[str, int]:
+    """Count per kind of what redaction should have removed: secret patterns,
+    e-mail addresses, home paths, local names and secret env values (empty when clean)."""
+    counts = {kind: len(pattern.findall(text)) for kind, pattern in SECRET_PATTERNS}
+    counts["email"] = len(_EMAIL.findall(text))
+    counts["home path"] = len(_WINDOWS_HOME.findall(text)) + len(_UNIX_HOME.findall(text))
     for kind, _, pattern in (names or LocalNames()).patterns():
-        counts[kind] = len(pattern.findall(text))
+        counts[kind] = counts.get(kind, 0) + len(pattern.findall(text))
     return {kind: count for kind, count in counts.items() if count}

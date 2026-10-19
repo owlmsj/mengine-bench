@@ -161,9 +161,8 @@ def _chart_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     return result
 
 
-VISION_PROMPT = "Reply ONLY with a JSON object. Do not use tools; look at the attached image(s)."
-LC_PROMPT = ("Reply ONLY with a JSON object, using only the document below (do not use tools; the file is not "
-             "on disk).")
+VISION_PROMPT = "Reply ONLY with a JSON object. The image(s) are attached."
+LC_PROMPT = "Reply ONLY with a JSON object. The document is below; it is not on disk."
 
 # par_s: DeepSeek V4.1 Flash wall times from the maintainers' v1 FAST run
 # (2026-09-23), rounded up. lc-contract was not in that run: 2x lc-changelog

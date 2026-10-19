@@ -12,6 +12,15 @@ import pytest
 FakeAgent = Callable[[str, str], str]
 
 
+@pytest.fixture(autouse=True)
+def isolated_preflight(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory) -> None:
+    """The real preflight reads this machine's home and temp dir; runner tests
+    must not depend on them (tests/test_preflight.py covers it with fakes)."""
+    from mengine_bench import cli
+    monkeypatch.setattr(cli, "contamination", lambda *args, **kwargs: [])
+    monkeypatch.setenv("MENGINE_BENCH_SCRATCH", str(tmp_path_factory.mktemp("scratch")))
+
+
 @pytest.fixture
 def fake_agent(tmp_path: Path) -> FakeAgent:
     """Write `body` as a script; return a JSON argv template for CmdAgent.

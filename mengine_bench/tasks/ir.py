@@ -27,7 +27,7 @@ from mengine_bench.core import (
     write,
 )
 
-RULES = "Work only inside {WS}. Do not ask for confirmation."
+RULES = "Write your files inside {WS}. Do not ask for confirmation."
 # Par for the unmeasured IR tasks: 2x ir-studio-wiki (14.6 s), the closest
 # comparable measured task (DeepSeek V4.1 Flash, private v1 FAST run 2026-09-23).
 WIKI_PAR_S = 14.6

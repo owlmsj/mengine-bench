@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 import sys
 import tempfile
 import uuid
@@ -14,8 +16,10 @@ from pathlib import Path
 from mengine_bench import __version__, catalog, visual
 from mengine_bench.core import FULL, SUITES, EvalTask, scratch_root
 from mengine_bench.judge import DEFAULT_VOTES, JudgeContext, SubjectiveJudge, VisionChecklistJudge, workspace_diff
-from mengine_bench.bundle import bench_commit, run_scope, write_bundle
+from mengine_bench.bundle import bench_commit, bundle_leaks, run_scope, write_bundle
 from mengine_bench.leaderboard import build_leaderboard
+from mengine_bench.preflight import contamination
+from mengine_bench.redact import LocalNames, local_names
 from mengine_bench.report import (
     SUMMARIES_BEGIN, SUMMARIES_END, RunMeta, TaskDetail, build_results, collect_environment, render_task_summaries,
     render_tasks_table, replace_tasks_table,
@@ -49,8 +53,11 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--judge-cmd", help="argv template for --judge cmd")
     run.add_argument("--out", type=Path, default=Path("results"), help="bundles go to <out>/<suite>/<run>/")
     run.add_argument("--submitter", help="free-text credit stored in result.json (optional, public)")
-    run.add_argument("--work", type=Path, help="workspace root (default: outside the repo, in the temp dir)")
-    run.add_argument("--dry-run", action="store_true")
+    run.add_argument("--work", type=Path, help="workspace root, kept after the run (default: a temp dir, removed "
+                                               "once the bundle is written)")
+    run.add_argument("--allow-unclean", action="store_true",
+                     help="run despite preflight findings; they are recorded and the run is not ranked")
+    run.add_argument("--dry-run", action="store_true", help="print the plan and the preflight findings; run nothing")
     listing = sub.add_parser("list", help="list the tasks of a suite")
     listing.add_argument("--suite", choices=SUITES, default=FULL)
     board = sub.add_parser("leaderboard", help="rank results/**/result.json into LEADERBOARD.md")
@@ -97,19 +104,27 @@ def _run(args: argparse.Namespace) -> int:
         raise SystemExit("error: received --agent cmd without --cmd; expected an argv template with {prompt_file}")
     if args.judge == "cmd" and not args.judge_cmd:
         raise SystemExit("error: received --judge cmd without --judge-cmd; expected an argv template")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    # Outside the repo by default: an agent working under the bench checkout
+    # could read the gold checks in mengine_bench/tasks.
+    scratch = scratch_root()
+    work = (args.work or scratch / "runs" / stamp).resolve()
+    problems = contamination(args.agent, work, scratch, env=os.environ)
+    for problem in problems:
+        print(f"preflight: {problem}")
     if args.dry_run:
         plan = {"suite": args.suite, "agent": args.agent, "model": args.model, "effort": args.effort,
-                "judge": args.judge, "tasks": [task.id for task in tasks], "dry_run": True, "launches": 0}
+                "judge": args.judge, "tasks": [task.id for task in tasks], "dry_run": True, "launches": 0,
+                "preflight": "clean" if not problems else f"{len(problems)} finding(s)"}
         print(json.dumps(plan))
         return 0
+    if problems and not args.allow_unclean:
+        raise SystemExit(f"error: received {len(problems)} preflight finding(s) above; expected a clean run "
+                         f"(README, 'Run hygiene'), or --allow-unclean to record them and stay unranked")
     agent = make_agent(args.agent, args.model, args.effort, args.cmd)
     judge_agent = None
     if args.judge != "none":
         judge_agent = make_agent(args.judge, args.judge_model, args.judge_effort, args.judge_cmd)
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    # Outside the repo by default: an agent working under the bench checkout
-    # could read the gold checks in mengine_bench/tasks.
-    work = (args.work or scratch_root() / "runs" / stamp).resolve()
     previous_judge = visual.JUDGE
     if judge_agent is not None:
         visual.JUDGE = VisionChecklistJudge(judge_agent, votes=args.judge_votes)
@@ -117,20 +132,39 @@ def _run(args: argparse.Namespace) -> int:
         results = _run_tasks(tasks, agent, judge_agent, args, work)
     finally:
         visual.JUDGE = previous_judge
+    results["preflight"] = problems
     transcripts = {task.id: work / task.id / "transcripts" for task in tasks}
-    bundle = write_bundle(results, args.out, transcripts, run_scope(work))
+    scope = run_scope(work, local_names().allowing(args.submitter))
+    bundle = write_bundle(results, args.out, transcripts, scope)
     totals = results["totals"]
     print(f"objective {totals['objective']} solved {totals['solved']}/{totals['total']}")  # type: ignore[index]
-    print(f"wrote bundle {bundle}; raw workspaces in {work}")
+    print(f"wrote bundle {bundle}")
+    if args.work is None:
+        # Raw transcripts are unredacted, and a later run's agent could read these solutions.
+        shutil.rmtree(work, ignore_errors=True)
+        print(f"removed raw run dir {work}" if not work.exists() else f"could not fully remove {work}; delete it")
+    else:
+        print(f"raw workspaces kept in {work}")
+    return _privacy_check(bundle, scope.names)
+
+
+def _privacy_check(bundle: Path, names: LocalNames) -> int:
+    leaks = bundle_leaks(bundle, names)
+    for name, kinds in leaks.items():
+        print(f"privacy check: {name}: " + ", ".join(f"{kind} x{count}" for kind, count in sorted(kinds.items())))
+    if leaks:
+        print("privacy check: FAILED; do not publish this bundle")
+        return 1
+    print("privacy check: clean")
     return 0
 
 
 def _leaderboard(args: argparse.Namespace) -> int:
     board = build_leaderboard(args.results, args.output.parent)
     args.output.write_text(board.markdown, encoding="utf-8", newline="\n")
-    for name in board.partial:
-        print(f"partial (not ranked): {name}")
-    print(f"wrote {args.output}: {board.ranked} ranked run(s), {len(board.partial)} partial")
+    for name, reason in board.unranked:
+        print(f"not ranked: {name}: {reason}")
+    print(f"wrote {args.output}: {board.ranked} ranked run(s), {len(board.unranked)} not ranked")
     return 0
 
 

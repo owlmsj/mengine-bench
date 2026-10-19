@@ -21,7 +21,9 @@ import subprocess
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 
-from mengine_bench.redact import LocalNames, PathScope, local_names, redact_paths, redact_text, redact_value
+from mengine_bench.redact import (
+    LocalNames, PathScope, find_leaks, local_names, redact_paths, redact_text, redact_value,
+)
 from mengine_bench.report import render_summary
 
 RESULT_NAME = "result.json"
@@ -112,3 +114,16 @@ def write_bundle(results: MutableMapping[str, object], out_root: Path, transcrip
     (bundle_dir / SUMMARY_NAME).write_text(public_text(render_summary(public), scope), encoding="utf-8",
                                            newline="\n")
     return bundle_dir
+
+
+def bundle_leaks(bundle_dir: Path, names: LocalNames) -> dict[str, dict[str, int]]:
+    """Per file, what redaction missed (counts only: the output is pasted into PRs)."""
+    found: dict[str, dict[str, int]] = {}
+    for path in sorted(bundle_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        raw = gzip.decompress(path.read_bytes()) if path.suffix == ".gz" else path.read_bytes()
+        leaks = find_leaks(raw.decode("utf-8", errors="replace"), names)
+        if leaks:
+            found[path.relative_to(bundle_dir).as_posix()] = leaks
+    return found
