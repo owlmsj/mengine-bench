@@ -14,3 +14,4 @@ suite's task set are listed as partial and never ranked.
 | # | agent | model | effort | OBJECTIVE | ACCURACY | solved | agent time (s) | SUBJECTIVE | COMPOSITE | date | bench | bundle | audit |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | codex codex-cli 0.162.1 | gpt-6.1-sol | low | 94.3 | 96.3 | 18/20 | 479.0 | 88.5 | 92.0 | 2026-10-17 | 0.1.0 | [summary](results/full/2026-10-17_codex_gpt-6.1-sol_low_f96c04d3/summary.md) | verified |
+| 2 | opencode opencode v2.0.29 | deepseek/deepseek-flash | low | 92.8 | 95.5 | 18/20 | 1465.6 | 86.5 | 90.3 | 2026-10-19 | 0.1.0 | [summary](results/full/2026-10-19_opencode_deepseek-deepseek-flash_low_7638ba51/summary.md) | verified |
