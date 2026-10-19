@@ -46,9 +46,12 @@ def test_readme_records_measured_baseline_and_clone_steps() -> None:
     text = " ".join((ROOT / "README.md").read_text(encoding="utf-8").split())
     for expected in ("git clone https://github.com/owlmsj/mengine-bench.git cd mengine-bench uv sync",
                      "20 min 10 s wall", "510 s agent time", "Codex gpt-6.1-sol",
-                     "low effort", "judge with 1 vote, as its bundle records", "claude-opus-5-5", "xhigh", "no browser",
-                     "FAST has no measured run yet"):
+                     "low effort", "judge with 1 vote, as its bundle records", "claude-opus-5-5", "xhigh",
+                     "Both visual tasks were rendered in a browser and graded by the vision judge",
+                     "FAST has no measured run yet", "every tool its harness gives it"):
         assert expected in text
+    # The 2026-10-17 bundle records grading.visual "rendered" and a screenshot per visual task.
+    assert 'reported "no browser"' not in text
 
 
 def test_docs_distinguish_all_six_derived_par_times() -> None:

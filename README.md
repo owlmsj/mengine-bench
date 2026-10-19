@@ -61,6 +61,13 @@ check. Categories:
 - long-context and context-compaction survival across sessions
 - visual output (web pages checked by rendering) and image understanding
 
+The agent may use every tool its harness gives it: shell, web search and
+fetch, browsers, MCP servers, skills, subagents. Nothing is turned off; what
+is measured is the harness plus the model as you configured them. Prompts
+only say where output files go and what the answer must contain. Bench 0.1.0
+prompts told agents to avoid tools on some tasks, so the two 0.1.0 baselines
+below are not strictly comparable with 0.2.0 runs.
+
 Every task ships a reference solution, and the test suite proves without any
 model that the reference passes and the untouched workspace fails.
 
@@ -77,7 +84,8 @@ The 2026-10-17 FULL baseline used Codex gpt-6.1-sol at low effort and a
 judge with 1 vote, as its bundle records (Claude `claude-opus-5-5`, xhigh
 effort). It took 20 min 10 s wall (510 s agent time); judging and grading are
 excluded from agent time.
-Both visual tasks reported "no browser" and used deterministic checks only.
+Both visual tasks were rendered in a browser and graded by the vision judge
+(1 vote each).
 This is one measured configuration, not a duration estimate for other agents.
 
 The 2026-10-19 FULL baseline used opencode 2.0.29 with DeepSeek V4 Flash

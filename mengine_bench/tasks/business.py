@@ -30,7 +30,7 @@ from mengine_bench.core import (
     write,
 )
 
-RULES = "Work only inside {WS}. Use the Python standard library if you need to compute. Do not ask for confirmation."
+RULES = "Write your files inside {WS}. Do not ask for confirmation."
 
 # ----------------------------------------------------------- ds-ab-playtest --
 

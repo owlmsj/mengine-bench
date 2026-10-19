@@ -41,7 +41,9 @@ BROWSER_PROFILE_DIRS = frozenset({"_browser-profile", ".browser-profile", "brows
                                   "verify-profile", ".chrome-profile", "chrome-profile", ".edge-profile",
                                   "edge-profile", "user-data-dir", ".user-data-dir"})
 
-WORKSPACE_RULES = "Work only in this directory. Do not use credentials or billable resources.\n"
+# The agent under test is harness + model as configured: every tool, MCP
+# server, skill or subagent it has is fair game.
+WORKSPACE_RULES = "Write your files in this directory. Use any tool you have.\n"
 COPY_IGNORE = shutil.ignore_patterns(".git", "tmp", "__pycache__", "_render")
 
 

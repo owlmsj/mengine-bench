@@ -325,7 +325,7 @@ def _ecs_reference(ws: Path) -> list[str]:
     return ["fixed movement.py:5 and collision.py:8"]
 
 
-RULES = "Work only inside {WS}. Do not ask for confirmation; finish the task and summarize in 2 lines."
+RULES = "Write your files inside {WS}. Do not ask for confirmation; finish the task and summarize in 2 lines."
 
 # par_s: DeepSeek V4.1 Flash wall times from the maintainers' v1 FAST run
 # (2026-09-23), rounded up to whole seconds.

@@ -36,7 +36,7 @@ from mengine_bench.core import (
     write,
 )
 
-RULES = "Work only inside {WS}. Do not ask for confirmation; finish and summarize in 2 lines."
+RULES = "Write your files inside {WS}. Do not ask for confirmation; finish and summarize in 2 lines."
 
 # ------------------------------------------------------- gd-lockstep-desync --
 
