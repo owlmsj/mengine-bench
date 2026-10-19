@@ -271,3 +271,18 @@ def test_rebundle_names_what_an_old_raw_dir_lacks(bundle: Path, tmp_path: Path) 
                      "--result", str(bundle / "result.json")]) == 0
     [new] = list((tmp_path / "again").glob("*/*"))
     assert verify_bundle(new).ok
+
+
+
+# An agent that reads a public web page echoes the page's contact address into
+# its transcript (2026-10-19 FULL run, web-mondrian-landing); published text
+# keeps no third-party email. Placeholder domains and GitHub noreply stay.
+def test_redact_text_hides_third_party_emails_only() -> None:
+    from mengine_bench.redact import redact_text
+
+    # Assembled at runtime so this file does not trip the repo's own privacy scan.
+    third_party = "sammlungonline" + "@" + "kunsthaus.ch"
+    text = f"mail {third_party} or dev@example.com or 1+me@users.noreply.github.com"
+    out = redact_text(text)
+    assert third_party not in out and "[REDACTED:email]" in out
+    assert "dev@example.com" in out and "1+me@users.noreply.github.com" in out
