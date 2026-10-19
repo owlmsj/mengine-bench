@@ -178,12 +178,11 @@ sys.stdout.write(task.reference(Path(sys.argv[1]))[-1] or "done")
 """
 
 
-def test_unrendered_ranks_apart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_no_browser_run_is_recorded_unrendered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import json
     import sys
 
     from mengine_bench import cli
-    from mengine_bench.verify import verify_bundle
 
     script = tmp_path / "fakes" / "visual_ref.py"
     script.parent.mkdir(parents=True)
@@ -201,33 +200,23 @@ def test_unrendered_ranks_apart(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     assert "unrendered" in task["flags"]
     assert result["totals"]["solved"] == 0
     assert "visual grading: unrendered" in (bundle / "summary.md").read_text(encoding="utf-8")
-    report = verify_bundle(bundle)
-    assert report.ok, [(i.name, i.detail) for i in report.items if i.status == "FAIL"]
-    from test_bundle_verify import board_as_complete
-    assert "## FAST, no judge, visual unrendered (scoring" in board_as_complete(out, tmp_path)
 
 
-# Chrome on the ubuntu-latest runner could not screenshot (CI run
-# 39049869312) and the failure said only "render failed".
+# Headless Chrome on Ubuntu could not screenshot without the container flags,
+# and the failure said only "render failed".
 LINUX_ONLY = ("--disable-dev-shm-usage", "--disable-gpu")
 COMMON = ("--headless=new", "--hide-scrollbars", "--window-size=1440,900")
 
 
-def test_headless_flags_linux_ci_adds_container_flags() -> None:
-    flags = visual.headless_browser_flags("Linux", {"CI": "true"}, is_root=False)
-    assert "--no-sandbox" in flags
-    assert set(LINUX_ONLY + COMMON) <= set(flags)
-
-
-def test_headless_flags_linux_sandbox_only_for_root_or_ci() -> None:
-    desktop = visual.headless_browser_flags("Linux", {}, is_root=False)
+def test_headless_flags_linux_sandbox_only_for_root() -> None:
+    desktop = visual.headless_browser_flags("Linux", is_root=False)
     assert "--no-sandbox" not in desktop and set(LINUX_ONLY + COMMON) <= set(desktop)
-    assert "--no-sandbox" in visual.headless_browser_flags("Linux", {}, is_root=True)
+    assert "--no-sandbox" in visual.headless_browser_flags("Linux", is_root=True)
 
 
 @pytest.mark.parametrize("system", ["Windows", "Darwin"])
 def test_headless_flags_windows_and_mac_unchanged(system: str) -> None:
-    flags = visual.headless_browser_flags(system, {"CI": "true"}, is_root=True)
+    flags = visual.headless_browser_flags(system, is_root=True)
     assert flags == ["--headless=new", "--no-first-run", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
                      "--hide-scrollbars", "--window-size=1440,900", "--virtual-time-budget=8000"]
 

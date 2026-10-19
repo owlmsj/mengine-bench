@@ -1,10 +1,9 @@
-"""Console entry point: run, verify, rebundle, list, leaderboard, selftest, tasks-doc, privacy-scan."""
+"""Console entry point: run, list, leaderboard, selftest, tasks-doc."""
 
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import tempfile
 import uuid
@@ -15,9 +14,8 @@ from pathlib import Path
 from mengine_bench import __version__, catalog, visual
 from mengine_bench.core import FULL, SUITES, EvalTask, scratch_root
 from mengine_bench.judge import DEFAULT_VOTES, JudgeContext, SubjectiveJudge, VisionChecklistJudge, workspace_diff
-from mengine_bench.bundle import TaskArtifacts, bench_commit, load_raw_run, run_scope, save_raw_run, write_bundle
-from mengine_bench.leaderboard import build_leaderboard, build_leaderboard_from_report, verification_report
-from mengine_bench.privacy import PRIVATE_TERMS_ENV, PrivateTerms, load_private_terms, scan_repo
+from mengine_bench.bundle import bench_commit, run_scope, write_bundle
+from mengine_bench.leaderboard import build_leaderboard
 from mengine_bench.report import (
     SUMMARIES_BEGIN, SUMMARIES_END, RunMeta, TaskDetail, build_results, collect_environment, render_task_summaries,
     render_tasks_table, replace_tasks_table,
@@ -25,7 +23,6 @@ from mengine_bench.report import (
 from mengine_bench.runner.agents import AGENT_NAMES, Agent, make_agent
 from mengine_bench.runner.task_run import TaskRunRecord, run_task, snapshot
 from mengine_bench.scoring import TaskOutcome, score_suite
-from mengine_bench.verify import verify_bundle
 
 JUDGE_CHOICES = ("none", *AGENT_NAMES)
 # docs/SCORING.md recommends this judge; reports always state the one used.
@@ -56,31 +53,15 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--dry-run", action="store_true")
     listing = sub.add_parser("list", help="list the tasks of a suite")
     listing.add_argument("--suite", choices=SUITES, default=FULL)
-    check = sub.add_parser("verify", help="audit result bundles; non-zero exit on any mismatch")
-    check.add_argument("bundles", type=Path, nargs="+")
-    again = sub.add_parser("rebundle", help="rebuild a bundle from a raw run dir with the current redaction; "
-                                            "reruns no agent or judge")
-    again.add_argument("raw_run_dir", type=Path, help="the run's work dir (printed by `run`, in the temp dir)")
-    again.add_argument("--out", type=Path, default=Path("results"), help="bundle goes to <out>/<suite>/<run>/")
-    again.add_argument("--result", type=Path, help="old bundle's result.json, for raw dirs without run.json")
-    board = sub.add_parser("leaderboard", help="rank verified results/**/result.json into LEADERBOARD.md")
+    board = sub.add_parser("leaderboard", help="rank results/**/result.json into LEADERBOARD.md")
     board.add_argument("--results", type=Path, default=Path("results"))
     board.add_argument("--output", type=Path, default=Path("LEADERBOARD.md"))
-    mode = board.add_mutually_exclusive_group()
-    mode.add_argument("--write-report", type=Path,
-                      help="verify every bundle and write the JSON verification report only (runs task checks)")
-    mode.add_argument("--from-report", type=Path,
-                      help="rank from result.json and this report only; runs no task check")
     selftest = sub.add_parser("selftest", help="run every task's gold self-test without an agent")
     selftest.add_argument("--tasks", default="")
     doc = sub.add_parser("tasks-doc", help="print (or --write) the docs/TASKS.md table; --readme rewrites the "
                                            "README task summaries")
     doc.add_argument("--write", type=Path, nargs="?", const=Path("docs/TASKS.md"))
     doc.add_argument("--readme", type=Path, nargs="?", const=Path("README.md"))
-    privacy = sub.add_parser("privacy-scan", help="scan the repo (cwd) for personal data and secrets; "
-                                                  "prints file and count only, non-zero exit on any hit")
-    privacy.add_argument("--private-terms", type=Path,
-                         help=f"file of extra terms, one per line, never committed (default: ${PRIVATE_TERMS_ENV})")
     return parser
 
 
@@ -101,18 +82,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         for task in catalog.tasks(args.suite):
             print(f"{task.id}\t{task.category}\tw={task.weight}\tpar={task.par_s:g}s")
         return 0
-    if args.command == "verify":
-        return _verify(args.bundles)
-    if args.command == "rebundle":
-        return _rebundle(args.raw_run_dir, args.out, args.result)
     if args.command == "leaderboard":
         return _leaderboard(args)
     if args.command == "selftest":
         return _selftest(_select(catalog.all_tasks(), args.tasks))
     if args.command == "tasks-doc":
         return _tasks_doc(args.write, args.readme)
-    if args.command == "privacy-scan":
-        return _privacy_scan(args.private_terms)
     return _run(args)
 
 
@@ -139,71 +114,33 @@ def _run(args: argparse.Namespace) -> int:
     if judge_agent is not None:
         visual.JUDGE = VisionChecklistJudge(judge_agent, votes=args.judge_votes)
     try:
-        results, artifacts = _run_tasks(tasks, agent, judge_agent, args, work)
+        results = _run_tasks(tasks, agent, judge_agent, args, work)
     finally:
         visual.JUDGE = previous_judge
-    save_raw_run(work, results, artifacts)
-    bundle = write_bundle(results, args.out, artifacts, run_scope(work))
+    transcripts = {task.id: work / task.id / "transcripts" for task in tasks}
+    bundle = write_bundle(results, args.out, transcripts, run_scope(work))
     totals = results["totals"]
     print(f"objective {totals['objective']} solved {totals['solved']}/{totals['total']}")  # type: ignore[index]
     print(f"wrote bundle {bundle}; raw workspaces in {work}")
-    print(f"check it with: mengine-bench verify {bundle}")
-    return 0
-
-
-def _rebundle(raw: Path, out: Path, result_file: Path | None) -> int:
-    # Maintenance only: re-applies the current redaction to a finished run;
-    # no agent or judge runs, so scores and votes are the recorded ones.
-    raw = raw.resolve()
-    try:
-        results, artifacts = load_raw_run(raw, result_file)
-    except FileNotFoundError as error:
-        raise SystemExit(f"error: {error}") from error
-    try:
-        bundle = write_bundle(results, out, artifacts, run_scope(raw))
-    except FileExistsError as error:
-        raise SystemExit(f"error: received --out holding bundle {error.filename}; expected a fresh dir "
-                         f"(remove the old bundle first)") from error
-    print(f"wrote bundle {bundle}")
-    print(f"check it with: mengine-bench verify {bundle}")
     return 0
 
 
 def _leaderboard(args: argparse.Namespace) -> int:
-    if args.write_report is not None:
-        report = verification_report(args.results, args.output.parent)
-        args.write_report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8", newline="\n")
-        print(f"wrote {args.write_report}: {len(report['bundles'])} bundle(s) verified")  # type: ignore[arg-type]
-        return 0
-    if args.from_report is not None:
-        report = json.loads(args.from_report.read_text(encoding="utf-8"))
-        board = build_leaderboard_from_report(args.results, args.output.parent, report)
-    else:
-        board = build_leaderboard(args.results, args.output.parent)
+    board = build_leaderboard(args.results, args.output.parent)
     args.output.write_text(board.markdown, encoding="utf-8", newline="\n")
-    for name, reason in board.skipped:
-        print(f"skipped {name}: {reason}")
-    print(f"wrote {args.output}: {board.ranked} verified bundle(s), {len(board.skipped)} skipped")
+    for name in board.partial:
+        print(f"partial (not ranked): {name}")
+    print(f"wrote {args.output}: {board.ranked} ranked run(s), {len(board.partial)} partial")
     return 0
 
 
-def _verify(bundles: Sequence[Path]) -> int:
-    failures = 0
-    for bundle in bundles:
-        report = verify_bundle(bundle)
-        sys.stdout.write(report.render())
-        failures += not report.ok
-    return 1 if failures else 0
-
-
 def _run_tasks(tasks: Sequence[EvalTask], agent: Agent, judge_agent: Agent | None, args: argparse.Namespace,
-               work: Path) -> tuple[dict[str, object], dict[str, TaskArtifacts]]:
+               work: Path) -> dict[str, object]:
     started_at = _utc_now()
     subjective = SubjectiveJudge(judge_agent, votes=args.judge_votes) if judge_agent is not None else None
     outcomes: list[TaskOutcome] = []
     details: dict[str, TaskDetail] = {}
     votes: dict[str, tuple[int, ...]] = {}
-    artifacts: dict[str, TaskArtifacts] = {}
     vision = visual.JUDGE if isinstance(visual.JUDGE, VisionChecklistJudge) else None
     for task in tasks:
         print(f"[{task.id}] running", flush=True)
@@ -216,7 +153,6 @@ def _run_tasks(tasks: Sequence[EvalTask], agent: Agent, judge_agent: Agent | Non
         except Exception as error:  # noqa: BLE001 - one task must not abort the suite
             record, detail = _crashed_task(task, record, error)
             votes.pop(task.id, None)
-        artifacts[task.id] = TaskArtifacts(transcripts=work / task.id / "transcripts", workspace=record.workspace)
         details[task.id] = detail
         outcomes.append(_outcome(task, record, votes.get(task.id, ())))
         print(f"[{task.id}] {record.status} c={detail['check_score']:.2f} t={record.agent_s:.1f}s", flush=True)
@@ -227,7 +163,7 @@ def _run_tasks(tasks: Sequence[EvalTask], agent: Agent, judge_agent: Agent | Non
                    judge_votes=args.judge_votes if label else 0, run_id=uuid.uuid4().hex[:8],
                    started_at=started_at, finished_at=_utc_now(), submitter=args.submitter,
                    judge_model=args.judge_model if label else None, judge_effort=args.judge_effort if label else None)
-    return build_results(meta, suite, details, votes, collect_environment(), bench_commit()), artifacts
+    return build_results(meta, suite, details, votes, collect_environment(), bench_commit())
 
 
 def _post_process(task: EvalTask, record: TaskRunRecord, vision: VisionChecklistJudge | None,
@@ -245,8 +181,7 @@ def _post_process(task: EvalTask, record: TaskRunRecord, vision: VisionChecklist
 def _crashed_task(task: EvalTask, record: TaskRunRecord | None, error: Exception) -> tuple[TaskRunRecord, TaskDetail]:
     """Record a task whose run or post-processing raised as `crash`, keeping what was graded.
 
-    The recorded checks and workspace stay consistent with each other, so
-    verify can still re-grade the archive (scoring gives a crash c = 0).
+    Scoring gives a crash c = 0.
     """
     message = f"post-processing failed: {type(error).__name__}: {error}"
     if record is None:
@@ -313,8 +248,8 @@ def _outcome(task: EvalTask, record: TaskRunRecord, votes: tuple[int, ...]) -> T
         check_score=check.score if check is not None else 0.0,
         mandatory_ok=check.mandatory_ok if check is not None else False,
         passed=check.passed if check is not None else False,
-        # Score the exact time result.json records, so verify recomputes the
-        # same totals instead of drifting at rounding boundaries.
+        # Score the exact time result.json records, so the totals follow
+        # from the published task times.
         agent_s=round(record.agent_s, 2) if record.steps else None, status=record.status, judge_votes=votes,
     )
 
@@ -373,23 +308,3 @@ def _tasks_doc(target: Path | None, readme: Path | None) -> int:
         readme.write_text(updated, encoding="utf-8", newline="\n")
         print(f"updated {readme}")
     return 0
-
-
-def _privacy_scan(terms_file: Path | None) -> int:
-    terms: PrivateTerms | None = None
-    source = terms_file or (Path(os.environ[PRIVATE_TERMS_ENV]) if os.environ.get(PRIVATE_TERMS_ENV) else None)
-    if source is not None:
-        try:
-            terms = load_private_terms(source)
-        except FileNotFoundError as error:
-            raise SystemExit(f"error: {error}") from error
-    hits = scan_repo(Path.cwd(), terms)
-    per_file: dict[str, list[str]] = {}
-    for hit in hits:
-        per_file.setdefault(hit.path, []).append(hit.kind)
-    # Never print the match: the output gets pasted into public PRs and issues.
-    for path, kinds in sorted(per_file.items()):
-        print(f"{path}: {len(kinds)} hit(s) [{', '.join(sorted(set(kinds)))}]")
-    mode = "generic + private terms" if terms else "generic"
-    print(f"privacy-scan ({mode}): {len(hits)} hit(s) in {len(per_file)} file(s)")
-    return 1 if hits else 0

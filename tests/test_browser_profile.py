@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from conftest import FakeAgent
-from mengine_bench import bundle, cli, visual
+from mengine_bench import cli, visual
 from mengine_bench.runner import task_run
 
 # Mimics Edge: the launcher writes the screenshot and exits while a helper
@@ -54,11 +54,9 @@ def test_render_keeps_the_browser_profile_outside_the_workspace(tmp_path: Path,
     profile = Path((script.parent / "profile.txt").read_text(encoding="utf-8"))
     assert not profile.resolve().is_relative_to(ws.resolve()), f"profile {profile} must live outside the workspace"
     assert not profile.exists(), "the temp profile is removed once the browser tree is gone"
-    _archive, summary = bundle.workspace_archive(ws)
-    assert summary["excluded"] == []
 
 
-def test_archive_skips_unreadable_files_and_browser_profiles(tmp_path: Path,
+def test_snapshot_skips_unreadable_files_and_browser_profiles(tmp_path: Path,
                                                              monkeypatch: pytest.MonkeyPatch) -> None:
     ws = tmp_path / "ws"
     (ws / "scene" / ".verify-profile" / "Default").mkdir(parents=True)
@@ -73,9 +71,6 @@ def test_archive_skips_unreadable_files_and_browser_profiles(tmp_path: Path,
         return real_read(self)
 
     monkeypatch.setattr(Path, "read_bytes", read_bytes)
-    _archive, summary = bundle.workspace_archive(ws)
-    assert summary["files"] == 1
-    assert summary["excluded"] == [{"path": "locked.bin", "reason": "unreadable: PermissionError"}]
     assert task_run.snapshot(ws) == {"scene/index.html": b"<html></html>"}
 
 
@@ -104,5 +99,3 @@ def test_post_processing_crash_marks_the_task_crash_and_the_suite_continues(
     assert tasks["ds-ab-playtest"]["status"] == "crash"
     assert "PermissionError" in tasks["ds-ab-playtest"]["error"]
     assert tasks["bo-pnl-runway"]["status"] == "ok"
-    # The crashed task keeps its graded checks and archive, so the bundle still verifies.
-    assert cli.main(["verify", str(result_file.parent)]) == 0

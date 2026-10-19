@@ -14,7 +14,6 @@ from types import ModuleType
 import pytest
 
 from mengine_bench.core import FAST, FULL, EvalTask
-from mengine_bench.privacy import private_terms_from_env, scan_text
 
 PART1_MODULES = ("gamedev", "business", "hard", "context", "compaction")
 
@@ -68,17 +67,3 @@ def test_reference_passes_and_untouched_workspace_fails(task_id: str, tmp_path: 
     result = task.check(solved, answers)
     assert result.passed, f"{task.id}: reference fails {result.failed()}"
 
-
-def test_prompts_answers_and_fixtures_scan_clean(tmp_path: Path) -> None:
-    # Fixtures exist only at runtime, so the repo-wide scan cannot see them.
-    terms = private_terms_from_env()
-    hits: list[str] = []
-    for task in _part1_tasks():
-        ws = tmp_path / task.id
-        ws.mkdir()
-        task.setup(ws)
-        answers = task.reference(ws)
-        texts = [task.provenance, task.summary, *answers, *(step.prompt for step in task.steps)]
-        texts += [p.read_bytes().decode("utf-8", errors="ignore") for p in ws.rglob("*") if p.is_file()]
-        hits += [f"{task.id}: {hit.kind}" for text in texts for hit in scan_text(text, task.id, terms)]
-    assert not hits, f"privacy hits in prompts or fixtures: {hits}"

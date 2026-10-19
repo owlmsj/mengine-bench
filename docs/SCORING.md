@@ -122,9 +122,8 @@ Every run records `grading.visual` in result.json:
   solved and `c_i` is capped at 0.5, however well the textual gates went.
 
 The leaderboard groups by grading profile, so unrendered runs never rank
-next to rendered ones. Gold self-tests and `mengine-bench verify` grade
-visual tasks on the deterministic gates only (no browser, no model); verify
-treats the screenshot and grading-profile checks as self-reported.
+next to rendered ones. Gold self-tests grade visual tasks on the
+deterministic gates only (no browser, no model).
 
 ## Multi-step boundary
 

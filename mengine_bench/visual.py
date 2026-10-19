@@ -7,8 +7,8 @@ judge adapter; nothing here calls a model. Deterministic checks gate the task
 the aesthetic checklist passes at PASS_RATIO of the judge's majority votes.
 
 Grading profile (release review R10): `grade` without a browser or a judge
-falls back to the deterministic gates, which is right for gold self-tests and
-for `verify`, but a run graded that way never saw the page. The runner calls
+falls back to the deterministic gates, which is right for gold self-tests,
+but a run graded that way never saw the page. The runner calls
 `enforce_rendered_profile` on every real run, which marks such a task
 "unrendered" with a failing mandatory check: not solved, c capped at 0.5.
 """
@@ -52,12 +52,12 @@ PROFILE_CHECK = "graded rendered: browser screenshot and vision judge"
 _UNRENDERED_CAUSES = (NO_BROWSER, NO_JUDGE)
 STDERR_REASON_LINES = 8
 STDERR_REASON_LINE_CHARS = 300
-# SwiftShader keeps WebGL scenes rendering on GPU-less CI hosts; the virtual
+# SwiftShader keeps WebGL scenes rendering on GPU-less hosts; the virtual
 # time budget lets animation loops and fonts settle before the capture.
 _HEADLESS_FLAGS = ("--headless=new", "--no-first-run", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
                    "--hide-scrollbars", "--window-size=1440,900", "--virtual-time-budget=8000")
-# Containers and CI runners have a tiny /dev/shm and no GPU; Chrome on the
-# ubuntu-latest runner failed to screenshot without these (CI run 39049869312).
+# Containers have a tiny /dev/shm and no GPU; headless Chrome on Ubuntu
+# failed to screenshot without these.
 _LINUX_FLAGS = ("--disable-dev-shm-usage", "--disable-gpu")
 
 
@@ -109,14 +109,13 @@ def find_browser() -> str | None:
     return None
 
 
-def headless_browser_flags(system: str, env: Mapping[str, str], is_root: bool) -> list[str]:
+def headless_browser_flags(system: str, is_root: bool) -> list[str]:
     """Chromium flags for one OS, without the per-call profile, screenshot and URL."""
     if system != "Linux":
         return list(_HEADLESS_FLAGS)
     flags = [*_HEADLESS_FLAGS, *_LINUX_FLAGS]
-    # Chrome refuses to start as root with the sandbox, and CI runners (Ubuntu
-    # 24.04 AppArmor) block the user-namespace sandbox; desktops keep it.
-    if is_root or env.get("CI"):
+    # Chrome refuses to start as root with the sandbox; desktops keep it.
+    if is_root:
         flags.append("--no-sandbox")
     return flags
 
@@ -133,7 +132,7 @@ def is_render_failure(status: str) -> bool:
 def render_headless(html: Path, png: Path, browser_argv: Sequence[str] | None = None) -> str:
     """Screenshot `html` at 1440x900; returns RENDERED, NO_BROWSER or a RENDER_FAILED reason.
 
-    A failure reads "render failed: <cause>" so CI logs explain themselves.
+    A failure reads "render failed: <cause>" so the run log explains itself.
     `browser_argv` replaces the discovered browser executable (tests use a fake).
     """
     if not html.is_file():
@@ -155,7 +154,7 @@ def render_headless(html: Path, png: Path, browser_argv: Sequence[str] | None = 
 
 
 def _screenshot(browser_argv: list[str], profile: Path, html: Path, png: Path) -> str:
-    flags = headless_browser_flags(platform.system(), os.environ, _running_as_root())
+    flags = headless_browser_flags(platform.system(), _running_as_root())
     argv = [*browser_argv, *flags, f"--user-data-dir={profile}", f"--screenshot={png.resolve()}",
             html.resolve().as_uri()]
     # stderr goes to a file, not a pipe: orphaned helpers inherit the handle
@@ -259,8 +258,7 @@ def grade(ws: Path, html_rel: str, deterministic: list[tuple[str, bool]], checkl
 def enforce_rendered_profile(check: CheckResult | None) -> str | None:
     """Grading profile of one task's check; None for non-visual tasks.
 
-    Idempotent. The failing PROFILE_CHECK gate is self-reported in bundles:
-    verify re-grades offline and cannot tell whether a browser ran.
+    Idempotent.
     """
     if not isinstance(check, VisualCheckResult):
         return None

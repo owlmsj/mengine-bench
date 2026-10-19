@@ -2,16 +2,13 @@
 
 <!-- One of: adds a result bundle / adds or changes a task / other. -->
 
-## Result submission checklist
+## Result checklist
 
-Skip this section if the PR does not add results. See docs/SUBMITTING.md.
+Skip this section if the PR does not add results.
 
 - [ ] Adds exactly one bundle directory under `results/<suite>/`, written by `mengine-bench run` and not edited by hand
-- [ ] Touches no other bundle, no code and no docs
-- [ ] Does not edit LEADERBOARD.md (the maintainer regenerates it)
-- [ ] `uv run mengine-bench verify <bundle>` passes locally (paste the last line below)
-- [ ] I read the transcripts and they contain no secrets, tokens or personal data
-- [ ] Run from a clean checkout of a released bench version (`bench_commit.dirty` is false)
+- [ ] Touches nothing else (no code, docs or LEADERBOARD.md)
+- [ ] I read summary.md and the transcripts: no secrets, tokens or personal data
 
 | field | value |
 | --- | --- |
@@ -20,7 +17,8 @@ Skip this section if the PR does not add results. See docs/SUBMITTING.md.
 | model id | |
 | effort | |
 | judge model, effort and votes (or "none") | |
-| verify result | |
+| OBJECTIVE / ACCURACY / solved | |
+| bench version and commit | |
 
 ## Task checklist
 

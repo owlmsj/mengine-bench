@@ -31,10 +31,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from mengine_bench import visual
-from mengine_bench.bundle import BROWSER_PROFILE_DIRS
 from mengine_bench.core import CheckResult, EvalTask
 from mengine_bench.runner import process
 from mengine_bench.runner.agents import Agent, AgentError
+
+# Browser user-data dirs an agent left in the workspace; their cache files can
+# stay locked by a live browser, and they are never part of the solution.
+BROWSER_PROFILE_DIRS = frozenset({"_browser-profile", ".browser-profile", "browser-profile", ".verify-profile",
+                                  "verify-profile", ".chrome-profile", "chrome-profile", ".edge-profile",
+                                  "edge-profile", "user-data-dir", ".user-data-dir"})
 
 WORKSPACE_RULES = "Work only in this directory. Do not use credentials or billable resources.\n"
 COPY_IGNORE = shutil.ignore_patterns(".git", "tmp", "__pycache__", "_render")
