@@ -1,9 +1,9 @@
 """LEADERBOARD.md from `results/**/result.json`, verified bundles only.
 
-Two steps so the job that can push never runs submitted code:
+Two steps, so ranking can run apart from the code-executing audit:
 `verification_report` re-verifies every bundle (verify.py executes workspace
-code) in a read-only job, and `build_leaderboard_from_report` ranks from
-result.json plus that JSON report alone. An edited, failed or unreported bundle drops off the table and is
+code), and `build_leaderboard_from_report` ranks from result.json plus that
+JSON report alone. An edited, failed or unreported bundle drops off the table and is
 listed under "Skipped" with the reason instead of silently ranking.
 """
 

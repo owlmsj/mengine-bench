@@ -255,7 +255,8 @@ The audit model, plainly:
   final workspace and must match the recorded results; OBJECTIVE, ACCURACY,
   SUBJECTIVE and COMPOSITE are recomputed from the raw per-task data; the
   manifest hashes, the JSON schema, the 25 MB size cap and the absence of
-  unredacted secrets are checked. CI does this on every results PR.
+  unredacted secrets are checked. The maintainer runs this on every results
+  PR before merging it; there is no CI.
 - **Self-reported**: timings, judge votes and vision checklist votes cannot be
   re-derived without rerunning the models. They are checked for internal
   consistency (step times sum to the task time, medians and majorities follow

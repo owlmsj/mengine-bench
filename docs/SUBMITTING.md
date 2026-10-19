@@ -55,7 +55,7 @@ The schema of `result.json` is [result.schema.json](result.schema.json).
   (listed as excluded).
 
 **Size limit:** a bundle may be at most **25 MiB** (26,214,400 bytes) in
-total. `verify` and the results workflow reject anything bigger.
+total. `verify` rejects anything bigger.
 
 ## 2. Verify locally
 
@@ -111,45 +111,22 @@ the highest `step-<n>` directory of each task).
 
 ## 3. Open a pull request
 
+- Fork the repository and open the pull request from a branch of your fork.
 - Add **exactly one** bundle directory under `results/<suite>/`, unedited.
   Do not touch other bundles, code or docs in the same PR.
-- **Do not edit LEADERBOARD.md.** It is regenerated on `main` after merge.
-- Fill the PR checklist (agent CLI version, model id, effort, judge).
+- **Do not edit LEADERBOARD.md.** The maintainer regenerates it.
+- Fill the PR checklist (agent CLI version, model id, effort, judge) and paste
+  the last line of your local `verify` output.
 
-CI (`.github/workflows/results.yml`) first enforces the results-only policy
-(`.github/scripts/check_submission.py`): every changed path must be a newly
-added file inside one `results/<suite>/<bundle>/` directory. A PR that also
-changes code, docs, workflows or LEADERBOARD.md, modifies or renames an
-existing bundle, or adds more than one bundle fails. It then enforces the size
-limit and runs `mengine-bench verify` on the bundle with the bench code of the
-**base branch** (not the code in your PR), with a read-only token, no
-persisted checkout credentials and no secrets, and posts the verify report as
-the job summary. Any FAIL fails the PR.
+There is no CI and no bot. The maintainer reviews every pull request by hand,
+checks it out, runs `mengine-bench verify` on the bundle with the bench code
+of `main` (not code from your PR), regenerates LEADERBOARD.md and merges, or
+asks for changes in the PR. Fixes to the bench itself (code, tasks, docs) go
+in a separate pull request.
 
 Note that verification executes the hidden gold tests against the code in
-your saved workspaces. That is the point of the audit, and why CI runs it with
-read-only permissions and no secrets.
-
-Changes to `.github/` (workflows, this policy script) and to `mengine_bench/`
-go in a separate PR and need maintainer review (`.github/CODEOWNERS`, with
-"require review from code owners" on `main`). A pull request runs the
-workflow file from the PR itself, so that review, not the workflow, is what
-keeps a submission from rewriting its own checks.
-
-After merge, `main` regenerates LEADERBOARD.md in two jobs. `verify-main`
-re-verifies every bundle (running submission code) with a read-only token
-and uploads `verification.json` as an artifact. `publish`, the only job with
-`contents: write`, never runs submission code: it downloads that report and
-runs `mengine-bench leaderboard --from-report verification.json`, which reads
-`result.json` files and the report only (a bundle whose `result.json` hash
-differs from the report, or that the report does not list, is skipped), then
-updates the long-lived `publish-leaderboard` branch and opens or updates a
-pull request for it. The owner reviews and merges that pull request; `main`
-stays pull-request-only, and no secret or extra credential is involved.
-Because a pull request opened with the Actions token runs no workflows, the
-owner merges it with the repository-admin bypass instead of waiting for
-checks; the ranked data was already verified by `verify-main`. Locally,
-`mengine-bench leaderboard` does both steps in one process.
+your saved workspaces. That is the point of the audit, and why the maintainer
+runs it in a disposable environment.
 
 Git stores `results/**` byte for byte (`.gitattributes`: `-text`), because
 `MANIFEST.sha256` hashes raw bytes and a CRLF checkout (Windows

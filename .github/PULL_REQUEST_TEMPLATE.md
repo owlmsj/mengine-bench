@@ -8,7 +8,7 @@ Skip this section if the PR does not add results. See docs/SUBMITTING.md.
 
 - [ ] Adds exactly one bundle directory under `results/<suite>/`, written by `mengine-bench run` and not edited by hand
 - [ ] Touches no other bundle, no code and no docs
-- [ ] Does not edit LEADERBOARD.md (it is regenerated on main)
+- [ ] Does not edit LEADERBOARD.md (the maintainer regenerates it)
 - [ ] `uv run mengine-bench verify <bundle>` passes locally (paste the last line below)
 - [ ] I read the transcripts and they contain no secrets, tokens or personal data
 - [ ] Run from a clean checkout of a released bench version (`bench_commit.dirty` is false)

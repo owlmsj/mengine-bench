@@ -40,7 +40,7 @@ RESULT_NAME = "result.json"
 SUMMARY_NAME = "summary.md"
 # Per-file cap inside a workspace archive; bigger files are listed as excluded.
 WORKSPACE_FILE_CAP = 1 * 2**20
-# Whole bundle cap, enforced by verify and the results workflow.
+# Whole bundle cap, enforced by verify.
 BUNDLE_SIZE_CAP = 25 * 2**20
 # Browser user-data dirs an agent (or an older bench) left in the workspace;
 # their cache files can stay locked by a live browser.

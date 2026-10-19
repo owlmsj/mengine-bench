@@ -387,7 +387,7 @@ def _privacy_scan(terms_file: Path | None) -> int:
     per_file: dict[str, list[str]] = {}
     for hit in hits:
         per_file.setdefault(hit.path, []).append(hit.kind)
-    # Never print the match: CI logs are public.
+    # Never print the match: the output gets pasted into public PRs and issues.
     for path, kinds in sorted(per_file.items()):
         print(f"{path}: {len(kinds)} hit(s) [{', '.join(sorted(set(kinds)))}]")
     mode = "generic + private terms" if terms else "generic"

@@ -41,8 +41,8 @@ public topics.
 `uv run mengine-bench privacy-scan` checks every tracked file (and the
 decompressed contents of result bundles) for home paths, e-mail addresses,
 private and tailnet addresses, default Windows host names and token shapes.
-It prints file and hit count only, exits non-zero on any hit, and runs in CI
-on every PR. Build test samples of these shapes at runtime from fragments so
+It prints file and hit count only and exits non-zero on any hit;
+`uv run pytest -q` runs it too (`tests/test_no_personal_data.py`). Build test samples of these shapes at runtime from fragments so
 the test sources stay clean.
 
 ### Maintainer pre-release step
@@ -61,9 +61,42 @@ or set `MENGINE_BENCH_PRIVATE_TERMS` to the file path, which `privacy-scan`
 and `uv run pytest` both honor. Private-term hits are waived only on the
 README "about" line and the LICENSE copyright line.
 
+## How contributions land
+
+`main` is the only branch and nobody pushes to it directly, the maintainer
+included: every change, results or code, is a pull request from a fork (or a
+maintainer branch) that the maintainer reviews and merges with a merge
+commit. There is no CI, no bot and no GitHub Actions workflow; the checks
+below run on the maintainer's machine. Questions and bug reports go in
+issues.
+
 ## Submitting results
 
 See [docs/SUBMITTING.md](docs/SUBMITTING.md): run a suite, verify the bundle
 locally with `uv run mengine-bench verify <bundle>`, and open a PR that adds
 exactly one directory under `results/<suite>/`, unedited. Do not edit
-LEADERBOARD.md; it is regenerated on main.
+LEADERBOARD.md; the maintainer regenerates it.
+
+## Maintainer: reviewing a result PR
+
+Verification executes the submitted workspace code, so run it in a
+disposable environment (a throwaway VM or container), never on a machine
+with credentials:
+
+```
+gh pr checkout <n>
+git diff --stat main...HEAD                 # only new files in one results/<suite>/<bundle>/
+uv sync --locked
+uv run mengine-bench verify results/<suite>/<bundle>
+uv run pytest -q                            # includes the privacy scan of the new bundle
+uv run mengine-bench leaderboard            # rewrites LEADERBOARD.md
+git commit -m "leaderboard: rank <bundle>" -- LEADERBOARD.md
+git push                                    # lands on the contributor's PR branch
+gh pr merge <n> --merge
+```
+
+`git push` to the contributor's branch works when the PR allows edits by
+maintainers (the default for forks owned by a user). If it does not, merge
+the PR first and land the LEADERBOARD.md commit in a pull request of your
+own. Reject a result PR that touches anything outside its bundle directory,
+edits an existing bundle, or adds more than one.

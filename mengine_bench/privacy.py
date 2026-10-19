@@ -9,7 +9,7 @@ file outside git and points `MENGINE_BENCH_PRIVATE_TERMS` at it before a
 release (CONTRIBUTING.md).
 
 Hits carry file, line and kind only, never the matched text: the CLI output
-lands in CI logs, which are public too.
+gets pasted into public pull requests and issues.
 """
 
 from __future__ import annotations
