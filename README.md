@@ -31,10 +31,26 @@ model that the reference passes and the untouched workspace fails.
 FAST already contains all six weight-2 tasks. FULL adds six weight-1 tasks.
 
 The 2026-10-17 FULL baseline used Codex gpt-6.1-sol at low effort and a
-3-vote judge (Claude `claude-opus-5-5`, xhigh effort). It took 20 min 10 s wall
-(510 s agent time); judging and grading are excluded from agent time.
+judge with 1 vote, as its bundle records (Claude `claude-opus-5-5`, xhigh
+effort). It took 20 min 10 s wall (510 s agent time); judging and grading are
+excluded from agent time.
 Both visual tasks reported "no browser" and used deterministic checks only.
 This is one measured configuration, not a duration estimate for other agents.
+
+The 2026-10-19 FULL baseline used opencode 2.0.29 with DeepSeek V4 Flash
+(`deepseek/deepseek-flash`, variant `low`) and the same judge (1 vote). It took
+27 min 57 s wall (1,466 s agent time).
+
+| | gpt-6.1-sol low (Codex) | DeepSeek V4 Flash low (opencode) |
+| --- | --- | --- |
+| OBJECTIVE / ACCURACY | 94.3 / 96.3 | 92.8 / 95.5 |
+| solved | 18/20 | 18/20 |
+| SUBJECTIVE / COMPOSITE | 88.5 / 92.0 | 86.5 / 90.3 |
+| agent time, 18 non-web tasks | 336.9 s | 388.5 s (faster on 10 of 18) |
+| agent time, 2 web build tasks | 142.1 s | 1,077.1 s |
+| misses | bo-reconcile 0.50, ir-server-logs 0.83, 3d-voxel 0.86 | vis-chart 0.00 (text-only model), ir-server-logs 0.83 |
+
+Both bundles are verified; see [LEADERBOARD.md](LEADERBOARD.md).
 
 A run declares its suite. Results are only compared within the same suite,
 scoring version, judge and visual grading profile.

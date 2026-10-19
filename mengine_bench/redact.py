@@ -71,9 +71,15 @@ def redact_secrets(text: str) -> str:
     return text
 
 
+# Third-party addresses only; placeholders and GitHub noreply addresses stay readable.
+_EMAIL = re.compile(r"(?<![\w.%+\-])[A-Za-z0-9._%+\-]+@(?!(?:users\.noreply\.github\.com|example\.(?:com|org|net))\b)"
+                    r"[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}\b")
+
+
 def redact_text(text: str) -> str:
     # Images first: a long base64 run could otherwise be read as a token.
-    return redact_secrets(redact_images(text))
+    # Emails are text-only: a workspace file keeping one is not dropped (re-grading needs it).
+    return _EMAIL.sub(REDACTED.format(kind="email"), redact_secrets(redact_images(text)))
 
 
 def find_secrets(text: str) -> list[str]:

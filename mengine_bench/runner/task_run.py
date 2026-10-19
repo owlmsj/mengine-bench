@@ -22,9 +22,11 @@ The gold check runs once, after the last step, on the final workspace.
 
 from __future__ import annotations
 
+import os
 import shutil
 import tempfile
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -190,6 +192,12 @@ def _run_step(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: 
     return new_session or session
 
 
+def _step_env(workspace: Path, extra: Mapping[str, str] | None) -> dict[str, str]:
+    """Caller env plus PWD=<workspace>: opencode 2.0.29 trusts PWD over the process cwd
+    (cli/src/run/run.ts:73), and Popen(cwd=...) does not update PWD."""
+    return {**os.environ, "PWD": str(workspace.resolve()), **(extra or {})}
+
+
 def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, label: str, prompt: str,
             session: str | None, record: TaskRunRecord, attachments: tuple[str, ...],
             index: int) -> tuple[str, str | None]:
@@ -201,7 +209,8 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, label: st
     prompt_file.write_text(prompt, encoding="utf-8")
     call = agent.invocation(prompt, prompt_file.resolve(), workspace.resolve(), session, attachments)
     try:
-        result = process.run_process(call.argv, workspace, task.timeout_s, stdin_text=call.stdin_text)
+        result = process.run_process(call.argv, workspace, task.timeout_s, stdin_text=call.stdin_text,
+                                     env=_step_env(workspace, call.env))
     except OSError as error:
         record.steps.append(StepRecord(index, 0.0, None, "crash", str(error)))
         raise StepFailed("crash", f"could not start agent {call.argv[0]!r}: {error}") from error

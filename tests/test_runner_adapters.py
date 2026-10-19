@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -162,11 +163,29 @@ def test_codex_message_without_turn_completed_is_a_crash() -> None:
 def test_opencode_text_without_terminal_stop_is_a_crash() -> None:
     text_only = [{"type": "step_start", "sessionID": "ses_1", "part": {}},
                  {"type": "text", "sessionID": "ses_1", "part": {"text": "partial"}}]
-    with pytest.raises(AgentError, match="step_finish"):
-        parse_opencode_jsonl(_jsonl(text_only), 0)
     mid_tool = [*text_only, {"type": "step_finish", "sessionID": "ses_1", "part": {"reason": "tool-calls"}}]
     with pytest.raises(AgentError, match="tool-calls"):
         parse_opencode_jsonl(_jsonl(mid_tool), 0)
+    # A last step that never produced text is still not an answer.
+    silent = [*mid_tool, {"type": "step_start", "sessionID": "ses_1", "part": {}}]
+    with pytest.raises(AgentError, match="step_finish"):
+        parse_opencode_jsonl(_jsonl(silent), 0)
+
+
+# opencode 2.0.29 `run --format json` returns on session.execution.succeeded and can
+# drop the last step's step_finish (cli/src/run/noninteractive.ts); failures and
+# interruptions emit an error event and exit 1. Real FULL transcript: 18 step_start,
+# 17 step_finish, last finish "tool-calls", final answer text after the 18th start.
+def test_opencode_final_answer_step_without_step_finish_is_complete() -> None:
+    events = [{"type": "step_start", "sessionID": "ses_2", "part": {}},
+              {"type": "tool_use", "sessionID": "ses_2", "part": {"tool": "read"}},
+              {"type": "step_finish", "sessionID": "ses_2", "part": {"reason": "tool-calls"}},
+              {"type": "step_start", "sessionID": "ses_2", "part": {}},
+              {"type": "text", "sessionID": "ses_2", "part": {"text": "final answer"}}]
+    parsed = parse_opencode_jsonl(_jsonl(events), 0)
+    assert (parsed.answer, parsed.session_id) == ("final answer", "ses_2")
+    with pytest.raises(AgentError, match="exit"):
+        parse_opencode_jsonl(_jsonl(events), 1)
 
 
 # R17: judges read untrusted answers, diffs and screenshots, so their argv
@@ -217,3 +236,32 @@ def test_opencode_judge_invocation_denies_tools(tmp_path: Path) -> None:
     assert call.env is not None
     config = json.loads(call.env["OPENCODE_CONFIG_CONTENT"])
     assert {config["permission"][tool] for tool in ("edit", "bash", "webfetch", "external_directory")} == {"deny"}
+
+
+# opencode 2.0.29 resolves its root as process.env.PWD ?? process.cwd() (cli/src/run/run.ts:73).
+# Popen(cwd=workspace) kept the caller's PWD, so a FULL run worked in the bench checkout and
+# wrote task files there instead of the workspace.
+def test_agent_step_runs_with_pwd_set_to_the_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from mengine_bench.runner import task_run
+
+    seen: dict[str, object] = {}
+
+    def fake_run(argv, cwd, timeout_s, stdin_text=None, env=None):
+        seen.update(cwd=cwd, env=env)
+        raise OSError("stop after capture")
+
+    monkeypatch.setattr(task_run.process, "run_process", fake_run)
+    monkeypatch.setenv("PWD", "/somewhere/else")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    agent = CmdAgent(template="my-agent {prompt_file}", model="m", effort=None)
+    record = SimpleNamespace(steps=[])
+    with pytest.raises(Exception, match="could not start agent"):
+        task_run._invoke(agent, SimpleNamespace(timeout_s=5), workspace, tmp_path, "0", "do it",
+                         None, record, (), 0)
+    env = seen["env"]
+    assert isinstance(env, dict)
+    assert env["PWD"] == str(workspace.resolve())
+    assert env.get("PATH") == os.environ.get("PATH")

@@ -143,7 +143,7 @@ def parse_opencode_jsonl(stdout: str, exit_code: int) -> Parsed:
     if any(isinstance(part, dict) and part.get("reason") == "length" for part in finishes):
         raise AgentError("received step_finish reason=length; expected a complete answer")
     last = finishes[-1].get("reason") if finishes and isinstance(finishes[-1], dict) else None
-    if last != "stop":
+    if last != "stop" and not _final_step_answered(events):
         raise AgentError(f"received last step_finish reason={last!r} in {len(events)} events; "
                          "expected a terminal step_finish with reason=stop")
     texts = [part.get("text") for event, part in zip(events, parts)
@@ -153,6 +153,19 @@ def parse_opencode_jsonl(stdout: str, exit_code: int) -> Parsed:
         raise AgentError(f"received no text in {len(events)} events; expected a non-empty answer")
     session = next((event.get("sessionID") for event in events if isinstance(event.get("sessionID"), str)), None)
     return Parsed(answer=answer, session_id=session)
+
+
+def _final_step_answered(events: list[dict[str, object]]) -> bool:
+    """opencode 2.0.29 can drop the last step_finish: it returns on
+    session.execution.succeeded (cli/src/run/noninteractive.ts), while failures and
+    interruptions emit an error and exit 1. With exit 0 and no error event, a last
+    step that started after every step_finish and produced text is complete."""
+    kinds = [event.get("type") for event in events]
+    starts = [index for index, kind in enumerate(kinds) if kind == "step_start"]
+    finishes = [index for index, kind in enumerate(kinds) if kind == "step_finish"]
+    if not starts or (finishes and finishes[-1] > starts[-1]):
+        return False
+    return any(kind == "text" for kind in kinds[starts[-1]:])
 
 
 def _image_block(path: Path) -> dict[str, object]:
