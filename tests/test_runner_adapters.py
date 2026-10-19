@@ -162,11 +162,29 @@ def test_codex_message_without_turn_completed_is_a_crash() -> None:
 def test_opencode_text_without_terminal_stop_is_a_crash() -> None:
     text_only = [{"type": "step_start", "sessionID": "ses_1", "part": {}},
                  {"type": "text", "sessionID": "ses_1", "part": {"text": "partial"}}]
-    with pytest.raises(AgentError, match="step_finish"):
-        parse_opencode_jsonl(_jsonl(text_only), 0)
     mid_tool = [*text_only, {"type": "step_finish", "sessionID": "ses_1", "part": {"reason": "tool-calls"}}]
     with pytest.raises(AgentError, match="tool-calls"):
         parse_opencode_jsonl(_jsonl(mid_tool), 0)
+    # A last step that never produced text is still not an answer.
+    silent = [*mid_tool, {"type": "step_start", "sessionID": "ses_1", "part": {}}]
+    with pytest.raises(AgentError, match="step_finish"):
+        parse_opencode_jsonl(_jsonl(silent), 0)
+
+
+# opencode 2.0.29 `run --format json` returns on session.execution.succeeded and can
+# drop the last step's step_finish (cli/src/run/noninteractive.ts); failures and
+# interruptions emit an error event and exit 1. Real FULL transcript: 18 step_start,
+# 17 step_finish, last finish "tool-calls", final answer text after the 18th start.
+def test_opencode_final_answer_step_without_step_finish_is_complete() -> None:
+    events = [{"type": "step_start", "sessionID": "ses_2", "part": {}},
+              {"type": "tool_use", "sessionID": "ses_2", "part": {"tool": "read"}},
+              {"type": "step_finish", "sessionID": "ses_2", "part": {"reason": "tool-calls"}},
+              {"type": "step_start", "sessionID": "ses_2", "part": {}},
+              {"type": "text", "sessionID": "ses_2", "part": {"text": "final answer"}}]
+    parsed = parse_opencode_jsonl(_jsonl(events), 0)
+    assert (parsed.answer, parsed.session_id) == ("final answer", "ses_2")
+    with pytest.raises(AgentError, match="exit"):
+        parse_opencode_jsonl(_jsonl(events), 1)
 
 
 # R17: judges read untrusted answers, diffs and screenshots, so their argv
