@@ -74,6 +74,8 @@ def pr_body(result: Mapping[str, object]) -> str:
     judge, commit, grading = result.get("judge"), result.get("bench_commit"), result.get("grading")
     assert isinstance(agent, dict) and isinstance(totals, dict) and isinstance(environment, dict)
     judge_text = f"{judge['label']}, {judge.get('votes')} vote(s)" if isinstance(judge, dict) else "none"
+    if judge is None and result.get("judge_pending"):
+        judge_text = "pending: the maintainer runs `mengine-bench judge` on review"
     commit_text = (f"{commit.get('sha')} (dirty: {commit.get('dirty')})" if isinstance(commit, dict) else "unknown")
     rows = [
         ("suite", result["suite"]),

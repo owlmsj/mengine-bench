@@ -8,9 +8,10 @@ leaderboard.
 ## Compete: one command
 
 Needs [uv](https://docs.astral.sh/uv/), [gh](https://cli.github.com) logged in
-(`gh auth login`), and the agent CLI you want to measure, installed and logged
-in. The [Claude Code](https://claude.com/claude-code) CLI, if installed, is
-the judge.
+(`gh auth login`), the agent CLI you want to measure, installed and logged
+in, and a Chromium-family browser (Edge, Chrome, Chromium) so the two visual
+tasks get screenshotted. No judge needed: the maintainer judges every run on
+review (see [Judging](#judging)).
 
 ```
 git clone https://github.com/owlmsj/mengine-bench.git
@@ -193,6 +194,29 @@ modeled on. Generated from the catalog; par time provenance and multi-step rules
 Full definitions and a worked example: [docs/SCORING.md](docs/SCORING.md).
 Task list: [docs/TASKS.md](docs/TASKS.md).
 
+## Judging
+
+Runs are judged by the maintainer, not by the competitor, so every ranked run
+has the same judge (Claude `claude-opus-5-5` at `xhigh`, 3 votes) and you need
+no judge of your own. A run without a judge (the default) stores the judge's
+evidence in its bundle, redacted like the rest: `judge/<task>.json` (task
+prompts, answers, workspace diff, transcript tail, check results) and, for
+the visual tasks, the screenshot `judge/<task>.png`. Its `summary.md` says
+"judge pending", and the leaderboard lists it apart until judged.
+
+While reviewing the pull request, the maintainer runs:
+
+```
+uv run mengine-bench judge results/full/<bundle>
+```
+
+It runs the subjective rubric on every task and the vision checklist on the
+stored screenshots (which finishes the visual tasks' objective grade, exactly
+as a judge during the run would), recomputes every score, and rewrites
+`result.json` and `summary.md` with `"deferred": true` on the judge. Until
+then, visual tasks count as unrendered. `run --judge claude` still judges
+during the run if you prefer, with your own Claude account.
+
 ## Quick start
 
 Requires Python >= 3.11 and [uv](https://docs.astral.sh/uv/).
@@ -216,11 +240,7 @@ uv run mengine-bench run --suite fast --agent opencode --model <provider/model>
 uv run mengine-bench run --suite fast --agent cmd --model <label> --cmd "my-agent --task {prompt_file} --cwd {workspace}"
 ```
 
-`--suite` defaults to `full`. The judge (subjective score and visual
-checklists) defaults to `--judge auto`: Claude `claude-opus-5-5` at `xhigh`, 3
-votes, when the `claude` CLI is installed, otherwise none; set `--judge`,
-`--judge-model`, `--judge-effort` and `--judge-votes` to change it.
-`--tasks a,b` runs a subset. Each run writes one result bundle to
+`--suite` defaults to `full`. `--tasks a,b` runs a subset. Each run writes one result bundle to
 `results/<suite>/<date>_<agent>_<model>_<effort>_<run id>/`:
 
 | file | content |
@@ -290,9 +310,10 @@ workspace holding only the files the task carries over; `hide` moves files
 out of the workspace before a step; `compact_before` compacts the session
 first (Claude Code only). Visual tasks need a Chromium-family browser
 (`MENGINE_BENCH_BROWSER`, PATH, or the standard Edge/Chrome install
-locations) and a judge. Without both the run's grading profile is
-"unrendered": visual tasks are never solved there (correctness capped at 0.5)
-and the leaderboard ranks such runs in their own table.
+locations) during the run and a vision judge (during the run or later, see
+[Judging](#judging)). A run with no browser stays "unrendered": visual tasks
+are never solved there (correctness capped at 0.5) and the leaderboard ranks
+such runs in their own table.
 
 ## Submitting results
 

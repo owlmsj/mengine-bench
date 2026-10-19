@@ -49,7 +49,11 @@ def test_bundle_holds_result_summary_and_redacted_transcripts(fake_agent: FakeAg
     [bundle] = out.glob("fast/*")
     assert bundle.name.split("_")[1:4] == ["cmd", "fake-ref", "none"]
     files = sorted(p.relative_to(bundle).as_posix() for p in bundle.rglob("*") if p.is_file())
-    assert files == ["result.json", "summary.md", f"transcripts/{TASK}.jsonl.gz"]
+    assert files == [f"judge/{TASK}.json", "result.json", "summary.md", f"transcripts/{TASK}.jsonl.gz"]
+    packet_text = (bundle / f"judge/{TASK}.json").read_text(encoding="utf-8")
+    packet = json.loads(packet_text)
+    assert set(packet) == {"task_id", "prompts", "answers", "diff", "transcript_tail", "checks"}
+    assert packet["diff"] and env_secret not in packet_text and str(tmp_path) not in packet_text
     result = json.loads((bundle / "result.json").read_text(encoding="utf-8"))
     assert result["submitter"] == "Alice Example"
     assert result["started_at"].endswith("Z") and result["finished_at"] >= result["started_at"]
@@ -60,7 +64,7 @@ def test_bundle_holds_result_summary_and_redacted_transcripts(fake_agent: FakeAg
     assert MARKER not in transcript and "[REDACTED:" in transcript
     assert env_secret not in transcript and "[REDACTED:env]" in transcript
     assert str(tmp_path) not in transcript and str(tmp_path) not in json.dumps(result)
-    assert result["preflight"] == []
+    assert result["preflight"] == [] and result["judge_pending"] is True and result["judge"] is None
     assert "- Preflight: clean" in (bundle / "summary.md").read_text(encoding="utf-8")
 
 
@@ -143,6 +147,17 @@ def test_leaderboard_lists_partial_runs_apart(tmp_path: Path, task_ids: list[str
     text = target.read_text(encoding="utf-8")
     assert "| 1 | " not in text and "No results yet." in text
     assert "- `results/fast/part`: not exactly its suite's task set" in text[text.index("## Not ranked"):]
+
+
+def test_leaderboard_lists_runs_waiting_for_the_judge_apart(tmp_path: Path) -> None:
+    results = tmp_path / "results"
+    bundle = _write_result(results, "pending", 99.0)
+    result = json.loads((bundle / "result.json").read_text(encoding="utf-8"))
+    result["judge_pending"] = True
+    (bundle / "result.json").write_text(json.dumps(result), encoding="utf-8")
+    board = leaderboard.build_leaderboard(results, tmp_path)
+    assert board.ranked == 0
+    assert board.unranked == [("results/fast/pending", "judge pending (`mengine-bench judge`)")]
 
 
 def test_leaderboard_lists_unclean_runs_apart(tmp_path: Path) -> None:

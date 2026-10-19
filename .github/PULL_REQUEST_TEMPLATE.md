@@ -17,7 +17,7 @@ Skip this section if the PR does not add results.
 | agent CLI and version | |
 | model id | |
 | effort | |
-| judge model, effort and votes (or "none") | |
+| judge model, effort and votes (or "pending": the maintainer judges) | |
 | OBJECTIVE / ACCURACY / solved | |
 | bench version and commit | |
 

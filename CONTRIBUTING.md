@@ -53,8 +53,10 @@ Results: see "Submitting results" in the [README](README.md). One PR adds one
 ```
 gh pr checkout <n>
 git diff --stat main...HEAD          # only new files in one results/<suite>/<bundle>/
+uv run mengine-bench judge results/<suite>/<bundle>   # Claude Opus 5.5 xhigh x3, your Claude login
 uv run mengine-bench leaderboard     # rewrites LEADERBOARD.md
-git commit -m "leaderboard: rank <bundle>" -- LEADERBOARD.md
+git add results/<suite>/<bundle>/result.json results/<suite>/<bundle>/summary.md LEADERBOARD.md
+git commit -m "judge and rank <bundle>"
 git push                             # lands on the contributor's PR branch
 gh pr merge <n> --merge
 ```
@@ -67,6 +69,8 @@ Before merging, the bundle is public once merged:
   companies, private projects) and for an agent reading outside its
   workspace or looking up this repo's gold; reject or ask for a rerun.
 
- `git push` to the contributor's branch works when the PR
+`judge` runs once per bundle (it refuses a judged one) through your `claude`
+login, so it spends your Claude plan's usage, not API credits, as long as no
+`ANTHROPIC_API_KEY` is set. `git push` to the contributor's branch works when the PR
 allows edits by maintainers (the default for forks owned by a user); if it
 does not, merge first and land the LEADERBOARD.md commit in a PR of your own.

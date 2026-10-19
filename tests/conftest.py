@@ -18,8 +18,6 @@ def isolated_preflight(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest
     must not depend on them (tests/test_preflight.py covers it with fakes)."""
     from mengine_bench import cli
     monkeypatch.setattr(cli, "contamination", lambda *args, **kwargs: [])
-    # --judge auto would launch a real claude judge on machines that have it.
-    monkeypatch.setattr(cli, "_auto_judge", lambda: "none")
     monkeypatch.setenv("MENGINE_BENCH_SCRATCH", str(tmp_path_factory.mktemp("scratch")))
 
 

@@ -72,10 +72,27 @@ class VisionJudge(Protocol):
 Renderer = Callable[[Path, Path], str]
 
 
+@dataclass(frozen=True)
+class PendingVision:
+    """A rendered screenshot no judge has seen yet: what `mengine-bench judge`
+    needs to finish the visual grade later (judge/<task>.json and .png)."""
+
+    png: Path
+    checklist: tuple[str, ...]
+    mandatory_items: tuple[str, ...]
+    deterministic: tuple[tuple[str, bool], ...]
+    screenshot_ok: bool
+
+    def record(self) -> dict[str, object]:
+        return {"checklist": list(self.checklist), "mandatory_items": list(self.mandatory_items),
+                "deterministic": [[name, ok] for name, ok in self.deterministic], "screenshot_ok": self.screenshot_ok}
+
+
 @dataclass
 class VisualCheckResult(CheckResult):
     # Degraded grading modes ("no browser", "no judge") are reported, not hidden.
     flags: list[str] = field(default_factory=list)
+    pending_vision: PendingVision | None = None
 
 
 def browser_install_candidates(system: str | None = None, env: Mapping[str, str] | None = None) -> list[Path]:
@@ -242,13 +259,28 @@ def grade(ws: Path, html_rel: str, deterministic: list[tuple[str, bool]], checkl
     if status == NO_BROWSER:
         return _deterministic_only(result, deterministic, NO_BROWSER)
     rendered = status == RENDERED
-    result.mandatory.append((SCREENSHOT_CHECK, rendered and screenshot_has_content(png, min_png_bytes)))
+    screenshot_ok = rendered and screenshot_has_content(png, min_png_bytes)
+    result.mandatory.append((SCREENSHOT_CHECK, screenshot_ok))
     if not rendered:
         return _deterministic_only(result, deterministic, None)
     try:
-        verdict = (judge or JUDGE)(png, checklist)
+        return judge_screenshot(png, deterministic, screenshot_ok, checklist, mandatory_items, judge or JUDGE)
     except JudgeUnavailable:
-        return _deterministic_only(result, deterministic, NO_JUDGE)
+        degraded = _deterministic_only(result, deterministic, NO_JUDGE)
+        degraded.pending_vision = PendingVision(png=png, checklist=tuple(checklist),
+                                                mandatory_items=tuple(sorted(mandatory_items)),
+                                                deterministic=tuple(deterministic), screenshot_ok=screenshot_ok)
+        return degraded
+
+
+def judge_screenshot(png: Path, deterministic: Sequence[tuple[str, bool]], screenshot_ok: bool,
+                     checklist: Sequence[str], mandatory_items: frozenset[str],
+                     judge: VisionJudge) -> VisualCheckResult:
+    """The visual grade from a screenshot: deterministic gates, the screenshot
+    gate, then the judge's checklist. Raises JudgeUnavailable without votes."""
+    verdict = judge(png, checklist)
+    result = VisualCheckResult(pass_ratio=PASS_RATIO,
+                               mandatory=[*deterministic, (SCREENSHOT_CHECK, screenshot_ok)])
     for item in checklist:
         target = result.mandatory if item in mandatory_items else result.checks
         target.append((f"vision: {item}", verdict.get(item) is True))

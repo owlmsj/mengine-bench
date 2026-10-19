@@ -82,6 +82,12 @@ SUBJECTIVE = sum(w_i * median(votes_i)) / sum(w_i)   (one decimal)
 Recommended judge: **Claude Opus 5.5 at xhigh effort**. Every report states
 the judge model and effort. Scores from different judges are not comparable.
 
+By default a run has no judge and the maintainer judges it on review with
+`mengine-bench judge` (README, "Judging"), from the evidence the run stored:
+the same prompt and the same scoring as a judge during the run, and the same
+vision checklist on the screenshot taken during the run. The report marks
+such a judge `"deferred": true`.
+
 ### Judge isolation
 
 Answers, diffs, transcripts and screenshots are written by the agent under
