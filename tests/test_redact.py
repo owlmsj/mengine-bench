@@ -9,7 +9,9 @@ import json
 import pytest
 
 from fakes import KINDS, MARKER, fake_secret
-from mengine_bench.redact import find_secrets, redact_text
+from mengine_bench.redact import (
+    LocalNames, PathScope, find_leaks, find_secrets, redact_paths, redact_text, secret_env_values,
+)
 
 
 @pytest.mark.parametrize("kind", KINDS)
@@ -60,3 +62,33 @@ def test_redact_text_hides_third_party_emails_only() -> None:
     out = redact_text(text)
     assert third_party not in out and "[REDACTED:email]" in out
     assert "dev@example.com" in out and "1+me@users.noreply.github.com" in out
+
+
+def test_secret_env_values_are_picked_by_name_segment() -> None:
+    env = {"DEEPSEEK_API_KEY": "ds-0123456789abcdef", "GH_TOKEN": "tok0123456789", "PATH": "C:/bin;C:/tools",
+           "PWD": "/home/project", "MY_AUTH": "short", "SESSIONNAME": "Console0123", "KEYBOARD": "us-international"}
+    assert set(secret_env_values(env)) == {"ds-0123456789abcdef", "tok0123456789"}
+
+
+def test_secret_env_value_is_redacted_raw_and_json_escaped() -> None:
+    # A value no pattern knows: only the exact-value rule catches it.
+    value = "pw" + "\\" + "q9Zx7Lk2Vm"
+    names = LocalNames(secret_values=(value,))
+    text = f"plain {value} and json {json.dumps(value)}"
+    assert find_leaks(text, names) == {"env secret": 2}
+    cleaned = redact_paths(text, PathScope(names=names))
+    assert value not in cleaned and json.dumps(value)[1:-1] not in cleaned
+    assert cleaned.count("[REDACTED:env]") == 2
+
+
+def test_the_chosen_public_credit_is_not_scrubbed() -> None:
+    # --submitter is published on purpose; it often equals the git name or account.
+    names = LocalNames(user="dquill", host="box-17", person="dquill").allowing("DQuill")
+    assert names == LocalNames(user=None, host="box-17", person=None)
+    assert LocalNames(user="dquill").allowing(None) == LocalNames(user="dquill")
+
+
+def test_git_author_name_is_redacted_as_a_whole_token() -> None:
+    names = LocalNames(person="Dana Quill")
+    text = "Author: Dana Quill <x@y.z>; Dana Quillfeather stays"
+    assert redact_paths(text, PathScope(names=names)) == "Author: <NAME> <x@y.z>; Dana Quillfeather stays"

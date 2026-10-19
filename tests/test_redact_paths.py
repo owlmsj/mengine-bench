@@ -9,7 +9,7 @@ import json
 import uuid
 from pathlib import Path
 
-from mengine_bench.redact import LocalNames, PathScope, find_path_leaks, redact_paths
+from mengine_bench.redact import LocalNames, PathScope, find_leaks, redact_paths
 
 
 def fake_name(prefix: str) -> str:
@@ -23,12 +23,12 @@ def test_home_path_in_every_escaping_form_is_redacted() -> None:
     twice = json.dumps({"line": once})
     line = " | ".join([raw, once, twice, f"d:/users/{name}/x", f"/home/{name}/repo", f"/Users/{name}/repo",
                        f"\\/home\\/{name}\\/repo"])
-    assert sum(find_path_leaks(line).values()) >= 7
+    assert sum(find_leaks(line).values()) >= 7
     cleaned = redact_paths(line, PathScope())
     assert name not in cleaned
     assert cleaned.count("<HOME>") == 7
     assert "<HOME>\\AppData\\Local" in cleaned and "<HOME>\\\\\\\\AppData" in cleaned
-    assert find_path_leaks(cleaned) == {}
+    assert find_leaks(cleaned) == {}
     inner = json.loads(json.loads(redact_paths(twice, PathScope()))["line"])
     assert inner["shell"] == "<HOME>\\AppData\\Local\\Microsoft\\WindowsApps\\pwsh.exe"
 
@@ -50,8 +50,8 @@ def test_user_and_host_are_redacted_as_whole_tokens_only() -> None:
     text = f"logged in as {user} on {host}.local; pre{user} {user}x {user.upper()}"
     cleaned = redact_paths(text, PathScope(names=names))
     assert cleaned == f"logged in as <USER> on <HOST>.local; pre{user} {user}x <USER>"
-    assert find_path_leaks(text, names) == {"user": 2, "host": 1}
-    assert find_path_leaks(cleaned, names) == {}
+    assert find_leaks(text, names) == {"user": 2, "host": 1}
+    assert find_leaks(cleaned, names) == {}
 
 
 def test_short_or_generic_names_are_not_tokens() -> None:
@@ -63,4 +63,4 @@ def test_short_or_generic_names_are_not_tokens() -> None:
 def test_ordinary_text_is_untouched() -> None:
     text = "see https://example.com/home/page and /usr/bin/env, C:\\Program Files\\x, ~/notes, <HOME>/a"
     assert redact_paths(text, PathScope()) == text
-    assert find_path_leaks(text) == {}
+    assert find_leaks(text) == {}

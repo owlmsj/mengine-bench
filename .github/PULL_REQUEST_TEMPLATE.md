@@ -8,6 +8,7 @@ Skip this section if the PR does not add results.
 
 - [ ] Adds exactly one bundle directory under `results/<suite>/`, written by `mengine-bench run` and not edited by hand
 - [ ] Touches nothing else (no code, docs or LEADERBOARD.md)
+- [ ] The run started clean (`summary.md`: `Preflight: clean`) and ended with `privacy check: clean`
 - [ ] I read summary.md and the transcripts: no secrets, tokens or personal data
 
 | field | value |

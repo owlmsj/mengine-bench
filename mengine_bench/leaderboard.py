@@ -2,7 +2,8 @@
 
 Scores are self-reported: the maintainer reviews each result pull request
 before merging it, and the table trusts what was merged. A run that is not
-exactly its suite's task set is listed apart and never ranked.
+exactly its suite's task set, or that recorded preflight findings, is listed
+apart and never ranked.
 """
 
 from __future__ import annotations
@@ -24,8 +25,9 @@ edit by hand. Scores are self-reported by each submitter and reviewed by the
 maintainer before merge; the transcripts are in each bundle. One table per
 suite, scoring version, judge and visual grading profile (rendered: browser +
 vision judge; unrendered: visual tasks not solvable): scores from different
-groups are not comparable. Runs that are not exactly their suite's task set
-are listed as partial and never ranked.
+groups are not comparable. Runs that are not exactly their suite's task set,
+or that started with preflight findings (README, "Run hygiene"), are listed
+apart and never ranked.
 """
 
 
@@ -39,7 +41,8 @@ class RankedBundle:
 class Leaderboard:
     markdown: str
     ranked: int
-    partial: list[str] = field(default_factory=list)
+    # (bundle, why it is not ranked)
+    unranked: list[tuple[str, str]] = field(default_factory=list)
 
 
 def _fmt(value: object) -> str:
@@ -73,12 +76,15 @@ def _group_key(result: dict[str, object]) -> tuple[str, str, str, str]:
 
 def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
     groups: dict[tuple[str, str, str, str], list[RankedBundle]] = {}
-    partial: list[str] = []
+    unranked: list[tuple[str, str]] = []
     for result_file in sorted(results_dir.rglob(RESULT_NAME)):
         bundle = result_file.parent
         result = json.loads(result_file.read_text(encoding="utf-8"))
         if not is_complete_suite(result):
-            partial.append(_link(bundle, link_base))
+            unranked.append((_link(bundle, link_base), "not exactly its suite's task set"))
+            continue
+        if result.get("preflight"):
+            unranked.append((_link(bundle, link_base), "started with preflight findings"))
             continue
         entry = RankedBundle(result=result, summary_link=_link(bundle / SUMMARY_NAME, link_base))
         groups.setdefault(_group_key(result), []).append(entry)
@@ -91,11 +97,11 @@ def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
         sections.append(f"## {suite.upper()}, {title}, visual {profile} (scoring {version})\n\n" + _table(rows))
     if not groups:
         sections.append("No results yet.\n")
-    if partial:
-        lines = [f"- `{name}`: not exactly its suite's task set" for name in partial]
-        sections.append("## Partial runs (not ranked)\n\n" + "\n".join(lines) + "\n")
+    if unranked:
+        lines = [f"- `{name}`: {reason}" for name, reason in unranked]
+        sections.append("## Not ranked\n\n" + "\n".join(lines) + "\n")
     ranked = sum(len(rows) for rows in groups.values())
-    return Leaderboard(markdown="\n".join(sections), ranked=ranked, partial=partial)
+    return Leaderboard(markdown="\n".join(sections), ranked=ranked, unranked=unranked)
 
 
 def _table(rows: Iterable[RankedBundle]) -> str:

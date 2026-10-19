@@ -164,6 +164,14 @@ def _visual_profile_text(results: Mapping[str, object]) -> str:
     return str(grading.get("visual")) if isinstance(grading, dict) else "not recorded"
 
 
+def _preflight_text(results: Mapping[str, object]) -> str:
+    found = results.get("preflight")
+    if found is None:
+        return "not recorded (bench before 0.2.0)"
+    assert isinstance(found, list)
+    return "clean" if not found else "NOT CLEAN, not ranked: " + "; ".join(str(item) for item in found)
+
+
 def render_summary(results: Mapping[str, object]) -> str:
     agent = results["agent"]
     totals = results["totals"]
@@ -180,6 +188,7 @@ def render_summary(results: Mapping[str, object]) -> str:
         f"solved {totals['solved']}/{totals['total']}; agent time {_fmt(totals['total_agent_s'])} s",
         f"- SUBJECTIVE: {_fmt(totals['subjective'])}; COMPOSITE: {_fmt(totals['composite'])}",
         f"- Unsupported: {', '.join(totals['unsupported']) or 'none'}",
+        f"- Preflight: {_preflight_text(results)}",
         f"- Bench {results['bench_version']} at {_commit_text(results.get('bench_commit'))}; "
         f"submitter {_fmt(results.get('submitter'))}; started {_fmt(results.get('started_at'))}",
         "",

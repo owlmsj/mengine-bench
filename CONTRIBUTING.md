@@ -59,7 +59,14 @@ git push                             # lands on the contributor's PR branch
 gh pr merge <n> --merge
 ```
 
-Read `summary.md` and skim the transcripts before merging: the bundle is
-public once merged. `git push` to the contributor's branch works when the PR
+Before merging, the bundle is public once merged:
+
+- `summary.md` says `Preflight: clean` (otherwise the run stays unranked, so
+  ask why);
+- skim the transcripts for personal data the redaction cannot know (names,
+  companies, private projects) and for an agent reading outside its
+  workspace or looking up this repo's gold; reject or ask for a rerun.
+
+ `git push` to the contributor's branch works when the PR
 allows edits by maintainers (the default for forks owned by a user); if it
 does not, merge first and land the LEADERBOARD.md commit in a PR of your own.
