@@ -5,59 +5,63 @@ workstation (mengine), public for contribution and comparison. Run it against
 your own agent and model, add tasks, and compare results on a shared
 leaderboard.
 
-## Benchmark your own agent: copy this prompt
+## Compete: one command
 
-Paste the prompt below into a **new session** of the coding agent you want to
-measure (Claude Code, Codex CLI, opencode, ...). The agent runs the FULL suite
-against its own harness and model and opens a pull request from your fork.
-It spends model tokens (the published FULL runs took 20 to 28 minutes of wall
-time) and runs agents with permission prompts bypassed. Read
-[Run hygiene](#run-hygiene) first: the run must start clean, and everything it
-writes becomes public.
+Needs [uv](https://docs.astral.sh/uv/), [gh](https://cli.github.com) logged in
+(`gh auth login`), and the agent CLI you want to measure, installed and logged
+in. The [Claude Code](https://claude.com/claude-code) CLI, if installed, is
+the judge.
+
+```
+git clone https://github.com/owlmsj/mengine-bench.git
+cd mengine-bench
+uv sync
+uv run mengine-bench run --agent codex --model gpt-6.1-sol --effort low --dry-run   # plan + preflight, runs nothing
+uv run mengine-bench run --agent codex --model gpt-6.1-sol --effort low --submit    # ~30 min, then opens the PR
+```
+
+`--agent` is `claude`, `codex`, `opencode` or `cmd` (any command, see Quick
+start); `--model` is the id that CLI accepts (opencode: `provider/model`).
+The dry run must print `"preflight": "clean"`; fix every `preflight:` line
+first ([Run hygiene](#run-hygiene)). With `--submit`, a clean run that ends
+with `privacy check: clean` is pushed (only its bundle, authored as your
+GitHub noreply address) to a branch of your fork, or of this repo if you can
+push to it, and the pull request opens with the scores filled in. To read the
+bundle before publishing, leave out `--submit` and run
+`uv run mengine-bench submit results/full/<bundle>` afterwards.
+
+## Or let your agent do it: copy this prompt
+
+Paste this into a **new session** of the agent you want to measure (Claude
+Code, Codex CLI, opencode, ...), started in a folder of your choice. Give that
+session permission to run long commands and use the network.
 
 ````text
-You are a coding agent in a fresh session. Benchmark yourself with
-mengine-bench (https://github.com/owlmsj/mengine-bench): the agent under test
-is the harness you are running in plus the model you are running on. Then
-submit the result as a pull request. Report only values copied from command
-output or from result.json; write "unknown" for anything you cannot read.
-If something fails or is unclear, stop and ask me instead of guessing.
-Never print, copy or commit credentials, environment variables or my
-personal data (names, e-mails, paths, files outside the bench).
+Benchmark yourself with mengine-bench (https://github.com/owlmsj/mengine-bench)
+and submit the result. The agent under test is the harness you are running in
+plus the model you are running on. Report only values copied from command
+output; if something fails or is unclear, stop and show me instead of
+guessing. Never print or commit credentials, environment variables or my
+personal data.
 
-1. Identify the run and confirm it with me before spending tokens:
-   - harness: claude, codex or opencode, and its exact `--version`;
-   - model: the exact model id that CLI accepts (opencode: provider/model)
-     and the effort, if any;
-   - my GitHub login: `gh api user --jq .login`;
-   - judge: claude-opus-5-5 at xhigh with 3 votes if the Claude Code CLI is
-     installed and logged in, otherwise none;
-   - whether a Chromium-family browser is installed (visual tasks need it).
-2. `gh repo fork owlmsj/mengine-bench --clone`, cd into it, `uv sync`, then
-   check the machine with the exact run command plus `--dry-run`. Every
-   `preflight:` line it prints is something that would contaminate the run
-   (my personal instruction files, a git checkout or instruction file above
-   the temp dir, earlier runs on disk). Show me the lines and the command, and
-   wait: I fix them (or move them aside for the run) and say "go". Never
-   delete or edit those files yourself, and never use --allow-unclean.
-3. Run the suite once, exactly as confirmed:
-   `uv run mengine-bench run --suite full --agent <agent> --model <model>
-   --effort <effort> --judge claude --judge-model claude-opus-5-5
-   --judge-effort xhigh --judge-votes 3 --submitter <github login>`
-   (`--judge none` without the other judge flags if there is no judge).
-   Do not help the agent, edit its workspaces or rerun single tasks. The run
-   must end with `privacy check: clean`; if it prints FAILED, stop and tell
-   me.
-4. Read summary.md (its Preflight line must say "clean") and skim the
-   transcripts for secrets, tokens or personal data the check cannot know
-   (my name, company, clients, private repos or projects); if you find any,
-   stop and tell me. Do not edit the bundle.
-5. On a new branch `results-<agent>-<model>-<date>`, commit only the new
-   `results/full/<bundle>/` directory and open the pull request with
-   `gh pr create --repo owlmsj/mengine-bench`, filling the template from
-   result.json (agent, model, effort, judge, totals, bench version and
-   commit, wall time from started_at to finished_at).
-   Reply to me with the PR URL.
+1. Find your harness (claude, codex or opencode), the exact model id that CLI
+   accepts (opencode: provider/model) and your effort, if any.
+2. If the current folder is not a clone of mengine-bench, run
+   `git clone https://github.com/owlmsj/mengine-bench.git` and cd into it.
+   Then `uv sync`.
+3. Run `uv run mengine-bench run --agent <harness> --model <model> [--effort
+   <effort>] --dry-run` and show me the output. If it prints `preflight:`
+   lines, wait until I fix them and say "go"; never delete or edit those files
+   yourself, and never use --allow-unclean.
+4. Run the same command without `--dry-run`. It takes 20 to 40 minutes: run it
+   in the background or without a timeout and wait for it to finish. Do not
+   help the agent under test or touch its files. It must end with
+   `privacy check: clean`.
+5. Skim results/full/<bundle>/summary.md and the transcripts for anything
+   private the check cannot know (my name, company, clients, private
+   projects). If you find any, stop and tell me. Otherwise run
+   `uv run mengine-bench submit results/full/<bundle>` and reply with the
+   scores and the pull request URL.
 ````
 
 ## What it measures
@@ -212,8 +216,10 @@ uv run mengine-bench run --suite fast --agent opencode --model <provider/model>
 uv run mengine-bench run --suite fast --agent cmd --model <label> --cmd "my-agent --task {prompt_file} --cwd {workspace}"
 ```
 
-Add `--judge claude --judge-model claude-opus-5-5 --judge-effort xhigh` for the
-subjective score and the visual checklists (`--judge-votes`, default 3).
+`--suite` defaults to `full`. The judge (subjective score and visual
+checklists) defaults to `--judge auto`: Claude `claude-opus-5-5` at `xhigh`, 3
+votes, when the `claude` CLI is installed, otherwise none; set `--judge`,
+`--judge-model`, `--judge-effort` and `--judge-votes` to change it.
 `--tasks a,b` runs a subset. Each run writes one result bundle to
 `results/<suite>/<date>_<agent>_<model>_<effort>_<run id>/`:
 
@@ -290,9 +296,13 @@ and the leaderboard ranks such runs in their own table.
 
 ## Submitting results
 
-Use the prompt above, or do it by hand: fork, run a suite, read `summary.md`
-and the transcripts, and open a pull request that adds only your
-`results/<suite>/<bundle>/` directory. Do not edit LEADERBOARD.md.
+`run --submit` or `submit <bundle>` (see [Compete](#compete-one-command)) is
+the whole flow. It refuses a bundle from another bench version, one whose run
+did not start clean, or one that fails the privacy check. The commit holds
+the bundle and nothing else, on top of this repo's `main`, built with a
+temporary index (your checkout, branch and index are untouched). By hand
+works too: a pull request that adds only your `results/<suite>/<bundle>/`
+directory. Do not edit LEADERBOARD.md.
 
 There is no CI and no bot. The maintainer reviews every pull request by hand,
 may edit it, regenerates [LEADERBOARD.md](LEADERBOARD.md) with

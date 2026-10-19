@@ -49,8 +49,9 @@ def bench_commit(root: Path = REPO_ROOT) -> dict[str, object]:
     try:
         head = subprocess.run([git, "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, timeout=30,
                               check=False)
-        status = subprocess.run([git, "status", "--porcelain"], cwd=root, capture_output=True, text=True,
-                                timeout=60, check=False)
+        # results/ holds this clone's own bundles (left untracked by `submit`); they change no bench code.
+        status = subprocess.run([git, "status", "--porcelain", "--", ".", ":(exclude)results"], cwd=root,
+                                capture_output=True, text=True, timeout=60, check=False)
     except (OSError, subprocess.TimeoutExpired):
         return unknown
     if head.returncode or status.returncode:
