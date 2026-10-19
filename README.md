@@ -48,7 +48,7 @@ The 2026-10-19 FULL baseline used opencode 2.0.29 with DeepSeek V4 Flash
 | SUBJECTIVE / COMPOSITE | 88.5 / 92.0 | 86.5 / 90.3 |
 | agent time, 18 non-web tasks | 336.9 s | 388.5 s (faster on 10 of 18) |
 | agent time, 2 web build tasks | 142.1 s | 1,077.1 s |
-| misses | bo-reconcile 0.50, ir-server-logs 0.83, 3d-voxel 0.86 | vis-chart 0.00 (text-only model), ir-server-logs 0.83 |
+| misses | bo-reconcile 0.50, ir-server-logs 0.83, 3d-voxel 0.86 | vis-chart 0.00 (image withheld: the opencode config declared the model text-only; the DeepSeek API reads images), ir-server-logs 0.83 |
 
 Both bundles are verified; see [LEADERBOARD.md](LEADERBOARD.md).
 
