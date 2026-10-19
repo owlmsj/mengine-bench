@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -235,3 +236,32 @@ def test_opencode_judge_invocation_denies_tools(tmp_path: Path) -> None:
     assert call.env is not None
     config = json.loads(call.env["OPENCODE_CONFIG_CONTENT"])
     assert {config["permission"][tool] for tool in ("edit", "bash", "webfetch", "external_directory")} == {"deny"}
+
+
+# opencode 2.0.29 resolves its root as process.env.PWD ?? process.cwd() (cli/src/run/run.ts:73).
+# Popen(cwd=workspace) kept the caller's PWD, so a FULL run worked in the bench checkout and
+# wrote task files there instead of the workspace.
+def test_agent_step_runs_with_pwd_set_to_the_workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from mengine_bench.runner import task_run
+
+    seen: dict[str, object] = {}
+
+    def fake_run(argv, cwd, timeout_s, stdin_text=None, env=None):
+        seen.update(cwd=cwd, env=env)
+        raise OSError("stop after capture")
+
+    monkeypatch.setattr(task_run.process, "run_process", fake_run)
+    monkeypatch.setenv("PWD", "/somewhere/else")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    agent = CmdAgent(template="my-agent {prompt_file}", model="m", effort=None)
+    record = SimpleNamespace(steps=[])
+    with pytest.raises(Exception, match="could not start agent"):
+        task_run._invoke(agent, SimpleNamespace(timeout_s=5), workspace, tmp_path, "0", "do it",
+                         None, record, (), 0)
+    env = seen["env"]
+    assert isinstance(env, dict)
+    assert env["PWD"] == str(workspace.resolve())
+    assert env.get("PATH") == os.environ.get("PATH")
