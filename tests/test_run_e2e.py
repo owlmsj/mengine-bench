@@ -84,12 +84,11 @@ def test_fresh_session_hides_files_and_collects_answers(fake_agent: FakeAgent, t
     assert (tmp_path / "run" / "transcripts" / "step-1.stdout.txt").is_file()
 
 
-def test_continuation_without_resume_is_unsupported(fake_agent: FakeAgent, tmp_path: Path) -> None:
-    task = _two_step_task(Step("second", hide=("secret.md",)))
-    agent = CmdAgent(template=fake_agent("echo", ECHO_AGENT), model="m", effort=None)
-    record = run_task(task, agent, tmp_path / "run")
-    assert record.status == "unsupported"
-    assert len(record.steps) == 1
+def test_a_later_step_must_start_a_fresh_session() -> None:
+    # #23: resume support is gone; a step that would continue a session is a task definition error.
+    with pytest.raises(ValueError, match="fresh_session"):
+        _two_step_task(Step("second", hide=("secret.md",)))
+    assert not hasattr(Step("x"), "compact_before")
 
 
 def test_crashing_agent_is_reported(fake_agent: FakeAgent, tmp_path: Path) -> None:

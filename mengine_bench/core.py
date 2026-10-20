@@ -26,8 +26,8 @@ class Step:
     `fresh_session` starts a new agent process without the chat history, in
     a new workspace that holds only the `carry` files from the previous one.
     `hide` moves workspace paths out of reach before the turn, so the agent
-    must rely on what it kept in context. `compact_before` asks the harness to
-    compact the running session first (never a prompted summary).
+    must rely on what it kept in context. Every step after the first is a
+    fresh session (#23: no task resumes one, so adapters have no resume).
     `attach` passes workspace files as attachments (images for vision tasks);
     `inline` pastes their text into the prompt.
     """
@@ -37,7 +37,6 @@ class Step:
     hide: tuple[str, ...] = ()
     attach: tuple[str, ...] = ()
     inline: tuple[str, ...] = ()
-    compact_before: bool = False
     carry: tuple[str, ...] = ()
 
 
@@ -94,6 +93,10 @@ class EvalTask:
     def __post_init__(self) -> None:
         if not self.steps:
             raise ValueError(f"task {self.id!r} received no steps; expected at least one Step")
+        resumed = [index for index, step in enumerate(self.steps) if index and not step.fresh_session]
+        if resumed:
+            raise ValueError(f"task {self.id!r} received steps {resumed} that continue a session; "
+                             f"expected fresh_session=True on every step after the first")
         bad = [rel for rel in self.deliverables if not rel or rel.startswith(("/", "\\")) or ".." in rel.split("/")]
         if bad:
             raise ValueError(f"task {self.id!r} received deliverables {bad}; expected workspace-relative paths")

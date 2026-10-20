@@ -33,15 +33,16 @@ def test_mandatory_failure_zeroes_correctness() -> None:
     assert task.correctness == 0.0 and task.solved is False
 
 
-@pytest.mark.parametrize("status", ["timeout", "crash", "unsupported"])
-def test_timeout_crash_unsupported_score_zero(status: str) -> None:
+@pytest.mark.parametrize("status", ["timeout", "crash"])
+def test_timeout_and_crash_score_zero(status: str) -> None:
     task = score_task(outcome(status=status))
     assert (task.correctness, task.objective, task.solved) == (0.0, 0.0, False)
 
 
-def test_unknown_status_is_rejected_with_value() -> None:
-    with pytest.raises(ValueError, match="'oops'"):
-        score_task(outcome(status="oops"))
+@pytest.mark.parametrize("status", ["oops", "unsupported"])
+def test_unknown_status_is_rejected_with_value(status: str) -> None:
+    with pytest.raises(ValueError, match=repr(status)):
+        score_task(outcome(status=status))
 
 
 def test_every_task_counts_the_same() -> None:

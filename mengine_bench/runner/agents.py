@@ -145,11 +145,8 @@ class Agent(Protocol):
     name: str
     model: str
     effort: str | None
-    supports_resume: bool
-    supports_compact: bool
-    compact_prompt: str
 
-    def invocation(self, prompt: str, prompt_file: Path, workspace: Path, session_id: str | None,
+    def invocation(self, prompt: str, prompt_file: Path, workspace: Path,
                    attachments: Sequence[str]) -> Invocation: ...
 
     def judge_invocation(self, prompt: str, workdir: Path, attachments: Sequence[str],
@@ -293,19 +290,14 @@ class ClaudeAgent:
     model: str
     effort: str | None
     name: str = "claude"
-    supports_resume: bool = True
-    supports_compact: bool = True
-    compact_prompt: str = "/compact"
 
-    def invocation(self, prompt: str, prompt_file: Path, workspace: Path, session_id: str | None,
+    def invocation(self, prompt: str, prompt_file: Path, workspace: Path,
                    attachments: Sequence[str]) -> Invocation:
         # Attachments are named in the prompt; Claude Code reads images with its Read tool.
         argv = [_executable("claude"), "-p", "--output-format", "stream-json", "--verbose", "--model", self.model]
         if self.effort:
             argv += ["--effort", self.effort]
         argv += ["--permission-mode", "bypassPermissions"]
-        if session_id:
-            argv += ["--resume", session_id]
         return Invocation(argv=argv, stdin_text=prompt)
 
     def judge_invocation(self, prompt: str, workdir: Path, attachments: Sequence[str],
@@ -343,23 +335,15 @@ OPENCODE_JUDGE_CONFIG = {"permission": {"edit": "deny", "bash": "deny", "webfetc
 
 @dataclass
 class CodexAgent:
-    """`codex exec --json`; `exec resume <thread>` continues a session.
-
-    Codex exec has no compaction command, so compact_before is unsupported.
-    """
+    """`codex exec --json`, one fresh session per step."""
 
     model: str
     effort: str | None
     name: str = "codex"
-    supports_resume: bool = True
-    supports_compact: bool = False
-    compact_prompt: str = ""
 
-    def invocation(self, prompt: str, prompt_file: Path, workspace: Path, session_id: str | None,
+    def invocation(self, prompt: str, prompt_file: Path, workspace: Path,
                    attachments: Sequence[str]) -> Invocation:
         argv = [_executable("codex"), "exec"]
-        if session_id:
-            argv.append("resume")
         argv += ["--json", "--skip-git-repo-check", "-m", self.model]
         if self.effort:
             argv += ["-c", f'model_reasoning_effort="{self.effort}"']
@@ -367,8 +351,6 @@ class CodexAgent:
         argv.append("--dangerously-bypass-approvals-and-sandbox")
         for attachment in attachments:
             argv += ["-i", attachment]
-        if session_id:
-            argv.append(session_id)
         argv.append("-")
         return Invocation(argv=argv, stdin_text=prompt)
 
@@ -400,23 +382,17 @@ class CodexAgent:
 class OpencodeAgent:
     """`opencode run --format json`; effort maps to the model variant (`model#effort`).
 
-    --standalone keeps runs off any shared background server. opencode has no
-    non-interactive compaction, so compact_before is unsupported.
+    --standalone keeps runs off any shared background server.
     """
 
     model: str
     effort: str | None
     name: str = "opencode"
-    supports_resume: bool = True
-    supports_compact: bool = False
-    compact_prompt: str = ""
 
-    def invocation(self, prompt: str, prompt_file: Path, workspace: Path, session_id: str | None,
+    def invocation(self, prompt: str, prompt_file: Path, workspace: Path,
                    attachments: Sequence[str]) -> Invocation:
         model = f"{self.model}#{self.effort}" if self.effort else self.model
         argv = [_executable("opencode"), "run", "--standalone", "--auto", "--format", "json", "-m", model]
-        if session_id:
-            argv += ["--session", session_id]
         for attachment in attachments:
             argv += ["--file", attachment]
         if len(prompt) > ARGV_PROMPT_LIMIT:
@@ -449,17 +425,13 @@ class CmdAgent:
     """Any command: the template is a JSON argv list or a POSIX-quoted string.
 
     Placeholders are substituted per argument after splitting, so paths with
-    spaces stay one argument. The answer is the trimmed stdout. No sessions:
-    continuation steps are reported unsupported.
+    spaces stay one argument. The answer is the trimmed stdout.
     """
 
     template: str
     model: str
     effort: str | None
     name: str = "cmd"
-    supports_resume: bool = False
-    supports_compact: bool = False
-    compact_prompt: str = ""
 
     def __post_init__(self) -> None:
         argv = self._split()
@@ -474,7 +446,7 @@ class CmdAgent:
             return parsed
         return shlex.split(self.template)
 
-    def invocation(self, prompt: str, prompt_file: Path, workspace: Path, session_id: str | None,
+    def invocation(self, prompt: str, prompt_file: Path, workspace: Path,
                    attachments: Sequence[str]) -> Invocation:
         values = {"{prompt_file}": str(prompt_file), "{workspace}": str(workspace),
                   "{model}": self.model, "{effort}": self.effort or ""}
@@ -491,7 +463,7 @@ class CmdAgent:
         # it in an empty cwd with the prompt file outside that cwd.
         if prompt_file is None:
             raise ValueError("received no prompt_file for a cmd judge; expected the {prompt_file} path")
-        return self.invocation(prompt, prompt_file, workdir, None, attachments)
+        return self.invocation(prompt, prompt_file, workdir, attachments)
 
     def parse(self, stdout: str, exit_code: int) -> Parsed:
         _require_exit_zero(exit_code)

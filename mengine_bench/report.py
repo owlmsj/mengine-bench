@@ -118,7 +118,6 @@ def totals_block(suite: SuiteScore) -> dict[str, object]:
     return {
         "objective": suite.objective, "accuracy": suite.accuracy, "solved": suite.solved, "total": suite.total,
         "total_agent_s": suite.total_agent_s, "subjective": suite.subjective, "composite": suite.composite,
-        "unsupported": list(suite.unsupported),
         "by_category": {name: vars(cat) for name, cat in suite.by_category.items()},
     }
 
@@ -192,7 +191,6 @@ def render_summary(results: Mapping[str, object]) -> str:
         f"- OBJECTIVE: **{_fmt(totals['objective'])}**; accuracy {_fmt(totals['accuracy'])}; "
         f"solved {totals['solved']}/{totals['total']}; agent time {_fmt(totals['total_agent_s'])} s",
         f"- SUBJECTIVE: {_fmt(totals['subjective'])}; COMPOSITE: {_fmt(totals['composite'])}",
-        f"- Unsupported: {', '.join(totals['unsupported']) or 'none'}",
         f"- Preflight: {_preflight_text(results)}",
         f"- Bench {results['bench_version']} at {_commit_text(results.get('bench_commit'))}; "
         f"submitter {_fmt(results.get('submitter'))}; started {_fmt(results.get('started_at'))}",

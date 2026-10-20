@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 
 SCORING_VERSION = "1.0"
 
-STATUSES = ("ok", "timeout", "crash", "unsupported")
+STATUSES = ("ok", "timeout", "crash")
 COMPOSITE_OBJECTIVE_SHARE = 0.6
 
 
@@ -61,7 +61,6 @@ class SuiteScore:
     subjective: float | None
     composite: float | None
     judge: str | None
-    unsupported: tuple[str, ...]
     tasks: tuple[TaskScore, ...]
     by_category: dict[str, CategoryScore] = field(default_factory=dict)
 
@@ -139,6 +138,5 @@ def score_suite(outcomes: Sequence[TaskOutcome], judge: str | None = None) -> Su
         solved=sum(t.solved for t in scored), total=len(scored),
         total_agent_s=round(sum(t.agent_s or 0.0 for t in scored), 1),
         subjective=subjective, composite=composite, judge=judge if judged else None,
-        unsupported=tuple(t.task_id for t in scored if t.status == "unsupported"),
         tasks=scored, by_category=_category_scores(scored),
     )

@@ -25,7 +25,7 @@ def test_timeout_kills_child_and_grandchild(fake_agent: FakeAgent, tmp_path: Pat
     agent = CmdAgent(template=fake_agent("spawner", SPAWNER), model="m", effort=None)
     ws = tmp_path / "ws"
     ws.mkdir()
-    call = agent.invocation("p", tmp_path / "p.md", ws, None, ())
+    call = agent.invocation("p", tmp_path / "p.md", ws, ())
     started = time.monotonic()
     result = run_process(call.argv, ws, timeout_s=3, stdin_text=call.stdin_text)
     assert result.timed_out and time.monotonic() - started < 30
