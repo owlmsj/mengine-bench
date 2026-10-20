@@ -174,7 +174,7 @@ def _run(args: argparse.Namespace) -> int:
         return 0
     if problems:
         raise SystemExit(f"error: received {len(problems)} earlier run(s) on disk above; expected none, since an "
-                         f"agent could read their solutions: delete them (README, 'Run hygiene') and run again")
+                         f"agent could read their solutions: delete them (README, 'What the agent may use') and run again")
     agent = make_agent(args.agent, args.model, args.effort, args.cmd)
     evidence = JudgeEvidence()
     settings = RunSettings(model=args.model, effort=args.effort, submitter=args.submitter, price=price,

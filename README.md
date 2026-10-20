@@ -9,6 +9,11 @@ opencode or your own command) + the model + its effort + your hardware + any
 other configuration (MCP servers, skills, local server, quantization, ...).
 All of it is part of the result.
 
+Words used below: a **harness** is the agent CLI; **effort** is its reasoning
+setting (low, high, xhigh...); a **run** is one pass over all tasks, saved as a
+folder `results/<run>/` (the CLI also calls it a bundle); **solved** means every
+check of a task passed.
+
 Each run answers three questions, plus a quality grade:
 
 | | Question | How it is measured |
@@ -76,7 +81,7 @@ the result first, then `uv run mengine-bench submit results/<run>`.
 | Claude Code | `claude` | `claude-sonnet-5-5` | reported by the harness |
 | Codex CLI | `codex` | `gpt-6.1-sol` | add `--price input=X,cached=Y,output=Z` (USD per 1M tokens) |
 | opencode | `opencode` | `provider/model` | reported by the harness |
-| anything else | `cmd` | any label | `--cmd "my-agent --prompt-file {prompt_file}"`, plus `--price` |
+| anything else | `cmd` | any label | `--cmd "my-agent --prompt-file {prompt_file}"`; cost n/a (no token counts), or `--price 0` if free |
 
 Describe the rest of your setup with `--config key=value` (repeatable). It is
 recorded and shown on the leaderboard, never applied. Useful keys:

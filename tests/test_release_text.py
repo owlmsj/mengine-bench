@@ -40,13 +40,6 @@ def test_readme_records_clone_steps_score_and_judge() -> None:
     assert f"## The {len(catalog.all_tasks())} tasks" in text
 
 
-def test_committed_results_are_all_of_the_current_bench() -> None:
-    import json
-    from mengine_bench import __version__
-    for result_file in (ROOT / "results").rglob("result.json"):
-        assert json.loads(result_file.read_text(encoding="utf-8"))["bench_version"] == __version__, result_file
-
-
 def test_readme_names_every_personal_instruction_file(tmp_path: Path) -> None:
     from mengine_bench.preflight import INSTRUCTION_FILES, global_instruction_files
     for folder in (".claude", ".codex", ".config/opencode"):

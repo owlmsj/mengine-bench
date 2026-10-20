@@ -68,7 +68,8 @@ Cost uses one basis per run, recorded next to the number:
 - `n/a`: unknown. Never shown as 0.
 
 A step without usage (crash, timeout) makes the total a lower bound, shown as
-`>= $x`. Tokens are always recorded, per step, per task and in total.
+`>= $x`. Tokens are always recorded, per step, per task and in total; the
+leaderboard's Tokens column is input (cache reads and writes included) plus output.
 
 ## Worked example
 

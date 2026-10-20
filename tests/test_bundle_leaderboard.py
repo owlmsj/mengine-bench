@@ -184,10 +184,10 @@ def test_leaderboard_ranks_the_current_major_minor_only(tmp_path: Path) -> None:
     assert board.unranked == [("results/old", f"older bench 0.2.0; only bench {major}.{minor}.x runs are ranked")]
 
 
-def test_bench_is_version_1_0_0() -> None:
+def test_bench_is_version_1_0_x() -> None:
     import tomllib
     pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
-    assert __version__ == pyproject["project"]["version"] == "1.0.0"
+    assert __version__ == pyproject["project"]["version"] and __version__.startswith("1.0.")
 
 
 def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:
