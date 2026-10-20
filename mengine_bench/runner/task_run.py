@@ -8,8 +8,6 @@ Step semantics (core.Step), ported from the private suite's runner:
   a parent or sibling of it; once the task ends it moves to `step-<i>/` under
   the run root for grading and bundling. Files are reachable only by an
   absolute path outside the workspace, which AGENTS.md forbids;
-- a task's final check is wrapped in the visual grading profile
-  (visual.enforce_rendered_profile): an unrendered visual task is not solved;
 - no step resumes a session (core.EvalTask rejects it, #23), so every
   adapter, `cmd` included, runs every task;
 - `hide` moves paths out of the workspace before the turn; `inline` pastes
@@ -28,7 +26,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mengine_bench import visual
 from mengine_bench.core import CheckResult, EvalTask
 from mengine_bench.runner import process
 from mengine_bench.runner.agents import Agent, AgentError, Usage, sum_usage
@@ -226,7 +223,6 @@ def _grade(task: EvalTask, record: TaskRunRecord) -> None:
     answers = record.answers + [""] * (len(task.steps) - len(record.answers))
     try:
         record.check = task.check(record.workspace, answers)
-        visual.enforce_rendered_profile(record.check)
     except (ValueError, RuntimeError, OSError) as error:
         record.error = f"{record.error or ''} grading failed: {error}".strip()
         record.status = "crash"

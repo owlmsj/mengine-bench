@@ -1,4 +1,4 @@
-"""Subjective judge and vision checklist judge, driven by a fake judge command."""
+"""Subjective judge, driven by a fake judge command."""
 
 from __future__ import annotations
 
@@ -8,11 +8,8 @@ from pathlib import Path
 import pytest
 
 from conftest import FakeAgent
-from mengine_bench.judge import (
-    JudgeContext, SubjectiveJudge, VisionChecklistJudge, build_judge_prompt, parse_judge_reply,
-)
+from mengine_bench.judge import JudgeContext, SubjectiveJudge, build_judge_prompt, parse_judge_reply
 from mengine_bench.runner.agents import CmdAgent
-from mengine_bench.visual import JudgeUnavailable
 
 # Replays one scripted reply per call; the call counter lives next to the script.
 SCRIPTED = """
@@ -80,24 +77,6 @@ def test_vote_dropped_after_retries(fake_agent: FakeAgent, tmp_path: Path) -> No
     assert len(result.errors) == 2
 
 
-def test_vision_checklist_majority(fake_agent: FakeAgent, tmp_path: Path) -> None:
-    replies = ['{"1": true, "2": false}', 'oops', '{"1": true, "2": true}', '{"1": false, "2": false}']
-    agent = scripted_judge(fake_agent, tmp_path, "vision", replies)
-    png = tmp_path / "shot" / "shot.png"
-    png.parent.mkdir()
-    png.write_bytes(b"\x89PNG fake")
-    verdict = VisionChecklistJudge(agent, votes=3, retries=1, timeout_s=60)(png, ["red block", "CTA visible"])
-    assert verdict == {"red block": True, "CTA visible": False}
-
-
-def test_vision_judge_without_valid_votes_degrades(fake_agent: FakeAgent, tmp_path: Path) -> None:
-    agent = scripted_judge(fake_agent, tmp_path, "mute", ["no"])
-    png = tmp_path / "shot.png"
-    png.write_bytes(b"\x89PNG fake")
-    with pytest.raises(JudgeUnavailable, match="expected"):
-        VisionChecklistJudge(agent, votes=3, retries=0, timeout_s=60)(png, ["a"])
-
-
 # R17 (release review): answers, diffs and transcripts are agent-written and
 # may carry instructions aimed at the judge.
 INJECTED = JudgeContext(task_id="t", prompts=("Fix {WS}/a.py",),
@@ -142,15 +121,3 @@ def test_judge_runs_in_an_empty_cwd_outside_the_run(fake_agent: FakeAgent, tmp_p
     assert not cwd.exists(), "the isolated judge cwd is removed after the vote"
     # The prompt is still kept next to the run for audit.
     assert any(run_dir.rglob("*.prompt.md"))
-
-
-def test_vision_judge_cwd_holds_only_the_screenshot(fake_agent: FakeAgent, tmp_path: Path) -> None:
-    agent = CmdAgent(template=fake_agent("where", RECORD_CWD), model="m", effort=None)
-    png = tmp_path / "ws" / "_render" / "shot.png"
-    png.parent.mkdir(parents=True)
-    png.write_bytes(b"\x89PNG fake")
-    (tmp_path / "ws" / "index.html").write_text("<p>agent output</p>", encoding="utf-8")
-    assert VisionChecklistJudge(agent, votes=1, retries=0, timeout_s=60)(png, ["a"]) == {"a": True}
-    seen = json.loads((tmp_path / "fakes" / "where.cwd").read_text(encoding="utf-8"))
-    assert seen["files"] == ["screenshot.png"]
-    assert not Path(seen["cwd"]).resolve().is_relative_to(tmp_path.resolve())

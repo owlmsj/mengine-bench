@@ -106,14 +106,13 @@ def test_scoring_uses_the_recorded_rounded_agent_time() -> None:
 
 
 def _write_result(results: Path, name: str, objective: float, *, model: str = "m", judge: str | None = None,
-                  visual: str = "rendered", task_ids: list[str] | None = None,
+                  task_ids: list[str] | None = None,
                   bench_version: str = __version__) -> Path:
     ids = task_ids if task_ids is not None else [task.id for task in catalog.all_tasks()]
     result = {
         "scoring_version": "1.0", "date": "2026-10-19", "bench_version": bench_version,
         "agent": {"name": "cmd", "model": model, "effort": None, "version": None},
         "judge": None if judge is None else {"label": judge},
-        "grading": {"visual": visual},
         "totals": {"objective": objective, "accuracy": objective, "solved": 1, "total": len(ids),
                    "total_agent_s": 10.0, "subjective": None, "composite": None},
         "tasks": [{"id": task_id} for task_id in ids],
@@ -124,19 +123,17 @@ def _write_result(results: Path, name: str, objective: float, *, model: str = "m
     return bundle
 
 
-def test_leaderboard_ranks_by_objective_and_groups_by_judge_and_visual_profile(tmp_path: Path) -> None:
+def test_leaderboard_ranks_by_objective_and_groups_by_judge(tmp_path: Path) -> None:
     results = tmp_path / "results"
     _write_result(results, "low", 50.0, model="low-model")
     _write_result(results, "high", 90.0, model="high-model")
     _write_result(results, "judged", 70.0, model="judged-model", judge="judge-x@high")
-    _write_result(results, "blind", 80.0, model="blind-model", visual="unrendered")
     board = leaderboard.build_leaderboard(results, tmp_path)
-    assert board.ranked == 4 and board.unranked == []
-    plain = board.markdown[board.markdown.index("## no judge, visual rendered"):]
+    assert board.ranked == 3 and board.unranked == []
+    plain = board.markdown[board.markdown.index("## no judge"):]
     assert plain.index("| 1 | cmd  | high-model |") < plain.index("| 2 | cmd  | low-model |")
     assert "[summary](results/high/summary.md)" in plain
-    assert "## judge judge-x@high, visual rendered" in board.markdown
-    assert "## no judge, visual unrendered" in board.markdown
+    assert "## judge judge-x@high" in board.markdown
 
 
 @pytest.mark.parametrize("task_ids", [[TASK], [TASK, TASK]], ids=["subset", "duplicate"])

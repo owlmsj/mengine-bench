@@ -6,7 +6,6 @@ Layout:
         summary.md                   human summary
         transcripts/<task>.jsonl.gz  raw agent output per step
         judge/<task>.json            judge evidence, when the run had no judge
-        judge/<task>.png             visual tasks: the screenshot for the vision judge
 
 Everything in a bundle is public once merged, so every text passes the secret
 and local-path redaction first.
@@ -98,10 +97,9 @@ def public_json(value: object, scope: PathScope) -> object:
 
 
 def write_bundle(results: MutableMapping[str, object], out_root: Path, transcripts: Mapping[str, Path],
-                 scope: PathScope, packets: Mapping[str, Mapping[str, object]] | None = None,
-                 screenshots: Mapping[str, Path] | None = None) -> Path:
+                 scope: PathScope, packets: Mapping[str, Mapping[str, object]] | None = None) -> Path:
     """Write the bundle for `results`; `transcripts` maps a task id to its raw transcript dir,
-    `packets` and `screenshots` hold the judge evidence of a run without a judge."""
+    `packets` holds the judge evidence of a run without a judge."""
     agent = results["agent"]
     tasks = results["tasks"]
     assert isinstance(agent, dict) and isinstance(tasks, list)
@@ -122,10 +120,6 @@ def write_bundle(results: MutableMapping[str, object], out_root: Path, transcrip
         (bundle_dir / JUDGE_DIR / f"{task_id}.json").write_text(
             json.dumps(public_json(packet, scope), indent=1, ensure_ascii=False) + "\n", encoding="utf-8",
             newline="\n")
-    for task_id, png in (screenshots or {}).items():
-        if png.is_file():
-            (bundle_dir / JUDGE_DIR).mkdir(exist_ok=True)
-            shutil.copyfile(png, bundle_dir / JUDGE_DIR / f"{task_id}.png")
     public = public_json(results, scope)
     assert isinstance(public, dict)
     (bundle_dir / RESULT_NAME).write_text(json.dumps(public, indent=2, ensure_ascii=False) + "\n",

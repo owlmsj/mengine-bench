@@ -23,7 +23,7 @@ def _result(**overrides: object) -> dict[str, object]:
         "totals": {"objective": 90.0, "accuracy": 92.0, "solved": 18, "total": 20, "total_agent_s": 500.0,
                    "subjective": 85.0, "composite": 88.0},
         "environment": {"os": "Linux 6", "cpu": "x86_64", "ram_gb": 32.0, "gpu": None},
-        "grading": {"visual": "rendered"}, "bench_commit": {"sha": "abc", "dirty": False},
+        "bench_commit": {"sha": "abc", "dirty": False},
         "started_at": "2026-10-19T10:00:00Z", "finished_at": "2026-10-19T10:30:00Z",
     }
     result.update(overrides)

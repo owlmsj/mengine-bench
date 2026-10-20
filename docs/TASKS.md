@@ -67,6 +67,6 @@ only an OS sandbox around the agent closes that (docs/SCORING.md).
 | `ir-server-logs` | retrieval | Game server log forensics: incident window, root cause and monthly SLO |
 | `ir-web-facts` | retrieval | Research 4 public facts on the web (llama.cpp, PagedAttention, Linux mascot, Rust 1.0) with sources |
 | `gd-integration-repo` | gamedev | ONE-SHOT LONG: ~100-file repo, 3 layered bugs that only the integration test and the spec reveal |
-| `web-mondrian-landing` | web-design | ONE-SHOT: research the painting and ship a Mondrian-style landing page; checks + vision checklist |
-| `3d-voxel-landscape` | 3d | ONE-SHOT: three.js voxel/low poly scene of Fuji with pagoda and cherry trees; checks + vision checklist |
+| `web-mondrian-landing` | web-design | Build a Mondrian-style landing page about one painting from a local fact sheet, in one request |
+| `3d-voxel-landscape` | 3d | Build a three.js low poly or voxel scene of Mount Fuji with a pagoda and cherry trees, in one request |
 <!-- tasks:end -->

@@ -1,8 +1,7 @@
 """Gold self-tests for the ported ir, longrepo and visual tasks.
 
 Reference solution -> passes; untouched workspace + empty answers -> fails.
-Visual tasks are graded on their deterministic checks only here: CI has no
-browser and no judge, and the gold must not depend on either.
+Visual tasks are graded on deterministic checks only, at run time too (#23).
 """
 
 from __future__ import annotations
@@ -12,17 +11,11 @@ from pathlib import Path
 
 import pytest
 
-from mengine_bench import visual
 from mengine_bench.core import EvalTask
 from mengine_bench.tasks import ir, longrepo
 from mengine_bench.tasks import visual as visual_tasks
 
 PART2 = (*ir.TASKS, *longrepo.TASKS, *visual_tasks.TASKS)
-
-
-@pytest.fixture
-def no_browser(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(visual, "RENDER", lambda html, png: visual.NO_BROWSER)
 
 
 def solve(task: EvalTask, root: Path) -> tuple[bool, list[str]]:
@@ -32,7 +25,6 @@ def solve(task: EvalTask, root: Path) -> tuple[bool, list[str]]:
     return result.passed, result.failed()
 
 
-@pytest.mark.usefixtures("no_browser")
 @pytest.mark.parametrize("task", PART2, ids=lambda task: task.id)
 def test_reference_passes_and_untouched_workspace_fails(task: EvalTask, tmp_path: Path) -> None:
     empty = tmp_path / "empty"
@@ -73,7 +65,6 @@ def test_longrepo_uses_neutral_profile() -> None:
     assert 'Profile("player1"' in integration and "player1.json" in integration
 
 
-@pytest.mark.usefixtures("no_browser")
 def test_landing_requires_new_subject_facts(tmp_path: Path) -> None:
     task = next(t for t in visual_tasks.TASKS if t.id == "web-mondrian-landing")
     passed, _ = solve(task, tmp_path / "ok")

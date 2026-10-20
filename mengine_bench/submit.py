@@ -71,7 +71,7 @@ def pr_title(result: Mapping[str, object]) -> str:
 
 def pr_body(result: Mapping[str, object]) -> str:
     agent, totals, environment = result["agent"], result["totals"], result["environment"]
-    judge, commit, grading = result.get("judge"), result.get("bench_commit"), result.get("grading")
+    judge, commit = result.get("judge"), result.get("bench_commit")
     assert isinstance(agent, dict) and isinstance(totals, dict) and isinstance(environment, dict)
     judge_text = f"{judge['label']}, {judge.get('votes')} vote(s)" if isinstance(judge, dict) else "none"
     if judge is None and result.get("judge_pending"):
@@ -87,7 +87,6 @@ def pr_body(result: Mapping[str, object]) -> str:
         ("SUBJECTIVE / COMPOSITE", f"{totals.get('subjective')} / {totals.get('composite')}"),
         ("agent time (s)", totals.get("total_agent_s")),
         ("wall time", f"{result.get('started_at')} to {result.get('finished_at')}"),
-        ("visual grading", grading.get("visual") if isinstance(grading, dict) else "unknown"),
         ("bench version and commit", f"{result['bench_version']} at {commit_text}"),
         ("machine", f"{environment.get('os')}, {environment.get('cpu')}, {environment.get('ram_gb')} GB RAM, "
                     f"GPU {environment.get('gpu') or 'none'}"),

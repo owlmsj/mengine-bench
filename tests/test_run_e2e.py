@@ -156,22 +156,6 @@ def test_fresh_session_without_carry_starts_empty(fake_agent: FakeAgent, tmp_pat
     assert json.loads(read(record.workspace, "seen-second.json") or "{}")["files"] == ["AGENTS.md"]
 
 
-def test_runner_applies_the_unrendered_profile_to_visual_checks(fake_agent: FakeAgent, tmp_path: Path) -> None:
-    from mengine_bench import visual
-
-    def check(ws: Path, answers: list[str]) -> CheckResult:
-        result = visual.VisualCheckResult(mandatory=[("page exists", True)], checks=[("page exists", True)])
-        result.flags.append(visual.NO_BROWSER)
-        return result
-
-    task = EvalTask(id="vis", category="test", provenance="t", summary="t",
-                    setup=lambda ws: None, steps=(Step("first"),), check=check, reference=lambda ws: [])
-    agent = CmdAgent(template=fake_agent("echo", ECHO_AGENT), model="m", effort=None)
-    record = run_task(task, agent, tmp_path / "run")
-    assert record.check is not None and not record.check.passed
-    assert visual.PROFILE_UNRENDERED in getattr(record.check, "flags")
-
-
 @pytest.mark.parametrize("exit_code,timed_out,status", [(0, False, "ok"), (7, False, "crash"),
                                                        (None, True, "timeout")])
 def test_step_usage_only_recorded_on_success(

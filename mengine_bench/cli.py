@@ -13,9 +13,9 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
-from mengine_bench import __version__, catalog, visual
+from mengine_bench import __version__, catalog
 from mengine_bench.core import EvalTask, scratch_root
-from mengine_bench.judge import DEFAULT_VOTES, JudgeContext, SubjectiveJudge, VisionChecklistJudge, workspace_diff
+from mengine_bench.judge import DEFAULT_VOTES, JudgeContext, SubjectiveJudge, workspace_diff
 from mengine_bench.bundle import bench_commit, bundle_leaks, run_scope, write_bundle
 from mengine_bench.deferred_judge import judge_bundle
 from mengine_bench.leaderboard import build_leaderboard
@@ -181,20 +181,13 @@ def _run(args: argparse.Namespace) -> int:
     judge_agent = None
     if args.judge != "none":
         judge_agent = make_agent(args.judge, args.judge_model, args.judge_effort, args.judge_cmd)
-    previous_judge = visual.JUDGE
-    if judge_agent is not None:
-        visual.JUDGE = VisionChecklistJudge(judge_agent, votes=args.judge_votes)
     packets: dict[str, dict[str, object]] = {}
-    screenshots: dict[str, Path] = {}
-    try:
-        results = _run_tasks(tasks, agent, judge_agent, args, work, packets, screenshots)
-    finally:
-        visual.JUDGE = previous_judge
+    results = _run_tasks(tasks, agent, judge_agent, args, work, packets)
     results["preflight"] = problems
     results["judge_pending"] = judge_agent is None and bool(packets)
     transcripts = {task.id: work / task.id / "transcripts" for task in tasks}
     scope = run_scope(work, local_names().allowing(args.submitter))
-    bundle = write_bundle(results, args.out, transcripts, scope, packets, screenshots)
+    bundle = write_bundle(results, args.out, transcripts, scope, packets)
     totals = results["totals"]
     print(f"objective {totals['objective']} solved {totals['solved']}/{totals['total']}")  # type: ignore[index]
     print(f"wrote bundle {bundle}")
@@ -231,26 +224,21 @@ def _leaderboard(args: argparse.Namespace) -> int:
 
 
 def _run_tasks(tasks: Sequence[EvalTask], agent: Agent, judge_agent: Agent | None, args: argparse.Namespace,
-               work: Path, packets: dict[str, dict[str, object]], screenshots: dict[str, Path]) -> dict[str, object]:
-    """Run and grade every task; without a judge, `packets` and `screenshots` collect its evidence."""
+               work: Path, packets: dict[str, dict[str, object]]) -> dict[str, object]:
+    """Run and grade every task; without a judge, `packets` collects its evidence."""
     started_at = _utc_now()
     subjective = SubjectiveJudge(judge_agent, votes=args.judge_votes) if judge_agent is not None else None
     outcomes: list[TaskOutcome] = []
     details: dict[str, TaskDetail] = {}
     votes: dict[str, tuple[int, ...]] = {}
-    vision = visual.JUDGE if isinstance(visual.JUDGE, VisionChecklistJudge) else None
     for task in tasks:
         print(f"[{task.id}] running", flush=True)
-        if vision is not None:
-            vision.history.clear()
         record: TaskRunRecord | None = None
         try:
             record = run_task(task, agent, work / task.id)
-            detail = _post_process(task, record, vision, subjective, work / task.id, votes)
+            detail = _post_process(task, record, subjective, work / task.id, votes)
             if subjective is None:
-                packets[task.id], png = _judge_packet(task, record, work / task.id)
-                if png is not None:
-                    screenshots[task.id] = png
+                packets[task.id] = _judge_packet(task, record, work / task.id)
         except Exception as error:  # noqa: BLE001 - one task must not abort the suite
             record, detail = _crashed_task(task, record, error)
             votes.pop(task.id, None)
@@ -267,20 +255,14 @@ def _run_tasks(tasks: Sequence[EvalTask], agent: Agent, judge_agent: Agent | Non
     return build_results(meta, suite, details, votes, collect_environment(), bench_commit())
 
 
-def _judge_packet(task: EvalTask, record: TaskRunRecord, root: Path) -> tuple[dict[str, object], Path | None]:
-    """The evidence `mengine-bench judge` needs later, and the screenshot a visual task left unjudged."""
-    packet = _judge_context(task, record, root).record()
-    pending = getattr(record.check, "pending_vision", None)
-    if pending is None:
-        return packet, None
-    packet["vision"] = pending.record()
-    return packet, pending.png
+def _judge_packet(task: EvalTask, record: TaskRunRecord, root: Path) -> dict[str, object]:
+    """The evidence `mengine-bench judge` needs later."""
+    return _judge_context(task, record, root).record()
 
 
-def _post_process(task: EvalTask, record: TaskRunRecord, vision: VisionChecklistJudge | None,
-                  subjective: SubjectiveJudge | None, root: Path, votes: dict[str, tuple[int, ...]]) -> TaskDetail:
+def _post_process(task: EvalTask, record: TaskRunRecord, subjective: SubjectiveJudge | None, root: Path,
+                  votes: dict[str, tuple[int, ...]]) -> TaskDetail:
     detail = _detail(task, record)
-    detail["vision"] = _vision_record(vision)
     if subjective is not None:
         verdict = subjective.grade(_judge_context(task, record, root), root / "judge")
         votes[task.id] = verdict.votes
@@ -310,13 +292,6 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _vision_record(vision: VisionChecklistJudge | None) -> dict[str, object] | None:
-    # A call with no valid ballot falls back to "no judge" and grades nothing.
-    if vision is None or not vision.history or not vision.history[-1]["ballots"]:
-        return None
-    return vision.history[-1]
-
-
 def _detail(task: EvalTask, record: TaskRunRecord) -> TaskDetail:
     check = record.check
     checks: list[dict[str, object]] = []
@@ -332,15 +307,11 @@ def _detail(task: EvalTask, record: TaskRunRecord) -> TaskDetail:
         passed=check.passed if check is not None else False,
         flags=_flags(record), error=_public_error(record.error, record),
         judge_rationales=[], judge_errors=[], answers=list(record.answers),
-        vision=None,
     )
 
 
 def _flags(record: TaskRunRecord) -> list[str]:
-    flags = list(getattr(record.check, "flags", []))
-    if record.status != "ok":
-        flags.append(record.status)
-    return flags
+    return [] if record.status == "ok" else [record.status]
 
 
 def _public_error(error: str | None, record: TaskRunRecord) -> str | None:
@@ -376,17 +347,11 @@ def _judge_context(task: EvalTask, record: TaskRunRecord, root: Path) -> JudgeCo
 
 def _selftest(tasks: Sequence[EvalTask]) -> int:
     failures = 0
-    previous = visual.RENDER
-    # Gold must not depend on a browser or judge: grade visual tasks on gates only.
-    visual.RENDER = lambda html, png: visual.NO_BROWSER
-    try:
-        with tempfile.TemporaryDirectory(prefix="selftest-", dir=scratch_root()) as tmp:
-            for task in tasks:
-                problem = _gold_problem(task, Path(tmp) / task.id)
-                failures += problem is not None
-                print(f"FAIL {task.id}: {problem}" if problem else f"PASS {task.id}", flush=True)
-    finally:
-        visual.RENDER = previous
+    with tempfile.TemporaryDirectory(prefix="selftest-", dir=scratch_root()) as tmp:
+        for task in tasks:
+            problem = _gold_problem(task, Path(tmp) / task.id)
+            failures += problem is not None
+            print(f"FAIL {task.id}: {problem}" if problem else f"PASS {task.id}", flush=True)
     print(f"{len(tasks) - failures}/{len(tasks)} gold self-tests passed")
     return 1 if failures else 0
 
