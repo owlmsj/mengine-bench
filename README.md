@@ -52,8 +52,9 @@ personal data.
    Then `uv sync`.
 3. Run `uv run mengine-bench run --agent <harness> --model <model> [--effort
    <effort>] --dry-run` and show me the output. If it prints `preflight:`
-   lines, wait until I fix them and say "go"; never delete or edit those files
-   yourself, and never use --allow-unclean.
+   lines, wait until I fix them (README, "Run hygiene", has the commands) and
+   say "go"; never delete, move or edit those files yourself, and never use
+   --allow-unclean.
 4. Run the same command without `--dry-run`. It takes 20 to 40 minutes: run it
    in the background or without a timeout and wait for it to finish. Do not
    help the agent under test or touch its files. It must end with
@@ -81,47 +82,27 @@ check. Categories:
 The agent may use every tool its harness gives it: shell, web search and
 fetch, browsers, MCP servers, skills, subagents. Nothing is turned off; what
 is measured is the harness plus the model as you configured them. Prompts
-only say where output files go and what the answer must contain. Bench 0.1.0
-prompts told agents to avoid tools on some tasks, so the two 0.1.0 baselines
-below are not strictly comparable with 0.2.0 runs.
+only say where output files go and what the answer must contain.
 
 Every task ships a reference solution, and the test suite proves without any
 model that the reference passes and the untouched workspace fails.
 
 ## Suites
 
-| Suite | Tasks | Measured run |
-| --- | --- | --- |
-| FAST | 14 | FAST has no measured run yet |
-| FULL | 20 | 20 min 10 s wall (510 s agent time), baseline below |
+| Suite | Tasks |
+| --- | --- |
+| FAST | 14 |
+| FULL | 20 |
 
 FAST already contains all six weight-2 tasks. FULL adds six weight-1 tasks.
-
-The 2026-10-17 FULL baseline used Codex gpt-6.1-sol at low effort and a
-judge with 1 vote, as its bundle records (Claude `claude-opus-5-5`, xhigh
-effort). It took 20 min 10 s wall (510 s agent time); judging and grading are
-excluded from agent time.
-Both visual tasks were rendered in a browser and graded by the vision judge
-(1 vote each).
-This is one measured configuration, not a duration estimate for other agents.
-
-The 2026-10-19 FULL baseline used opencode 2.0.29 with DeepSeek V4 Flash
-(`deepseek/deepseek-flash`, variant `low`) and the same judge (1 vote). It took
-27 min 57 s wall (1,466 s agent time).
-
-| | gpt-6.1-sol low (Codex) | DeepSeek V4 Flash low (opencode) |
-| --- | --- | --- |
-| OBJECTIVE / ACCURACY | 94.3 / 96.3 | 92.8 / 95.5 |
-| solved | 18/20 | 18/20 |
-| SUBJECTIVE / COMPOSITE | 88.5 / 92.0 | 86.5 / 90.3 |
-| agent time, 18 non-web tasks | 336.9 s | 388.5 s (faster on 10 of 18) |
-| agent time, 2 web build tasks | 142.1 s | 1,077.1 s |
-| misses | bo-reconcile 0.50, ir-server-logs 0.83, 3d-voxel 0.86 | vis-chart 0.00 (image withheld: the opencode config declared the model text-only; the DeepSeek API reads images), ir-server-logs 0.83 |
-
-Both runs are on [LEADERBOARD.md](LEADERBOARD.md).
+Measured runs, with their agent times, are on [LEADERBOARD.md](LEADERBOARD.md).
 
 A run declares its suite. Results are only compared within the same suite,
-scoring version, judge and visual grading profile.
+scoring version, judge and visual grading profile, and only runs of the
+current bench are ranked. The two bench 0.1.0 runs (Codex gpt-6.1-sol low and
+opencode DeepSeek V4 Flash low, FULL) were retired with 0.2.0: their prompts
+limited tools and they started without the preflight. They stay in git
+history (`git show fde6c16:LEADERBOARD.md`).
 
 ## Tasks
 
@@ -274,6 +255,28 @@ start:
   `<temp>/mengine-bench-fresh-*`): an agent could read other solutions.
   Delete them.
 
+To move the personal instruction files aside before a run, and back after it
+(default locations; with `CODEX_HOME` or `CLAUDE_CONFIG_DIR` set, use the path
+the `preflight:` line prints):
+
+```powershell
+# PowerShell, before the run
+$bak = "$HOME/mengine-bench-preflight-backup"
+$files = ".claude/CLAUDE.md", ".codex/AGENTS.md", ".codex/AGENTS.override.md", ".config/opencode/AGENTS.md"
+foreach ($f in $files) { if (Test-Path "$HOME/$f") { New-Item -ItemType Directory -Force (Split-Path "$bak/$f") | Out-Null; Move-Item "$HOME/$f" "$bak/$f" } }
+# after the run (same $bak and $files)
+foreach ($f in $files) { if (Test-Path "$bak/$f") { Move-Item "$bak/$f" "$HOME/$f" } }
+```
+
+```bash
+# bash or zsh, before the run
+bak=~/mengine-bench-preflight-backup
+files=".claude/CLAUDE.md .codex/AGENTS.md .codex/AGENTS.override.md .config/opencode/AGENTS.md"
+for f in $files; do [ -f ~/"$f" ] && mkdir -p "$bak/$(dirname "$f")" && mv ~/"$f" "$bak/$f"; done
+# after the run (same bak and files)
+for f in $files; do [ -f "$bak/$f" ] && mv "$bak/$f" ~/"$f"; done
+```
+
 `--allow-unclean` starts anyway, records the findings in `result.json` and
 `summary.md`, and the leaderboard never ranks that run. Each agent also gets an
 `AGENTS.md` in its workspace: use any tool, read and write local files only
@@ -336,10 +339,9 @@ an issue naming the bundle directory.
   self-reported. The bundle records every check, answer and vote, and the
   transcripts let anyone sanity-check a run, but nothing re-runs it.
 - Runs are only compared within the same suite, scoring version, judge and
-  visual grading profile; a run that is not exactly its suite's task set (a
-  `--tasks` subset) or that started unclean is listed apart and never ranked.
-- The two 0.1.0 baselines predate the preflight: nothing checked that they
-  started clean (their result.json has no `preflight` record).
+  visual grading profile; a run of an older bench, a run that is not exactly
+  its suite's task set (a `--tasks` subset), one that started unclean or one
+  that waits for the judge is listed apart and never ranked.
 - The workspace boundary is an instruction, not a sandbox: an agent with
   bypassed permissions can still read the rest of the disk, or find this
   public repo on the web. The transcripts show it if it does, and the

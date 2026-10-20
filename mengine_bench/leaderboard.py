@@ -2,8 +2,9 @@
 
 Scores are self-reported: the maintainer reviews each result pull request
 before merging it, and the table trusts what was merged. A run that is not
-exactly its suite's task set, or that recorded preflight findings, is listed
-apart and never ranked.
+exactly its suite's task set, that recorded preflight findings, that waits
+for the judge, or that ran an older bench (other prompts, so other scores) is
+listed apart and never ranked.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mengine_bench import catalog
+from mengine_bench import __version__, catalog
 from mengine_bench.bundle import RESULT_NAME, SUMMARY_NAME
 from mengine_bench.core import SUITES
 
@@ -25,9 +26,10 @@ edit by hand. Scores are self-reported by each submitter and reviewed by the
 maintainer before merge; the transcripts are in each bundle. One table per
 suite, scoring version, judge and visual grading profile (rendered: browser +
 vision judge; unrendered: visual tasks not solvable): scores from different
-groups are not comparable. Runs that are not exactly their suite's task set,
-or that started with preflight findings (README, "Run hygiene"), are listed
-apart and never ranked.
+groups are not comparable. Only runs of the current bench version are ranked;
+runs of an older bench, runs that are not exactly their suite's task set, that
+started with preflight findings (README, "Run hygiene") or that wait for the
+judge are listed apart.
 """
 
 
@@ -80,6 +82,10 @@ def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
     for result_file in sorted(results_dir.rglob(RESULT_NAME)):
         bundle = result_file.parent
         result = json.loads(result_file.read_text(encoding="utf-8"))
+        if result.get("bench_version") != __version__:
+            reason = f"bench {result.get('bench_version')}; only bench {__version__} runs are ranked"
+            unranked.append((_link(bundle, link_base), reason))
+            continue
         if not is_complete_suite(result):
             unranked.append((_link(bundle, link_base), "not exactly its suite's task set"))
             continue

@@ -33,7 +33,7 @@ long-context and compaction; retrieval retains the decimal precision:
 | `ir-server-logs` | `ir-studio-wiki` | 14.6 | 29.2 |
 | `ir-web-facts` | `ir-studio-wiki` | 14.6 | 29.2 |
 
-These pars are separate from the Codex FULL baseline duration in the README.
+These pars are reference times for scoring, not a duration estimate for any agent.
 
 ## Multi-step tasks
 
