@@ -33,7 +33,7 @@ from pathlib import Path
 from mengine_bench import visual
 from mengine_bench.core import CheckResult, EvalTask
 from mengine_bench.runner import process
-from mengine_bench.runner.agents import Agent, AgentError
+from mengine_bench.runner.agents import Agent, AgentError, Usage, sum_usage
 
 # Browser user-data dirs an agent left in the workspace; their cache files can
 # stay locked by a live browser, and they are never part of the solution.
@@ -57,6 +57,8 @@ class StepRecord:
     exit_code: int | None
     status: str
     error: str | None = None
+    # Failed steps remain unmeasured because incomplete streams cannot establish usage (#23).
+    usage: Usage | None = None
 
 
 @dataclass
@@ -70,6 +72,10 @@ class TaskRunRecord:
     grading_s: float = 0.0
     workspace: Path | None = None
     initial_files: dict[str, bytes] = field(default_factory=dict)
+
+    @property
+    def usage(self) -> Usage | None:
+        return sum_usage([step.usage for step in self.steps if step.usage is not None])
 
     @property
     def agent_s(self) -> float:
@@ -235,7 +241,7 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, label: st
     except AgentError as error:
         record.steps.append(StepRecord(index, result.wall_s, result.exit_code, "crash", str(error)))
         raise StepFailed("crash", f"step {label}: {error}") from error
-    record.steps.append(StepRecord(index, result.wall_s, result.exit_code, "ok"))
+    record.steps.append(StepRecord(index, result.wall_s, result.exit_code, "ok", usage=parsed.usage))
     return parsed.answer, parsed.session_id
 
 

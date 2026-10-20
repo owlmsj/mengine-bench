@@ -173,3 +173,25 @@ def test_runner_applies_the_unrendered_profile_to_visual_checks(fake_agent: Fake
     record = run_task(task, agent, tmp_path / "run")
     assert record.check is not None and not record.check.passed
     assert visual.PROFILE_UNRENDERED in getattr(record.check, "flags")
+
+
+@pytest.mark.parametrize("exit_code,timed_out,status", [(0, False, "ok"), (7, False, "crash"),
+                                                       (None, True, "timeout")])
+def test_step_usage_only_recorded_on_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, exit_code: int | None, timed_out: bool, status: str,
+) -> None:
+    from mengine_bench.runner import process
+    from mengine_bench.runner.agents import ClaudeAgent, Usage
+
+    stdout = json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "first",
+                         "total_cost_usd": 0.1, "usage": {"input_tokens": 2, "cache_creation_input_tokens": 3,
+                         "cache_read_input_tokens": 4, "output_tokens": 5,
+                         "output_tokens_details": {"thinking_tokens": 1}}})
+    result = process.ProcessResult(stdout, "", exit_code, timed_out, 0.5)
+    monkeypatch.setattr(process, "run_process", lambda *args, **kwargs: result)
+    task = _two_step_task(Step("second", fresh_session=True))
+    record = run_task(task, ClaudeAgent("m", None), tmp_path / "run", fresh_root=tmp_path)
+    assert record.status == status
+    expected = Usage(5, 4, 5, 1, 0.1, "harness") if status == "ok" else None
+    assert record.steps[0].usage == expected
+    assert record.usage == (Usage(10, 8, 10, 2, 0.2, "harness") if status == "ok" else None)

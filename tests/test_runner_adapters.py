@@ -265,3 +265,91 @@ def test_agent_step_runs_with_pwd_set_to_the_workspace(tmp_path: Path, monkeypat
     assert isinstance(env, dict)
     assert env["PWD"] == str(workspace.resolve())
     assert env.get("PATH") == os.environ.get("PATH")
+
+
+def test_claude_real_usage() -> None:
+    parsed = parse_claude_stream(_jsonl([{
+        "type": "result", "subtype": "success", "is_error": False, "result": "done",
+        "total_cost_usd": 0.00369365,
+        "usage": {"input_tokens": 2, "cache_creation_input_tokens": 17537,
+                  "cache_read_input_tokens": 16405, "output_tokens": 44,
+                  "output_tokens_details": {"thinking_tokens": 40}}, "num_turns": 1,
+    }]), 0)
+    from mengine_bench.runner.agents import Usage
+    assert parsed.usage == Usage(17539, 16405, 44, 40, 0.00369365, "harness")
+
+
+@pytest.mark.parametrize("answer", ["", "   ", "\n\t"])
+def test_claude_empty_answer_rejected(answer: str) -> None:
+    with pytest.raises(AgentError, match="received result=.*expected non-empty answer text"):
+        parse_claude_stream(_jsonl([{**CLAUDE_OK[-1], "result": answer}]), 0)
+
+
+def test_codex_real_usage_sums_all_turns() -> None:
+    from mengine_bench.runner.agents import Usage
+    turn = {"type": "turn.completed", "usage": {
+        "input_tokens": 22329, "cached_input_tokens": 13312, "cache_write_input_tokens": 0,
+        "output_tokens": 5, "reasoning_output_tokens": 0}}
+    events = [turn, {"type": "item.completed", "item": {"type": "agent_message", "text": "done"}}, turn]
+    assert parse_codex_jsonl(_jsonl(events), 0).usage == Usage(44658, 26624, 10, 0, None, "none")
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_opencode_usage_sums_steps(partial: bool) -> None:
+    from mengine_bench.runner.agents import Usage
+    finish = {"type": "step_finish", "part": {"reason": "stop", "cost": 0.25,
+              "tokens": {"input": 10, "output": 5, "reasoning": 2, "cache": {"read": 7, "write": 3}}}}
+    events = [finish, finish]
+    if partial:
+        events.append({"type": "step_start"})
+    events.append({"type": "text", "part": {"text": "done"}})
+    assert parse_opencode_jsonl(_jsonl(events), 0).usage == Usage(
+        26, 14, 10, 4, 0.5, "partial" if partial else "harness")
+
+
+@pytest.mark.parametrize("bad", [None, "3", True, -1, 1.5, {}, []])
+def test_malformed_usage_fields_are_unknown(bad: object) -> None:
+    parsed = parse_claude_stream(_jsonl([{**CLAUDE_OK[-1], "total_cost_usd": "bad",
+        "usage": {"input_tokens": bad, "cache_creation_input_tokens": 2,
+                  "cache_read_input_tokens": bad, "output_tokens": bad,
+                  "output_tokens_details": {"thinking_tokens": bad}}}]), 0)
+    from mengine_bench.runner.agents import Usage
+    assert parsed.usage == Usage(None, None, None, None, None, "none")
+
+
+def test_opencode_without_finish_has_unknown_partial_usage() -> None:
+    from mengine_bench.runner.agents import Usage
+    events = [{"type": "step_start"}, {"type": "text", "part": {"text": "done"}}]
+    assert parse_opencode_jsonl(_jsonl(events), 0).usage == Usage(None, None, None, None, None, "partial")
+
+
+def test_task_usage_totals_preserve_unknown_cost() -> None:
+    from mengine_bench.runner.agents import Usage
+    from mengine_bench.runner.task_run import StepRecord, TaskRunRecord
+    record = TaskRunRecord("usage")
+    assert record.usage is None
+    record.steps.append(StepRecord(0, 1.0, 0, "ok", usage=Usage(10, 2, 3, 1, 0.2, "harness")))
+    record.steps.append(StepRecord(1, 1.0, None, "timeout"))
+    assert record.usage == Usage(10, 2, 3, 1, 0.2, "harness")
+    record.steps.append(StepRecord(2, 1.0, 0, "ok", usage=Usage(5, 1, 2, None, None, "none")))
+    assert record.usage == Usage(15, 3, 5, None, None, "none")
+
+
+def test_codex_malformed_turn_does_not_become_zero() -> None:
+    from mengine_bench.runner.agents import Usage
+    events = [{"type": "item.completed", "item": {"type": "agent_message", "text": "done"}},
+              {"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 5}},
+              {"type": "turn.completed", "usage": {"input_tokens": "bad", "output_tokens": 2}}]
+    assert parse_codex_jsonl(_jsonl(events), 0).usage == Usage(None, None, 7, None, None, "none")
+
+
+@pytest.mark.parametrize("cost", [None, "bad", True, -1, float("nan"), float("inf")])
+def test_opencode_invalid_cost_and_tokens_are_unknown(cost: object) -> None:
+    from mengine_bench.runner.agents import Usage
+    events = [{"type": "text", "part": {"text": "done"}},
+              {"type": "step_finish", "part": {"reason": "stop", "cost": cost, "tokens": []}}]
+    assert parse_opencode_jsonl(_jsonl(events), 0).usage == Usage(None, None, None, None, None, "none")
+
+
+def test_cmd_usage_is_unmeasured() -> None:
+    assert CmdAgent("agent {prompt_file}", "m", None).parse("done", 0).usage is None

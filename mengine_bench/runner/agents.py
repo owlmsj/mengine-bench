@@ -21,13 +21,14 @@ from __future__ import annotations
 import base64
 import json
 import mimetypes
+import math
 import shlex
 import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 AGENT_NAMES = ("claude", "codex", "opencode", "cmd")
 # Stay well under the 32767-char Windows command line with flags and paths.
@@ -48,9 +49,91 @@ class Invocation:
 
 
 @dataclass(frozen=True)
+class Usage:
+    input_tokens: int | None
+    cached_input_tokens: int | None
+    output_tokens: int | None
+    reasoning_tokens: int | None
+    cost_usd: float | None
+    cost_source: Literal["harness", "none", "partial"]
+
+
+def _known_sum(values: Sequence[int | None]) -> int | None:
+    if not values or any(value is None for value in values):
+        return None
+    return sum(value for value in values if value is not None)
+
+
+def sum_usage(usages: Sequence[Usage]) -> Usage | None:
+    if not usages:
+        return None
+    costs = [usage.cost_usd for usage in usages]
+    cost = None if any(value is None for value in costs) else sum(value for value in costs if value is not None)
+    source: Literal["harness", "none", "partial"] = "harness" if cost is not None else "none"
+    if any(usage.cost_source == "partial" for usage in usages):
+        source = "partial"
+    return Usage(
+        _known_sum([usage.input_tokens for usage in usages]),
+        _known_sum([usage.cached_input_tokens for usage in usages]),
+        _known_sum([usage.output_tokens for usage in usages]),
+        _known_sum([usage.reasoning_tokens for usage in usages]), cost, source,
+    )
+
+
+def _usage_mapping(value: object) -> Mapping[str, object]:
+    return value if isinstance(value, dict) else {}
+
+
+def _token_count(value: object) -> int | None:
+    return value if type(value) is int and value >= 0 else None
+
+
+def _usd_cost(value: object) -> float | None:
+    if type(value) not in (int, float):
+        return None
+    try:
+        cost = float(value)
+    except OverflowError:
+        return None
+    return cost if math.isfinite(cost) and cost >= 0 else None
+
+
+def _claude_usage(final: Mapping[str, object]) -> Usage:
+    usage = _usage_mapping(final.get("usage"))
+    details = _usage_mapping(usage.get("output_tokens_details"))
+    cost = _usd_cost(final.get("total_cost_usd"))
+    return Usage(
+        _known_sum([_token_count(usage.get("input_tokens")), _token_count(usage.get("cache_creation_input_tokens"))]),
+        _token_count(usage.get("cache_read_input_tokens")), _token_count(usage.get("output_tokens")),
+        _token_count(details.get("thinking_tokens")), cost, "harness" if cost is not None else "none",
+    )
+
+
+def _codex_usage(event: Mapping[str, object]) -> Usage:
+    usage = _usage_mapping(event.get("usage"))
+    # Preserve raw Codex input_tokens, which includes cached input (#23).
+    return Usage(_token_count(usage.get("input_tokens")), _token_count(usage.get("cached_input_tokens")),
+                 _token_count(usage.get("output_tokens")), _token_count(usage.get("reasoning_output_tokens")),
+                 None, "none")
+
+
+def _opencode_usage(part: object) -> Usage:
+    finish = _usage_mapping(part)
+    tokens = _usage_mapping(finish.get("tokens"))
+    cache = _usage_mapping(tokens.get("cache"))
+    cost = _usd_cost(finish.get("cost"))
+    return Usage(
+        _known_sum([_token_count(tokens.get("input")), _token_count(cache.get("write"))]),
+        _token_count(cache.get("read")), _token_count(tokens.get("output")),
+        _token_count(tokens.get("reasoning")), cost, "harness" if cost is not None else "none",
+    )
+
+
+@dataclass(frozen=True)
 class Parsed:
     answer: str
     session_id: str | None
+    usage: Usage | None = None
 
 
 class Agent(Protocol):
@@ -106,10 +189,10 @@ def parse_claude_stream(stdout: str, exit_code: int) -> Parsed:
         raise AgentError(f"received result subtype={final.get('subtype')!r} is_error={final.get('is_error')!r}; "
                          "expected subtype=success, is_error=false")
     answer = final.get("result")
-    if not isinstance(answer, str):
-        raise AgentError(f"received result={answer!r:.80}; expected answer text")
+    if not isinstance(answer, str) or not answer.strip():
+        raise AgentError(f"received result={answer!r}; expected non-empty answer text")
     session = final.get("session_id")
-    return Parsed(answer=answer, session_id=session if isinstance(session, str) else None)
+    return Parsed(answer=answer, session_id=session if isinstance(session, str) else None, usage=_claude_usage(final))
 
 
 def parse_codex_jsonl(stdout: str, exit_code: int) -> Parsed:
@@ -129,7 +212,8 @@ def parse_codex_jsonl(stdout: str, exit_code: int) -> Parsed:
     answers = [text for text in texts if isinstance(text, str)]
     if not answers:
         raise AgentError(f"received no agent_message in {len(events)} events; expected a final message")
-    return Parsed(answer=answers[-1], session_id=session if isinstance(session, str) else None)
+    usage = sum_usage([_codex_usage(event) for event in events if event.get("type") == "turn.completed"])
+    return Parsed(answer=answers[-1], session_id=session if isinstance(session, str) else None, usage=usage)
 
 
 def parse_opencode_jsonl(stdout: str, exit_code: int) -> Parsed:
@@ -152,7 +236,12 @@ def parse_opencode_jsonl(stdout: str, exit_code: int) -> Parsed:
     if not answer.strip():
         raise AgentError(f"received no text in {len(events)} events; expected a non-empty answer")
     session = next((event.get("sessionID") for event in events if isinstance(event.get("sessionID"), str)), None)
-    return Parsed(answer=answer, session_id=session)
+    usage = sum_usage([_opencode_usage(part) for part in finishes])
+    if _final_step_answered(events):
+        previous = usage or Usage(None, None, None, None, None, "none")
+        usage = Usage(previous.input_tokens, previous.cached_input_tokens, previous.output_tokens,
+                      previous.reasoning_tokens, previous.cost_usd, "partial")
+    return Parsed(answer=answer, session_id=session, usage=usage)
 
 
 def _final_step_answered(events: list[dict[str, object]]) -> bool:
