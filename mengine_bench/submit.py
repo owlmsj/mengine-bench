@@ -73,9 +73,9 @@ def pr_body(result: Mapping[str, object]) -> str:
     agent, totals, environment = result["agent"], result["totals"], result["environment"]
     judge, commit = result.get("judge"), result.get("bench_commit")
     assert isinstance(agent, dict) and isinstance(totals, dict) and isinstance(environment, dict)
-    judge_text = f"{judge['label']}, {judge.get('votes')} vote(s)" if isinstance(judge, dict) else "none"
-    if judge is None and result.get("judge_pending"):
-        judge_text = "pending: the maintainer runs `mengine-bench judge` on review"
+    judge_text = "pending: the maintainer runs `mengine-bench judge` on review"
+    if isinstance(judge, dict):
+        judge_text = f"{judge.get('model')}@{judge.get('effort')}, rubric {judge.get('rubric')}"
     commit_text = (f"{commit.get('sha')} (dirty: {commit.get('dirty')})" if isinstance(commit, dict) else "unknown")
     rows = [
         ("agent CLI and version", f"{agent['name']} {agent.get('version') or 'unknown'}"),

@@ -67,7 +67,7 @@ def is_complete_run(result: dict[str, object]) -> bool:
 
 def _group_key(result: dict[str, object]) -> tuple[str, str]:
     judge = result.get("judge")
-    label = str(judge["label"]) if isinstance(judge, dict) else ""
+    label = f"{judge.get('model')}@{judge.get('effort') or 'default'}" if isinstance(judge, dict) else ""
     return str(result["scoring_version"]), label
 
 
@@ -87,8 +87,8 @@ def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
         if result.get("preflight"):
             unranked.append((_link(bundle, link_base), "started with preflight findings"))
             continue
-        if result.get("judge_pending"):
-            unranked.append((_link(bundle, link_base), "judge pending (`mengine-bench judge`)"))
+        if not isinstance(result.get("judge"), dict):
+            unranked.append((_link(bundle, link_base), "waiting for the judge (`mengine-bench judge`)"))
             continue
         entry = RankedBundle(result=result, summary_link=_link(bundle / SUMMARY_NAME, link_base))
         groups.setdefault(_group_key(result), []).append(entry)

@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from conftest import FakeAgent
-from mengine_bench import cli, visual
+from mengine_bench import cli, run_command, visual
 from mengine_bench.runner import task_run
 
 # Mimics Edge: the launcher writes the screenshot and exits while a helper
@@ -79,7 +79,7 @@ IDLE_AGENT = "print('done')\n"
 
 def test_post_processing_crash_marks_the_task_crash_and_the_suite_continues(
         fake_agent: FakeAgent, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    real_judge_packet = cli._judge_packet
+    real_judge_packet = run_command._judge_packet
     calls: list[int] = []
 
     def flaky_judge_packet(*args: object) -> object:
@@ -88,7 +88,7 @@ def test_post_processing_crash_marks_the_task_crash_and_the_suite_continues(
             raise PermissionError(13, "Permission denied", "data_0")
         return real_judge_packet(*args)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(cli, "_judge_packet", flaky_judge_packet)
+    monkeypatch.setattr(run_command, "_judge_packet", flaky_judge_packet)
     out = tmp_path / "results"
     code = cli.main(["run", "--agent", "cmd", "--cmd", fake_agent("idle", IDLE_AGENT),
                      "--model", "fake/idle", "--tasks", "ds-ab-playtest,bo-pnl-runway", "--out", str(out),

@@ -9,7 +9,7 @@ from __future__ import annotations
 import platform
 import shutil
 import subprocess
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TypedDict
 
@@ -37,8 +37,6 @@ class TaskDetail(TypedDict):
     passed: bool
     flags: list[str]
     error: str | None
-    judge_rationales: list[str]
-    judge_errors: list[str]
     answers: list[str]
 
 
@@ -49,14 +47,10 @@ class RunMeta:
     model: str
     effort: str | None
     agent_version: str | None
-    judge_label: str | None
-    judge_votes: int
     run_id: str
     started_at: str
     finished_at: str
     submitter: str | None = None
-    judge_model: str | None = None
-    judge_effort: str | None = None
 
 
 def _gpu_name() -> str | None:
@@ -83,7 +77,7 @@ def collect_environment() -> dict[str, object]:
     }
 
 
-def _task_entry(score: TaskScore, detail: TaskDetail, votes: Sequence[int]) -> dict[str, object]:
+def _task_entry(score: TaskScore, detail: TaskDetail) -> dict[str, object]:
     return {
         "id": score.task_id, "category": score.category,
         "status": score.status, "error": detail["error"], "flags": detail["flags"],
@@ -91,17 +85,10 @@ def _task_entry(score: TaskScore, detail: TaskDetail, votes: Sequence[int]) -> d
         "grading_s": round(detail["grading_s"], 2), "checks": detail["checks"],
         "check_score": detail["check_score"], "mandatory_ok": detail["mandatory_ok"], "passed": detail["passed"],
         "c": score.correctness, "o": round(score.objective, 2),
-        "judge_votes": list(votes), "subjective": score.subjective,
-        "judge_rationales": detail["judge_rationales"], "judge_errors": detail["judge_errors"],
+        # Set by `mengine-bench judge` on review (#23): one rubric vote per task.
+        "judge": None, "judge_rationale": None, "judge_errors": [], "subjective": score.subjective,
         "answers": detail["answers"],
     }
-
-
-def _judge_block(meta: RunMeta) -> dict[str, object] | None:
-    if meta.judge_label is None:
-        return None
-    return {"label": meta.judge_label, "model": meta.judge_model, "effort": meta.judge_effort,
-            "votes": meta.judge_votes}
 
 
 def totals_block(suite: SuiteScore) -> dict[str, object]:
@@ -113,23 +100,20 @@ def totals_block(suite: SuiteScore) -> dict[str, object]:
 
 
 def build_results(meta: RunMeta, suite: SuiteScore, details: Mapping[str, TaskDetail],
-                  votes: Mapping[str, Sequence[int]], environment: Mapping[str, object],
-                  commit: Mapping[str, object]) -> dict[str, object]:
-    judge = _judge_block(meta)
+                  environment: Mapping[str, object], commit: Mapping[str, object]) -> dict[str, object]:
     run_environment = {
         **environment, "agent_cli": {"name": meta.agent, "version": meta.agent_version},
         "model": meta.model, "effort": meta.effort,
-        "judge": None if judge is None else {key: judge[key] for key in ("model", "effort", "votes")},
     }
     return {
         "schema": RESULT_SCHEMA, "bench_version": __version__, "bench_commit": dict(commit),
         "scoring_version": suite.scoring_version, "run_id": meta.run_id, "submitter": meta.submitter,
         "date": meta.date, "started_at": meta.started_at, "finished_at": meta.finished_at,
         "agent": {"name": meta.agent, "model": meta.model, "effort": meta.effort, "version": meta.agent_version},
-        "judge": judge,
+        "judge": None,
         "environment": run_environment,
         "totals": totals_block(suite),
-        "tasks":[_task_entry(task, details[task.task_id], votes.get(task.task_id, ())) for task in suite.tasks],
+        "tasks": [_task_entry(task, details[task.task_id]) for task in suite.tasks],
     }
 
 
@@ -160,11 +144,9 @@ def render_summary(results: Mapping[str, object]) -> str:
     totals = results["totals"]
     judge = results["judge"]
     assert isinstance(agent, dict) and isinstance(totals, dict)
-    judge_text = judge["label"] if isinstance(judge, dict) else "none"
-    if isinstance(judge, dict) and judge.get("deferred"):
-        judge_text += " (judged after the run with `mengine-bench judge`)"
-    if judge is None and results.get("judge_pending"):
-        judge_text = "pending (the maintainer runs `mengine-bench judge` on review)"
+    judge_text = "pending (the maintainer runs `mengine-bench judge` on review)"
+    if isinstance(judge, dict):
+        judge_text = f"{judge['model']}@{judge.get('effort') or 'default'}, rubric {judge.get('rubric')}"
     lines = [
         f"# mengine-bench: {agent['name']} / {agent['model']}",
         "",

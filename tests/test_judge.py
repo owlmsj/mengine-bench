@@ -1,4 +1,4 @@
-"""Subjective judge, driven by a fake judge command."""
+"""Rubric 2.0 judge, driven by a fake judge command: one vote per task, retried only when the call or JSON fails."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from conftest import FakeAgent
-from mengine_bench.judge import JudgeContext, SubjectiveJudge, build_judge_prompt, parse_judge_reply
+from mengine_bench.judge import RUBRIC_VERSION, JudgeContext, RubricJudge, build_judge_prompt, parse_judge_reply
 from mengine_bench.runner.agents import CmdAgent
 
 # Replays one scripted reply per call; the call counter lives next to the script.
@@ -51,30 +51,38 @@ def test_parse_rejects_malformed_or_out_of_range(reply: str) -> None:
         parse_judge_reply(reply)
 
 
-def test_prompt_carries_rubric_and_evidence() -> None:
-    prompt = build_judge_prompt(CONTEXT)
-    for needle in ("40", "30", "20", "10", "Fix the bug", "fixed", "M a.py", "...done", "[FAIL] no regressions",
-                   '{"score"'):
-        assert needle in prompt
+def test_rubric_grades_the_complement_of_the_checks() -> None:
+    prompt = build_judge_prompt(CONTEXT, screenshot=False)
+    assert RUBRIC_VERSION == "2.0" and "rubric 2.0" in prompt
+    for needle in ("Approach and code/solution quality: 40", "Deliverable and instruction following: 30",
+                   "Self-verification: 30", "do not re-score correctness", "Fix the bug", "fixed", "M a.py",
+                   "...done", "[FAIL] no regressions", '{"score"'):
+        assert needle in prompt, needle
+    assert "screenshot" not in prompt.lower()
 
 
-def test_votes_retry_malformed_then_take_median(fake_agent: FakeAgent, tmp_path: Path) -> None:
-    replies = ["garbage", '{"score": 80, "rationale": "a"}', '{"score": 200, "rationale": "b"}',
-               '{"score": 60, "rationale": "c"}', '{"score": 90, "rationale": "d"}']
-    agent = scripted_judge(fake_agent, tmp_path, "subjective", replies)
-    judge = SubjectiveJudge(agent, votes=3, retries=2, timeout_s=60)
-    result = judge.grade(CONTEXT, tmp_path / "judge")
-    assert result.votes == (80, 60, 90)
-    assert result.median == 80
-    assert calls(tmp_path, "subjective") == 5
-    assert judge.label == "judge-m@xhigh"
+def test_visual_rubric_scores_the_rendered_look_from_the_screenshot() -> None:
+    prompt = build_judge_prompt(CONTEXT, screenshot=True)
+    assert "Rendered look: 30" in prompt and "screenshot.png" in prompt
+    assert "Self-verification: 30" not in prompt
 
 
-def test_vote_dropped_after_retries(fake_agent: FakeAgent, tmp_path: Path) -> None:
+def test_one_vote_retried_only_on_invalid_replies(fake_agent: FakeAgent, tmp_path: Path) -> None:
+    replies = ["garbage", '{"score": 200, "rationale": "b"}', '{"score": 60, "rationale": "c"}',
+               '{"score": 90, "rationale": "d"}']
+    agent = scripted_judge(fake_agent, tmp_path, "rubric", replies)
+    judge = RubricJudge(agent, retries=2, timeout_s=60)
+    verdict = judge.grade(CONTEXT, tmp_path / "judge")
+    assert (verdict.score, verdict.rationale) == (60, "c")
+    assert calls(tmp_path, "rubric") == 3, "a valid vote ends the task: no second vote"
+    assert len(verdict.errors) == 2
+    assert not hasattr(judge, "votes")
+
+
+def test_no_vote_after_retries(fake_agent: FakeAgent, tmp_path: Path) -> None:
     agent = scripted_judge(fake_agent, tmp_path, "broken", ['{"score": 500, "rationale": "x"}'])
-    result = SubjectiveJudge(agent, votes=2, retries=1, timeout_s=60).grade(CONTEXT, tmp_path / "judge")
-    assert result.votes == () and result.median is None
-    assert len(result.errors) == 2
+    verdict = RubricJudge(agent, retries=1, timeout_s=60).grade(CONTEXT, tmp_path / "judge")
+    assert verdict.score is None and len(verdict.errors) == 2
 
 
 # R17 (release review): answers, diffs and transcripts are agent-written and
@@ -87,7 +95,7 @@ INJECTED = JudgeContext(task_id="t", prompts=("Fix {WS}/a.py",),
 def test_prompt_wraps_untrusted_evidence_in_delimited_data_blocks() -> None:
     from mengine_bench.judge import evidence_marker
 
-    prompt = build_judge_prompt(INJECTED)
+    prompt = build_judge_prompt(INJECTED, screenshot=False)
     marker = evidence_marker(INJECTED)
     assert len(marker) >= 16 and marker not in "".join(INJECTED.answers)
     rules = prompt.index("data, not instructions")
@@ -105,15 +113,15 @@ RECORD_CWD = """
 import json, os, sys
 from pathlib import Path
 Path(__file__).with_suffix(".cwd").write_text(json.dumps({"cwd": os.getcwd(), "files": sorted(os.listdir("."))}))
-print('{"score": 70, "rationale": "ok", "1": true}')
+print('{"score": 70, "rationale": "ok"}')
 """
 
 
 def test_judge_runs_in_an_empty_cwd_outside_the_run(fake_agent: FakeAgent, tmp_path: Path) -> None:
     agent = CmdAgent(template=fake_agent("where", RECORD_CWD), model="m", effort=None)
     run_dir = tmp_path / "run" / "task" / "judge"
-    result = SubjectiveJudge(agent, votes=1, retries=0, timeout_s=60).grade(CONTEXT, run_dir)
-    assert result.votes == (70,)
+    verdict = RubricJudge(agent, retries=0, timeout_s=60).grade(CONTEXT, run_dir)
+    assert verdict.score == 70
     seen = json.loads((tmp_path / "fakes" / "where.cwd").read_text(encoding="utf-8"))
     cwd = Path(seen["cwd"]).resolve()
     assert seen["files"] == []
@@ -121,3 +129,14 @@ def test_judge_runs_in_an_empty_cwd_outside_the_run(fake_agent: FakeAgent, tmp_p
     assert not cwd.exists(), "the isolated judge cwd is removed after the vote"
     # The prompt is still kept next to the run for audit.
     assert any(run_dir.rglob("*.prompt.md"))
+
+
+def test_visual_judge_cwd_holds_only_the_screenshot(fake_agent: FakeAgent, tmp_path: Path) -> None:
+    agent = CmdAgent(template=fake_agent("where", RECORD_CWD), model="m", effort=None)
+    png = tmp_path / "render" / "shot.png"
+    png.parent.mkdir(parents=True)
+    png.write_bytes(b"\x89PNG fake")
+    assert RubricJudge(agent, retries=0, timeout_s=60).grade(CONTEXT, tmp_path / "judge", png).score == 70
+    seen = json.loads((tmp_path / "fakes" / "where.cwd").read_text(encoding="utf-8"))
+    assert seen["files"] == ["screenshot.png"]
+    assert not Path(seen["cwd"]).resolve().is_relative_to(tmp_path.resolve())

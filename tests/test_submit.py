@@ -19,7 +19,7 @@ def _result(**overrides: object) -> dict[str, object]:
     result: dict[str, object] = {
         "bench_version": __version__, "preflight": [], "submitter": "dquill",
         "agent": {"name": "codex", "model": "gpt-x", "effort": "low", "version": "codex-cli 1.0"},
-        "judge": {"label": "claude-opus-5-5@xhigh", "votes": 3},
+        "judge": None,
         "totals": {"objective": 90.0, "accuracy": 92.0, "solved": 18, "total": 20, "total_agent_s": 500.0,
                    "subjective": 85.0, "composite": 88.0},
         "environment": {"os": "Linux 6", "cpu": "x86_64", "ram_gb": 32.0, "gpu": None},
@@ -42,7 +42,7 @@ def test_title_and_body_come_from_result_json() -> None:
     result = _result()
     assert submit.pr_title(result) == "results: codex gpt-x low"
     body = submit.pr_body(result)
-    for expected in ("| agent CLI and version | codex codex-cli 1.0 |", "| judge | claude-opus-5-5@xhigh, 3 vote(s) |",
+    for expected in ("| agent CLI and version | codex codex-cli 1.0 |", "| judge | pending: the maintainer runs `mengine-bench judge` on review |",
                      "| OBJECTIVE / ACCURACY / solved | 90.0 / 92.0 / 18/20 |", "| preflight / privacy check | clean"):
         assert expected in body
 
