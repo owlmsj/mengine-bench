@@ -192,3 +192,17 @@ def test_run_price_is_validated_before_the_run_and_recorded(fake_agent: FakeAgen
     assert result["price_per_mtok"] == {"input": 3.0, "cached": 0.3, "output": 15.0}
     # The cmd adapter reports no tokens: the cost stays unknown, never 0.
     assert (result["totals"]["cost_usd"], result["totals"]["cost_basis"]) == (None, "n/a")
+
+
+def test_judge_evidence_lists_the_shell_commands_of_every_harness() -> None:
+    # The judge grades self-verification; a raw 4k stream tail rarely shows it (#23 review).
+    from mengine_bench.run_command import agent_commands
+    stream = "\n".join(json.dumps(event) for event in [
+        {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash",
+                                                       "input": {"command": "python -m unittest"}}]}},
+        {"type": "item.started", "item": {"type": "command_execution", "command": "pytest -q"}},
+        {"type": "item.completed", "item": {"type": "command_execution", "command": "pytest -q"}},
+        {"type": "tool_use", "part": {"tool": "bash", "state": {"input": {"command": "ls"}}}},
+        {"type": "text", "part": {"text": "no command here"}},
+    ])
+    assert agent_commands("banner\n" + stream) == ["python -m unittest", "pytest -q", "ls"]

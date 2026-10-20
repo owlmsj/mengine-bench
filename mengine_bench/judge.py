@@ -40,7 +40,6 @@ JUDGE_TIMEOUT_S = 600
 PROMPT_CHARS = 6_000
 DIFF_CHARS = 20_000
 FILE_CHARS = 4_000
-TRANSCRIPT_TAIL_CHARS = 4_000
 SCREENSHOT_NAME = "screenshot.png"
 
 RUBRIC_HEAD = f"""Score the work from 0 to 100 with this fixed rubric (rubric {RUBRIC_VERSION}).

@@ -187,12 +187,19 @@ def _round_usd(value: float | None) -> float | None:
     return None if value is None else round(value, 4)
 
 
+def _task_cost(usages: Sequence[Usage], basis: str, price: Price | None) -> float | None:
+    if price is not None and price.free:
+        return 0.0
+    # A task with no measured step has an unknown cost, never 0 (#23 review).
+    return _round_usd(_usd(usages, basis, price)) if usages else None
+
+
 def _task_score(outcome: TaskOutcome, basis: str, price: Price | None) -> TaskScore:
     ok = outcome.status == "ok"
     usages = _measured([outcome])
     return TaskScore(task_id=outcome.task_id, status=outcome.status, correctness=outcome.correctness if ok else 0.0,
                      solved=ok and outcome.solved, agent_s=outcome.agent_s, judge=outcome.judge,
-                     cost_usd=_round_usd(_usd(usages, basis, price)) if usages else 0.0 if basis != "n/a" else None,
+                     cost_usd=_task_cost(usages, basis, price),
                      tokens=_tokens(usages))
 
 

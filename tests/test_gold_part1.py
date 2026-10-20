@@ -164,6 +164,7 @@ def test_handoff_rejects_embedded_answer_tokens(tmp_path: Path, key: str, wrong:
 @pytest.mark.parametrize("key,valid", [
     ("final_decode", "decode: 38,0 t/s"),
     ("final_decode", "38.00"),
+    ("final_decode", "38"),
     ("discarded_quant", "Q6_K does not fit"),
     ("pending", "Update README.md"),
     ("pending", "Remove check_vision.ps1"),

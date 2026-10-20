@@ -133,3 +133,11 @@ def test_declared_free_inference_costs_zero_even_without_token_counts() -> None:
     run = score_run([outcome(step_usages=(None,)), outcome(task_id="b", step_usages=())], parse_price("0"))
     assert (run.cost.usd, run.cost.basis, run.cost.lower_bound) == (0.0, "price", False)
     assert [task.cost_usd for task in run.tasks] == [0.0, 0.0]
+
+
+def test_a_task_without_usage_has_unknown_cost_not_zero() -> None:
+    # Never 0 for an unmeasured task (docs/SCORING.md, #23 review): the total is a lower bound.
+    run = score_run([outcome(), outcome(task_id="c", status="timeout", correctness=0.0, solved=False,
+                                        step_usages=(None,))])
+    assert [task.cost_usd for task in run.tasks] == [1.0, None]
+    assert (run.cost.usd, run.cost.lower_bound) == (1.0, True)

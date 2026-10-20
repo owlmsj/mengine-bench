@@ -18,11 +18,13 @@ from mengine_bench.core import EvalTask
 from mengine_bench.judge import JudgeContext, workspace_diff
 from mengine_bench.environment import collect_environment
 from mengine_bench.report import RunMeta, TaskDetail, build_results, usage_record
-from mengine_bench.runner.agents import Agent
+from mengine_bench.runner.agents import Agent, split_jsonl
 from mengine_bench.runner.task_run import TaskRunRecord, run_task, snapshot
 from mengine_bench.scoring import Price, TaskOutcome, score_run
 
 TRANSCRIPT_TAIL_CHARS = 4_000
+# The judge grades self-verification from these; the stream tail rarely shows them (#23 review).
+COMMANDS_SHOWN = 40
 
 
 @dataclass(frozen=True)
@@ -74,10 +76,33 @@ def run_tasks(tasks: Sequence[EvalTask], agent: Agent, settings: RunSettings, wo
     return build_results(meta, run, details, collect_environment(), bench_commit())
 
 
+def agent_commands(stdout: str) -> list[str]:
+    """Shell commands in any harness's JSON stream: every "command" string (Claude Bash input, Codex
+    command_execution, opencode bash state), consecutive repeats (started/completed) dropped."""
+    found: list[str] = []
+    pending: list[object] = list(split_jsonl(stdout))
+    while pending:
+        value = pending.pop(0)
+        if isinstance(value, list):
+            pending[:0] = value
+            continue
+        if not isinstance(value, dict):
+            continue
+        command = value.get("command")
+        if isinstance(command, str) and command and (not found or found[-1] != command):
+            found.append(command)
+        pending[:0] = [item for key, item in value.items() if key != "command"]
+    return found
+
+
 def _judge_context(task: EvalTask, record: TaskRunRecord, root: Path) -> JudgeContext:
     after = snapshot(record.workspace) if record.workspace is not None else {}
     transcripts = sorted((root / "transcripts").glob("*.stdout.txt"))
     tail = transcripts[-1].read_text(encoding="utf-8")[-TRANSCRIPT_TAIL_CHARS:] if transcripts else ""
+    commands = [command for path in transcripts for command in agent_commands(path.read_text(encoding="utf-8"))]
+    if commands:
+        listed = "\n".join(f"$ {command[:300]}" for command in commands[-COMMANDS_SHOWN:])
+        tail = f"Shell commands the agent ran (last {COMMANDS_SHOWN}):\n{listed}\n\nStream tail:\n{tail}"
     checks = () if record.check is None else (*record.check.mandatory, *record.check.checks)
     return JudgeContext(task_id=task.id, prompts=tuple(step.prompt for step in task.steps),
                         answers=tuple(record.answers), diff=workspace_diff(record.initial_files, after),
