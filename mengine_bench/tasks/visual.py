@@ -204,7 +204,7 @@ TASKS = [
         id="web-mondrian-landing", category="web-design",
         provenance="One-shot front-end from a local fact sheet: Piet Mondrian's Composition with Red, Blue and "
                    "Yellow (1930)",
-        summary="Build a Mondrian-style landing page about one painting from a local fact sheet, in one request",
+        summary="Build a Mondrian-style landing page about one painting from a local fact sheet, in one request.",
         setup=_landing_setup, check=_landing_check,
         reference=lambda ws: _ship(ws, LANDING, LANDING_REFERENCE),
         timeout_s=900, deliverables=(LANDING,),
@@ -219,7 +219,7 @@ TASKS = [
     EvalTask(
         id="3d-voxel-landscape", category="3d",
         provenance="One-shot procedural 3D (Design Arena style): Mt. Fuji + Chureito pagoda + sakura in low poly/voxel",
-        summary="Build a three.js low poly or voxel scene of Mount Fuji with a pagoda and cherry trees, in one request",
+        summary="Build a three.js low poly or voxel scene of Mount Fuji with a pagoda and cherry trees, in one request.",
         setup=lambda ws: None, check=_scene_check,
         reference=lambda ws: _ship(ws, SCENE, SCENE_REFERENCE),
         timeout_s=900, deliverables=(SCENE,),

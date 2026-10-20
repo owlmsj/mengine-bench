@@ -38,6 +38,6 @@ visual tasks declare their page, which the judge renders headless.
 | `ir-studio-wiki` | retrieval | Find release and game details across a studio wiki and cite the files that support each answer. |
 | `ir-server-logs` | retrieval | Read game server logs to explain an outage and calculate downtime and monthly availability. |
 | `gd-integration-repo` | gamedev | Fix configuration priority and saved player credits in a game server without changing existing tests. |
-| `web-mondrian-landing` | web-design | Build a Mondrian-style landing page about one painting from a local fact sheet, in one request |
-| `3d-voxel-landscape` | 3d | Build a three.js low poly or voxel scene of Mount Fuji with a pagoda and cherry trees, in one request |
+| `web-mondrian-landing` | web-design | Build a Mondrian-style landing page about one painting from a local fact sheet, in one request. |
+| `3d-voxel-landscape` | 3d | Build a three.js low poly or voxel scene of Mount Fuji with a pagoda and cherry trees, in one request. |
 <!-- tasks:end -->
