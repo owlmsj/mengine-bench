@@ -131,7 +131,8 @@ secret-looking values, the values of secret environment variables, e-mail
 addresses, home and run paths, and your user, host and git names. The run ends
 with `privacy check: clean`, or names the file and kind of leak and exits
 non-zero (do not publish then). It cannot know your company, clients or private
-projects: skim `results/<run>/` before you submit, and disconnect tools that
+projects, and the harness's own log lists your connected MCP servers and tools
+by name: skim `results/<run>/` before you submit, and disconnect tools that
 read private data (mail, drive, chat) for the run.
 
 ## Submitting and judging

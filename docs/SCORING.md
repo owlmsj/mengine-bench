@@ -60,7 +60,8 @@ Cost uses one basis per run, recorded next to the number:
 - `harness`: every measured step reported USD (Claude Code `total_cost_usd`,
   opencode step cost).
 - `price`: the harness reported no USD, so the submitter declared prices with
-  `run --price input=X,cached=Y,output=Z` (USD per million tokens). Per step:
+  `run --price input=X,cached=Y,output=Z` (USD per million tokens), applied to
+  each step's tokens and recorded per task and in total:
   `((input - cached) x X + cached x Y + output x Z) / 1,000,000`. Reasoning
   tokens are already inside output. `--price 0` declares free or local
   inference.

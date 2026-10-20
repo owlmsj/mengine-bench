@@ -58,7 +58,7 @@ gh pr checkout <n>
 git diff --stat main...HEAD                    # only new files in one results/<run>/
 uv run mengine-bench judge results/<run>       # Claude Opus 5.5 xhigh, one vote per task
 uv run mengine-bench leaderboard               # rewrites LEADERBOARD.md
-git add results/<run>/result.json results/<run>/summary.md LEADERBOARD.md
+git add results/<run> LEADERBOARD.md          # result.json, summary.md, judge screenshots
 git commit -m "judge and rank <run>"
 git push                                       # lands on the contributor's PR branch
 gh pr merge <n> --merge

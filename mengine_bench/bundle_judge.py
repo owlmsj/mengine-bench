@@ -7,8 +7,9 @@ judge/<task>/<file>. The maintainer runs this while reviewing the result pull
 request, so contributors need no judge and every ranked run is judged the
 same way: one rubric 2.0 vote per task. For a task whose deliverable is an
 HTML page, the stored page is rendered headless in a temp dir and the judge
-sees the screenshot; a blank or failed render scores that task's judge 0.
-Nothing is written unless every task ends with a vote.
+sees the screenshot, kept as judge/<task>.png for audit; a blank or failed
+render scores that task's judge 0. Nothing is written unless every task ends
+with a vote.
 """
 
 from __future__ import annotations
@@ -78,6 +79,7 @@ def judge_bundle(bundle: Path, judge_agent: Agent, render: Renderer | None = Non
     packets = {str(task["id"]): read_packet(bundle, str(task["id"])) for task in tasks}
     judge = RubricJudge(judge_agent)
     verdicts: dict[str, TaskVerdict] = {}
+    screenshots: dict[str, bytes] = {}
     with tempfile.TemporaryDirectory(prefix="mengine-bench-judge-") as tmp:
         for task_id, packet in packets.items():
             print(f"[{task_id}] judging", flush=True)
@@ -87,10 +89,15 @@ def judge_bundle(bundle: Path, judge_agent: Agent, render: Renderer | None = Non
                 continue
             verdicts[task_id] = _render_verdict(bundle, task_id, packet, judge, workdir,
                                                 render or render_headless)
+            shot = workdir / "render" / "shot.png"
+            if shot.is_file():
+                screenshots[task_id] = shot.read_bytes()
     missing = {task_id: verdict.errors[-1:] for task_id, verdict in verdicts.items() if verdict.score is None}
     if missing:
         raise ValueError(f"received no judge vote for {sorted(missing)} ({missing}); expected one vote per task, "
                          f"so nothing was written")
+    for task_id, png in screenshots.items():
+        (bundle / JUDGE_DIR / f"{task_id}.png").write_bytes(png)
     for task in tasks:
         verdict = verdicts[str(task["id"])]
         task.update(judge=verdict.score, judge_rationale=verdict.rationale, judge_errors=list(verdict.errors))

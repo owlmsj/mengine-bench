@@ -107,6 +107,8 @@ def test_visual_deliverable_is_rendered_from_the_bundle_for_the_judge(
     assert seen == ['["screenshot.png"]']
     [task] = json.loads((bundle / "result.json").read_text(encoding="utf-8"))["tasks"]
     assert task["judge"] == 80
+    # The screenshot the judge saw stays in the bundle for audit (#23 QA).
+    assert (bundle / "judge" / "web-mondrian-landing.png").read_bytes() == b"P" * 50_000
 
 
 def test_failed_render_scores_the_judge_zero_without_asking(fake_agent: FakeAgent, tmp_path: Path,
