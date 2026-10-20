@@ -181,3 +181,40 @@ def test_handoff_accepts_answer_tokens_in_prose(tmp_path: Path, key: str, valid:
     payload[key] = valid
     answers[-1] = json.dumps(payload)
     assert compaction._handoff_check(tmp_path, answers).passed
+
+
+def test_funnel_counts_ordered_steps_without_expiry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mengine_bench.tasks import hard
+
+    users = [("p", "pc", 0), ("q", "pc", 0), ("s", "steamdeck", 0), ("test", "pc", 1)]
+    events = [
+        ("p", "install", "2026-01-01 00:00:00"),
+        ("p", "install", "2026-01-02 00:00:00"),
+        ("p", "tutorial_complete", "2026-01-20 00:00:00"),
+        ("p", "first_match", "2026-01-30 00:00:00"),
+        ("p", "purchase", "2026-02-20 00:00:00"),
+        ("q", "purchase", "2026-01-01 00:00:00"),
+        ("q", "install", "2026-01-02 00:00:00"),
+        ("q", "first_match", "2026-01-03 00:00:00"),
+        ("q", "tutorial_complete", "2026-01-04 00:00:00"),
+    ]
+    events += [(uid, step, "2026-01-01 00:00:00")
+               for uid in ("s", "test", "ghost") for step in hard.FUNNEL]
+    events += [("s", "purchase", "2026-01-01 00:00:00")]
+    monkeypatch.setattr(hard, "_funnel_rows", lambda: (users, list(reversed(events))))
+    expected = [
+        ("pc", "install", 2, 1.0), ("pc", "tutorial_complete", 2, 1.0),
+        ("pc", "first_match", 1, 0.5), ("pc", "purchase", 1, 1.0),
+        ("steamdeck", "install", 1, 1.0), ("steamdeck", "tutorial_complete", 1, 1.0),
+        ("steamdeck", "first_match", 1, 1.0), ("steamdeck", "purchase", 1, 1.0),
+    ]
+    assert hard._funnel_expected() == expected
+    hard._funnel_setup(tmp_path)
+    assert not hard._funnel_check(tmp_path, [""]).passed
+    assert hard._funnel_check(tmp_path, hard._funnel_reference(tmp_path)).passed
+    csv_text = "platform,step,users,conv_from_prev\n" + "".join(
+        f"{platform},{step},{count},{conversion:.4f}\n" for platform, step, count, conversion in expected
+    )
+    assert (tmp_path / "funnel.csv").read_text(encoding="utf-8") == csv_text

@@ -26,7 +26,6 @@ RULES = "Write your files inside {WS}. Do not ask for confirmation; finish and s
 # ------------------------------------------------------------ ds-sql-funnel --
 
 FUNNEL = ("install", "tutorial_complete", "first_match", "purchase")
-WINDOW = timedelta(days=7)
 
 
 def _funnel_rows() -> tuple[list[tuple[str, str, int]], list[tuple[str, str, str]]]:
@@ -66,7 +65,7 @@ def _funnel_expected() -> list[tuple[str, str, int, float]]:
         evs.sort()
         prev_time = None
         for step in FUNNEL:
-            candidates = [t for t, n in evs if n == step and (prev_time is None or prev_time <= t <= prev_time + WINDOW)]
+            candidates = [t for t, n in evs if n == step and (prev_time is None or t >= prev_time)]
             if not candidates:
                 break
             prev_time = min(candidates)
@@ -116,13 +115,13 @@ def _funnel_reference(ws: Path) -> list[str]:
 TASKS = [
     EvalTask(
         id="ds-sql-funnel", category="data-science", suites=frozenset({FAST, FULL}),
-        provenance="Product funnel in SQL: ordered steps, 7-day window per step, test accounts, dupes, out-of-order events",
-        summary="HARD: ordered funnel with a 7-day window per step in SQLite, per platform",
+        provenance="Product funnel in SQL: ordered steps, test accounts, dupes, out-of-order events",
+        summary="Count players at each ordered funnel step in SQLite, excluding test accounts and duplicates, by platform.",
         setup=_funnel_setup, check=_funnel_check, reference=_funnel_reference, timeout_s=420, weight=2, par_s=23,
         steps=(Step("In {WS}/analytics.db (SQLite: users, events) compute the funnel install -> tutorial_complete -> "
                     "first_match -> purchase per platform. Rules: ignore users with is_test=1 and events whose user_id is "
-                    "not in users; a step only counts if it happens within 7 days (inclusive) after the same user's "
-                    "previous step, never before it; use the first valid occurrence of each step. Write {WS}/funnel.csv "
+                    "not in users; a step only counts at or after the same user's previous step, with no time limit; "
+                    "use the first valid occurrence of each step. Write {WS}/funnel.csv "
                     "with platform,step,users,conv_from_prev (4 decimals; 1.0 on install), platform pc first then "
                     "steamdeck, steps in funnel order. " + RULES),),
     ),

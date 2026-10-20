@@ -53,7 +53,7 @@ only an OS sandbox around the agent closes that (docs/SCORING.md).
 | vis-chart | fast, full | vision | 1 | 3 | Read a bar chart: highest/lowest GPU, value and ratio |
 | gd-astar-doors | fast, full | gamedev | 1 | 19 | Implement minimum-cost pathfinding (doors cost 3) on a tile map; hidden tests |
 | gd-ecs-collision-bug | fast, full | gamedev | 1 | 12 | Find and fix 2 bugs (movement and AABB collision) in a multi-file ECS without touching the tests |
-| ds-sql-funnel | fast, full | data-science | 2 | 23 | HARD: ordered funnel with a 7-day window per step in SQLite, per platform |
+| ds-sql-funnel | fast, full | data-science | 2 | 23 | Count players at each ordered funnel step in SQLite, excluding test accounts and duplicates, by platform. |
 | ir-studio-wiki | fast, full | retrieval | 1 | 14.6 | Answer 5 multi-hop facts from a studio wiki with distractors, citing files |
 | ir-server-logs | full | retrieval | 1 | 29.2 | Game server log forensics: incident window, root cause and monthly SLO |
 | gd-integration-repo | fast, full | gamedev | 2 | 89 | ONE-SHOT LONG: ~100-file repo, 3 layered bugs that only the integration test and the spec reveal |

@@ -114,7 +114,7 @@ modeled on. Generated from the catalog; par time provenance and multi-step rules
 **data-science**
 
 - `ds-ab-playtest` (FAST, FULL; weight 1; par 25 s): Deduplicate telemetry, per-variant rates, lift, two-proportion z-test and ship decision. Scenario: Pixel Arena playtest A/B (arena-panel telemetry); two-proportion z-test on a dirty export.
-- `ds-sql-funnel` (FAST, FULL; weight 2; par 23 s): HARD: ordered funnel with a 7-day window per step in SQLite, per platform. Scenario: Product funnel in SQL: ordered steps, 7-day window per step, test accounts, dupes, out-of-order events.
+- `ds-sql-funnel` (FAST, FULL; weight 2; par 23 s): Count players at each ordered funnel step in SQLite, excluding test accounts and duplicates, by platform.. Scenario: Product funnel in SQL: ordered steps, test accounts, dupes, out-of-order events.
 
 **backoffice**
 
