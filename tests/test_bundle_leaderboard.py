@@ -60,7 +60,7 @@ def test_bundle_holds_result_summary_and_redacted_transcripts(fake_agent: FakeAg
     assert result["started_at"].endswith("Z") and result["finished_at"] >= result["started_at"]
     assert set(result["bench_commit"]) == {"sha", "dirty"}
     [task] = result["tasks"]
-    assert task["passed"] and task["transcript"] == f"transcripts/{TASK}.jsonl.gz"
+    assert task["solved"] and task["transcript"] == f"transcripts/{TASK}.jsonl.gz"
     transcript = gzip.decompress((bundle / task["transcript"]).read_bytes()).decode("utf-8")
     assert MARKER not in transcript and "[REDACTED:" in transcript
     assert env_secret not in transcript and "[REDACTED:env]" in transcript
@@ -115,8 +115,8 @@ def _write_result(results: Path, name: str, objective: float, *, model: str = "m
         "scoring_version": "1.0", "date": "2026-10-19", "bench_version": bench_version,
         "agent": {"name": "cmd", "model": model, "effort": None, "version": None},
         "judge": None if judge is None else {"model": judge.split("@")[0], "effort": judge.split("@")[1]},
-        "totals": {"objective": objective, "accuracy": objective, "solved": 1, "total": len(ids),
-                   "total_agent_s": 10.0, "subjective": None, "composite": None},
+        "totals": {"score": objective, "correct": objective, "solved": 1, "total": len(ids),
+                   "time_s": 10.0, "judge": 50.0, "cost_usd": None, "cost_basis": "n/a"},
         "tasks": [{"id": task_id} for task_id in ids],
     }
     bundle = results / name

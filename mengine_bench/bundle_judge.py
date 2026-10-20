@@ -23,9 +23,9 @@ from pathlib import Path
 from mengine_bench.bundle import JUDGE_DIR, RESULT_NAME, SUMMARY_NAME, public_text
 from mengine_bench.judge import RUBRIC_VERSION, JudgeContext, RubricJudge, TaskVerdict
 from mengine_bench.redact import PathScope, local_names
-from mengine_bench.report import render_summary, totals_block
+from mengine_bench.report import render_summary
 from mengine_bench.runner.agents import Agent
-from mengine_bench.scoring import TaskOutcome, score_suite
+from mengine_bench.scoring import combined_score, judge_mean
 from mengine_bench.visual import RENDERED, render_headless, screenshot_has_content
 
 TaskEntry = MutableMapping[str, object]
@@ -67,15 +67,6 @@ def _render_verdict(bundle: Path, task_id: str, packet: JudgePacket, judge: Rubr
     return judge.grade(packet.context, workdir / "judge", png)
 
 
-def _outcome(task: TaskEntry) -> TaskOutcome:
-    vote = task.get("judge")
-    return TaskOutcome(task_id=str(task["id"]), category=str(task["category"]),
-                       check_score=float(task["check_score"]),  # type: ignore[arg-type]
-                       mandatory_ok=bool(task["mandatory_ok"]), passed=bool(task["passed"]),
-                       agent_s=None if task["agent_s"] is None else float(task["agent_s"]),  # type: ignore[arg-type]
-                       status=str(task["status"]), judge_votes=(int(vote),) if isinstance(vote, int) else ())
-
-
 def judge_bundle(bundle: Path, judge_agent: Agent, render: Renderer | None = None) -> dict[str, object]:
     """Judge every task, rescore, and rewrite result.json and summary.md; raises ValueError, writing nothing,
     when the bundle is already judged, lacks evidence, or a task ends without a vote."""
@@ -103,11 +94,10 @@ def judge_bundle(bundle: Path, judge_agent: Agent, render: Renderer | None = Non
     for task in tasks:
         verdict = verdicts[str(task["id"])]
         task.update(judge=verdict.score, judge_rationale=verdict.rationale, judge_errors=list(verdict.errors))
-    label = f"{judge_agent.model}@{judge_agent.effort or 'default'}"
-    suite = score_suite([_outcome(task) for task in tasks], judge=label)
-    for task, score in zip(tasks, suite.tasks):
-        task.update(c=score.correctness, o=round(score.objective, 2), subjective=score.subjective)
-    result["totals"] = totals_block(suite)
+    # The judge changes Judge and Score only: checks, Correct %, Time and Cost stay as the run published them.
+    totals = result["totals"]
+    totals["judge"] = judge_mean([verdicts[str(task["id"])].score for task in tasks])
+    totals["score"] = combined_score(float(totals["correct"]), totals["judge"])
     result["judge"] = {"agent": judge_agent.name, "model": judge_agent.model, "effort": judge_agent.effort,
                        "rubric": RUBRIC_VERSION}
     (bundle / RESULT_NAME).write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8",

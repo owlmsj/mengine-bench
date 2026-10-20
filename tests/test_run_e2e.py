@@ -38,8 +38,8 @@ def test_run_with_reference_agent_scores_full_marks(fake_agent: FakeAgent, tmp_p
     assert (result_file.parent / "summary.md").is_file()
     result = json.loads(result_file.read_text(encoding="utf-8"))
     [task] = result["tasks"]
-    assert task["status"] == "ok" and task["passed"] and task["c"] == 1.0
-    assert result["totals"]["objective"] == 100.0
+    assert task["status"] == "ok" and task["solved"] and task["c"] == 1.0
+    assert result["totals"]["correct"] == 100.0 and result["totals"]["score"] is None
     assert result["totals"]["solved"] == 1
     assert "suite" not in result
     assert result["agent"] == {"name": "cmd", "model": "fake/ref", "effort": None, "version": None}
@@ -176,3 +176,19 @@ def test_step_usage_only_recorded_on_success(
     expected = Usage(9, 4, 5, 1, 0.1, "harness") if status == "ok" else None
     assert record.steps[0].usage == expected
     assert record.usage == (Usage(18, 8, 10, 2, 0.2, "harness") if status == "ok" else None)
+
+
+def test_run_price_is_validated_before_the_run_and_recorded(fake_agent: FakeAgent, tmp_path: Path) -> None:
+    template = json.loads(fake_agent("reference", REFERENCE_AGENT))
+    template.remove("-I")
+    argv = ["run", "--agent", "cmd", "--cmd", json.dumps(template), "--model", "fake/ref", "--tasks",
+            "ds-ab-playtest", "--out", str(tmp_path / "results")]
+    with pytest.raises(SystemExit, match="input=X,cached=Y,output=Z"):
+        cli.main([*argv, "--price", "input=1"])
+    assert not (tmp_path / "results").exists()
+    assert cli.main([*argv, "--price", "input=3,cached=0.3,output=15"]) == 0
+    [result_file] = (tmp_path / "results").glob("*/result.json")
+    result = json.loads(result_file.read_text(encoding="utf-8"))
+    assert result["price_per_mtok"] == {"input": 3.0, "cached": 0.3, "output": 15.0}
+    # The cmd adapter reports no tokens: the cost stays unknown, never 0.
+    assert (result["totals"]["cost_usd"], result["totals"]["cost_basis"]) == (None, "n/a")

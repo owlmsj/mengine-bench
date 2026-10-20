@@ -21,6 +21,7 @@ from pathlib import Path
 from mengine_bench import __version__
 from mengine_bench.bundle import RESULT_NAME, bundle_leaks
 from mengine_bench.redact import local_names
+from mengine_bench.report import cost_text, time_text
 
 UPSTREAM = "owlmsj/mengine-bench"
 UPSTREAM_BRANCH = "main"
@@ -82,10 +83,10 @@ def pr_body(result: Mapping[str, object]) -> str:
         ("model id", agent["model"]),
         ("effort", agent.get("effort") or "default"),
         ("judge", judge_text),
-        ("OBJECTIVE / ACCURACY / solved", f"{totals['objective']} / {totals.get('accuracy')} / "
-                                          f"{totals['solved']}/{totals['total']}"),
-        ("SUBJECTIVE / COMPOSITE", f"{totals.get('subjective')} / {totals.get('composite')}"),
-        ("agent time (s)", totals.get("total_agent_s")),
+        ("Correct % / solved", f"{totals['correct']} / {totals['solved']}/{totals['total']}"),
+        ("Judge / Score", f"{totals.get('judge')} / {totals.get('score')} (set by the maintainer's judge)"),
+        ("Time", time_text(totals.get("time_s"))),
+        ("Cost", cost_text(totals)),
         ("wall time", f"{result.get('started_at')} to {result.get('finished_at')}"),
         ("bench version and commit", f"{result['bench_version']} at {commit_text}"),
         ("machine", f"{environment.get('os')}, {environment.get('cpu')}, {environment.get('ram_gb')} GB RAM, "

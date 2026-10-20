@@ -20,8 +20,8 @@ def _result(**overrides: object) -> dict[str, object]:
         "bench_version": __version__, "preflight": [], "submitter": "dquill",
         "agent": {"name": "codex", "model": "gpt-x", "effort": "low", "version": "codex-cli 1.0"},
         "judge": None,
-        "totals": {"objective": 90.0, "accuracy": 92.0, "solved": 18, "total": 20, "total_agent_s": 500.0,
-                   "subjective": 85.0, "composite": 88.0},
+        "totals": {"score": 88.5, "correct": 90.0, "solved": 12, "total": 14, "time_s": 500.0, "judge": 85.0,
+                   "cost_usd": 3.2, "cost_basis": "price", "cost_lower_bound": True},
         "environment": {"os": "Linux 6", "cpu": "x86_64", "ram_gb": 32.0, "gpu": None},
         "bench_commit": {"sha": "abc", "dirty": False},
         "started_at": "2026-10-19T10:00:00Z", "finished_at": "2026-10-19T10:30:00Z",
@@ -43,7 +43,7 @@ def test_title_and_body_come_from_result_json() -> None:
     assert submit.pr_title(result) == "results: codex gpt-x low"
     body = submit.pr_body(result)
     for expected in ("| agent CLI and version | codex codex-cli 1.0 |", "| judge | pending: the maintainer runs `mengine-bench judge` on review |",
-                     "| OBJECTIVE / ACCURACY / solved | 90.0 / 92.0 / 18/20 |", "| preflight / privacy check | clean"):
+                     "| Correct % / solved | 90.0 / 12/14 |", "| Cost | >= $3.20 (price) |", "| Time | 8 min 20 s |", "| preflight / privacy check | clean"):
         assert expected in body
 
 

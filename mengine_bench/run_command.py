@@ -16,10 +16,10 @@ from pathlib import Path
 from mengine_bench.bundle import bench_commit
 from mengine_bench.core import EvalTask
 from mengine_bench.judge import JudgeContext, workspace_diff
-from mengine_bench.report import RunMeta, TaskDetail, build_results, collect_environment
+from mengine_bench.report import RunMeta, TaskDetail, build_results, collect_environment, usage_record
 from mengine_bench.runner.agents import Agent
 from mengine_bench.runner.task_run import TaskRunRecord, run_task, snapshot
-from mengine_bench.scoring import TaskOutcome, score_suite
+from mengine_bench.scoring import Price, TaskOutcome, score_run
 
 TRANSCRIPT_TAIL_CHARS = 4_000
 
@@ -34,7 +34,7 @@ class JudgeEvidence:
 
 
 def run_tasks(tasks: Sequence[EvalTask], agent: Agent, model: str, effort: str | None, work: Path,
-              submitter: str | None, evidence: JudgeEvidence) -> dict[str, object]:
+              submitter: str | None, price: Price | None, evidence: JudgeEvidence) -> dict[str, object]:
     """Run and grade every task; `evidence` collects the judge packets and deliverables."""
     started_at = _utc_now()
     outcomes: list[TaskOutcome] = []
@@ -52,12 +52,13 @@ def run_tasks(tasks: Sequence[EvalTask], agent: Agent, model: str, effort: str |
             evidence.packets[task.id] = _crash_packet(task, record)
         details[task.id] = detail
         outcomes.append(_outcome(task, record))
-        print(f"[{task.id}] {record.status} c={detail['check_score']:.2f} t={record.agent_s:.1f}s", flush=True)
-    suite = score_suite(outcomes)
+        correct = record.check.score if record.check is not None and record.status == "ok" else 0.0
+        print(f"[{task.id}] {record.status} c={correct:.2f} t={record.agent_s:.1f}s", flush=True)
+    run = score_run(outcomes, price)
     meta = RunMeta(date=datetime.now().strftime("%Y-%m-%d"), agent=agent.name, model=model, effort=effort,
                    agent_version=agent.version(), run_id=uuid.uuid4().hex[:8], started_at=started_at,
-                   finished_at=_utc_now(), submitter=submitter)
-    return build_results(meta, suite, details, collect_environment(), bench_commit())
+                   finished_at=_utc_now(), submitter=submitter, price=price)
+    return build_results(meta, run, details, collect_environment(), bench_commit())
 
 
 def _judge_context(task: EvalTask, record: TaskRunRecord, root: Path) -> JudgeContext:
@@ -127,14 +128,11 @@ def _detail(task: EvalTask, record: TaskRunRecord) -> TaskDetail:
         checks = [{"name": name, "ok": ok, "mandatory": True} for name, ok in check.mandatory]
         checks += [{"name": name, "ok": ok, "mandatory": False} for name, ok in check.checks]
     return TaskDetail(
-        steps=[{"index": s.index, "wall_s": round(s.wall_s, 2), "exit_code": s.exit_code, "status": s.status}
-               for s in record.steps],
+        steps=[{"index": s.index, "wall_s": round(s.wall_s, 2), "exit_code": s.exit_code, "status": s.status,
+                "usage": usage_record(s.usage)} for s in record.steps],
         grading_s=record.grading_s, checks=checks,
-        check_score=check.score if check is not None else 0.0,
-        mandatory_ok=check.mandatory_ok if check is not None else False,
-        passed=check.passed if check is not None else False,
         flags=[] if record.status == "ok" else [record.status], error=_public_error(record.error, record),
-        answers=list(record.answers),
+        answers=list(record.answers), usage=usage_record(record.usage),
     )
 
 
@@ -149,11 +147,11 @@ def _public_error(error: str | None, record: TaskRunRecord) -> str | None:
 def _outcome(task: EvalTask, record: TaskRunRecord) -> TaskOutcome:
     check = record.check
     return TaskOutcome(
-        task_id=task.id, category=task.category,
-        check_score=check.score if check is not None else 0.0,
-        mandatory_ok=check.mandatory_ok if check is not None else False,
-        passed=check.passed if check is not None else False,
+        task_id=task.id, status=record.status,
+        correctness=check.score if check is not None else 0.0,
+        solved=check.passed if check is not None else False,
         # Score the exact time result.json records, so the totals follow
         # from the published task times.
-        agent_s=round(record.agent_s, 2) if record.steps else None, status=record.status,
+        agent_s=round(record.agent_s, 2) if record.steps else None,
+        step_usages=tuple(step.usage for step in record.steps),
     )

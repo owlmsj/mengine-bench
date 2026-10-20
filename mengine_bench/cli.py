@@ -20,10 +20,12 @@ from mengine_bench.leaderboard import build_leaderboard
 from mengine_bench.preflight import contamination
 from mengine_bench.redact import LocalNames, local_names
 from mengine_bench.report import (
-    SUMMARIES_BEGIN, SUMMARIES_END, render_task_summaries, render_tasks_table, replace_tasks_table,
+    SUMMARIES_BEGIN, SUMMARIES_END, cost_text, render_task_summaries, render_tasks_table, replace_tasks_table,
+    time_text,
 )
 from mengine_bench.run_command import JudgeEvidence, run_tasks
 from mengine_bench.runner.agents import AGENT_NAMES, make_agent
+from mengine_bench.scoring import parse_price
 from mengine_bench.submit import SubmitError, gh_login, submit
 
 # The one judge for every ranked run (docs/SCORING.md); the flags exist for tests.
@@ -42,6 +44,8 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--cmd", help="argv template for --agent cmd: JSON list or quoted string with {prompt_file}")
     run.add_argument("--tasks", default="",
                      help="comma-separated task ids, for debugging; such a run is never ranked (default: every task)")
+    run.add_argument("--price", help="USD per million tokens when the harness reports no USD: "
+                                     "input=X,cached=Y,output=Z, or 0 for free/local inference")
     run.add_argument("--out", type=Path, default=Path("results"), help="bundles go to <out>/<run>/")
     run.add_argument("--submitter", help="public credit in result.json (default with --submit: your GitHub login)")
     run.add_argument("--submit", action="store_true",
@@ -113,8 +117,8 @@ def _judge(args: argparse.Namespace) -> int:
         return 1
     totals = result["totals"]
     assert isinstance(totals, dict)
-    print(f"judged {args.bundle.name}: objective {totals['objective']} subjective {totals['subjective']} "
-          f"composite {totals['composite']} solved {totals['solved']}/{totals['total']}")
+    print(f"judged {args.bundle.name}: Score {totals['score']} = 0.7 x correct {totals['correct']} "
+          f"+ 0.3 x judge {totals['judge']}")
     print("updated result.json and summary.md; commit them with LEADERBOARD.md")
     return 0
 
@@ -133,6 +137,10 @@ def _run(args: argparse.Namespace) -> int:
     tasks = _select(catalog.all_tasks(), args.tasks)
     if args.agent == "cmd" and not args.cmd:
         raise SystemExit("error: received --agent cmd without --cmd; expected an argv template with {prompt_file}")
+    try:
+        price = None if args.price is None else parse_price(args.price)
+    except ValueError as error:
+        raise SystemExit(f"error: {error}") from error
     if args.submit and args.allow_unclean:
         raise SystemExit("error: received --submit with --allow-unclean; expected a clean run to publish")
     if args.submit and not args.dry_run:
@@ -162,13 +170,15 @@ def _run(args: argparse.Namespace) -> int:
                          f"(README, 'Run hygiene'), or --allow-unclean to record them and stay unranked")
     agent = make_agent(args.agent, args.model, args.effort, args.cmd)
     evidence = JudgeEvidence()
-    results = run_tasks(tasks, agent, args.model, args.effort, work, args.submitter, evidence)
+    results = run_tasks(tasks, agent, args.model, args.effort, work, args.submitter, price, evidence)
     results["preflight"] = problems
     transcripts = {task.id: work / task.id / "transcripts" for task in tasks}
     scope = run_scope(work, local_names().allowing(args.submitter))
     bundle = write_bundle(results, args.out, transcripts, scope, evidence.packets, evidence.deliverables)
     totals = results["totals"]
-    print(f"objective {totals['objective']} solved {totals['solved']}/{totals['total']}")  # type: ignore[index]
+    assert isinstance(totals, dict)
+    print(f"correct {totals['correct']}% solved {totals['solved']}/{totals['total']} time "
+          f"{time_text(totals['time_s'])} cost {cost_text(totals)}; Score waits for the judge")
     print(f"wrote bundle {bundle}")
     if args.work is None:
         # Raw transcripts are unredacted, and a later run's agent could read these solutions.

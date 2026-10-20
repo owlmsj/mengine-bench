@@ -68,7 +68,7 @@ def is_complete_run(result: dict[str, object]) -> bool:
 def _group_key(result: dict[str, object]) -> tuple[str, str]:
     judge = result.get("judge")
     label = f"{judge.get('model')}@{judge.get('effort') or 'default'}" if isinstance(judge, dict) else ""
-    return str(result["scoring_version"]), label
+    return str(result.get("bench_version")), label
 
 
 def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
@@ -96,7 +96,7 @@ def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
     for key in sorted(groups):
         version, label = key
         title = f"judge {label}" if label else "no judge"
-        rows = sorted(groups[key], key=lambda e: -float(e.result["totals"]["objective"]))  # type: ignore[index]
+        rows = sorted(groups[key], key=lambda e: -float(e.result["totals"]["score"] or 0))  # type: ignore[index]
         sections.append(f"## {title} (scoring {version})\n\n" + _table(rows))
     if not groups:
         sections.append("No results yet.\n")
@@ -116,8 +116,8 @@ def _table(rows: Iterable[RankedBundle]) -> str:
         agent, totals = row["agent"], row["totals"]
         assert isinstance(agent, dict) and isinstance(totals, dict)
         lines.append(f"| {rank} | {agent['name']} {agent.get('version') or ''} | {agent['model']} | "
-                     f"{_fmt(agent.get('effort'))} | {_fmt(totals['objective'])} | {_fmt(totals.get('accuracy'))} | "
-                     f"{totals['solved']}/{totals['total']} | {_fmt(totals.get('total_agent_s'))} | "
-                     f"{_fmt(totals.get('subjective'))} | {_fmt(totals.get('composite'))} | {row['date']} | "
+                     f"{_fmt(agent.get('effort'))} | {_fmt(totals['score'])} | {_fmt(totals.get('correct'))} | "
+                     f"{totals['solved']}/{totals['total']} | {_fmt(totals.get('time_s'))} | "
+                     f"{_fmt(totals.get('judge'))} | {_fmt(totals.get('judge'))} | {row['date']} | "
                      f"{row['bench_version']} | [summary]({entry.summary_link}) |")
     return "\n".join(lines) + "\n"

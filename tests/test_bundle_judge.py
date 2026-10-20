@@ -78,6 +78,10 @@ def test_judging_the_bundle_sets_one_vote_per_task(fake_agent: FakeAgent, tmp_pa
     assert (task["judge"], task["judge_rationale"]) == (80, "solid")
     assert task["checks"] == before["tasks"][0]["checks"], "the judge never changes the checks"
     assert result["judge"] == {"agent": "cmd", "model": "judge-x", "effort": "high", "rubric": "2.0"}
+    totals = result["totals"]
+    assert totals["judge"] == 80.0 and totals["score"] == round(0.7 * totals["correct"] + 0.3 * 80.0, 1)
+    assert {key: totals[key] for key in ("correct", "time_s", "cost_usd")} == \
+        {key: before["totals"][key] for key in ("correct", "time_s", "cost_usd")}
     assert _judge(fake_agent, bundle) == 1, "a judged bundle is not judged twice"
 
 
