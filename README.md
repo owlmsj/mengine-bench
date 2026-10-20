@@ -159,6 +159,8 @@ Questions about a result: open an issue naming the run folder.
   peek outside or look up this repo's answers.
 - Cost depends on the basis (harness list price or your declared prices) and is
   an estimate. Time depends on your machine and network.
+- The visual tasks' checks read the page code (content, palette, three.js use);
+  whether it looks right is the judge's call.
 - One judge vote per task; a judge model can drift over months.
 - A crashed or timed-out task scores 0; there are no retries.
 
