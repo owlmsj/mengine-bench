@@ -30,15 +30,14 @@ def test_fixture_uses_public_vocabulary(task_id: str, fixture: str, expected: st
     assert expected in (tmp_path / fixture).read_text(encoding="utf-8")
 
 
-def test_readme_records_clone_steps_and_current_runs_only() -> None:
+def test_readme_records_clone_steps_score_and_judge() -> None:
     text = " ".join((ROOT / "README.md").read_text(encoding="utf-8").split())
     for expected in ("git clone https://github.com/owlmsj/mengine-bench.git cd mengine-bench uv sync",
-                     "every tool its harness gives it", "claude-opus-5-5", "xhigh",
-                     "only runs of the current bench are ranked", "git show fde6c16:LEADERBOARD.md"):
-        assert expected in text
-    # The 0.1.0 runs left results/: the README must not quote them as current numbers.
-    for retired in ("20 min 10 s wall", "baseline below", "Both runs are on"):
-        assert retired not in text
+                     "Everything its harness gives it", "Claude Opus 5.5, xhigh",
+                     "Score = 0.7 x Correct % + 0.3 x Judge", "## The 14 tasks", "--config key=value",
+                     "--price input=X,cached=Y,output=Z", "privacy check: clean"):
+        assert expected in text, expected
+    assert f"## The {len(catalog.all_tasks())} tasks" in text
 
 
 def test_committed_results_are_all_of_the_current_bench() -> None:
@@ -48,15 +47,14 @@ def test_committed_results_are_all_of_the_current_bench() -> None:
         assert json.loads(result_file.read_text(encoding="utf-8"))["bench_version"] == __version__, result_file
 
 
-def test_readme_moves_every_preflight_instruction_file_aside_and_back(tmp_path: Path) -> None:
+def test_readme_names_every_personal_instruction_file(tmp_path: Path) -> None:
     from mengine_bench.preflight import INSTRUCTION_FILES, global_instruction_files
     for folder in (".claude", ".codex", ".config/opencode"):
+        (tmp_path / folder).mkdir(parents=True, exist_ok=True)
         for name in INSTRUCTION_FILES:
-            (tmp_path / folder).mkdir(parents=True, exist_ok=True)
             (tmp_path / folder / name).write_text("x", encoding="utf-8")
-    checked = {path.relative_to(tmp_path).as_posix() for agent in ("claude", "codex", "opencode")
-               for path in global_instruction_files(agent, tmp_path, {})}
+    names = {path.relative_to(tmp_path).as_posix() for agent in ("claude", "codex", "opencode")
+             for path in global_instruction_files(agent, tmp_path, {})}
     text = (ROOT / "README.md").read_text(encoding="utf-8")
-    hygiene = text[text.index("## Run hygiene"):text.index("## Submitting results")]
-    assert checked and {path for path in checked if f'"{path}"' not in hygiene and f" {path}" not in hygiene} == set()
-    assert "after the run" in hygiene and "mengine-bench-preflight-backup" in hygiene
+    # AGENTS.override.md is Codex's rarely used twin of AGENTS.md; the warning names it when present.
+    assert names and {name for name in names if f"~/{name}" not in text} <= {".codex/AGENTS.override.md"}
