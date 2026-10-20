@@ -201,4 +201,18 @@ def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 0
     assert board.unranked == [("results/cheap-judge",
-                               "judged by claude-haiku-5-5@xhigh; only claude-opus-5-5@xhigh judges are ranked")]
+                               "judged by claude claude-haiku-5-5@xhigh rubric 2.0; only claude claude-opus-5-5@xhigh rubric 2.0 judges are ranked")]
+
+
+@pytest.mark.parametrize("field,value", [("agent", "cmd"), ("rubric", "1.0")])
+def test_leaderboard_ranks_only_the_claude_adapter_and_current_rubric(tmp_path: Path, field: str,
+                                                                      value: str) -> None:
+    # `judge --judge cmd` keeps the default model and effort labels (#23 review):
+    # the adapter and rubric must match too.
+    results = tmp_path / "results"
+    bundle = _write_result(results, "custom", 88.0)
+    result = json.loads((bundle / "result.json").read_text(encoding="utf-8"))
+    result["judge"][field] = value
+    (bundle / "result.json").write_text(json.dumps(result), encoding="utf-8")
+    board = leaderboard.build_leaderboard(results, tmp_path)
+    assert board.ranked == 0 and "only claude claude-opus-5-5@xhigh" in board.unranked[0][1]

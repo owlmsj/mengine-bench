@@ -34,7 +34,14 @@ class Price:
     cached: float
     output: float
 
+    @property
+    def free(self) -> bool:
+        """`--price 0`: a declared $0 that needs no token counts (`cmd` reports none)."""
+        return self.input == self.cached == self.output == 0.0
+
     def cost_usd(self, usage: Usage) -> float | None:
+        if self.free:
+            return 0.0
         if usage.input_tokens is None or usage.output_tokens is None:
             return None
         cached = usage.cached_input_tokens or 0
@@ -149,6 +156,8 @@ def _measured(outcomes: Sequence[TaskOutcome]) -> list[Usage]:
 
 
 def _basis(outcomes: Sequence[TaskOutcome], price: Price | None) -> str:
+    if price is not None and price.free:
+        return "price"
     measured = _measured(outcomes)
     if not measured:
         return "n/a"
@@ -195,13 +204,14 @@ def score_run(outcomes: Sequence[TaskOutcome], price: Price | None = None) -> Ru
     basis = _basis(outcomes, price)
     tasks = tuple(_task_score(outcome, basis, price) for outcome in outcomes)
     measured = _measured(outcomes)
-    unmeasured = any(usage is None for outcome in outcomes for usage in outcome.step_usages)
+    free = price is not None and price.free
+    unmeasured = not free and any(usage is None for outcome in outcomes for usage in outcome.step_usages)
     partial = any(usage.cost_source == "partial" for usage in measured)
     correct = round(100.0 * sum(task.correctness for task in tasks) / len(tasks), 1)
     judge = judge_mean([task.judge for task in tasks])
     return RunScore(
         correct=correct, solved=sum(task.solved for task in tasks), total=len(tasks), judge=judge,
         score=combined_score(correct, judge), time_s=round(sum(task.agent_s or 0.0 for task in tasks), 1),
-        cost=Cost(usd=_round_usd(_usd(measured, basis, price)), basis=basis, lower_bound=unmeasured or partial),
+        cost=Cost(usd=0.0 if free else _round_usd(_usd(measured, basis, price)), basis=basis, lower_bound=unmeasured or partial),
         tokens=_tokens(measured), tasks=tasks,
     )

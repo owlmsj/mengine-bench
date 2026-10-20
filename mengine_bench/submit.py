@@ -20,6 +20,7 @@ from pathlib import Path
 
 from mengine_bench import __version__
 from mengine_bench.bundle import RESULT_NAME, bundle_leaks
+from mengine_bench.leaderboard import major_minor
 from mengine_bench.redact import local_names
 from mengine_bench.report import config_text, cost_text, time_text
 
@@ -52,8 +53,9 @@ def gh_login() -> str:
 def submission_problems(bundle: Path, result: Mapping[str, object]) -> list[str]:
     """Why this bundle must not be published (empty when it can be)."""
     problems = []
-    if result.get("bench_version") != __version__:
-        problems.append(f"received bench {result.get('bench_version')}; expected {__version__}: run with this bench")
+    if major_minor(result.get("bench_version")) != major_minor(__version__):
+        problems.append(f"received bench {result.get('bench_version')}; expected {major_minor(__version__)}.x: "
+                        "run with this bench")
     submitter = result.get("submitter")
     names = local_names().allowing(submitter if isinstance(submitter, str) else None)
     problems += [f"privacy check: {name}: {', '.join(sorted(kinds))}" for name, kinds in

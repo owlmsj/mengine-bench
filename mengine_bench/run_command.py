@@ -84,15 +84,10 @@ def _judge_context(task: EvalTask, record: TaskRunRecord, root: Path) -> JudgeCo
                         transcript_tail=tail, checks=tuple(checks))
 
 
-def _render_target(task: EvalTask) -> str | None:
-    # The judge renders the first HTML deliverable (visual tasks) and grades its look.
-    return next((rel for rel in task.deliverables if rel.endswith(".html")), None)
-
-
 def _judge_packet(task: EvalTask, record: TaskRunRecord, root: Path) -> dict[str, object]:
     """The evidence `mengine-bench judge` needs later (judge/<task>.json)."""
     packet = _judge_context(task, record, root).record()
-    packet.update(deliverables=list(task.deliverables), render=_render_target(task))
+    packet.update(deliverables=list(task.deliverables), render=task.render_target)
     return packet
 
 

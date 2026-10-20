@@ -147,3 +147,10 @@ def test_submit_wants_a_bundle_directly_under_results(tmp_path: Path, monkeypatc
     monkeypatch.setattr(submit, "_call", lambda argv, cwd=None, env=None: str(tmp_path))
     with pytest.raises(SubmitError, match="results/<bundle>"):
         submit.submit(nested)
+
+
+def test_a_patch_release_bundle_is_publishable(tmp_path: Path) -> None:
+    # A patch changes no task, prompt or score (#23): 1.0.x bundles submit like the leaderboard ranks them.
+    major, minor, _ = __version__.split(".")
+    result = _result(bench_version=f"{major}.{minor}.99")
+    assert submit.submission_problems(_bundle(tmp_path, result), result) == []

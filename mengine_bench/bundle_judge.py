@@ -18,10 +18,11 @@ import json
 import shutil
 import tempfile
 from collections.abc import Callable, MutableMapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-from mengine_bench.bundle import JUDGE_DIR, RESULT_NAME, SUMMARY_NAME, public_text
+from mengine_bench import catalog
+from mengine_bench.bundle import JUDGE_DIR, RESULT_NAME, SUMMARY_NAME, public_json, public_text
 from mengine_bench.judge import RUBRIC_VERSION, JudgeContext, RubricJudge, TaskVerdict
 from mengine_bench.redact import PathScope, local_names
 from mengine_bench.report import render_summary
@@ -43,13 +44,19 @@ class JudgePacket:
 
 
 def read_packet(bundle: Path, task_id: str) -> JudgePacket:
+    """The evidence of one task. The bundle comes from a contributor's pull request, so the task's prompts
+    and the page to render come from the catalog, never from the packet (#23 review)."""
+    task = next((task for task in catalog.all_tasks() if task.id == task_id), None)
+    if task is None:
+        raise ValueError(f"received task {task_id!r} in {bundle.name}; expected a catalog task id")
     packet_file = bundle / JUDGE_DIR / f"{task_id}.json"
     if not packet_file.is_file():
         raise ValueError(f"received {bundle.name} without {JUDGE_DIR}/{task_id}.json; expected judge evidence "
                          f"for every task (a bundle written by bench 1.0 or later)")
     record = json.loads(packet_file.read_text(encoding="utf-8"))
-    render = record.get("render")
-    return JudgePacket(context=JudgeContext.from_record(record), render=render if isinstance(render, str) else None)
+    context = replace(JudgeContext.from_record(record), task_id=task.id,
+                      prompts=tuple(step.prompt for step in task.steps))
+    return JudgePacket(context=context, render=task.render_target)
 
 
 def _render_verdict(bundle: Path, task_id: str, packet: JudgePacket, judge: RubricJudge, workdir: Path,
@@ -107,8 +114,12 @@ def judge_bundle(bundle: Path, judge_agent: Agent, render: Renderer | None = Non
     totals["score"] = combined_score(float(totals["correct"]), totals["judge"])
     result["judge"] = {"agent": judge_agent.name, "model": judge_agent.model, "effort": judge_agent.effort,
                        "rubric": RUBRIC_VERSION}
+    # Rationales and errors come from the maintainer's machine: redact them like the run's own text.
+    scope = PathScope(names=local_names().allowing(result.get("submitter")))
+    public = public_json(result, scope)
+    assert isinstance(public, dict)
+    result = public
     (bundle / RESULT_NAME).write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8",
                                       newline="\n")
-    scope = PathScope(names=local_names().allowing(result.get("submitter")))
     (bundle / SUMMARY_NAME).write_text(public_text(render_summary(result), scope), encoding="utf-8", newline="\n")
     return result

@@ -18,7 +18,7 @@ from pathlib import Path
 
 from mengine_bench import __version__, catalog
 from mengine_bench.bundle import RESULT_NAME, SUMMARY_NAME
-from mengine_bench.judge import OFFICIAL_JUDGE_EFFORT, OFFICIAL_JUDGE_MODEL
+from mengine_bench.judge import OFFICIAL_JUDGE_EFFORT, OFFICIAL_JUDGE_MODEL, RUBRIC_VERSION
 from mengine_bench.report import cost_text, hardware_short_text, time_text, tokens_text
 
 CONFIG_CELL_CHARS = 60
@@ -61,7 +61,8 @@ def _link(path: Path, base: Path) -> str:
     return Path(os.path.relpath(path.resolve(), base.resolve())).as_posix()
 
 
-def _major_minor(version: object) -> str:
+def major_minor(version: object) -> str:
+    """Runs compare within a bench major.minor; a patch changes no task, prompt or score."""
     return ".".join(str(version).split(".")[:2])
 
 
@@ -76,15 +77,16 @@ def is_complete_run(result: dict[str, object]) -> bool:
 
 def unranked_reason(result: dict[str, object]) -> str | None:
     """Why a run is not ranked, or None when it is."""
-    current = _major_minor(__version__)
-    if _major_minor(result.get("bench_version")) != current:
+    current = major_minor(__version__)
+    if major_minor(result.get("bench_version")) != current:
         return f"older bench {result.get('bench_version')}; only bench {current}.x runs are ranked"
     if not is_complete_run(result):
         return "incomplete: not exactly every catalog task once (a --tasks run, or a crash before the bundle)"
     judge = result.get("judge")
     if not isinstance(judge, dict):
         return "waiting for the judge (`mengine-bench judge`)"
-    used, official = f"{judge.get('model')}@{judge.get('effort')}", f"{OFFICIAL_JUDGE_MODEL}@{OFFICIAL_JUDGE_EFFORT}"
+    used = f"{judge.get('agent')} {judge.get('model')}@{judge.get('effort')} rubric {judge.get('rubric')}"
+    official = f"claude {OFFICIAL_JUDGE_MODEL}@{OFFICIAL_JUDGE_EFFORT} rubric {RUBRIC_VERSION}"
     if used != official:
         return f"judged by {used}; only {official} judges are ranked"
     return None

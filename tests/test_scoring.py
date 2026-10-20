@@ -126,3 +126,10 @@ def test_docs_worked_example() -> None:
                  "Time = 120 + 300 + 900 = 1320 s (22 min 00 s)", "Cost = 0.40 + 0.90 = >= $1.30 (harness)",
                  "(500,000 x 1.25 + 1,500,000 x 0.125 + 100,000 x 10) / 1,000,000 = $1.81"):
         assert line in " ".join(doc.split()), line
+
+
+def test_declared_free_inference_costs_zero_even_without_token_counts() -> None:
+    # `cmd` reports no usage; `--price 0` still declares a known $0 (#23 review).
+    run = score_run([outcome(step_usages=(None,)), outcome(task_id="b", step_usages=())], parse_price("0"))
+    assert (run.cost.usd, run.cost.basis, run.cost.lower_bound) == (0.0, "price", False)
+    assert [task.cost_usd for task in run.tasks] == [0.0, 0.0]

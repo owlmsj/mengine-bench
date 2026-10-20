@@ -101,6 +101,11 @@ class EvalTask:
         if bad:
             raise ValueError(f"task {self.id!r} received deliverables {bad}; expected workspace-relative paths")
 
+    @property
+    def render_target(self) -> str | None:
+        """The HTML deliverable the maintainer's judge renders (visual tasks), or None."""
+        return next((rel for rel in self.deliverables if rel.endswith(".html")), None)
+
 
 # --------------------------------------------------------------- helpers ----
 
