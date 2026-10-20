@@ -21,7 +21,7 @@ from pathlib import Path
 from mengine_bench import __version__
 from mengine_bench.bundle import RESULT_NAME, bundle_leaks
 from mengine_bench.redact import local_names
-from mengine_bench.report import cost_text, time_text
+from mengine_bench.report import config_text, cost_text, time_text
 
 UPSTREAM = "owlmsj/mengine-bench"
 UPSTREAM_BRANCH = "main"
@@ -54,8 +54,6 @@ def submission_problems(bundle: Path, result: Mapping[str, object]) -> list[str]
     problems = []
     if result.get("bench_version") != __version__:
         problems.append(f"received bench {result.get('bench_version')}; expected {__version__}: run with this bench")
-    if result.get("preflight") != []:
-        problems.append("the run did not start clean (result.json `preflight`); fix it and run again")
     submitter = result.get("submitter")
     names = local_names().allowing(submitter if isinstance(submitter, str) else None)
     problems += [f"privacy check: {name}: {', '.join(sorted(kinds))}" for name, kinds in
@@ -91,7 +89,8 @@ def pr_body(result: Mapping[str, object]) -> str:
         ("bench version and commit", f"{result['bench_version']} at {commit_text}"),
         ("machine", f"{environment.get('os')}, {environment.get('cpu')}, {environment.get('ram_gb')} GB RAM, "
                     f"GPU {environment.get('gpu') or 'none'}"),
-        ("preflight / privacy check", "clean / clean"),
+        ("config", config_text(result.get("config"))),
+        ("privacy check", "clean"),
     ]
     table = "\n".join(f"| {name} | {value} |" for name, value in rows)
     return ("Adds one result bundle, written by `mengine-bench run` and submitted with `mengine-bench submit`; "

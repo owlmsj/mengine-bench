@@ -65,24 +65,30 @@ def test_bundle_holds_result_summary_and_redacted_transcripts(fake_agent: FakeAg
     assert MARKER not in transcript and "[REDACTED:" in transcript
     assert env_secret not in transcript and "[REDACTED:env]" in transcript
     assert str(tmp_path) not in transcript and str(tmp_path) not in json.dumps(result)
-    assert result["preflight"] == [] and result["judge"] is None
-    assert "- Preflight: clean" in (bundle / "summary.md").read_text(encoding="utf-8")
+    assert result["config"] == {"personal_instructions": []} and result["judge"] is None
 
 
-def test_run_refuses_unclean_preflight_unless_allowed(fake_agent: FakeAgent, tmp_path: Path,
-                                                      monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cli, "contamination", lambda *args, **kwargs: ["claude global instructions: x"])
+def test_earlier_runs_block_and_personal_instructions_are_recorded(fake_agent: FakeAgent, tmp_path: Path,
+                                                                    monkeypatch: pytest.MonkeyPatch) -> None:
     template = json.loads(fake_agent("reference", REFERENCE_AGENT))
     template.remove("-I")
     argv = ["run", "--agent", "cmd", "--cmd", json.dumps(template), "--model", "fake/ref",
             "--tasks", TASK, "--out", str(tmp_path / "results")]
-    with pytest.raises(SystemExit, match="1 preflight finding"):
+    monkeypatch.setattr(cli, "blocking_problems", lambda *args, **kwargs: ["earlier run left on disk: x"])
+    with pytest.raises(SystemExit, match="1 earlier run"):
         cli.main(argv)
     assert not (tmp_path / "results").exists(), "a refused run launches nothing"
-    assert cli.main([*argv, "--allow-unclean"]) == 0
+    with pytest.raises(SystemExit):
+        cli.main([*argv, "--allow-unclean"])
+    monkeypatch.setattr(cli, "blocking_problems", lambda *args, **kwargs: [])
+    monkeypatch.setattr(cli, "personal_instructions", lambda *args, **kwargs: ["~/.claude/CLAUDE.md"])
+    assert cli.main(argv) == 0
     [result_file] = (tmp_path / "results").glob("*/result.json")
-    assert json.loads(result_file.read_text(encoding="utf-8"))["preflight"] == ["claude global instructions: x"]
-    assert "NOT CLEAN, not ranked" in (result_file.parent / "summary.md").read_text(encoding="utf-8")
+    result = json.loads(result_file.read_text(encoding="utf-8"))
+    assert result["config"]["personal_instructions"] == ["~/.claude/CLAUDE.md"]
+    assert "preflight" not in result
+    assert "personal_instructions=~/.claude/CLAUDE.md" in (result_file.parent / "summary.md").read_text(
+        encoding="utf-8")
 
 
 def test_privacy_check_fails_on_a_leak_and_names_only_file_and_kind(tmp_path: Path,
@@ -155,18 +161,6 @@ def test_leaderboard_lists_runs_waiting_for_the_judge_apart(tmp_path: Path) -> N
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 0
     assert board.unranked == [("results/pending", "waiting for the judge (`mengine-bench judge`)")]
-
-
-def test_leaderboard_lists_unclean_runs_apart(tmp_path: Path) -> None:
-    results = tmp_path / "results"
-    bundle = _write_result(results, "unclean", 99.0, judge="j@x")
-    result = json.loads((bundle / "result.json").read_text(encoding="utf-8"))
-    result["preflight"] = ["codex global instructions: <HOME>/.codex/AGENTS.md"]
-    (bundle / "result.json").write_text(json.dumps(result), encoding="utf-8")
-    _write_result(results, "clean", 50.0, judge="j@x")
-    board = leaderboard.build_leaderboard(results, tmp_path)
-    assert board.ranked == 1
-    assert board.unranked == [("results/unclean", "started with preflight findings")]
 
 
 def test_leaderboard_ranks_only_runs_of_the_current_bench(tmp_path: Path) -> None:

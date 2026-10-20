@@ -17,7 +17,8 @@ GIT = shutil.which("git")
 
 def _result(**overrides: object) -> dict[str, object]:
     result: dict[str, object] = {
-        "bench_version": __version__, "preflight": [], "submitter": "dquill",
+        "bench_version": __version__, "submitter": "dquill",
+        "config": {"personal_instructions": ["~/.codex/AGENTS.md"], "provider": "openai"},
         "agent": {"name": "codex", "model": "gpt-x", "effort": "low", "version": "codex-cli 1.0"},
         "judge": None,
         "totals": {"score": 88.5, "correct": 90.0, "solved": 12, "total": 14, "time_s": 500.0, "judge": 85.0,
@@ -43,14 +44,12 @@ def test_title_and_body_come_from_result_json() -> None:
     assert submit.pr_title(result) == "results: codex gpt-x low"
     body = submit.pr_body(result)
     for expected in ("| agent CLI and version | codex codex-cli 1.0 |", "| judge | pending: the maintainer runs `mengine-bench judge` on review |",
-                     "| Correct % / solved | 90.0 / 12/14 |", "| Cost | >= $3.20 (price) |", "| Time | 8 min 20 s |", "| preflight / privacy check | clean"):
+                     "| Correct % / solved | 90.0 / 12/14 |", "| Cost | >= $3.20 (price) |", "| Time | 8 min 20 s |", "| config | personal_instructions=~/.codex/AGENTS.md; provider=openai |"):
         assert expected in body
 
 
 @pytest.mark.parametrize(("overrides", "summary", "reason"), [
     ({"bench_version": "0.0.1"}, "clean\n", "received bench 0.0.1"),
-    ({"preflight": ["codex global instructions: x"]}, "clean\n", "did not start clean"),
-    ({"preflight": None}, "clean\n", "did not start clean"),
     ({}, "cwd " + "C:" + "\\Users\\" + "dana" + "\\x\n", "privacy check: summary.md: home path"),
 ])
 def test_unpublishable_bundles_are_refused(tmp_path: Path, overrides: dict[str, object], summary: str,
@@ -137,5 +136,5 @@ def test_run_submit_fails_before_running_without_gh(monkeypatch: pytest.MonkeyPa
         cli.main(["run", "--agent", "cmd", "--cmd", "x {prompt_file}", "--model", "m", "--submit",
                   "--out", str(tmp_path / "results")])
     assert not (tmp_path / "results").exists()
-    with pytest.raises(SystemExit, match="--allow-unclean"):
+    with pytest.raises(SystemExit):
         cli.main(["run", "--agent", "cmd", "--cmd", "x {prompt_file}", "--model", "m", "--submit", "--allow-unclean"])

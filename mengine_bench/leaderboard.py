@@ -84,9 +84,6 @@ def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
         if not is_complete_run(result):
             unranked.append((_link(bundle, link_base), "not exactly the catalog's task set"))
             continue
-        if result.get("preflight"):
-            unranked.append((_link(bundle, link_base), "started with preflight findings"))
-            continue
         if not isinstance(result.get("judge"), dict):
             unranked.append((_link(bundle, link_base), "waiting for the judge (`mengine-bench judge`)"))
             continue

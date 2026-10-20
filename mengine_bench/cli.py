@@ -17,7 +17,7 @@ from mengine_bench.bundle import bundle_leaks, run_scope, write_bundle
 from mengine_bench.bundle_judge import judge_bundle
 from mengine_bench.core import EvalTask, scratch_root
 from mengine_bench.leaderboard import build_leaderboard
-from mengine_bench.preflight import contamination
+from mengine_bench.preflight import blocking_problems, personal_instructions
 from mengine_bench.redact import LocalNames, local_names
 from mengine_bench.report import (
     SUMMARIES_BEGIN, SUMMARIES_END, cost_text, render_task_summaries, render_tasks_table, replace_tasks_table,
@@ -56,8 +56,6 @@ def _parser() -> argparse.ArgumentParser:
                      help="after a clean run, open the pull request with the bundle (needs gh, logged in)")
     run.add_argument("--work", type=Path, help="workspace root, kept after the run (default: a temp dir, removed "
                                                "once the bundle is written)")
-    run.add_argument("--allow-unclean", action="store_true",
-                     help="run despite preflight findings; they are recorded and the run is not ranked")
     run.add_argument("--dry-run", action="store_true", help="print the plan and the preflight findings; run nothing")
     sub.add_parser("list", help="list the tasks")
     board = sub.add_parser("leaderboard", help="rank results/*/result.json into LEADERBOARD.md")
@@ -146,8 +144,6 @@ def _run(args: argparse.Namespace) -> int:
         config: dict[str, object] = dict(parse_config(args.config))
     except ValueError as error:
         raise SystemExit(f"error: {error}") from error
-    if args.submit and args.allow_unclean:
-        raise SystemExit("error: received --submit with --allow-unclean; expected a clean run to publish")
     if args.submit and not args.dry_run:
         # Fail before the run, not 30 minutes later.
         try:
@@ -160,25 +156,29 @@ def _run(args: argparse.Namespace) -> int:
     # could read the gold checks in mengine_bench/tasks.
     scratch = scratch_root()
     work = (args.work or scratch / "runs" / stamp).resolve()
-    problems = contamination(args.agent, work, scratch, env=os.environ)
+    problems = blocking_problems(scratch, work)
     for problem in problems:
         print(f"preflight: {problem}")
+    # #23: personal instruction files are part of the configuration under test: recorded, never blocking.
+    config["personal_instructions"] = personal_instructions(args.agent, work, env=os.environ)
+    for found in config["personal_instructions"]:  # type: ignore[union-attr]
+        print(f"preflight warning: personal instructions in use, recorded in config: {found}")
     if args.dry_run:
         plan = {"agent": args.agent, "model": args.model, "effort": args.effort,
                 "judge": "on review (maintainer: mengine-bench judge)", "tasks": [task.id for task in tasks],
                 "dry_run": True, "launches": 0,
-                "preflight": "clean" if not problems else f"{len(problems)} finding(s)"}
+                "preflight": "clean" if not problems else f"blocked by {len(problems)} earlier run(s)",
+                "config": config}
         print(json.dumps(plan))
         return 0
-    if problems and not args.allow_unclean:
-        raise SystemExit(f"error: received {len(problems)} preflight finding(s) above; expected a clean run "
-                         f"(README, 'Run hygiene'), or --allow-unclean to record them and stay unranked")
+    if problems:
+        raise SystemExit(f"error: received {len(problems)} earlier run(s) on disk above; expected none, since an "
+                         f"agent could read their solutions: delete them (README, 'Run hygiene') and run again")
     agent = make_agent(args.agent, args.model, args.effort, args.cmd)
     evidence = JudgeEvidence()
     settings = RunSettings(model=args.model, effort=args.effort, submitter=args.submitter, price=price,
                            config=config)
     results = run_tasks(tasks, agent, settings, work, evidence)
-    results["preflight"] = problems
     transcripts = {task.id: work / task.id / "transcripts" for task in tasks}
     scope = run_scope(work, local_names().allowing(args.submitter))
     bundle = write_bundle(results, args.out, transcripts, scope, evidence.packets, evidence.deliverables)

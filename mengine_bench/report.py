@@ -143,14 +143,6 @@ def _commit_text(commit: object) -> str:
     return f"{str(commit['sha'])[:12]}{' (dirty tree)' if commit.get('dirty') else ''}"
 
 
-def _preflight_text(results: Mapping[str, object]) -> str:
-    found = results.get("preflight")
-    if found is None:
-        return "not recorded"
-    assert isinstance(found, list)
-    return "clean" if not found else "NOT CLEAN, not ranked: " + "; ".join(str(item) for item in found)
-
-
 def config_text(config: object) -> str:
     """'key=value, ...' of the declared config and the recorded personal instruction files."""
     if not isinstance(config, dict) or not config:
@@ -196,7 +188,6 @@ def render_summary(results: Mapping[str, object]) -> str:
         f"- Judge: {judge_text(results.get('judge'))}",
         f"- Config: {config_text(results.get('config'))}",
         f"- Machine: {_machine_os(results.get('environment'))}, {hardware_text(results.get('environment'))}",
-        f"- Preflight: {_preflight_text(results)}",
         f"- Run: {results['date']}, started {_fmt(results.get('started_at'))}; bench at "
         f"{_commit_text(results.get('bench_commit'))}; submitter {_fmt(results.get('submitter'))}",
         "",
