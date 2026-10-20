@@ -248,8 +248,10 @@ def _recon_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     ids = sorted(str(m.get("id")) for m in mism if isinstance(m, dict))
     result.add("mismatched amounts", ids == RECON["mismatched"])
     invoiced = {i: v for i, _, v in _invoices()}
+    paid = {"INV-1021": round(invoiced["INV-1021"] - 250.0, 2), "INV-1036": round(invoiced["INV-1036"] * 0.9, 2)}
     result.add("invoiced vs paid on mismatches", ids == RECON["mismatched"] and all(
-        close(m.get("invoiced"), invoiced[str(m.get("id"))], 0.01) for m in mism if isinstance(m, dict)))
+        close(m.get("invoiced"), invoiced[str(m.get("id"))], 0.01)
+        and close(m.get("paid"), paid[str(m.get("id"))], 0.01) for m in mism if isinstance(m, dict)))
     return result
 
 

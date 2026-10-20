@@ -8,6 +8,7 @@ own reference would fail every agent.
 from __future__ import annotations
 
 import importlib
+import json
 from pathlib import Path
 from types import ModuleType
 
@@ -103,3 +104,37 @@ def test_ecs_modified_visible_tests_fail_integrity(tmp_path: Path) -> None:
     assert result.mandatory == [("visible tests left untouched", False)]
     assert all(ok for _, ok in result.checks)
     assert not result.passed
+
+
+@pytest.mark.parametrize("invoice_id", ["INV-1021", "INV-1036"])
+@pytest.mark.parametrize("wrong_paid", [0, "not a number", None])
+def test_reconcile_rejects_wrong_paid(
+    tmp_path: Path, invoice_id: str, wrong_paid: object,
+) -> None:
+    from mengine_bench.tasks import business
+
+    business._recon_setup(tmp_path)
+    business._recon_reference(tmp_path)
+    output = tmp_path / "reconciliation.json"
+    reconciliation = json.loads(output.read_text(encoding="utf-8"))
+    for mismatch in reconciliation["mismatched"]:
+        if mismatch["id"] == invoice_id:
+            mismatch["paid"] = wrong_paid
+    output.write_text(json.dumps(reconciliation), encoding="utf-8")
+    result = business._recon_check(tmp_path, [""])
+    assert not result.passed
+    assert "invoiced vs paid on mismatches" in result.failed()
+
+
+@pytest.mark.parametrize("delta,expected", [(0.005, True), (0.02, False)])
+def test_reconcile_paid_cent_tolerance(tmp_path: Path, delta: float, expected: bool) -> None:
+    from mengine_bench.tasks import business
+
+    business._recon_setup(tmp_path)
+    business._recon_reference(tmp_path)
+    output = tmp_path / "reconciliation.json"
+    reconciliation = json.loads(output.read_text(encoding="utf-8"))
+    for mismatch in reconciliation["mismatched"]:
+        mismatch["paid"] += delta
+    output.write_text(json.dumps(reconciliation), encoding="utf-8")
+    assert business._recon_check(tmp_path, [""]).passed is expected
