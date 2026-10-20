@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from mengine_bench import visual
-from mengine_bench.core import FAST, FULL, EvalTask
+from mengine_bench.core import FAST, FULL, EvalTask, run_hidden_tests
 from mengine_bench.tasks import ir, longrepo
 from mengine_bench.tasks import visual as visual_tasks
 
@@ -97,7 +97,7 @@ def test_longrepo_scores_hidden_scenarios_separately(tmp_path: Path) -> None:
     (tmp_path / loader).write_text(longrepo.FILES[loader], encoding="utf-8")
     result = longrepo._check(tmp_path, [""])
     checks = dict(result.checks)
-    assert not checks["hidden visible scenario"]
+    assert not checks["hidden config override and persistence"]
     assert not checks["hidden env float wins over file"]
     assert checks["hidden round trip keeps everything"]
     assert 0 < result.score < 1
@@ -112,3 +112,27 @@ def test_longrepo_modified_existing_tests_fail_integrity(tmp_path: Path) -> None
     assert result.mandatory == [("existing tests untouched", False)]
     assert all(ok for _, ok in result.checks)
     assert not result.passed
+
+
+def test_longrepo_fixture_already_rounds_halves_up(tmp_path: Path) -> None:
+    longrepo._setup(tmp_path)
+    rounding_test = """import unittest
+from arena_server.economy.payout import match_payout
+
+class PayoutContract(unittest.TestCase):
+    def test_documented_half_up_examples(self):
+        for raw, expected in ((1425, 1430), (1585, 1590)):
+            cfg = {"win_base": raw, "loss_base": 600, "kill_bonus": 50, "event_multiplier": 1.0}
+            self.assertEqual(match_payout(True, 0, cfg), expected)
+"""
+    ok, output = run_hidden_tests(tmp_path, rounding_test)
+    assert ok, output
+
+
+def test_longrepo_reference_fixes_only_two_modules(tmp_path: Path) -> None:
+    longrepo._setup(tmp_path)
+    answers = longrepo._reference(tmp_path)
+    changed = {rel for rel, original in longrepo.FILES.items()
+               if (tmp_path / rel).read_text(encoding="utf-8") != original}
+    assert changed == {"arena_server/config/loader.py", "arena_server/persistence/codec.py"}
+    assert longrepo._check(tmp_path, answers).passed

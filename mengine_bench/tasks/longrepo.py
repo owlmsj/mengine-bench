@@ -1,9 +1,8 @@
 """Long-horizon one-shot task: ~100-file game server, integration-only bug.
 
-Three layered bugs across three modules (config precedence, payout rounding,
-profile codec). Unit tests pass; the visible integration test fails; fixing one
-bug reveals the next. The rounding bug does not change the visible scenario at
-all: only reading docs/ECONOMY.md finds it, and the hidden scenarios catch it.
+Two layered bugs across two modules (config precedence and profile codec).
+Unit tests pass; the visible integration test fails; fixing one bug reveals
+the next. Payout rounding already follows docs/ECONOMY.md.
 Ported from the private suite with a neutral test profile.
 """
 
@@ -73,11 +72,13 @@ class Profile:
     "arena_server/economy/__init__.py": "",
     "arena_server/economy/payout.py": '''"""Match payout. Rules live in docs/ECONOMY.md."""
 
+import math
+
 
 def match_payout(won, kills, cfg):
     base = cfg["win_base"] if won else cfg["loss_base"]
     raw = (base + kills * cfg["kill_bonus"]) * cfg["event_multiplier"]
-    return int(round(raw / 10) * 10)
+    return int(math.floor(raw / 10 + 0.5) * 10)
 ''',
     "arena_server/economy/legacy_payout.py": '''"""DEPRECATED since 0.12 - kept for old replays only; not used by the live economy."""
 
@@ -231,11 +232,8 @@ def play(cfg_file_data, env, won, kills, credits=0):
 
 
 class Hidden(unittest.TestCase):
-    def test_visible_scenario(self):
+    def test_config_override_and_persistence(self):
         self.assertEqual(play({"kill_bonus": 50, "event_multiplier": 1.25}, {"ARENA_KILL_BONUS": "75"}, True, 5, 100).credits, 1690)
-
-    def test_half_rounds_up(self):
-        self.assertEqual(play(None, {"ARENA_KILL_BONUS": "75"}, True, 7).credits, 1430)
 
     def test_env_float_wins_over_file(self):
         self.assertEqual(play({"event_multiplier": 1.1}, {"ARENA_EVENT_MULTIPLIER": "1.5"}, False, 2).credits, 1050)
@@ -263,7 +261,7 @@ def _check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     untouched = all(_sha(read(ws, rel) or "") == _sha(FILES[rel]) for rel in PROTECTED)
     result.mandatory.append(("existing tests untouched", untouched))
-    for scenario in ("visible_scenario", "half_rounds_up", "env_float_wins_over_file", "round_trip_keeps_everything"):
+    for scenario in ("config_override_and_persistence", "env_float_wins_over_file", "round_trip_keeps_everything"):
         selection = ("\n\ndef load_tests(loader, tests, pattern):\n"
                      f"    return unittest.TestSuite([Hidden('test_{scenario}')])\n")
         ok, _ = run_hidden_tests(ws, HIDDEN + selection)
@@ -288,26 +286,22 @@ def _reference(ws: Path) -> list[str]:
         if value is not None:
             cfg[key] = _coerce(value, default)
 ''')
-    payout = FILES["arena_server/economy/payout.py"].replace(
-        "    return int(round(raw / 10) * 10)\n", "    return int(math.floor(raw / 10 + 0.5) * 10)\n"
-    ).replace('"""Match payout. Rules live in docs/ECONOMY.md."""\n', '"""Match payout. Rules live in docs/ECONOMY.md."""\n\nimport math\n')
     codec = FILES["arena_server/persistence/codec.py"].replace(
         'Profile(name=data["name"], level=data.get("level", 1), cosmetics=data.get("cosmetics", []))',
         'Profile(name=data["name"], level=data.get("level", 1), credits=data.get("credits", 0),\n'
         '                   cosmetics=data.get("cosmetics", []))')
     write(ws, "arena_server/config/loader.py", loader)
-    write(ws, "arena_server/economy/payout.py", payout)
     write(ws, "arena_server/persistence/codec.py", codec)
-    return ["fixed loader precedence, half-up rounding, codec credits"]
+    return ["fixed loader precedence and codec credits"]
 
 
 TASKS = [
     EvalTask(
         id="gd-integration-repo", category="gamedev", suites=frozenset({FAST, FULL}),
-        provenance="Long-horizon SWE: ~100-file game backend, 3 layered bugs only visible end to end; spec in docs/",
-        summary="ONE-SHOT LONG: ~100-file repo, 3 layered bugs that only the integration test and the spec reveal",
+        provenance="Long-horizon SWE: ~100-file game backend, 2 layered bugs only visible end to end; spec in docs/",
+        summary="Fix configuration priority and saved player credits in a game server without changing existing tests.",
         setup=_setup, check=_check, reference=_reference,
-        # Long-horizon: three layered bugs across modules in a single request.
+        # Long-horizon: two layered bugs across modules in a single request.
         weight=2,
         # Par: DeepSeek V4.1 Flash one-shot run, 89 s (private v1 FAST runs, 2026-09-24).
         par_s=89.0, timeout_s=900,

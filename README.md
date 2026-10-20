@@ -137,7 +137,7 @@ modeled on. Generated from the catalog; par time provenance and multi-step rules
 
 - `gd-astar-doors` (FAST, FULL; weight 1; par 19 s): Implement minimum-cost pathfinding (doors cost 3) on a tile map; hidden tests. Scenario: Terminal-Bench style: implement + hidden tests; A* with weighted doors on a Pixel Arena tile map.
 - `gd-ecs-collision-bug` (FAST, FULL; weight 1; par 12 s): Find and fix 2 bugs (movement and AABB collision) in a multi-file ECS without touching the tests. Scenario: SWE-bench style debug: two planted bugs across an ECS package; visible tests must stay untouched.
-- `gd-integration-repo` (FAST, FULL; weight 2; par 89 s): ONE-SHOT LONG: ~100-file repo, 3 layered bugs that only the integration test and the spec reveal. Scenario: Long-horizon SWE: ~100-file game backend, 3 layered bugs only visible end to end; spec in docs/.
+- `gd-integration-repo` (FAST, FULL; weight 2; par 89 s): Fix configuration priority and saved player credits in a game server without changing existing tests.. Scenario: Long-horizon SWE: ~100-file game backend, 2 layered bugs only visible end to end; spec in docs/.
 
 **retrieval**
 

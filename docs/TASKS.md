@@ -56,7 +56,7 @@ only an OS sandbox around the agent closes that (docs/SCORING.md).
 | ds-sql-funnel | fast, full | data-science | 2 | 23 | Count players at each ordered funnel step in SQLite, excluding test accounts and duplicates, by platform. |
 | ir-studio-wiki | fast, full | retrieval | 1 | 14.6 | Answer 5 multi-hop facts from a studio wiki with distractors, citing files |
 | ir-server-logs | full | retrieval | 1 | 29.2 | Game server log forensics: incident window, root cause and monthly SLO |
-| gd-integration-repo | fast, full | gamedev | 2 | 89 | ONE-SHOT LONG: ~100-file repo, 3 layered bugs that only the integration test and the spec reveal |
+| gd-integration-repo | fast, full | gamedev | 2 | 89 | Fix configuration priority and saved player credits in a game server without changing existing tests. |
 | web-mondrian-landing | fast, full | web-design | 2 | 345 | ONE-SHOT: research the painting and ship a Mondrian-style landing page; checks + vision checklist |
 | 3d-voxel-landscape | fast, full | 3d | 2 | 295 | ONE-SHOT: three.js voxel/low poly scene of Fuji with pagoda and cherry trees; checks + vision checklist |
 <!-- tasks:end -->
