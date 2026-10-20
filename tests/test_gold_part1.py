@@ -182,7 +182,7 @@ def test_handoff_accepts_answer_tokens_in_prose(tmp_path: Path, key: str, valid:
 def test_funnel_counts_ordered_steps_without_expiry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from mengine_bench.tasks import hard
+    from mengine_bench.tasks import funnel
 
     users = [("p", "pc", 0), ("q", "pc", 0), ("s", "steamdeck", 0), ("test", "pc", 1)]
     events = [
@@ -197,7 +197,7 @@ def test_funnel_counts_ordered_steps_without_expiry(
         ("q", "tutorial_complete", "2026-01-04 00:00:00"),
     ]
     events += [(uid, step, "2026-01-01 00:00:00")
-               for uid in ("s", "test", "ghost") for step in hard.FUNNEL]
+               for uid in ("s", "test", "ghost") for step in funnel.FUNNEL]
     events += [("s", "purchase", "2026-01-01 00:00:00")]
     monkeypatch.setattr(hard, "_funnel_rows", lambda: (users, list(reversed(events))))
     expected = [
@@ -206,10 +206,10 @@ def test_funnel_counts_ordered_steps_without_expiry(
         ("steamdeck", "install", 1, 1.0), ("steamdeck", "tutorial_complete", 1, 1.0),
         ("steamdeck", "first_match", 1, 1.0), ("steamdeck", "purchase", 1, 1.0),
     ]
-    assert hard._funnel_expected() == expected
-    hard._funnel_setup(tmp_path)
-    assert not hard._funnel_check(tmp_path, [""]).passed
-    assert hard._funnel_check(tmp_path, hard._funnel_reference(tmp_path)).passed
+    assert funnel._funnel_expected() == expected
+    funnel._funnel_setup(tmp_path)
+    assert not funnel._funnel_check(tmp_path, [""]).passed
+    assert funnel._funnel_check(tmp_path, funnel._funnel_reference(tmp_path)).passed
     csv_text = "platform,step,users,conv_from_prev\n" + "".join(
         f"{platform},{step},{count},{conversion:.4f}\n" for platform, step, count, conversion in expected
     )
