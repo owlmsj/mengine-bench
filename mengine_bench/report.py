@@ -6,14 +6,9 @@ never local paths. Bundles (bundle.py) add redacted transcripts next to them.
 
 from __future__ import annotations
 
-import platform
-import shutil
-import subprocess
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import TypedDict
-
-import psutil
 
 from mengine_bench import __version__
 from mengine_bench.core import EvalTask
@@ -62,30 +57,6 @@ def usage_record(usage: Usage | None) -> dict[str, object] | None:
     return {"input_tokens": usage.input_tokens, "cached_input_tokens": usage.cached_input_tokens,
             "output_tokens": usage.output_tokens, "reasoning_tokens": usage.reasoning_tokens,
             "cost_usd": usage.cost_usd, "cost_source": usage.cost_source}
-
-
-def _gpu_name() -> str | None:
-    smi = shutil.which("nvidia-smi")
-    if smi is None:
-        return None
-    try:
-        proc = subprocess.run([smi, "--query-gpu=name", "--format=csv,noheader"], capture_output=True, text=True,
-                              timeout=10, check=False)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    names = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-    return ", ".join(names) if proc.returncode == 0 and names else None
-
-
-def collect_environment() -> dict[str, object]:
-    return {
-        "os": f"{platform.system()} {platform.release()}",
-        "cpu": platform.processor() or platform.machine(),
-        "cpu_count": psutil.cpu_count(logical=True),
-        "ram_gb": round(psutil.virtual_memory().total / 2**30, 1),
-        "gpu": _gpu_name(),
-        "python": platform.python_version(),
-    }
 
 
 def _tokens_record(tokens: TokenTotals) -> dict[str, int]:
@@ -180,10 +151,32 @@ def _preflight_text(results: Mapping[str, object]) -> str:
     return "clean" if not found else "NOT CLEAN, not ranked: " + "; ".join(str(item) for item in found)
 
 
+def config_text(config: object) -> str:
+    """'key=value, ...' of the declared config and the recorded personal instruction files."""
+    if not isinstance(config, dict) or not config:
+        return "none declared"
+    parts = []
+    for key, value in config.items():
+        shown = ", ".join(str(item) for item in value) if isinstance(value, list) else str(value)
+        parts.append(f"{key}={shown or 'none'}")
+    return "; ".join(parts)
+
+
+def hardware_text(environment: object) -> str:
+    if not isinstance(environment, dict):
+        return "-"
+    return (f"{environment.get('cpu')} ({environment.get('cpu_count')} threads), {environment.get('ram_gb')} GB RAM, "
+            f"GPU {environment.get('gpu')}")
+
+
 def judge_text(judge: object) -> str:
     if not isinstance(judge, dict):
         return JUDGE_PENDING
     return f"{judge.get('model')}@{judge.get('effort') or 'default'}, rubric {judge.get('rubric')}"
+
+
+def _machine_os(environment: object) -> str:
+    return str(environment.get("os")) if isinstance(environment, dict) else "-"
 
 
 def render_summary(results: Mapping[str, object]) -> str:
@@ -201,6 +194,8 @@ def render_summary(results: Mapping[str, object]) -> str:
         f"{tokens_text(totals.get('tokens'))} |",
         "",
         f"- Judge: {judge_text(results.get('judge'))}",
+        f"- Config: {config_text(results.get('config'))}",
+        f"- Machine: {_machine_os(results.get('environment'))}, {hardware_text(results.get('environment'))}",
         f"- Preflight: {_preflight_text(results)}",
         f"- Run: {results['date']}, started {_fmt(results.get('started_at'))}; bench at "
         f"{_commit_text(results.get('bench_commit'))}; submitter {_fmt(results.get('submitter'))}",

@@ -16,12 +16,24 @@ from pathlib import Path
 from mengine_bench.bundle import bench_commit
 from mengine_bench.core import EvalTask
 from mengine_bench.judge import JudgeContext, workspace_diff
-from mengine_bench.report import RunMeta, TaskDetail, build_results, collect_environment, usage_record
+from mengine_bench.environment import collect_environment
+from mengine_bench.report import RunMeta, TaskDetail, build_results, usage_record
 from mengine_bench.runner.agents import Agent
 from mengine_bench.runner.task_run import TaskRunRecord, run_task, snapshot
 from mengine_bench.scoring import Price, TaskOutcome, score_run
 
 TRANSCRIPT_TAIL_CHARS = 4_000
+
+
+@dataclass(frozen=True)
+class RunSettings:
+    """What the submitter declared for the run; recorded, never applied to the harness except model/effort."""
+
+    model: str
+    effort: str | None
+    submitter: str | None = None
+    price: Price | None = None
+    config: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass
@@ -33,8 +45,8 @@ class JudgeEvidence:
     deliverables: dict[str, dict[str, Path]] = field(default_factory=dict)
 
 
-def run_tasks(tasks: Sequence[EvalTask], agent: Agent, model: str, effort: str | None, work: Path,
-              submitter: str | None, price: Price | None, evidence: JudgeEvidence) -> dict[str, object]:
+def run_tasks(tasks: Sequence[EvalTask], agent: Agent, settings: RunSettings, work: Path,
+              evidence: JudgeEvidence) -> dict[str, object]:
     """Run and grade every task; `evidence` collects the judge packets and deliverables."""
     started_at = _utc_now()
     outcomes: list[TaskOutcome] = []
@@ -54,10 +66,11 @@ def run_tasks(tasks: Sequence[EvalTask], agent: Agent, model: str, effort: str |
         outcomes.append(_outcome(task, record))
         correct = record.check.score if record.check is not None and record.status == "ok" else 0.0
         print(f"[{task.id}] {record.status} c={correct:.2f} t={record.agent_s:.1f}s", flush=True)
-    run = score_run(outcomes, price)
-    meta = RunMeta(date=datetime.now().strftime("%Y-%m-%d"), agent=agent.name, model=model, effort=effort,
-                   agent_version=agent.version(), run_id=uuid.uuid4().hex[:8], started_at=started_at,
-                   finished_at=_utc_now(), submitter=submitter, price=price)
+    run = score_run(outcomes, settings.price)
+    meta = RunMeta(date=datetime.now().strftime("%Y-%m-%d"), agent=agent.name, model=settings.model,
+                   effort=settings.effort, agent_version=agent.version(), run_id=uuid.uuid4().hex[:8],
+                   started_at=started_at, finished_at=_utc_now(), submitter=settings.submitter,
+                   price=settings.price, config=settings.config)
     return build_results(meta, run, details, collect_environment(), bench_commit())
 
 

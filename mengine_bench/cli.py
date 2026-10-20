@@ -23,7 +23,8 @@ from mengine_bench.report import (
     SUMMARIES_BEGIN, SUMMARIES_END, cost_text, render_task_summaries, render_tasks_table, replace_tasks_table,
     time_text,
 )
-from mengine_bench.run_command import JudgeEvidence, run_tasks
+from mengine_bench.environment import parse_config
+from mengine_bench.run_command import JudgeEvidence, RunSettings, run_tasks
 from mengine_bench.runner.agents import AGENT_NAMES, make_agent
 from mengine_bench.scoring import parse_price
 from mengine_bench.submit import SubmitError, gh_login, submit
@@ -46,6 +47,9 @@ def _parser() -> argparse.ArgumentParser:
                      help="comma-separated task ids, for debugging; such a run is never ranked (default: every task)")
     run.add_argument("--price", help="USD per million tokens when the harness reports no USD: "
                                      "input=X,cached=Y,output=Z, or 0 for free/local inference")
+    run.add_argument("--config", action="append", default=[], metavar="KEY=VALUE",
+                     help="declared setup, repeatable, recorded in result.json and never applied "
+                          "(e.g. provider=local, quant=Q4_K_M, ctx=256k, mcp=none)")
     run.add_argument("--out", type=Path, default=Path("results"), help="bundles go to <out>/<run>/")
     run.add_argument("--submitter", help="public credit in result.json (default with --submit: your GitHub login)")
     run.add_argument("--submit", action="store_true",
@@ -139,6 +143,7 @@ def _run(args: argparse.Namespace) -> int:
         raise SystemExit("error: received --agent cmd without --cmd; expected an argv template with {prompt_file}")
     try:
         price = None if args.price is None else parse_price(args.price)
+        config: dict[str, object] = dict(parse_config(args.config))
     except ValueError as error:
         raise SystemExit(f"error: {error}") from error
     if args.submit and args.allow_unclean:
@@ -170,7 +175,9 @@ def _run(args: argparse.Namespace) -> int:
                          f"(README, 'Run hygiene'), or --allow-unclean to record them and stay unranked")
     agent = make_agent(args.agent, args.model, args.effort, args.cmd)
     evidence = JudgeEvidence()
-    results = run_tasks(tasks, agent, args.model, args.effort, work, args.submitter, price, evidence)
+    settings = RunSettings(model=args.model, effort=args.effort, submitter=args.submitter, price=price,
+                           config=config)
+    results = run_tasks(tasks, agent, settings, work, evidence)
     results["preflight"] = problems
     transcripts = {task.id: work / task.id / "transcripts" for task in tasks}
     scope = run_scope(work, local_names().allowing(args.submitter))
