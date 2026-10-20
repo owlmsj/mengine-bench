@@ -50,6 +50,10 @@ class Invocation:
 
 @dataclass(frozen=True)
 class Usage:
+    """Token counts share one meaning across harnesses (#23): input_tokens is
+    every prompt token including cache reads and writes, as Codex reports it;
+    cached_input_tokens is the part read from cache."""
+
     input_tokens: int | None
     cached_input_tokens: int | None
     output_tokens: int | None
@@ -103,7 +107,8 @@ def _claude_usage(final: Mapping[str, object]) -> Usage:
     details = _usage_mapping(usage.get("output_tokens_details"))
     cost = _usd_cost(final.get("total_cost_usd"))
     return Usage(
-        _known_sum([_token_count(usage.get("input_tokens")), _token_count(usage.get("cache_creation_input_tokens"))]),
+        _known_sum([_token_count(usage.get("input_tokens")), _token_count(usage.get("cache_creation_input_tokens")),
+                    _token_count(usage.get("cache_read_input_tokens"))]),
         _token_count(usage.get("cache_read_input_tokens")), _token_count(usage.get("output_tokens")),
         _token_count(details.get("thinking_tokens")), cost, "harness" if cost is not None else "none",
     )
@@ -111,7 +116,6 @@ def _claude_usage(final: Mapping[str, object]) -> Usage:
 
 def _codex_usage(event: Mapping[str, object]) -> Usage:
     usage = _usage_mapping(event.get("usage"))
-    # Preserve raw Codex input_tokens, which includes cached input (#23).
     return Usage(_token_count(usage.get("input_tokens")), _token_count(usage.get("cached_input_tokens")),
                  _token_count(usage.get("output_tokens")), _token_count(usage.get("reasoning_output_tokens")),
                  None, "none")
@@ -123,7 +127,8 @@ def _opencode_usage(part: object) -> Usage:
     cache = _usage_mapping(tokens.get("cache"))
     cost = _usd_cost(finish.get("cost"))
     return Usage(
-        _known_sum([_token_count(tokens.get("input")), _token_count(cache.get("write"))]),
+        _known_sum([_token_count(tokens.get("input")), _token_count(cache.get("write")),
+                    _token_count(cache.get("read"))]),
         _token_count(cache.get("read")), _token_count(tokens.get("output")),
         _token_count(tokens.get("reasoning")), cost, "harness" if cost is not None else "none",
     )

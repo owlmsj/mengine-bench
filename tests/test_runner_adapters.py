@@ -276,7 +276,7 @@ def test_claude_real_usage() -> None:
                   "output_tokens_details": {"thinking_tokens": 40}}, "num_turns": 1,
     }]), 0)
     from mengine_bench.runner.agents import Usage
-    assert parsed.usage == Usage(17539, 16405, 44, 40, 0.00369365, "harness")
+    assert parsed.usage == Usage(33944, 16405, 44, 40, 0.00369365, "harness")
 
 
 @pytest.mark.parametrize("answer", ["", "   ", "\n\t"])
@@ -304,7 +304,7 @@ def test_opencode_usage_sums_steps(partial: bool) -> None:
         events.append({"type": "step_start"})
     events.append({"type": "text", "part": {"text": "done"}})
     assert parse_opencode_jsonl(_jsonl(events), 0).usage == Usage(
-        26, 14, 10, 4, 0.5, "partial" if partial else "harness")
+        40, 14, 10, 4, 0.5, "partial" if partial else "harness")
 
 
 @pytest.mark.parametrize("bad", [None, "3", True, -1, 1.5, {}, []])
