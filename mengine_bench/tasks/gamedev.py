@@ -277,21 +277,30 @@ from arena_ecs.systems.movement import movement_system
 from arena_ecs.world import World
 
 
-class HiddenTest(unittest.TestCase):
+class MovementTests(unittest.TestCase):
+    def test_each_axis_and_multiple_steps(self):
+        world = World()
+        eid = world.spawn(pos=Position(1, 10), vel=Velocity(2, -4))
+        movement_system(world, 2.0)
+        pos = world.entities[eid]["pos"]
+        self.assertEqual((pos.x, pos.y), (5.0, 2.0))
+        movement_system(world, 0.5)
+        self.assertEqual((pos.x, pos.y), (6.0, 0.0))
+
+
+class CollisionTests(unittest.TestCase):
     def test_overlap_matrix(self):
         a = (Position(0, 0), Box(2, 2))
         cases = [((1, 1), True), ((2, 0), False), ((0, 2), False), ((-1.5, 1.5), True), ((0, 3), False), ((0, -1.9), True)]
         for (x, y), expected in cases:
             self.assertEqual(overlaps(a[0], a[1], Position(x, y), Box(2, 2)), expected, (x, y))
 
-    def test_movement_and_hits(self):
+    def test_collision_pairs(self):
         world = World()
-        a = world.spawn(pos=Position(0, 10), vel=Velocity(0, -4), box=Box(1, 1))
+        a = world.spawn(pos=Position(0, 2), box=Box(1, 1))
         b = world.spawn(pos=Position(0, 0), box=Box(1, 1))
-        movement_system(world, 2.0)
-        self.assertEqual(world.entities[a]["pos"].y, 2.0)
         self.assertEqual(collision_system(world), [])
-        movement_system(world, 0.5)
+        world.entities[a]["pos"].y = 0
         self.assertEqual(collision_system(world), [(a, b)])
 
 
@@ -311,9 +320,12 @@ def _ecs_setup(ws: Path) -> None:
 
 def _ecs_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
-    result.add("visible tests left untouched", _sha(read(ws, "tests/test_systems.py") or "") == _sha(ECS_FILES["tests/test_systems.py"]))
-    ok, _ = run_hidden_tests(ws, ECS_HIDDEN)
-    result.add("hidden movement + collision tests", ok)
+    untouched = _sha(read(ws, "tests/test_systems.py") or "") == _sha(ECS_FILES["tests/test_systems.py"])
+    result.mandatory.append(("visible tests left untouched", untouched))
+    for name, case in (("movement", "MovementTests"), ("collision", "CollisionTests")):
+        selection = f"\n\ndef load_tests(loader, tests, pattern):\n    return loader.loadTestsFromTestCase({case})\n"
+        ok, _ = run_hidden_tests(ws, ECS_HIDDEN + selection)
+        result.add(f"hidden {name}", ok)
     return result
 
 

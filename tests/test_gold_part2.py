@@ -80,3 +80,35 @@ def test_landing_requires_new_subject_facts(tmp_path: Path) -> None:
         page = ws / visual_tasks.LANDING
         page.write_text(page.read_text(encoding="utf-8").replace(fact, "X"), encoding="utf-8")
         assert not task.check(ws, ["done"]).passed, f"landing without {fact!r} must fail"
+
+
+def test_longrepo_untouched_tests_grant_no_correctness(tmp_path: Path) -> None:
+    longrepo._setup(tmp_path)
+    result = longrepo._check(tmp_path, [""])
+    assert not result.passed
+    assert result.score == 0
+    assert result.mandatory == [("existing tests untouched", True)]
+
+
+def test_longrepo_scores_hidden_scenarios_separately(tmp_path: Path) -> None:
+    longrepo._setup(tmp_path)
+    longrepo._reference(tmp_path)
+    loader = "arena_server/config/loader.py"
+    (tmp_path / loader).write_text(longrepo.FILES[loader], encoding="utf-8")
+    result = longrepo._check(tmp_path, [""])
+    checks = dict(result.checks)
+    assert not checks["hidden visible scenario"]
+    assert not checks["hidden env float wins over file"]
+    assert checks["hidden round trip keeps everything"]
+    assert 0 < result.score < 1
+    assert not result.passed
+
+
+def test_longrepo_modified_existing_tests_fail_integrity(tmp_path: Path) -> None:
+    longrepo._setup(tmp_path)
+    longrepo._reference(tmp_path)
+    (tmp_path / "tests/integration/test_match_flow.py").write_text("", encoding="utf-8")
+    result = longrepo._check(tmp_path, [""])
+    assert result.mandatory == [("existing tests untouched", False)]
+    assert all(ok for _, ok in result.checks)
+    assert not result.passed

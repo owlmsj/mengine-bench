@@ -161,7 +161,7 @@ from arena_server.services.match_service import finish_match
 
 class MatchFlow(unittest.TestCase):
     def test_event_weekend_win_is_paid_and_persisted(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:
             cfg_file = Path(tmp) / "live.json"
             cfg_file.write_text(json.dumps({"kill_bonus": 50, "event_multiplier": 1.25}))
             cfg = load_config(cfg_file, env={"ARENA_KILL_BONUS": "75"})
@@ -218,7 +218,7 @@ from arena_server.services.match_service import finish_match
 
 
 def play(cfg_file_data, env, won, kills, credits=0):
-    with tempfile.TemporaryDirectory() as tmp:
+    with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:
         path = None
         if cfg_file_data is not None:
             path = Path(tmp) / "c.json"
@@ -262,9 +262,12 @@ def _setup(ws: Path) -> None:
 def _check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     untouched = all(_sha(read(ws, rel) or "") == _sha(FILES[rel]) for rel in PROTECTED)
-    result.add("existing tests untouched", untouched)
-    ok, _ = run_hidden_tests(ws, HIDDEN)
-    result.add("hidden scenarios: precedence, half-up rounding, persistence", ok)
+    result.mandatory.append(("existing tests untouched", untouched))
+    for scenario in ("visible_scenario", "half_rounds_up", "env_float_wins_over_file", "round_trip_keeps_everything"):
+        selection = ("\n\ndef load_tests(loader, tests, pattern):\n"
+                     f"    return unittest.TestSuite([Hidden('test_{scenario}')])\n")
+        ok, _ = run_hidden_tests(ws, HIDDEN + selection)
+        result.add(f"hidden {scenario.replace('_', ' ')}", ok)
     return result
 
 
