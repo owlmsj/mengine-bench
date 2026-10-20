@@ -3,7 +3,8 @@
 Scores are self-reported: the maintainer reviews each result pull request,
 judges the bundle, and the table trusts what was merged. A run is ranked when
 it ran the current bench major.minor (a patch changes no task, prompt or
-score), holds every catalog task exactly once, and was judged. Everything
+score), holds every catalog task exactly once, and was judged by the official
+judge. Everything
 else is listed under "Not ranked" with the reason.
 """
 
@@ -17,6 +18,7 @@ from pathlib import Path
 
 from mengine_bench import __version__, catalog
 from mengine_bench.bundle import RESULT_NAME, SUMMARY_NAME
+from mengine_bench.judge import OFFICIAL_JUDGE_EFFORT, OFFICIAL_JUDGE_MODEL
 from mengine_bench.report import cost_text, hardware_short_text, time_text, tokens_text
 
 CONFIG_CELL_CHARS = 60
@@ -79,8 +81,12 @@ def unranked_reason(result: dict[str, object]) -> str | None:
         return f"older bench {result.get('bench_version')}; only bench {current}.x runs are ranked"
     if not is_complete_run(result):
         return "incomplete: not exactly every catalog task once (a --tasks run, or a crash before the bundle)"
-    if not isinstance(result.get("judge"), dict):
+    judge = result.get("judge")
+    if not isinstance(judge, dict):
         return "waiting for the judge (`mengine-bench judge`)"
+    used, official = f"{judge.get('model')}@{judge.get('effort')}", f"{OFFICIAL_JUDGE_MODEL}@{OFFICIAL_JUDGE_EFFORT}"
+    if used != official:
+        return f"judged by {used}; only {official} judges are ranked"
     return None
 
 

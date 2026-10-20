@@ -25,13 +25,14 @@ from mengine_bench.report import (
 )
 from mengine_bench.environment import parse_config
 from mengine_bench.run_command import JudgeEvidence, RunSettings, run_tasks
+from mengine_bench.judge import OFFICIAL_JUDGE_EFFORT, OFFICIAL_JUDGE_MODEL
 from mengine_bench.runner.agents import AGENT_NAMES, make_agent
 from mengine_bench.scoring import parse_price
 from mengine_bench.submit import SubmitError, gh_login, submit
 
-# The one judge for every ranked run (docs/SCORING.md); the flags exist for tests.
-DEFAULT_JUDGE_MODEL = "claude-opus-5-5"
-DEFAULT_JUDGE_EFFORT = "xhigh"
+# The flags exist for tests; the leaderboard ranks only the default judge.
+DEFAULT_JUDGE_MODEL = OFFICIAL_JUDGE_MODEL
+DEFAULT_JUDGE_EFFORT = OFFICIAL_JUDGE_EFFORT
 
 
 def _parser() -> argparse.ArgumentParser:

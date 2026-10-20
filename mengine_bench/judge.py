@@ -30,6 +30,10 @@ from mengine_bench.core import answer_json
 from mengine_bench.runner import process
 from mengine_bench.runner.agents import Agent, AgentError
 
+# The one judge for every ranked run (docs/SCORING.md, #23).
+OFFICIAL_JUDGE_MODEL = "claude-opus-5-5"
+OFFICIAL_JUDGE_EFFORT = "xhigh"
+
 RUBRIC_VERSION = "2.0"
 DEFAULT_RETRIES = 2
 JUDGE_TIMEOUT_S = 600

@@ -188,3 +188,17 @@ def test_bench_is_version_1_0_0() -> None:
     import tomllib
     pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
     assert __version__ == pyproject["project"]["version"] == "1.0.0"
+
+
+def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:
+    # Judge scores from different judges do not compare (#23): a run judged by
+    # anything but claude-opus-5-5 at xhigh is listed apart.
+    results = tmp_path / "results"
+    bundle = _write_result(results, "cheap-judge", 88.0)
+    result = json.loads((bundle / "result.json").read_text(encoding="utf-8"))
+    result["judge"]["model"] = "claude-haiku-5-5"
+    (bundle / "result.json").write_text(json.dumps(result), encoding="utf-8")
+    board = leaderboard.build_leaderboard(results, tmp_path)
+    assert board.ranked == 0
+    assert board.unranked == [("results/cheap-judge",
+                               "judged by claude-haiku-5-5@xhigh; only claude-opus-5-5@xhigh judges are ranked")]
