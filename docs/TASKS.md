@@ -32,9 +32,9 @@ visual tasks declare their page, which the judge renders headless.
 | `cmp-handoff` | compaction | Summarize a debugging session, then answer questions using only that summary. |
 | `lc-changelog` | long-context | Find when a setting changed and was restored in a long changelog, including who approved the change. |
 | `vis-chart` | vision | Read a bar chart to identify the fastest and slowest GPUs and compare their speeds. |
+| `ds-sql-funnel` | data-science | Count players at each ordered funnel step in SQLite, excluding test accounts and duplicates, by platform. |
 | `gd-astar-doors` | gamedev | Implement the cheapest route across a game map where doors cost more to cross. |
 | `gd-ecs-collision-bug` | gamedev | Fix movement and box collision bugs in a small game codebase without changing its tests. |
-| `ds-sql-funnel` | data-science | Count players at each ordered funnel step in SQLite, excluding test accounts and duplicates, by platform. |
 | `ir-studio-wiki` | retrieval | Find release and game details across a studio wiki and cite the files that support each answer. |
 | `ir-server-logs` | retrieval | Read game server logs to explain an outage and calculate downtime and monthly availability. |
 | `gd-integration-repo` | gamedev | Fix configuration priority and saved player credits in a game server without changing existing tests. |

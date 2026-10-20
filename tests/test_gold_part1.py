@@ -16,7 +16,7 @@ import pytest
 
 from mengine_bench.core import EvalTask
 
-PART1_MODULES = ("gamedev", "business", "hard", "context", "compaction")
+PART1_MODULES = ("gamedev", "business", "funnel", "context", "compaction")
 
 # Source catalog membership (private v1 suite); ids must not drift.
 EXPECTED_IDS = {
@@ -199,7 +199,7 @@ def test_funnel_counts_ordered_steps_without_expiry(
     events += [(uid, step, "2026-01-01 00:00:00")
                for uid in ("s", "test", "ghost") for step in funnel.FUNNEL]
     events += [("s", "purchase", "2026-01-01 00:00:00")]
-    monkeypatch.setattr(hard, "_funnel_rows", lambda: (users, list(reversed(events))))
+    monkeypatch.setattr(funnel, "_funnel_rows", lambda: (users, list(reversed(events))))
     expected = [
         ("pc", "install", 2, 1.0), ("pc", "tutorial_complete", 2, 1.0),
         ("pc", "first_match", 1, 0.5), ("pc", "purchase", 1, 1.0),
