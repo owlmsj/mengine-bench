@@ -1,5 +1,5 @@
 """Information retrieval tasks: multi-hop over a studio wiki, log forensics on a
-game server, and stable public web facts with a citable source.
+game server.
 
 Distractors are planted on purpose (a near-identical bug id, a deprecated map
 page, an unrelated ERROR) so grep-and-guess fails and reading wins.
@@ -20,7 +20,6 @@ from mengine_bench.core import (
     CheckResult,
     EvalTask,
     Step,
-    answer_json,
     close,
     has,
     read_json,
@@ -248,40 +247,6 @@ def _logs_reference(ws: Path) -> list[str]:
     return ["done"]
 
 
-# ------------------------------------------------------------- ir-web-facts --
-
-# Stable public facts with an unambiguous answer and a citable source.
-WEB_GOLD = {
-    "llama_cpp_org": r"ggml-org",
-    "pagedattention_arxiv": r"2309\.06180",
-    "linux_mascot": r"\btux\b",
-    "rust_1_0_year": r"\b2015\b",
-}
-
-
-def _web_setup(ws: Path) -> None:
-    write(ws, "QUESTIONS.md", "Answer using web search, citing URLs.\n")
-
-
-def _web_check(ws: Path, answers: Sequence[str]) -> CheckResult:
-    result = CheckResult()
-    got = answer_json(answers)
-    for key, pattern in WEB_GOLD.items():
-        result.add(key, has(str(got.get(key, "")), pattern))
-    sources = got.get("sources")
-    urls = [u for u in sources if str(u).startswith("http")] if isinstance(sources, list) else []
-    result.add("at least 3 source URLs", len(urls) >= 3)
-    return result
-
-
-def _web_reference(ws: Path) -> list[str]:
-    return [json.dumps({"llama_cpp_org": "ggml-org", "pagedattention_arxiv": "2309.06180",
-                        "linux_mascot": "tux", "rust_1_0_year": 2015,
-                        "sources": ["https://github.com/ggml-org/llama.cpp", "https://arxiv.org/abs/2309.06180",
-                                    "https://blog.rust-lang.org/2015/05/15/Rust-1.0.html",
-                                    "https://en.wikipedia.org/wiki/Tux_(mascot)"]})]
-
-
 TASKS = [
     EvalTask(
         id="ir-studio-wiki", category="retrieval", suites=frozenset({FAST, FULL}),
@@ -305,16 +270,5 @@ TASKS = [
         steps=(Step("Read {WS}/logs/README.md and investigate the logs in {WS}/logs. Write {WS}/incident.json with "
                     "start and end (format 'YYYY-MM-DD HH:MM:SS'), minutes_down (2 decimals), availability_june_pct "
                     "(3 decimals), slo_999_ok (bool) and root_cause (one sentence). " + RULES),),
-    ),
-    EvalTask(
-        id="ir-web-facts", category="retrieval", suites=frozenset({FULL}), needs=frozenset({"web"}),
-        provenance="Stable public web facts (llama.cpp, vLLM paper, Linux mascot, Rust 1.0) with cited sources",
-        summary="Research 4 public facts on the web (llama.cpp, PagedAttention, Linux mascot, Rust 1.0) with sources",
-        setup=_web_setup, check=_web_check, reference=_web_reference, timeout_s=480,
-        par_s=2 * WIKI_PAR_S,
-        steps=(Step("Search the web and answer ONLY with a JSON object with the keys: llama_cpp_org (GitHub "
-                    "organization that owns the official llama.cpp repo), pagedattention_arxiv (arXiv id of the vLLM "
-                    "PagedAttention paper), linux_mascot (name of the Linux kernel mascot), rust_1_0_year (year Rust "
-                    "1.0 was released) and sources (list of URLs consulted)."),),
     ),
 ]

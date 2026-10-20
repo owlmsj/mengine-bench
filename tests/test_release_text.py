@@ -19,7 +19,6 @@ ROOT = Path(__file__).resolve().parents[1]
     ("cmp-handoff", "session/transcript.md", "profiles/local/local-9b.json"),
     ("cmp-handoff", "session/transcript.md", "check_vision.ps1"),
     ("lc-changelog", "_inline/changelog.md", "Pixel Arena"),
-    ("lc-contract", "_inline/contract.md", "Arena Tools"),
     ("gd-astar-doors", "pathfind.py", "Pixel Arena"),
     ("gd-ecs-collision-bug", "arena_ecs/components.py", "class Position"),
     ("gd-integration-repo", "README.md", "arena-server"),
@@ -36,10 +35,11 @@ def test_docs_explain_weight_two_membership(document: str) -> None:
     full = catalog.tasks("full")
     fast_ids = {task.id for task in catalog.tasks("fast")}
     heavy_ids = {task.id for task in full if task.weight == 2}
-    assert len(heavy_ids) == 6 and heavy_ids <= fast_ids
+    assert len(heavy_ids) == 4 and heavy_ids <= fast_ids
     text = " ".join((ROOT / document).read_text(encoding="utf-8").split())
-    assert "FAST already contains all six weight-2 tasks" in text
-    assert "FULL adds six weight-1 tasks" in text
+    heavy, extra = ("four", "two") if document == "docs/TASKS.md" else ("six", "six")
+    assert f"FAST already contains all {heavy} weight-2 tasks" in text
+    assert f"FULL adds {extra} weight-1 tasks" in text
 
 
 def test_readme_records_clone_steps_and_current_runs_only() -> None:
@@ -74,19 +74,15 @@ def test_readme_moves_every_preflight_instruction_file_aside_and_back(tmp_path: 
     assert "after the run" in hygiene and "mengine-bench-preflight-backup" in hygiene
 
 
-def test_docs_distinguish_all_six_derived_par_times() -> None:
+def test_docs_distinguish_remaining_derived_par_times() -> None:
     text = (ROOT / "docs/TASKS.md").read_text(encoding="utf-8").split("## Multi-step tasks")[0]
     derived = {
         "bo-reconcile": ("bo-pnl-runway", "27.5", "55"),
-        "lc-contract": ("lc-changelog", "3.6", "8"),
-        "cmp-meeting-decisions": ("cmp-handoff", "19.6", "40"),
-        "cmp-agent-trajectory": ("cmp-handoff", "19.6", "40"),
         "ir-server-logs": ("ir-studio-wiki", "14.6", "29.2"),
-        "ir-web-facts": ("ir-studio-wiki", "14.6", "29.2"),
     }
     for task_id, (source, measured, published) in derived.items():
         assert f"| `{task_id}` | `{source}` | {measured} | {published} |" in text
-    for expected in ("14 measured", "six derived", "2026-09-23", "2026-09-24", "rounded up"):
+    for expected in ("12 measured", "two derived", "2026-09-23", "2026-09-24", "rounded up"):
         assert expected in text
     scoring = (ROOT / "docs/SCORING.md").read_text(encoding="utf-8")
     assert "14 measured" in scoring and "six derived" in scoring

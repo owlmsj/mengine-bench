@@ -24,17 +24,12 @@ EXPECTED_SUITES: dict[str, frozenset[str]] = {
     "ds-ab-playtest": frozenset({FAST, FULL}),
     "bo-pnl-runway": frozenset({FAST, FULL}),
     "bo-reconcile": frozenset({FULL}),
-    "gd-lockstep-desync": frozenset({FAST, FULL}),
     "ds-sql-funnel": frozenset({FAST, FULL}),
-    "bo-safe-conversion": frozenset({FAST, FULL}),
     "lc-changelog": frozenset({FAST, FULL}),
-    "lc-contract": frozenset({FULL}),
     "vis-chart": frozenset({FAST, FULL}),
     "cmp-handoff": frozenset({FAST, FULL}),
-    "cmp-meeting-decisions": frozenset({FULL}),
-    "cmp-agent-trajectory": frozenset({FULL}),
 }
-HARD_IDS = {"gd-lockstep-desync", "ds-sql-funnel", "bo-safe-conversion"}
+HARD_IDS = {"ds-sql-funnel"}
 
 def _modules() -> list[ModuleType]:
     return [importlib.import_module(f"mengine_bench.tasks.{name}") for name in PART1_MODULES]
