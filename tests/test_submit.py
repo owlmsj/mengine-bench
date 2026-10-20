@@ -17,13 +17,14 @@ GIT = shutil.which("git")
 
 def _result(**overrides: object) -> dict[str, object]:
     result: dict[str, object] = {
-        "suite": "full", "bench_version": __version__, "preflight": [], "submitter": "dquill",
+        "bench_version": __version__, "submitter": "dquill",
+        "config": {"personal_instructions": ["~/.codex/AGENTS.md"], "provider": "openai"},
         "agent": {"name": "codex", "model": "gpt-x", "effort": "low", "version": "codex-cli 1.0"},
-        "judge": {"label": "claude-opus-5-5@xhigh", "votes": 3},
-        "totals": {"objective": 90.0, "accuracy": 92.0, "solved": 18, "total": 20, "total_agent_s": 500.0,
-                   "subjective": 85.0, "composite": 88.0},
+        "judge": None,
+        "totals": {"score": 88.5, "correct": 90.0, "solved": 12, "total": 14, "time_s": 500.0, "judge": 85.0,
+                   "cost_usd": 3.2, "cost_basis": "price", "cost_lower_bound": True},
         "environment": {"os": "Linux 6", "cpu": "x86_64", "ram_gb": 32.0, "gpu": None},
-        "grading": {"visual": "rendered"}, "bench_commit": {"sha": "abc", "dirty": False},
+        "bench_commit": {"sha": "abc", "dirty": False},
         "started_at": "2026-10-19T10:00:00Z", "finished_at": "2026-10-19T10:30:00Z",
     }
     result.update(overrides)
@@ -31,7 +32,7 @@ def _result(**overrides: object) -> dict[str, object]:
 
 
 def _bundle(root: Path, result: dict[str, object], summary: str = "clean\n") -> Path:
-    bundle = root / "results" / "full" / "2026-10-19_codex_gpt-x_low_ab12cd34"
+    bundle = root / "results" / "2026-10-19_codex_gpt-x_low_ab12cd34"
     (bundle / "transcripts").mkdir(parents=True)
     (bundle / "result.json").write_text(json.dumps(result), encoding="utf-8")
     (bundle / "summary.md").write_text(summary, encoding="utf-8")
@@ -40,17 +41,15 @@ def _bundle(root: Path, result: dict[str, object], summary: str = "clean\n") -> 
 
 def test_title_and_body_come_from_result_json() -> None:
     result = _result()
-    assert submit.pr_title(result) == "results: FULL codex gpt-x low"
+    assert submit.pr_title(result) == "results: codex gpt-x low"
     body = submit.pr_body(result)
-    for expected in ("| agent CLI and version | codex codex-cli 1.0 |", "| judge | claude-opus-5-5@xhigh, 3 vote(s) |",
-                     "| OBJECTIVE / ACCURACY / solved | 90.0 / 92.0 / 18/20 |", "| preflight / privacy check | clean"):
+    for expected in ("| agent CLI and version | codex codex-cli 1.0 |", "| judge | pending: the maintainer runs `mengine-bench judge` on review |",
+                     "| Correct % / solved | 90.0 / 12/14 |", "| Cost | >= $3.20 (price) |", "| Time | 8 min 20 s |", "| config | personal_instructions=~/.codex/AGENTS.md; provider=openai |"):
         assert expected in body
 
 
 @pytest.mark.parametrize(("overrides", "summary", "reason"), [
     ({"bench_version": "0.0.1"}, "clean\n", "received bench 0.0.1"),
-    ({"preflight": ["codex global instructions: x"]}, "clean\n", "did not start clean"),
-    ({"preflight": None}, "clean\n", "did not start clean"),
     ({}, "cwd " + "C:" + "\\Users\\" + "dana" + "\\x\n", "privacy check: summary.md: home path"),
 ])
 def test_unpublishable_bundles_are_refused(tmp_path: Path, overrides: dict[str, object], summary: str,
@@ -137,5 +136,14 @@ def test_run_submit_fails_before_running_without_gh(monkeypatch: pytest.MonkeyPa
         cli.main(["run", "--agent", "cmd", "--cmd", "x {prompt_file}", "--model", "m", "--submit",
                   "--out", str(tmp_path / "results")])
     assert not (tmp_path / "results").exists()
-    with pytest.raises(SystemExit, match="--allow-unclean"):
+    with pytest.raises(SystemExit):
         cli.main(["run", "--agent", "cmd", "--cmd", "x {prompt_file}", "--model", "m", "--submit", "--allow-unclean"])
+
+
+def test_submit_wants_a_bundle_directly_under_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    nested = tmp_path / "results" / "full" / "2026-10-19_codex_gpt-x_low_ab12cd34"
+    (nested / "transcripts").mkdir(parents=True)
+    (nested / "result.json").write_text(json.dumps(_result()), encoding="utf-8")
+    monkeypatch.setattr(submit, "_call", lambda argv, cwd=None, env=None: str(tmp_path))
+    with pytest.raises(SubmitError, match="results/<bundle>"):
+        submit.submit(nested)

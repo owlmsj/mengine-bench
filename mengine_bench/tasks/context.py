@@ -16,8 +16,6 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from mengine_bench.core import (
-    FAST,
-    FULL,
     CheckResult,
     EvalTask,
     Step,
@@ -110,26 +108,24 @@ def _chart_check(ws: Path, answers: Sequence[str]) -> CheckResult:
 VISION_PROMPT = "Reply ONLY with a JSON object. The image(s) are attached."
 LC_PROMPT = "Reply ONLY with a JSON object. The document is below; it is not on disk."
 
-# par_s: DeepSeek V4.1 Flash wall times from the maintainers' v1 FAST run
-# (2026-09-23), rounded up.
 TASKS = [
     EvalTask(
-        id="lc-changelog", category="long-context", suites=frozenset({FAST, FULL}),
+        id="lc-changelog", category="long-context",
         provenance="AA-LCR style multi-hop over a long build changelog with near-duplicate distractor keys",
         summary="Find when a setting changed and was restored in a long changelog, including who approved the change.",
-        setup=_changelog_setup, check=_changelog_check, reference=_changelog_reference, timeout_s=300, par_s=4,
+        setup=_changelog_setup, check=_changelog_check, reference=_changelog_reference, timeout_s=300,
         steps=(Step("Keys: build_change (build that changed recoil_multiplier from 1.0 to 0.85; beware of parameters "
                     "with similar names), build_revert (build that set it back to 1.0), revert_date (YYYY-MM-DD), "
                     "revert_approver, builds_between (how many builds lie between the two, exclusive). " + LC_PROMPT,
                     inline=("_inline/changelog.md",), hide=("_inline",)),),
     ),
     EvalTask(
-        id="vis-chart", category="vision", suites=frozenset({FAST, FULL}), needs=frozenset({"vision"}),
+        id="vis-chart", category="vision", needs=frozenset({"vision"}),
         provenance="ChartQA style bar chart (golden image chart.png)",
         summary="Read a bar chart to identify the fastest and slowest GPUs and compare their speeds.",
         setup=lambda ws: _copy_assets(ws, "chart.png"), check=_chart_check,
         reference=lambda ws: [json.dumps({"top_gpu": "B200", "top_tps": 210, "bottom_gpu": "A100", "ratio": 2.96})],
-        timeout_s=240, par_s=3,
+        timeout_s=240,
         steps=(Step("Keys: top_gpu, top_tps, bottom_gpu, ratio (top_tps / bottom_tps, 2 decimals). " + VISION_PROMPT,
                     attach=("images/chart.png",)),),
     ),

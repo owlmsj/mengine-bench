@@ -8,12 +8,8 @@ Step semantics (core.Step), ported from the private suite's runner:
   a parent or sibling of it; once the task ends it moves to `step-<i>/` under
   the run root for grading and bundling. Files are reachable only by an
   absolute path outside the workspace, which AGENTS.md forbids;
-- a task's final check is wrapped in the visual grading profile
-  (visual.enforce_rendered_profile): an unrendered visual task is not solved;
-- otherwise the step continues the previous session through the adapter's
-  resume feature; an adapter without one makes the task "unsupported";
-- `compact_before` asks the harness to compact the resumed session first
-  (Claude Code `/compact`); adapters that cannot do it make it "unsupported";
+- no step resumes a session (core.EvalTask rejects it, #23), so every
+  adapter, `cmd` included, runs every task;
 - `hide` moves paths out of the workspace before the turn; `inline` pastes
   files into the prompt; `attach` names images (and passes them natively when
   the CLI supports attachments).
@@ -30,7 +26,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mengine_bench import visual
 from mengine_bench.core import CheckResult, EvalTask
 from mengine_bench.runner import process
 from mengine_bench.runner.agents import Agent, AgentError, Usage, sum_usage
@@ -128,21 +123,16 @@ def run_task(task: EvalTask, agent: Agent, root: Path, fresh_root: Path | None =
     workspace.mkdir()
     task.setup(workspace)
     record = TaskRunRecord(task_id=task.id, initial_files=snapshot(workspace))
-    session: str | None = None
     workspace_index = 0
     for index, step in enumerate(task.steps):
         try:
-            if index and step.fresh_session:
+            if index:
                 fresh = fresh_workspace(workspace, step.carry, fresh_root)
                 settle_workspace(workspace, root, workspace_index)
-                workspace, session, workspace_index = fresh, None, index
-            elif index:
-                _require_continuation(agent, session, task.id)
-                if step.compact_before:
-                    _compact(agent, task, workspace, root, index, session, record)
+                workspace, workspace_index = fresh, index
             prompt = render_prompt(task, index, workspace, root / "hidden" / str(index))
             (workspace / "AGENTS.md").write_text(WORKSPACE_RULES, encoding="utf-8")
-            session = _run_step(agent, task, workspace, root, index, prompt, session, record)
+            _run_step(agent, task, workspace, root, index, prompt, record)
         except StepFailed as failure:
             record.status, record.error = failure.status, str(failure)
             break
@@ -184,28 +174,10 @@ def settle_workspace(workspace: Path, root: Path, index: int) -> Path:
     return dest
 
 
-def _require_continuation(agent: Agent, session: str | None, task_id: str) -> None:
-    if not agent.supports_resume:
-        raise StepFailed("unsupported", f"task {task_id!r} continues a session; agent {agent.name!r} cannot resume")
-    if session is None:
-        raise StepFailed("crash", f"task {task_id!r} continues a session; agent {agent.name!r} reported no session id")
-
-
-def _compact(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: int, session: str | None,
-             record: TaskRunRecord) -> None:
-    if not agent.supports_compact:
-        raise StepFailed("unsupported", f"task {task.id!r} needs compaction; agent {agent.name!r} cannot compact")
-    # Compaction time is agent time; its reply is not an answer to the task.
-    _invoke(agent, task, workspace, root, f"{index}-compact", agent.compact_prompt, session, record, (), index)
-
-
 def _run_step(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: int, prompt: str,
-              session: str | None, record: TaskRunRecord) -> str | None:
+              record: TaskRunRecord) -> None:
     step = task.steps[index]
-    answer, new_session = _invoke(agent, task, workspace, root, str(index), prompt, session, record,
-                                  step.attach, index)
-    record.answers.append(answer)
-    return new_session or session
+    record.answers.append(_invoke(agent, task, workspace, root, index, prompt, record, step.attach))
 
 
 def _step_env(workspace: Path, extra: Mapping[str, str] | None) -> dict[str, str]:
@@ -214,16 +186,16 @@ def _step_env(workspace: Path, extra: Mapping[str, str] | None) -> dict[str, str
     return {**os.environ, "PWD": str(workspace.resolve()), **(extra or {})}
 
 
-def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, label: str, prompt: str,
-            session: str | None, record: TaskRunRecord, attachments: tuple[str, ...],
-            index: int) -> tuple[str, str | None]:
+def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: int, prompt: str,
+            record: TaskRunRecord, attachments: tuple[str, ...]) -> str:
+    label = str(index)
     prompts = root / "prompts"
     transcripts = root / "transcripts"
     prompts.mkdir(exist_ok=True)
     transcripts.mkdir(exist_ok=True)
     prompt_file = prompts / f"step-{label}.md"
     prompt_file.write_text(prompt, encoding="utf-8")
-    call = agent.invocation(prompt, prompt_file.resolve(), workspace.resolve(), session, attachments)
+    call = agent.invocation(prompt, prompt_file.resolve(), workspace.resolve(), attachments)
     try:
         result = process.run_process(call.argv, workspace, task.timeout_s, stdin_text=call.stdin_text,
                                      env=_step_env(workspace, call.env))
@@ -242,7 +214,7 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, label: st
         record.steps.append(StepRecord(index, result.wall_s, result.exit_code, "crash", str(error)))
         raise StepFailed("crash", f"step {label}: {error}") from error
     record.steps.append(StepRecord(index, result.wall_s, result.exit_code, "ok", usage=parsed.usage))
-    return parsed.answer, parsed.session_id
+    return parsed.answer
 
 
 def _grade(task: EvalTask, record: TaskRunRecord) -> None:
@@ -251,7 +223,6 @@ def _grade(task: EvalTask, record: TaskRunRecord) -> None:
     answers = record.answers + [""] * (len(task.steps) - len(record.answers))
     try:
         record.check = task.check(record.workspace, answers)
-        visual.enforce_rendered_profile(record.check)
     except (ValueError, RuntimeError, OSError) as error:
         record.error = f"{record.error or ''} grading failed: {error}".strip()
         record.status = "crash"

@@ -15,8 +15,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from mengine_bench.core import (
-    FAST,
-    FULL,
     CheckResult,
     EvalTask,
     Step,
@@ -27,9 +25,6 @@ from mengine_bench.core import (
 )
 
 RULES = "Write your files inside {WS}. Do not ask for confirmation."
-# Par for the unmeasured IR tasks: 2x ir-studio-wiki (14.6 s), the closest
-# comparable measured task (DeepSeek V4.1 Flash, private v1 FAST run 2026-09-23).
-WIKI_PAR_S = 14.6
 
 # ------------------------------------------------------------ ir-studio-wiki --
 
@@ -249,12 +244,10 @@ def _logs_reference(ws: Path) -> list[str]:
 
 TASKS = [
     EvalTask(
-        id="ir-studio-wiki", category="retrieval", suites=frozenset({FAST, FULL}),
+        id="ir-studio-wiki", category="retrieval",
         provenance="Internal-wiki QA with multi-hop (bug -> changelog -> approvals) and planted distractors",
         summary="Find release and game details across a studio wiki and cite the files that support each answer.",
         setup=_wiki_setup, check=_wiki_check, reference=_wiki_reference, timeout_s=300,
-        # Par: DeepSeek V4.1 Flash, 14.6 s (private v1 FAST run, 2026-09-23).
-        par_s=WIKI_PAR_S,
         steps=(Step("Use the wiki in {WS}/wiki to answer: (1) in which build the fix for BUG-4471 first shipped and "
                     "(2) who approved that build; (3) the maximum number of players in ranked mode on the current "
                     "Neoplastic map; (4) which flag was reverted in PM-12 and (5) to which value. Write "
@@ -262,11 +255,10 @@ TASKS = [
                     "(list of the wiki files used). " + RULES),),
     ),
     EvalTask(
-        id="ir-server-logs", category="retrieval", suites=frozenset({FULL}),
+        id="ir-server-logs", category="retrieval",
         provenance="Game server ops: incident window, root cause and monthly SLO from 3 days of logs",
         summary="Read game server logs to explain an outage and calculate downtime and monthly availability.",
         setup=_logs_setup, check=_logs_check, reference=_logs_reference, timeout_s=360,
-        par_s=2 * WIKI_PAR_S,
         steps=(Step("Read {WS}/logs/README.md and investigate the logs in {WS}/logs. Write {WS}/incident.json with "
                     "start and end (format 'YYYY-MM-DD HH:MM:SS'), minutes_down (2 decimals), availability_june_pct "
                     "(3 decimals), slo_999_ok (bool) and root_cause (one sentence). " + RULES),),

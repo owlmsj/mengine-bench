@@ -24,42 +24,41 @@ def tail(argv: list[str]) -> list[str]:
 
 def test_claude_new_session_reads_prompt_from_stdin() -> None:
     agent = ClaudeAgent(model="claude-opus-5-5", effort="xhigh")
-    call = agent.invocation("do it", PROMPT_FILE, WS, session_id=None, attachments=())
+    call = agent.invocation("do it", PROMPT_FILE, WS, attachments=())
     assert tail(call.argv) == ["-p", "--output-format", "stream-json", "--verbose", "--model", "claude-opus-5-5",
                                "--effort", "xhigh", "--permission-mode", "bypassPermissions"]
     assert call.stdin_text == "do it"
     assert Path(call.argv[0]).stem.lower() == "claude"
 
 
-def test_claude_resume_and_compact() -> None:
-    agent = ClaudeAgent(model="m", effort=None)
-    call = agent.invocation("next", PROMPT_FILE, WS, session_id="abc", attachments=())
-    assert tail(call.argv)[-2:] == ["--resume", "abc"]
-    assert "--effort" not in call.argv
-    assert agent.supports_resume and agent.supports_compact
-    assert agent.compact_prompt == "/compact"
+def test_adapters_never_resume_or_compact() -> None:
+    # #23: no task continues a session, so adapters carry no resume or compaction support.
+    agents = [ClaudeAgent(model="m", effort=None), CodexAgent(model="m", effort=None),
+              OpencodeAgent(model="m", effort=None), CmdAgent(template="a {prompt_file}", model="m", effort=None)]
+    for agent in agents:
+        for removed in ("supports_resume", "supports_compact", "compact_prompt"):
+            assert not hasattr(agent, removed), (agent.name, removed)
+        argv = agent.invocation("next", PROMPT_FILE, WS, attachments=()).argv
+        assert not {"--resume", "resume", "--session"} & set(argv), argv
+    assert "--effort" not in ClaudeAgent(model="m", effort=None).invocation("n", PROMPT_FILE, WS, ()).argv
 
 
-def test_codex_new_and_resume() -> None:
+def test_codex_new_session() -> None:
     agent = CodexAgent(model="gpt-6", effort="high")
-    first = agent.invocation("p", PROMPT_FILE, WS, session_id=None, attachments=("images/a.png",))
+    first = agent.invocation("p", PROMPT_FILE, WS, attachments=("images/a.png",))
     assert tail(first.argv) == ["exec", "--json", "--skip-git-repo-check", "-m", "gpt-6",
                                 "-c", 'model_reasoning_effort="high"',
                                 "--dangerously-bypass-approvals-and-sandbox", "-i", "images/a.png", "-"]
     assert first.stdin_text == "p"
-    resumed = agent.invocation("p2", PROMPT_FILE, WS, session_id="t-1", attachments=())
-    assert tail(resumed.argv)[:2] == ["exec", "resume"]
-    assert tail(resumed.argv)[-2:] == ["t-1", "-"]
-    assert agent.supports_resume and not agent.supports_compact
 
 
 def test_opencode_short_prompt_in_argv_long_prompt_on_stdin() -> None:
     agent = OpencodeAgent(model="deepseek/flash", effort="high")
-    short = agent.invocation("hi", PROMPT_FILE, WS, session_id="ses_1", attachments=("a.png",))
+    short = agent.invocation("hi", PROMPT_FILE, WS, attachments=("a.png",))
     assert tail(short.argv) == ["run", "--standalone", "--auto", "--format", "json", "-m", "deepseek/flash#high",
-                                "--session", "ses_1", "--file", "a.png", "hi"]
+                                "--file", "a.png", "hi"]
     assert short.stdin_text is None
-    long = agent.invocation("x" * 40_000, PROMPT_FILE, WS, session_id=None, attachments=())
+    long = agent.invocation("x" * 40_000, PROMPT_FILE, WS, attachments=())
     assert long.argv[-1] == "deepseek/flash#high"
     assert long.stdin_text == "x" * 40_000
 
@@ -67,15 +66,14 @@ def test_opencode_short_prompt_in_argv_long_prompt_on_stdin() -> None:
 def test_cmd_template_substitutes_placeholders_per_argument() -> None:
     template = json.dumps(["python", "my agent.py", "--ws={workspace}", "{prompt_file}", "{model}"])
     agent = CmdAgent(template=template, model="m1", effort=None)
-    call = agent.invocation("p", Path("dir with space") / "p.md", Path("w s"), session_id=None, attachments=())
+    call = agent.invocation("p", Path("dir with space") / "p.md", Path("w s"), attachments=())
     assert call.argv == ["python", "my agent.py", f"--ws={Path('w s')}", str(Path("dir with space") / "p.md"), "m1"]
     assert call.stdin_text is None
-    assert not agent.supports_resume
 
 
 def test_cmd_template_plain_string_is_split_without_a_shell() -> None:
     agent = CmdAgent(template="my-agent --run {prompt_file}", model="m", effort=None)
-    assert agent.invocation("p", Path("p.md"), WS, None, ()).argv == ["my-agent", "--run", "p.md"]
+    assert agent.invocation("p", Path("p.md"), WS, ()).argv == ["my-agent", "--run", "p.md"]
     with pytest.raises(ValueError, match="prompt_file"):
         CmdAgent(template="my-agent --run", model="m", effort=None)
 
@@ -259,8 +257,7 @@ def test_agent_step_runs_with_pwd_set_to_the_workspace(tmp_path: Path, monkeypat
     agent = CmdAgent(template="my-agent {prompt_file}", model="m", effort=None)
     record = SimpleNamespace(steps=[])
     with pytest.raises(Exception, match="could not start agent"):
-        task_run._invoke(agent, SimpleNamespace(timeout_s=5), workspace, tmp_path, "0", "do it",
-                         None, record, (), 0)
+        task_run._invoke(agent, SimpleNamespace(timeout_s=5), workspace, tmp_path, 0, "do it", record, ())
     env = seen["env"]
     assert isinstance(env, dict)
     assert env["PWD"] == str(workspace.resolve())

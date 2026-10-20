@@ -1,4 +1,4 @@
-"""Run hygiene: personal instructions, a git checkout or earlier runs block a run."""
+"""Run hygiene: earlier runs on disk block a run; personal instructions are recorded warnings (#23)."""
 
 from __future__ import annotations
 
@@ -37,9 +37,8 @@ def test_global_instructions_follow_config_env_and_ignore_other_harnesses(tmp_pa
 def test_instruction_files_and_git_above_the_workspaces_are_found(tmp_path: Path) -> None:
     _touch(tmp_path / "AGENTS.md")
     (tmp_path / "repo" / ".git").mkdir(parents=True)
-    problems = preflight.ancestor_problems(tmp_path / "repo" / "runs" / "now")
-    assert any("instruction file" in problem and "AGENTS.md" in problem for problem in problems)
-    assert any("git checkout" in problem for problem in problems)
+    found = preflight.ancestor_instructions(tmp_path / "repo" / "runs" / "now")
+    assert "AGENTS.md above the workspaces" in found and "git checkout around the workspaces" in found
 
 
 def test_earlier_runs_are_found_but_not_this_one(tmp_path: Path) -> None:
@@ -53,13 +52,21 @@ def test_earlier_runs_are_found_but_not_this_one(tmp_path: Path) -> None:
     assert preflight.leftover_runs(scratch, work, temp) == [old, fresh]
 
 
-def test_contamination_names_each_finding(tmp_path: Path) -> None:
-    # Ancestors and the system temp dir are this machine's; only the faked parts are asserted.
-    scratch, home = tmp_path / "scratch", tmp_path / "home"
-    assert [p for p in preflight.contamination("claude", scratch / "runs" / "now", scratch, home=home, env={})
-            if "global instructions" in p] == []
+def test_personal_instructions_are_file_names_only(tmp_path: Path) -> None:
+    home, work = tmp_path / "home", tmp_path / "repo" / "runs" / "now"
     _touch(home / ".claude" / "CLAUDE.md")
+    _touch(tmp_path / "repo" / "AGENTS.md")
+    (tmp_path / "repo" / ".git").mkdir(parents=True)
+    found = preflight.personal_instructions("claude", work, home=home, env={})
+    assert found[:3] == ["~/.claude/CLAUDE.md", "AGENTS.md above the workspaces", "git checkout around the workspaces"]
+    assert not any(str(tmp_path) in item or "\\" in item for item in found), found
+
+
+def test_only_earlier_runs_block(tmp_path: Path) -> None:
+    scratch, temp = tmp_path / "scratch", tmp_path / "temp"
+    temp.mkdir()
+    work = scratch / "runs" / "now"
+    assert preflight.blocking_problems(scratch, work, temp) == []
     (scratch / "runs" / "old").mkdir(parents=True)
-    problems = preflight.contamination("claude", scratch / "runs" / "now", scratch, home=home, env={})
-    assert f"claude global instructions: {home / '.claude' / 'CLAUDE.md'}" in problems
-    assert f"earlier run left on disk: {scratch / 'runs' / 'old'}" in problems
+    assert preflight.blocking_problems(scratch, work, temp) == [f"earlier run left on disk: {scratch / 'runs' / 'old'}"]
+    assert not hasattr(preflight, "contamination")

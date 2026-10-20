@@ -14,8 +14,6 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from mengine_bench.core import (
-    FAST,
-    FULL,
     CheckResult,
     EvalTask,
     Step,
@@ -114,14 +112,12 @@ def _two_steps(source: str, summary: str, limit: int, ask: str) -> tuple[Step, .
     )
 
 
-# par_s: DeepSeek V4.1 Flash wall times from the maintainers' v1 FAST run
-# (2026-09-23), rounded up.
 TASKS = [
     EvalTask(
-        id="cmp-handoff", category="compaction", suites=frozenset({FAST, FULL}),
+        id="cmp-handoff", category="compaction",
         provenance="Agent debugging-session handoff on a local LLM server; native retention rules",
         summary="Summarize a debugging session, then answer questions using only that summary.",
-        setup=_handoff_setup, check=_handoff_check, reference=_handoff_reference, timeout_s=360, par_s=20,
+        setup=_handoff_setup, check=_handoff_check, reference=_handoff_reference, timeout_s=360,
         steps=_two_steps("session/transcript.md", "HANDOFF.md", 1500,
                          "Keys: file_line (where the recipe was applied), final_decode, final_vram_mib, "
                          "discarded_quant, pending, measure_command."),

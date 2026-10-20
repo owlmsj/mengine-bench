@@ -9,7 +9,7 @@ import pytest
 
 from conftest import FakeAgent
 from mengine_bench import cli
-from mengine_bench.core import FULL, CheckResult, EvalTask, Step, read
+from mengine_bench.core import CheckResult, EvalTask, Step, read
 from mengine_bench.runner.agents import CmdAgent
 from mengine_bench.runner.task_run import run_task
 
@@ -30,20 +30,18 @@ def test_run_with_reference_agent_scores_full_marks(fake_agent: FakeAgent, tmp_p
     # -I would hide the installed package from the fake agent; drop it.
     template.remove("-I")
     out = tmp_path / "results"
-    code = cli.main(["run", "--suite", "fast", "--agent", "cmd", "--cmd", json.dumps(template), "--model", "fake/ref",
+    code = cli.main(["run", "--agent", "cmd", "--cmd", json.dumps(template), "--model", "fake/ref",
                      "--tasks", "ds-ab-playtest", "--out", str(out), "--work", str(tmp_path / "work")])
     assert code == 0
-    [result_file] = out.glob("fast/*/result.json")
+    [result_file] = out.glob("*/result.json")
     assert "_cmd_fake-ref_none_" in result_file.parent.name
     assert (result_file.parent / "summary.md").is_file()
     result = json.loads(result_file.read_text(encoding="utf-8"))
     [task] = result["tasks"]
-    assert task["status"] == "ok" and task["passed"] and task["c"] == 1.0
-    speed = min(1.0, task["par_s"] / task["agent_s"])
-    assert task["s"] == pytest.approx(speed)
-    assert result["totals"]["objective"] == round(100 * (0.8 + 0.2 * speed), 1)
+    assert task["status"] == "ok" and task["solved"] and task["c"] == 1.0
+    assert result["totals"]["correct"] == 100.0 and result["totals"]["score"] is None
     assert result["totals"]["solved"] == 1
-    assert result["suite"] == "fast" and result["scoring_version"] == "1.0"
+    assert "suite" not in result
     assert result["agent"] == {"name": "cmd", "model": "fake/ref", "effort": None, "version": None}
     assert {"os", "cpu", "cpu_count", "python"} <= set(result["environment"])
     assert str(tmp_path) not in result_file.read_text(encoding="utf-8"), "results must not leak local paths"
@@ -69,9 +67,9 @@ def _two_step_task(second: Step) -> EvalTask:
         result.add("answers per step", answers == ["first", "second"])
         return result
 
-    return EvalTask(id="two-step", category="test", suites=frozenset({FULL}), provenance="t", summary="t",
+    return EvalTask(id="two-step", category="test", provenance="t", summary="t",
                     setup=setup, steps=(Step("first\nread {WS}/secret.md"), second), check=check,
-                    reference=lambda ws: [], par_s=10.0)
+                    reference=lambda ws: [])
 
 
 def test_fresh_session_hides_files_and_collects_answers(fake_agent: FakeAgent, tmp_path: Path) -> None:
@@ -86,12 +84,11 @@ def test_fresh_session_hides_files_and_collects_answers(fake_agent: FakeAgent, t
     assert (tmp_path / "run" / "transcripts" / "step-1.stdout.txt").is_file()
 
 
-def test_continuation_without_resume_is_unsupported(fake_agent: FakeAgent, tmp_path: Path) -> None:
-    task = _two_step_task(Step("second", hide=("secret.md",)))
-    agent = CmdAgent(template=fake_agent("echo", ECHO_AGENT), model="m", effort=None)
-    record = run_task(task, agent, tmp_path / "run")
-    assert record.status == "unsupported"
-    assert len(record.steps) == 1
+def test_a_later_step_must_start_a_fresh_session() -> None:
+    # #23: resume support is gone; a step that would continue a session is a task definition error.
+    with pytest.raises(ValueError, match="fresh_session"):
+        _two_step_task(Step("second", hide=("secret.md",)))
+    assert not hasattr(Step("x"), "compact_before")
 
 
 def test_crashing_agent_is_reported(fake_agent: FakeAgent, tmp_path: Path) -> None:
@@ -129,10 +126,10 @@ def _carry_task() -> EvalTask:
         result.add("summary carried", read(ws, "notes/summary.md") == "kept")
         return result
 
-    return EvalTask(id="carry", category="test", suites=frozenset({FULL}), provenance="t", summary="t",
+    return EvalTask(id="carry", category="test", provenance="t", summary="t",
                     setup=setup, steps=(Step("first"), Step("second", fresh_session=True, hide=("source.md",),
                                                               carry=("notes/summary.md",))),
-                    check=check, reference=lambda ws: [], par_s=10.0)
+                    check=check, reference=lambda ws: [])
 
 
 def test_fresh_session_sees_only_carried_files_in_an_isolated_root(fake_agent: FakeAgent, tmp_path: Path) -> None:
@@ -159,22 +156,6 @@ def test_fresh_session_without_carry_starts_empty(fake_agent: FakeAgent, tmp_pat
     assert json.loads(read(record.workspace, "seen-second.json") or "{}")["files"] == ["AGENTS.md"]
 
 
-def test_runner_applies_the_unrendered_profile_to_visual_checks(fake_agent: FakeAgent, tmp_path: Path) -> None:
-    from mengine_bench import visual
-
-    def check(ws: Path, answers: list[str]) -> CheckResult:
-        result = visual.VisualCheckResult(mandatory=[("page exists", True)], checks=[("page exists", True)])
-        result.flags.append(visual.NO_BROWSER)
-        return result
-
-    task = EvalTask(id="vis", category="test", suites=frozenset({FULL}), provenance="t", summary="t",
-                    setup=lambda ws: None, steps=(Step("first"),), check=check, reference=lambda ws: [], par_s=1.0)
-    agent = CmdAgent(template=fake_agent("echo", ECHO_AGENT), model="m", effort=None)
-    record = run_task(task, agent, tmp_path / "run")
-    assert record.check is not None and not record.check.passed
-    assert visual.PROFILE_UNRENDERED in getattr(record.check, "flags")
-
-
 @pytest.mark.parametrize("exit_code,timed_out,status", [(0, False, "ok"), (7, False, "crash"),
                                                        (None, True, "timeout")])
 def test_step_usage_only_recorded_on_success(
@@ -195,3 +176,19 @@ def test_step_usage_only_recorded_on_success(
     expected = Usage(9, 4, 5, 1, 0.1, "harness") if status == "ok" else None
     assert record.steps[0].usage == expected
     assert record.usage == (Usage(18, 8, 10, 2, 0.2, "harness") if status == "ok" else None)
+
+
+def test_run_price_is_validated_before_the_run_and_recorded(fake_agent: FakeAgent, tmp_path: Path) -> None:
+    template = json.loads(fake_agent("reference", REFERENCE_AGENT))
+    template.remove("-I")
+    argv = ["run", "--agent", "cmd", "--cmd", json.dumps(template), "--model", "fake/ref", "--tasks",
+            "ds-ab-playtest", "--out", str(tmp_path / "results")]
+    with pytest.raises(SystemExit, match="input=X,cached=Y,output=Z"):
+        cli.main([*argv, "--price", "input=1"])
+    assert not (tmp_path / "results").exists()
+    assert cli.main([*argv, "--price", "input=3,cached=0.3,output=15"]) == 0
+    [result_file] = (tmp_path / "results").glob("*/result.json")
+    result = json.loads(result_file.read_text(encoding="utf-8"))
+    assert result["price_per_mtok"] == {"input": 3.0, "cached": 0.3, "output": 15.0}
+    # The cmd adapter reports no tokens: the cost stays unknown, never 0.
+    assert (result["totals"]["cost_usd"], result["totals"]["cost_basis"]) == (None, "n/a")

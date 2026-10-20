@@ -11,8 +11,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from mengine_bench.core import (
-    FAST,
-    FULL,
     CheckResult,
     EvalTask,
     Step,
@@ -110,14 +108,12 @@ def _funnel_reference(ws: Path) -> list[str]:
     return ["done"]
 
 
-# Weight 2: HARD tasks. par_s: DeepSeek V4.1 Flash wall times from the
-# maintainers' v1 FAST run (2026-09-23), rounded up to whole seconds.
 TASKS = [
     EvalTask(
-        id="ds-sql-funnel", category="data-science", suites=frozenset({FAST, FULL}),
+        id="ds-sql-funnel", category="data-science",
         provenance="Product funnel in SQL: ordered steps, test accounts, dupes, out-of-order events",
         summary="Count players at each ordered funnel step in SQLite, excluding test accounts and duplicates, by platform.",
-        setup=_funnel_setup, check=_funnel_check, reference=_funnel_reference, timeout_s=420, weight=2, par_s=23,
+        setup=_funnel_setup, check=_funnel_check, reference=_funnel_reference, timeout_s=420,
         steps=(Step("In {WS}/analytics.db (SQLite: users, events) compute the funnel install -> tutorial_complete -> "
                     "first_match -> purchase per platform. Rules: ignore users with is_test=1 and events whose user_id is "
                     "not in users; a step only counts at or after the same user's previous step, with no time limit; "

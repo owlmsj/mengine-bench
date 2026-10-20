@@ -14,8 +14,6 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from mengine_bench.core import (
-    FAST,
-    FULL,
     CheckResult,
     EvalTask,
     Step,
@@ -297,14 +295,11 @@ def _reference(ws: Path) -> list[str]:
 
 TASKS = [
     EvalTask(
-        id="gd-integration-repo", category="gamedev", suites=frozenset({FAST, FULL}),
+        id="gd-integration-repo", category="gamedev",
         provenance="Long-horizon SWE: ~100-file game backend, 2 layered bugs only visible end to end; spec in docs/",
         summary="Fix configuration priority and saved player credits in a game server without changing existing tests.",
         setup=_setup, check=_check, reference=_reference,
-        # Long-horizon: two layered bugs across modules in a single request.
-        weight=2,
-        # Par: DeepSeek V4.1 Flash one-shot run, 89 s (private v1 FAST runs, 2026-09-24).
-        par_s=89.0, timeout_s=900,
+        timeout_s=900,
         steps=(Step("The backend in {WS} (Pixel Arena) has the integration test in {WS}/tests/integration failing, "
                     "while the unit tests pass. Find and fix ALL root causes following the specification in {WS}/docs "
                     "(not just the symptom of the visible test). Do not change any existing test. At the end run the "
