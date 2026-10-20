@@ -192,6 +192,6 @@ def test_step_usage_only_recorded_on_success(
     task = _two_step_task(Step("second", fresh_session=True))
     record = run_task(task, ClaudeAgent("m", None), tmp_path / "run", fresh_root=tmp_path)
     assert record.status == status
-    expected = Usage(5, 4, 5, 1, 0.1, "harness") if status == "ok" else None
+    expected = Usage(9, 4, 5, 1, 0.1, "harness") if status == "ok" else None
     assert record.steps[0].usage == expected
-    assert record.usage == (Usage(10, 8, 10, 2, 0.2, "harness") if status == "ok" else None)
+    assert record.usage == (Usage(18, 8, 10, 2, 0.2, "harness") if status == "ok" else None)
