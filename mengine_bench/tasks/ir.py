@@ -251,7 +251,7 @@ TASKS = [
     EvalTask(
         id="ir-studio-wiki", category="retrieval", suites=frozenset({FAST, FULL}),
         provenance="Internal-wiki QA with multi-hop (bug -> changelog -> approvals) and planted distractors",
-        summary="Answer 5 multi-hop facts from a studio wiki with distractors, citing files",
+        summary="Find release and game details across a studio wiki and cite the files that support each answer.",
         setup=_wiki_setup, check=_wiki_check, reference=_wiki_reference, timeout_s=300,
         # Par: DeepSeek V4.1 Flash, 14.6 s (private v1 FAST run, 2026-09-23).
         par_s=WIKI_PAR_S,
@@ -264,7 +264,7 @@ TASKS = [
     EvalTask(
         id="ir-server-logs", category="retrieval", suites=frozenset({FULL}),
         provenance="Game server ops: incident window, root cause and monthly SLO from 3 days of logs",
-        summary="Game server log forensics: incident window, root cause and monthly SLO",
+        summary="Read game server logs to explain an outage and calculate downtime and monthly availability.",
         setup=_logs_setup, check=_logs_check, reference=_logs_reference, timeout_s=360,
         par_s=2 * WIKI_PAR_S,
         steps=(Step("Read {WS}/logs/README.md and investigate the logs in {WS}/logs. Write {WS}/incident.json with "

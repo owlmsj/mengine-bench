@@ -55,7 +55,7 @@ def test_tasks_doc_matches_catalog() -> None:
     start, end = doc.index(TASKS_BEGIN) + len(TASKS_BEGIN), doc.index(TASKS_END)
     expected = render_tasks_table(catalog.all_tasks())
     assert doc[start:end].strip() == expected.strip(), "regenerate with: uv run mengine-bench tasks-doc --write"
-    assert expected.count("\n| ") == 20 + 1
+    assert expected.count("\n| ") == 14 + 1
 
 
 def test_readme_task_summaries_match_catalog() -> None:

@@ -218,3 +218,11 @@ def test_funnel_counts_ordered_steps_without_expiry(
         f"{platform},{step},{count},{conversion:.4f}\n" for platform, step, count, conversion in expected
     )
     assert (tmp_path / "funnel.csv").read_text(encoding="utf-8") == csv_text
+
+
+@pytest.mark.parametrize("task", _part1_tasks(), ids=lambda task: task.id)
+def test_part1_summaries_are_short_sentences(task: EvalTask) -> None:
+    assert 0 < len(task.summary) <= 120
+    assert task.summary.endswith(".") and task.summary.count(".") == 1
+    assert "\n" not in task.summary
+    assert task.provenance

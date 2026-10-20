@@ -136,3 +136,11 @@ def test_longrepo_reference_fixes_only_two_modules(tmp_path: Path) -> None:
                if (tmp_path / rel).read_text(encoding="utf-8") != original}
     assert changed == {"arena_server/config/loader.py", "arena_server/persistence/codec.py"}
     assert longrepo._check(tmp_path, answers).passed
+
+
+@pytest.mark.parametrize("task", (*ir.TASKS, *longrepo.TASKS), ids=lambda task: task.id)
+def test_retrieval_and_integration_summaries_are_short_sentences(task: EvalTask) -> None:
+    assert 0 < len(task.summary) <= 120
+    assert task.summary.endswith(".") and task.summary.count(".") == 1
+    assert "\n" not in task.summary
+    assert task.provenance

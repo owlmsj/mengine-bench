@@ -345,7 +345,7 @@ TASKS = [
     EvalTask(
         id="gd-astar-doors", category="gamedev", suites=frozenset({FAST, FULL}),
         provenance="Terminal-Bench style: implement + hidden tests; A* with weighted doors on a Pixel Arena tile map",
-        summary="Implement minimum-cost pathfinding (doors cost 3) on a tile map; hidden tests",
+        summary="Implement the cheapest route across a game map where doors cost more to cross.",
         setup=_astar_setup, check=_astar_check, reference=_astar_reference, timeout_s=300, par_s=19,
         steps=(Step("In {WS}/pathfind.py implement find_path as the docstring says (minimum cost, not just fewest steps). "
                     "Run `python -m unittest test_pathfind` in {WS}. " + RULES),),
@@ -353,7 +353,7 @@ TASKS = [
     EvalTask(
         id="gd-ecs-collision-bug", category="gamedev", suites=frozenset({FAST, FULL}),
         provenance="SWE-bench style debug: two planted bugs across an ECS package; visible tests must stay untouched",
-        summary="Find and fix 2 bugs (movement and AABB collision) in a multi-file ECS without touching the tests",
+        summary="Fix movement and box collision bugs in a small game codebase without changing its tests.",
         setup=_ecs_setup, check=_ecs_check, reference=_ecs_reference, timeout_s=300, par_s=12,
         steps=(Step("The package {WS}/arena_ecs has failing tests in {WS}/tests. Find the root cause and fix the code "
                     "(do not change the tests). Run `python -m unittest discover -s tests` with cwd {WS}. " + RULES),),
