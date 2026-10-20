@@ -113,6 +113,9 @@ _SEGMENT_END = r"(?![^\\/\s\"'<>:|*?])"
 _WINDOWS_HOME = re.compile(r"\b[A-Za-z]:" + _SEP + r"Users" + _SEP + _NAME, re.IGNORECASE)
 # Not after a word char: a URL path segment named home is not a home dir.
 _UNIX_HOME = re.compile(r"(?<![\w.~\-])\\*/(?:home|Users)\\*/" + _NAME)
+# Claude Code project dirs flatten the cwd, every separator becoming "-"
+# (C--Users-<name>-AppData-..., -home-<name>-repo); #23 QA leaked a name this way.
+_SLUG_HOME = re.compile(r"(?<![A-Za-z0-9])((?:[A-Za-z]-)?-(?:Users|home)-)[A-Za-z0-9_.]+(?=-)", re.IGNORECASE)
 _TOKEN_BEFORE, _TOKEN_AFTER = r"(?<![A-Za-z0-9_.\-])", r"(?![A-Za-z0-9_\-])"
 # Too short or too generic to be identifying; redacting them would mangle text.
 _GENERIC_NAMES = frozenset({"localhost", "root", "user", "admin"})
@@ -210,6 +213,7 @@ def redact_paths(text: str, scope: PathScope) -> str:
         for pattern in _dir_patterns(paths):
             text = pattern.sub(label, text)
     text = _UNIX_HOME.sub(HOME, _WINDOWS_HOME.sub(HOME, text))
+    text = _SLUG_HOME.sub(lambda match: match.group(1) + USER, text)
     for _, label, pattern in scope.names.patterns():
         text = pattern.sub(label, text)
     return text
@@ -220,7 +224,7 @@ def find_leaks(text: str, names: LocalNames | None = None) -> dict[str, int]:
     e-mail addresses, home paths, local names and secret env values (empty when clean)."""
     counts = {kind: len(pattern.findall(text)) for kind, pattern in SECRET_PATTERNS}
     counts["email"] = len(_EMAIL.findall(text))
-    counts["home path"] = len(_WINDOWS_HOME.findall(text)) + len(_UNIX_HOME.findall(text))
+    counts["home path"] = sum(len(pattern.findall(text)) for pattern in (_WINDOWS_HOME, _UNIX_HOME, _SLUG_HOME))
     for kind, _, pattern in (names or LocalNames()).patterns():
         counts[kind] = counts.get(kind, 0) + len(pattern.findall(text))
     return {kind: count for kind, count in counts.items() if count}

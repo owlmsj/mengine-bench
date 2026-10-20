@@ -64,3 +64,15 @@ def test_ordinary_text_is_untouched() -> None:
     text = "see https://example.com/home/page and /usr/bin/env, C:\\Program Files\\x, ~/notes, <HOME>/a"
     assert redact_paths(text, PathScope()) == text
     assert find_leaks(text) == {}
+
+
+def test_claude_project_slug_home_is_redacted() -> None:
+    # Claude Code names its project dir after the cwd with every separator
+    # turned into "-" (QA smoke of #23 leaked the account name this way).
+    name = fake_name("u")
+    line = json.dumps({"paths": {"auto": f"<HOME>\.claude\projects\C--Users-{name}-AppData-Local-Temp-x",
+                                 "unix": f"~/.claude/projects/-home-{name}-repo", "mac": f"-Users-{name}-repo"}})
+    assert find_leaks(line).get("home path") == 3
+    cleaned = redact_paths(line, PathScope())
+    assert name not in cleaned and find_leaks(cleaned) == {}
+    assert "C--Users-<USER>-AppData" in cleaned and "-home-<USER>-repo" in cleaned
