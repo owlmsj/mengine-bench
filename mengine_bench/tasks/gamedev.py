@@ -277,21 +277,30 @@ from arena_ecs.systems.movement import movement_system
 from arena_ecs.world import World
 
 
-class HiddenTest(unittest.TestCase):
+class MovementTests(unittest.TestCase):
+    def test_each_axis_and_multiple_steps(self):
+        world = World()
+        eid = world.spawn(pos=Position(1, 10), vel=Velocity(2, -4))
+        movement_system(world, 2.0)
+        pos = world.entities[eid]["pos"]
+        self.assertEqual((pos.x, pos.y), (5.0, 2.0))
+        movement_system(world, 0.5)
+        self.assertEqual((pos.x, pos.y), (6.0, 0.0))
+
+
+class CollisionTests(unittest.TestCase):
     def test_overlap_matrix(self):
         a = (Position(0, 0), Box(2, 2))
         cases = [((1, 1), True), ((2, 0), False), ((0, 2), False), ((-1.5, 1.5), True), ((0, 3), False), ((0, -1.9), True)]
         for (x, y), expected in cases:
             self.assertEqual(overlaps(a[0], a[1], Position(x, y), Box(2, 2)), expected, (x, y))
 
-    def test_movement_and_hits(self):
+    def test_collision_pairs(self):
         world = World()
-        a = world.spawn(pos=Position(0, 10), vel=Velocity(0, -4), box=Box(1, 1))
+        a = world.spawn(pos=Position(0, 2), box=Box(1, 1))
         b = world.spawn(pos=Position(0, 0), box=Box(1, 1))
-        movement_system(world, 2.0)
-        self.assertEqual(world.entities[a]["pos"].y, 2.0)
         self.assertEqual(collision_system(world), [])
-        movement_system(world, 0.5)
+        world.entities[a]["pos"].y = 0
         self.assertEqual(collision_system(world), [(a, b)])
 
 
@@ -311,9 +320,12 @@ def _ecs_setup(ws: Path) -> None:
 
 def _ecs_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
-    result.add("visible tests left untouched", _sha(read(ws, "tests/test_systems.py") or "") == _sha(ECS_FILES["tests/test_systems.py"]))
-    ok, _ = run_hidden_tests(ws, ECS_HIDDEN)
-    result.add("hidden movement + collision tests", ok)
+    untouched = _sha(read(ws, "tests/test_systems.py") or "") == _sha(ECS_FILES["tests/test_systems.py"])
+    result.mandatory.append(("visible tests left untouched", untouched))
+    for name, case in (("movement", "MovementTests"), ("collision", "CollisionTests")):
+        selection = f"\n\ndef load_tests(loader, tests, pattern):\n    return loader.loadTestsFromTestCase({case})\n"
+        ok, _ = run_hidden_tests(ws, ECS_HIDDEN + selection)
+        result.add(f"hidden {name}", ok)
     return result
 
 
@@ -333,7 +345,7 @@ TASKS = [
     EvalTask(
         id="gd-astar-doors", category="gamedev", suites=frozenset({FAST, FULL}),
         provenance="Terminal-Bench style: implement + hidden tests; A* with weighted doors on a Pixel Arena tile map",
-        summary="Implement minimum-cost pathfinding (doors cost 3) on a tile map; hidden tests",
+        summary="Implement the cheapest route across a game map where doors cost more to cross.",
         setup=_astar_setup, check=_astar_check, reference=_astar_reference, timeout_s=300, par_s=19,
         steps=(Step("In {WS}/pathfind.py implement find_path as the docstring says (minimum cost, not just fewest steps). "
                     "Run `python -m unittest test_pathfind` in {WS}. " + RULES),),
@@ -341,7 +353,7 @@ TASKS = [
     EvalTask(
         id="gd-ecs-collision-bug", category="gamedev", suites=frozenset({FAST, FULL}),
         provenance="SWE-bench style debug: two planted bugs across an ECS package; visible tests must stay untouched",
-        summary="Find and fix 2 bugs (movement and AABB collision) in a multi-file ECS without touching the tests",
+        summary="Fix movement and box collision bugs in a small game codebase without changing its tests.",
         setup=_ecs_setup, check=_ecs_check, reference=_ecs_reference, timeout_s=300, par_s=12,
         steps=(Step("The package {WS}/arena_ecs has failing tests in {WS}/tests. Find the root cause and fix the code "
                     "(do not change the tests). Run `python -m unittest discover -s tests` with cwd {WS}. " + RULES),),

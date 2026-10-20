@@ -25,7 +25,7 @@ def test_dry_run_lists_tasks_and_launches_nothing(monkeypatch: pytest.MonkeyPatc
     assert cli.main(["run", "--suite", "fast", "--agent", "claude", "--model", "m", "--dry-run"]) == 0
     plan = json.loads(capsys.readouterr().out)
     assert plan["tasks"] == [task.id for task in catalog.tasks("fast")]
-    assert len(plan["tasks"]) == 14
+    assert len(plan["tasks"]) == 12
     assert plan["launches"] == 0 and plan["dry_run"] is True
 
 
@@ -41,7 +41,7 @@ def test_cmd_agent_requires_template() -> None:
 
 def test_list_full_suite(capsys: pytest.CaptureFixture[str]) -> None:
     assert cli.main(["list", "--suite", "full"]) == 0
-    assert len(capsys.readouterr().out.strip().splitlines()) == 20
+    assert len(capsys.readouterr().out.strip().splitlines()) == 14
 
 
 def test_selftest_runs_gold_without_agent(capsys: pytest.CaptureFixture[str]) -> None:
@@ -55,7 +55,7 @@ def test_tasks_doc_matches_catalog() -> None:
     start, end = doc.index(TASKS_BEGIN) + len(TASKS_BEGIN), doc.index(TASKS_END)
     expected = render_tasks_table(catalog.all_tasks())
     assert doc[start:end].strip() == expected.strip(), "regenerate with: uv run mengine-bench tasks-doc --write"
-    assert expected.count("\n| ") == 20 + 1
+    assert expected.count("\n| ") == 14 + 1
 
 
 def test_readme_task_summaries_match_catalog() -> None:
