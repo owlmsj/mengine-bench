@@ -1,76 +1,78 @@
 # Contributing
 
-Two kinds of contribution: new tasks and benchmark results. Both land by pull
-request. Development uses uv only (`uv sync`, `uv run pytest -q`).
+Two kinds of contribution, both by pull request: **results** (a run of your
+agent) and **tasks**. Development uses uv only (`uv sync`, `uv run pytest -q`).
+`main` takes pull requests only, merged with a merge commit; there is no CI and
+no bot. Questions and bug reports go in issues.
+
+## Submitting a result
+
+Run the bench (README, "Run it") and submit with `run --submit` or
+`uv run mengine-bench submit results/<run>`. The pull request adds one
+`results/<run>/` folder written by `mengine-bench run`, not edited by hand, and
+nothing else. Describe your setup with `--config key=value` so others can
+compare: harness, model and effort are recorded automatically; provider,
+server hardware, quantization, context size, MCP servers and skills are not.
 
 ## Adding a task
 
-A task is a module in `mengine_bench/tasks/` that exposes
-`TASKS: list[EvalTask]`. The catalog discovers it automatically. A task has:
+A task is an `EvalTask` in a module of `mengine_bench/tasks/` listed in its
+`TASKS` list; the catalog finds it automatically. It has:
 
-1. **Fixture**: `setup(ws)` writes the starting workspace (code, data, docs).
-   It must be deterministic and offline.
-2. **Prompt(s)**: one or more `Step`s, in English. Use `fresh_session`,
-   `hide` and `compact_before` for multi-session tasks (see `core.py`).
-3. **Reference solution**: `reference(ws)` applies a correct solution to the
-   workspace and returns the final answer text(s) a correct agent would give.
-4. **Checks**: `check(ws, answers)` returns a `CheckResult`. Gold is
-   deterministic: executed hidden tests, exact numbers, file state or regex.
-   Mark gates (for example "the page rendered") as `mandatory`.
-5. **Metadata**: a stable `id`, `category`, `suites` (`fast`, `full`),
-   `provenance`, `summary`, `weight` (2 only for HARD/long-horizon tasks) and
-   `par_s` (par time in seconds, with its source in `docs/TASKS.md`).
+1. **Fixture**: `setup(ws)` writes the starting folder. Deterministic and offline.
+2. **Prompt(s)**: one or more `Step`s in English. A second step must be a
+   `fresh_session` (new agent process) and names the files it keeps in `carry`.
+3. **Reference solution**: `reference(ws)` solves the task and returns the
+   answer text(s) a correct agent would give.
+4. **Checks**: `check(ws, answers)` returns a `CheckResult`. Scored checks map
+   to requirements the agent delivers (hidden tests, exact numbers, file state).
+   Integrity rules such as "existing tests untouched" are `mandatory` gates:
+   they never earn points, and a failed gate scores the task 0.
+5. **Metadata**: a stable `id`, a `category`, a one-sentence beginner `summary`
+   (the README TL;DR), `provenance`, `timeout_s`, and `deliverables` for files
+   the judge must see verbatim (for example a page it renders).
 
-### Gold self-test rule
+Keep tasks moderate: one clear job, solvable by a good agent in a few minutes.
 
-Every task must have a self-test in `tests/` proving both directions:
+**Gold self-test rule.** Every task has a hermetic test in `tests/` (no network,
+no model) proving the reference **passes** and the untouched folder **fails**;
+when you fix a lenient check, add the wrong answer that used to pass. Then
+regenerate the tables and run everything:
 
-- the reference solution **passes** the checks, and
-- the untouched workspace **fails** them.
+```
+uv run mengine-bench tasks-doc --write    # docs/TASKS.md
+uv run mengine-bench tasks-doc --readme   # README task table
+uv run pytest -q
+```
 
-Tests are hermetic: no network, no model calls. A task without a passing
-gold self-test is not merged. Regenerate `docs/TASKS.md` in the same PR with
-`uv run mengine-bench tasks-doc --write` (a test fails when it drifts).
+Adding, removing or changing a task, prompt or check is a new bench minor
+version (1.1.0): runs of different minor versions are never ranked together.
 
-### Content rules
+**Content rules.** No personal data, company names, secrets, tokens or absolute
+local paths in tasks or fixtures. Use neutral fictional names and public topics.
 
-No personal data, company names, secrets, tokens or absolute local paths in
-tasks or fixtures. Use neutral fictional names (Alice, Bruno, Carla...) and
-public topics.
-
-## How contributions land
-
-`main` is the only branch and nobody pushes to it directly, the maintainer
-included: every change, results or code, is a pull request that the
-maintainer reviews and merges with a merge commit. There is no CI and no bot.
-Questions and bug reports go in issues.
-
-Results: see "Submitting results" in the [README](README.md). One PR adds one
-`results/<suite>/<bundle>/` directory and nothing else.
-
-## Maintainer: merging a result PR
+## Maintainer: reviewing a result
 
 ```
 gh pr checkout <n>
-git diff --stat main...HEAD          # only new files in one results/<suite>/<bundle>/
-uv run mengine-bench judge results/<suite>/<bundle>   # Claude Opus 5.5 xhigh x3, your Claude login
-uv run mengine-bench leaderboard     # rewrites LEADERBOARD.md
-git add results/<suite>/<bundle>/result.json results/<suite>/<bundle>/summary.md LEADERBOARD.md
-git commit -m "judge and rank <bundle>"
-git push                             # lands on the contributor's PR branch
+git diff --stat main...HEAD                    # only new files in one results/<run>/
+uv run mengine-bench judge results/<run>       # Claude Opus 5.5 xhigh, one vote per task
+uv run mengine-bench leaderboard               # rewrites LEADERBOARD.md
+git add results/<run>/result.json results/<run>/summary.md LEADERBOARD.md
+git commit -m "judge and rank <run>"
+git push                                       # lands on the contributor's PR branch
 gh pr merge <n> --merge
 ```
 
-Before merging, the bundle is public once merged:
+Before merging (the folder is public once merged), skim `summary.md` and the
+transcripts for personal data the redaction cannot know (names, companies,
+private projects) and for an agent reading outside its folder or looking up
+this repo's answers; reject or ask for a rerun.
 
-- `summary.md` says `Preflight: clean` (otherwise the run stays unranked, so
-  ask why);
-- skim the transcripts for personal data the redaction cannot know (names,
-  companies, private projects) and for an agent reading outside its
-  workspace or looking up this repo's gold; reject or ask for a rerun.
-
-`judge` runs once per bundle (it refuses a judged one) through your `claude`
-login, so it spends your Claude plan's usage, not API credits, as long as no
-`ANTHROPIC_API_KEY` is set. `git push` to the contributor's branch works when the PR
-allows edits by maintainers (the default for forks owned by a user); if it
-does not, merge first and land the LEADERBOARD.md commit in a PR of your own.
+`judge` runs once per run folder (it refuses a judged one) through your `claude`
+login, so it uses your Claude plan, not API credits, as long as no
+`ANTHROPIC_API_KEY` is set. For the visual tasks it renders the stored page with
+a local Chromium-family browser (Edge, Chrome or Chromium, or
+`MENGINE_BENCH_BROWSER`); never run it as root. If `git push` to the
+contributor's branch is refused (the PR does not allow maintainer edits), merge
+first and land the LEADERBOARD.md commit in a pull request of your own.
