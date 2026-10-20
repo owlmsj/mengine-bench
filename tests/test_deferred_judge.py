@@ -41,9 +41,9 @@ def _template(fake_agent: FakeAgent, name: str, body: str) -> str:
 
 
 def _run(fake_agent: FakeAgent, out: Path, task: str, body: str) -> Path:
-    assert cli.main(["run", "--suite", "fast", "--agent", "cmd", "--cmd", _template(fake_agent, "agent", body),
+    assert cli.main(["run", "--agent", "cmd", "--cmd", _template(fake_agent, "agent", body),
                      "--model", "fake/ref", "--tasks", task, "--out", str(out)]) == 0
-    [bundle] = out.glob("fast/*")
+    [bundle] = out.glob("*")
     return bundle
 
 

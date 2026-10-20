@@ -24,8 +24,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from mengine_bench.core import (
-    FAST,
-    FULL,
     CheckResult,
     EvalTask,
     Step,
@@ -317,19 +315,19 @@ def _safe_reference(ws: Path) -> list[str]:
 # maintainers' v1 FAST run (2026-09-23), rounded up to whole seconds.
 TASKS = [
     EvalTask(
-        id="gd-lockstep-desync", category="gamedev", suites=frozenset({FAST, FULL}),
+        id="gd-lockstep-desync", category="gamedev",
         provenance="Multiplayer lockstep desync: two nondeterminism sources, one invisible in-process (hash seed)",
         summary="HARD: make a lockstep simulation deterministic across processes without changing the rules",
-        setup=_desync_setup, check=_desync_check, reference=_desync_reference, timeout_s=420, weight=2, par_s=52,
+        setup=_desync_setup, check=_desync_check, reference=_desync_reference, timeout_s=420,
         steps=(Step("Read {WS}/BUG.md and the determinism contract in the docstring of {WS}/lockstep/sim.py. Fix the code "
                     "so the same seed yields the same state_hash on any machine and process, without changing the rules. "
                     "Validate by running the simulation in separate processes. " + RULES),),
     ),
     EvalTask(
-        id="ds-sql-funnel", category="data-science", suites=frozenset({FAST, FULL}),
+        id="ds-sql-funnel", category="data-science",
         provenance="Product funnel in SQL: ordered steps, 7-day window per step, test accounts, dupes, out-of-order events",
         summary="HARD: ordered funnel with a 7-day window per step in SQLite, per platform",
-        setup=_funnel_setup, check=_funnel_check, reference=_funnel_reference, timeout_s=420, weight=2, par_s=23,
+        setup=_funnel_setup, check=_funnel_check, reference=_funnel_reference, timeout_s=420,
         steps=(Step("In {WS}/analytics.db (SQLite: users, events) compute the funnel install -> tutorial_complete -> "
                     "first_match -> purchase per platform. Rules: ignore users with is_test=1 and events whose user_id is "
                     "not in users; a step only counts if it happens within 7 days (inclusive) after the same user's "
@@ -338,10 +336,10 @@ TASKS = [
                     "steamdeck, steps in funnel order. " + RULES),),
     ),
     EvalTask(
-        id="bo-safe-conversion", category="backoffice", suites=frozenset({FAST, FULL}),
+        id="bo-safe-conversion", category="backoffice",
         provenance="Series A math: post-money pool top-up in the pre-money plus SAFE conversion (circular, fixed point)",
         summary="HARD: Series A round with pool top-up and conversion of 3 SAFEs (circular computation)",
-        setup=_safe_setup, check=_safe_check, reference=_safe_reference, timeout_s=420, weight=2, par_s=51,
+        setup=_safe_setup, check=_safe_check, reference=_safe_reference, timeout_s=420,
         steps=(Step("Follow {WS}/round/term_sheet.md with {WS}/round/cap_table.csv and {WS}/round/safes.csv. Write "
                     "{WS}/round_result.json with price_per_share, new_pool_shares, safe_shares (object investor -> "
                     "shares), new_investor_shares, founders_ownership_pct (both founders combined, % of the post-round "

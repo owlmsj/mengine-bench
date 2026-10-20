@@ -2,8 +2,8 @@
 
 Every task ships a reference solution so the self-tests prove, without any
 model, that the gold passes a correct answer and fails an untouched workspace.
-Gold is executed tests, exact numbers, file state or regex; the optional LLM
-judge only feeds the separate subjective score (docs/SCORING.md).
+Gold is executed tests, exact numbers, file state or regex; the maintainer's
+LLM judge only feeds the separate Judge grade (docs/SCORING.md).
 """
 
 from __future__ import annotations
@@ -18,14 +18,6 @@ import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-
-FAST = "fast"
-FULL = "full"
-SUITES = (FAST, FULL)
-# Weight 2 marks HARD/long-horizon tasks; anything else would silently skew
-# the weighted means in scoring.py.
-WEIGHTS = (1, 2)
-
 
 @dataclass(frozen=True)
 class Step:
@@ -52,10 +44,8 @@ class Step:
 @dataclass
 class CheckResult:
     checks: list[tuple[str, bool]] = field(default_factory=list)
-    # 1.0 = every check must hold (exact gold). Checklist-graded artifacts
-    # (visual one-shot tasks) pass at a share of items instead.
-    pass_ratio: float = 1.0
-    # Gates: any failure here means not solved and correctness capped at 0.5.
+    # Gates: any failure here means not solved and score 0 (#23: no partial
+    # credit for checks that pass because the gate's work was skipped).
     mandatory: list[tuple[str, bool]] = field(default_factory=list)
 
     def add(self, name: str, ok: bool) -> None:
@@ -67,11 +57,12 @@ class CheckResult:
 
     @property
     def passed(self) -> bool:
-        return self.mandatory_ok and bool(self.checks) and self.score >= self.pass_ratio - 1e-9
+        return self.mandatory_ok and bool(self.checks) and all(ok for _, ok in self.checks)
 
     @property
     def score(self) -> float:
-        if not self.checks:
+        """Correctness 0..1: the share of scored checks passed, 0 on a failed gate."""
+        if not self.checks or not self.mandatory_ok:
             return 0.0
         return sum(ok for _, ok in self.checks) / len(self.checks)
 
@@ -88,30 +79,24 @@ Reference = Callable[[Path], list[str]]
 class EvalTask:
     id: str
     category: str
-    suites: frozenset[str]
     provenance: str
     summary: str
     setup: Setup
     steps: tuple[Step, ...]
     check: Check
     reference: Reference
-    # Published par time in seconds; the speed term of the objective score.
-    par_s: float
-    weight: int = 1
     needs: frozenset[str] = frozenset()
     timeout_s: int = 300
+    # Workspace files stored verbatim in the bundle for the maintainer's judge
+    # (visual tasks: the page it renders).
+    deliverables: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.steps:
             raise ValueError(f"task {self.id!r} received no steps; expected at least one Step")
-        unknown = set(self.suites) - set(SUITES)
-        if not self.suites or unknown:
-            got = sorted(self.suites)
-            raise ValueError(f"task {self.id!r} received suites {got}; expected subset of {SUITES}")
-        if self.weight not in WEIGHTS:
-            raise ValueError(f"task {self.id!r} received weight {self.weight}; expected one of {WEIGHTS}")
-        if not (math.isfinite(self.par_s) and self.par_s > 0):
-            raise ValueError(f"task {self.id!r} received par_s {self.par_s}; expected seconds > 0")
+        bad = [rel for rel in self.deliverables if not rel or rel.startswith(("/", "\\")) or ".." in rel.split("/")]
+        if bad:
+            raise ValueError(f"task {self.id!r} received deliverables {bad}; expected workspace-relative paths")
 
 
 # --------------------------------------------------------------- helpers ----

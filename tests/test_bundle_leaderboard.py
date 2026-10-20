@@ -41,12 +41,12 @@ def test_bundle_holds_result_summary_and_redacted_transcripts(fake_agent: FakeAg
     template.remove("-I")
     template += [fake_secret("openai"), env_secret]
     out = tmp_path / "results"
-    assert cli.main(["run", "--suite", "fast", "--agent", "cmd", "--cmd", json.dumps(template), "--model", "fake/ref",
+    assert cli.main(["run", "--agent", "cmd", "--cmd", json.dumps(template), "--model", "fake/ref",
                      "--tasks", TASK, "--out", str(out), "--submitter", "Alice Example"]) == 0
     printed = capsys.readouterr().out
     assert "privacy check: clean" in printed and "removed raw run dir" in printed
     assert list((scratch_root() / "runs").iterdir()) == [], "the raw run dir holds unredacted transcripts"
-    [bundle] = out.glob("fast/*")
+    [bundle] = out.glob("*")
     assert bundle.name.split("_")[1:4] == ["cmd", "fake-ref", "none"]
     files = sorted(p.relative_to(bundle).as_posix() for p in bundle.rglob("*") if p.is_file())
     assert files == [f"judge/{TASK}.json", "result.json", "summary.md", f"transcripts/{TASK}.jsonl.gz"]
@@ -73,13 +73,13 @@ def test_run_refuses_unclean_preflight_unless_allowed(fake_agent: FakeAgent, tmp
     monkeypatch.setattr(cli, "contamination", lambda *args, **kwargs: ["claude global instructions: x"])
     template = json.loads(fake_agent("reference", REFERENCE_AGENT))
     template.remove("-I")
-    argv = ["run", "--suite", "fast", "--agent", "cmd", "--cmd", json.dumps(template), "--model", "fake/ref",
+    argv = ["run", "--agent", "cmd", "--cmd", json.dumps(template), "--model", "fake/ref",
             "--tasks", TASK, "--out", str(tmp_path / "results")]
     with pytest.raises(SystemExit, match="1 preflight finding"):
         cli.main(argv)
     assert not (tmp_path / "results").exists(), "a refused run launches nothing"
     assert cli.main([*argv, "--allow-unclean"]) == 0
-    [result_file] = (tmp_path / "results").glob("fast/*/result.json")
+    [result_file] = (tmp_path / "results").glob("*/result.json")
     assert json.loads(result_file.read_text(encoding="utf-8"))["preflight"] == ["claude global instructions: x"]
     assert "NOT CLEAN, not ranked" in (result_file.parent / "summary.md").read_text(encoding="utf-8")
 
@@ -108,9 +108,9 @@ def test_scoring_uses_the_recorded_rounded_agent_time() -> None:
 def _write_result(results: Path, name: str, objective: float, *, model: str = "m", judge: str | None = None,
                   visual: str = "rendered", task_ids: list[str] | None = None,
                   bench_version: str = __version__) -> Path:
-    ids = task_ids if task_ids is not None else [task.id for task in catalog.tasks("fast")]
+    ids = task_ids if task_ids is not None else [task.id for task in catalog.all_tasks()]
     result = {
-        "suite": "fast", "scoring_version": "1.0", "date": "2026-10-19", "bench_version": bench_version,
+        "scoring_version": "1.0", "date": "2026-10-19", "bench_version": bench_version,
         "agent": {"name": "cmd", "model": model, "effort": None, "version": None},
         "judge": None if judge is None else {"label": judge},
         "grading": {"visual": visual},
@@ -118,7 +118,7 @@ def _write_result(results: Path, name: str, objective: float, *, model: str = "m
                    "total_agent_s": 10.0, "subjective": None, "composite": None},
         "tasks": [{"id": task_id} for task_id in ids],
     }
-    bundle = results / "fast" / name
+    bundle = results / name
     bundle.mkdir(parents=True)
     (bundle / "result.json").write_text(json.dumps(result), encoding="utf-8")
     return bundle
@@ -132,11 +132,11 @@ def test_leaderboard_ranks_by_objective_and_groups_by_judge_and_visual_profile(t
     _write_result(results, "blind", 80.0, model="blind-model", visual="unrendered")
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 4 and board.unranked == []
-    plain = board.markdown[board.markdown.index("## FAST, no judge, visual rendered"):]
+    plain = board.markdown[board.markdown.index("## no judge, visual rendered"):]
     assert plain.index("| 1 | cmd  | high-model |") < plain.index("| 2 | cmd  | low-model |")
-    assert "[summary](results/fast/high/summary.md)" in plain
-    assert "## FAST, judge judge-x@high, visual rendered" in board.markdown
-    assert "## FAST, no judge, visual unrendered" in board.markdown
+    assert "[summary](results/high/summary.md)" in plain
+    assert "## judge judge-x@high, visual rendered" in board.markdown
+    assert "## no judge, visual unrendered" in board.markdown
 
 
 @pytest.mark.parametrize("task_ids", [[TASK], [TASK, TASK]], ids=["subset", "duplicate"])
@@ -147,7 +147,7 @@ def test_leaderboard_lists_partial_runs_apart(tmp_path: Path, task_ids: list[str
     assert cli.main(["leaderboard", "--results", str(results), "--output", str(target)]) == 0
     text = target.read_text(encoding="utf-8")
     assert "| 1 | " not in text and "No results yet." in text
-    assert "- `results/fast/part`: not exactly its suite's task set" in text[text.index("## Not ranked"):]
+    assert "- `results/part`: not exactly the catalog's task set" in text[text.index("## Not ranked"):]
 
 
 def test_leaderboard_lists_runs_waiting_for_the_judge_apart(tmp_path: Path) -> None:
@@ -158,7 +158,7 @@ def test_leaderboard_lists_runs_waiting_for_the_judge_apart(tmp_path: Path) -> N
     (bundle / "result.json").write_text(json.dumps(result), encoding="utf-8")
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 0
-    assert board.unranked == [("results/fast/pending", "judge pending (`mengine-bench judge`)")]
+    assert board.unranked == [("results/pending", "judge pending (`mengine-bench judge`)")]
 
 
 def test_leaderboard_lists_unclean_runs_apart(tmp_path: Path) -> None:
@@ -170,7 +170,7 @@ def test_leaderboard_lists_unclean_runs_apart(tmp_path: Path) -> None:
     _write_result(results, "clean", 50.0)
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 1
-    assert board.unranked == [("results/fast/unclean", "started with preflight findings")]
+    assert board.unranked == [("results/unclean", "started with preflight findings")]
 
 
 def test_leaderboard_ranks_only_runs_of_the_current_bench(tmp_path: Path) -> None:
@@ -180,4 +180,4 @@ def test_leaderboard_ranks_only_runs_of_the_current_bench(tmp_path: Path) -> Non
     _write_result(results, "current", 50.0)
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 1
-    assert board.unranked == [("results/fast/old", f"bench 0.1.0; only bench {__version__} runs are ranked")]
+    assert board.unranked == [("results/old", f"bench 0.1.0; only bench {__version__} runs are ranked")]

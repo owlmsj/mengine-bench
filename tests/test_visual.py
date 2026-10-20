@@ -40,17 +40,6 @@ def test_all_items_pass(tmp_path: Path) -> None:
     assert result.passed and result.flags == []
 
 
-def test_aesthetic_items_pass_at_seventy_percent(tmp_path: Path) -> None:
-    # 3 aesthetic items: one miss = 0.67 < 0.7 fails.
-    assert not grade(tmp_path, judge_failing("style ok")).passed
-    # 4 aesthetic items: one miss = 0.75 passes.
-    write(tmp_path, "page.html", "<html></html>")
-    four = (*CHECKLIST, "hierarchy ok")
-    result = visual.grade(tmp_path, "page.html", DETERMINISTIC, four, MANDATORY, 10_000,
-                          render=fake_render, judge=judge_failing("style ok"))
-    assert result.passed and result.pass_ratio == visual.PASS_RATIO == 0.7
-
-
 def test_mandatory_visual_item_cannot_be_outvoted(tmp_path: Path) -> None:
     result = grade(tmp_path, judge_failing("cta visible"))
     assert not result.passed and "vision: cta visible" in result.failed()
@@ -190,13 +179,13 @@ def test_no_browser_run_is_recorded_unrendered(tmp_path: Path, monkeypatch: pyte
     monkeypatch.setattr(visual, "RENDER", lambda html, png: visual.NO_BROWSER)
     out = tmp_path / "r"
     template = json.dumps([sys.executable, str(script), "{workspace}", "{prompt_file}"])
-    assert cli.main(["run", "--suite", "fast", "--agent", "cmd", "--cmd", template, "--model", "fake/ref",
+    assert cli.main(["run", "--agent", "cmd", "--cmd", template, "--model", "fake/ref",
                      "--tasks", "web-mondrian-landing", "--out", str(out), "--work", str(tmp_path / "w")]) == 0
-    [bundle] = out.glob("fast/*")
+    [bundle] = out.glob("*")
     result = json.loads((bundle / "result.json").read_text(encoding="utf-8"))
     assert result["grading"] == {"visual": "unrendered"}
     [task] = result["tasks"]
-    assert task["passed"] is False and task["c"] <= 0.5
+    assert task["passed"] is False and task["c"] == 0.0
     assert "unrendered" in task["flags"]
     assert result["totals"]["solved"] == 0
     assert "visual grading: unrendered" in (bundle / "summary.md").read_text(encoding="utf-8")

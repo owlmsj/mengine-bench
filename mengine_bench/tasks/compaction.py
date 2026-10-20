@@ -14,8 +14,6 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from mengine_bench.core import (
-    FAST,
-    FULL,
     CheckResult,
     EvalTask,
     Step,
@@ -247,28 +245,28 @@ def _two_steps(source: str, summary: str, limit: int, ask: str) -> tuple[Step, .
 # were not in that run: 2x cmp-handoff (19.6 s), the closest compaction task.
 TASKS = [
     EvalTask(
-        id="cmp-handoff", category="compaction", suites=frozenset({FAST, FULL}),
+        id="cmp-handoff", category="compaction",
         provenance="Agent debugging-session handoff on a local LLM server; native retention rules",
         summary="Compact a debugging session into HANDOFF.md <=1500 chars and answer 6 questions from it alone",
-        setup=_handoff_setup, check=_handoff_check, reference=_handoff_reference, timeout_s=360, par_s=20,
+        setup=_handoff_setup, check=_handoff_check, reference=_handoff_reference, timeout_s=360,
         steps=_two_steps("session/transcript.md", "HANDOFF.md", 1500,
                          "Keys: file_line (where the recipe was applied), final_decode, final_vram_mib, "
                          "discarded_quant, pending, measure_command."),
     ),
     EvalTask(
-        id="cmp-meeting-decisions", category="compaction", suites=frozenset({FULL}),
+        id="cmp-meeting-decisions", category="compaction",
         provenance="Startup weekly ops meeting: decisions, owners, deadlines, with a debated-then-changed price",
         summary="Compact a long operations meeting into DECISIONS.md and answer 7 questions from it alone",
-        setup=_meeting_setup, check=_meeting_check, reference=_meeting_reference, timeout_s=420, par_s=40,
+        setup=_meeting_setup, check=_meeting_check, reference=_meeting_reference, timeout_s=420,
         steps=_two_steps("meetings/2026-06-30-ops.md", "DECISIONS.md", 2000,
                          "Keys: new_pro_price, new_price_start, approved_role, role_owner, monthly_cloud_cap, "
                          "stripe_deadline, designer_trigger."),
     ),
     EvalTask(
-        id="cmp-agent-trajectory", category="compaction", suites=frozenset({FULL}),
+        id="cmp-agent-trajectory", category="compaction",
         provenance="AMA-Bench style: compact a 160-step agent trajectory (JSONL) and answer from the state only",
         summary="Compact an agent trajectory (160 steps) into STATE.md and answer 5 questions from it alone",
-        setup=_traj_setup, check=_traj_check, reference=_traj_reference, timeout_s=420, par_s=40,
+        setup=_traj_setup, check=_traj_check, reference=_traj_reference, timeout_s=420,
         steps=_two_steps("agent/trajectory.jsonl", "STATE.md", 1800,
                          "Keys: last_edited_file, failing_test, last_measured_p99_ms (last tools/bench_tick.sh), "
                          "abandoned_approach, abandon_reason."),

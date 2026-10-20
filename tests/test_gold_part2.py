@@ -13,12 +13,11 @@ from pathlib import Path
 import pytest
 
 from mengine_bench import visual
-from mengine_bench.core import FAST, FULL, EvalTask
+from mengine_bench.core import EvalTask
 from mengine_bench.tasks import ir, longrepo
 from mengine_bench.tasks import visual as visual_tasks
 
 PART2 = (*ir.TASKS, *longrepo.TASKS, *visual_tasks.TASKS)
-PAR_FROM_RUNS = {"gd-integration-repo": 89.0, "web-mondrian-landing": 345.0, "3d-voxel-landscape": 295.0}
 
 
 @pytest.fixture
@@ -44,16 +43,10 @@ def test_reference_passes_and_untouched_workspace_fails(task: EvalTask, tmp_path
     assert passed, f"{task.id}: reference fails {failed}"
 
 
-def test_part2_ids_suites_and_weights_are_stable() -> None:
+def test_part2_ids_are_stable() -> None:
     by_id = {task.id: task for task in PART2}
     assert set(by_id) == {"ir-studio-wiki", "ir-server-logs", "ir-web-facts", "gd-integration-repo",
                           "web-mondrian-landing", "3d-voxel-landscape"}
-    fast = {task.id for task in PART2 if FAST in task.suites}
-    assert fast == {"ir-studio-wiki", "gd-integration-repo", "web-mondrian-landing", "3d-voxel-landscape"}
-    assert all(FULL in task.suites for task in PART2)
-    assert {tid for tid, task in by_id.items() if task.weight == 2} == set(PAR_FROM_RUNS)
-    for tid, par in PAR_FROM_RUNS.items():
-        assert by_id[tid].par_s == par
 
 
 def test_prompts_are_english() -> None:

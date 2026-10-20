@@ -65,7 +65,7 @@ def submission_problems(bundle: Path, result: Mapping[str, object]) -> list[str]
 def pr_title(result: Mapping[str, object]) -> str:
     agent = result["agent"]
     assert isinstance(agent, dict)
-    return (f"results: {str(result['suite']).upper()} {agent['name']} {agent['model']} "
+    return (f"results: {agent['name']} {agent['model']} "
             f"{agent.get('effort') or 'default effort'}")
 
 
@@ -78,7 +78,6 @@ def pr_body(result: Mapping[str, object]) -> str:
         judge_text = "pending: the maintainer runs `mengine-bench judge` on review"
     commit_text = (f"{commit.get('sha')} (dirty: {commit.get('dirty')})" if isinstance(commit, dict) else "unknown")
     rows = [
-        ("suite", result["suite"]),
         ("agent CLI and version", f"{agent['name']} {agent.get('version') or 'unknown'}"),
         ("model id", agent["model"]),
         ("effort", agent.get("effort") or "default"),
@@ -121,8 +120,8 @@ def submit(bundle: Path) -> str:
         raise SubmitError("received a bundle that cannot be published:\n- " + "\n- ".join(problems))
     repo = Path(_call(["git", "rev-parse", "--show-toplevel"], cwd=bundle)).resolve()
     parts = bundle.relative_to(repo).parts
-    if len(parts) != 3 or parts[0] != "results":
-        raise SubmitError(f"received bundle {bundle}; expected <bench clone>/results/<suite>/<bundle>")
+    if len(parts) != 2 or parts[0] != "results":
+        raise SubmitError(f"received bundle {bundle}; expected <bench clone>/results/<bundle>")
     user = json.loads(_call(["gh", "api", "user"]))
     login = str(user["login"])
     author = (login, f"{user['id']}+{login}@users.noreply.github.com")

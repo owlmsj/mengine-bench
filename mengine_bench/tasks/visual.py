@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from mengine_bench import visual
-from mengine_bench.core import FAST, FULL, CheckResult, EvalTask, Step, has, read, write
+from mengine_bench.core import CheckResult, EvalTask, Step, has, read, write
 
 ONE_SHOT = ("This is your ONLY request: there will be no second turn and no answers to questions. "
             "Deliver the complete, working final file. Work only inside {WS}.")
@@ -205,15 +205,12 @@ def _ship(ws: Path, rel: str, html: str) -> list[str]:
 
 TASKS = [
     EvalTask(
-        id="web-mondrian-landing", category="web-design", suites=frozenset({FAST, FULL}), needs=frozenset({"web"}),
+        id="web-mondrian-landing", category="web-design", needs=frozenset({"web"}),
         provenance="One-shot research + front-end: Piet Mondrian's Composition with Red, Blue and Yellow (1930)",
         summary="ONE-SHOT: research the painting and ship a Mondrian-style landing page; checks + vision checklist",
         setup=lambda ws: None, check=_landing_check,
         reference=lambda ws: _ship(ws, LANDING, LANDING_REFERENCE),
-        # Long one-shot: research + design + build in a single request.
-        weight=2,
-        # Par: DeepSeek V4.1 Flash one-shot run, 345 s (private v1 FAST runs, 2026-09-24).
-        par_s=345.0, timeout_s=900,
+        timeout_s=900,
         steps=(Step("Research on the web Piet Mondrian's painting \"Composition with Red, Blue and Yellow\" (1930) and "
                     "the De Stijl movement. Create {WS}/landing/index.html: a single-file landing page (HTML + inline "
                     "CSS; Google Fonts allowed; no frameworks) telling its story, with art direction inspired by Piet "
@@ -223,14 +220,12 @@ TASKS = [
                     + ONE_SHOT),),
     ),
     EvalTask(
-        id="3d-voxel-landscape", category="3d", suites=frozenset({FAST, FULL}),
+        id="3d-voxel-landscape", category="3d",
         provenance="One-shot procedural 3D (Design Arena style): Mt. Fuji + Chureito pagoda + sakura in low poly/voxel",
         summary="ONE-SHOT: three.js voxel/low poly scene of Fuji with pagoda and cherry trees; checks + vision checklist",
         setup=lambda ws: None, check=_scene_check,
         reference=lambda ws: _ship(ws, SCENE, SCENE_REFERENCE),
-        weight=2,
-        # Par: DeepSeek V4.1 Flash one-shot run, 295 s (private v1 FAST runs, 2026-09-24).
-        par_s=295.0, timeout_s=900,
+        timeout_s=900,
         steps=(Step("Create {WS}/scene/index.html: a single-file 3D scene with three.js loaded from a CDN "
                     "(cdn.jsdelivr.net or unpkg.com), in low poly or voxel style, showing the classic view of Mount "
                     "Fuji with the Chureito pagoda (red, five tiers) and cherry trees in bloom in the foreground, with "

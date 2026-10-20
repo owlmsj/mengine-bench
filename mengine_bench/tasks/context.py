@@ -16,8 +16,6 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from mengine_bench.core import (
-    FAST,
-    FULL,
     CheckResult,
     EvalTask,
     Step,
@@ -169,32 +167,32 @@ LC_PROMPT = "Reply ONLY with a JSON object. The document is below; it is not on 
 # (3.6 s), the closest long-context task.
 TASKS = [
     EvalTask(
-        id="lc-changelog", category="long-context", suites=frozenset({FAST, FULL}),
+        id="lc-changelog", category="long-context",
         provenance="AA-LCR style multi-hop over a long build changelog with near-duplicate distractor keys",
         summary="Find the change and revert of a parameter in a 640-build changelog and cross-reference date/approver",
-        setup=_changelog_setup, check=_changelog_check, reference=_changelog_reference, timeout_s=300, par_s=4,
+        setup=_changelog_setup, check=_changelog_check, reference=_changelog_reference, timeout_s=300,
         steps=(Step("Keys: build_change (build that changed recoil_multiplier from 1.0 to 0.85; beware of parameters "
                     "with similar names), build_revert (build that set it back to 1.0), revert_date (YYYY-MM-DD), "
                     "revert_approver, builds_between (how many builds lie between the two, exclusive). " + LC_PROMPT,
                     inline=("_inline/changelog.md",), hide=("_inline",)),),
     ),
     EvalTask(
-        id="lc-contract", category="long-context", suites=frozenset({FULL}),
+        id="lc-contract", category="long-context",
         provenance="Contract review over a long agreement: price amendment supersedes a clause, unsigned draft is a trap",
         summary="Compute the annual cost of 37 seats in a long contract with an amendment and a trap draft",
-        setup=_contract_setup, check=_contract_check, reference=_contract_reference, timeout_s=600, par_s=8,
+        setup=_contract_setup, check=_contract_check, reference=_contract_reference, timeout_s=600,
         steps=(Step("Kestrel Games will buy 37 seats of the Pro plan, with annual prepayment, for 12 months starting "
                     "2026-05-01. Keys: seat_price_month (current list price), volume_discount_pct, annual_cost (final "
                     "amount in BRL, 2 decimals). " + LC_PROMPT,
                     inline=("_inline/contract.md",), hide=("_inline",)),),
     ),
     EvalTask(
-        id="vis-chart", category="vision", suites=frozenset({FAST, FULL}), needs=frozenset({"vision"}),
+        id="vis-chart", category="vision", needs=frozenset({"vision"}),
         provenance="ChartQA style bar chart (golden image chart.png)",
         summary="Read a bar chart: highest/lowest GPU, value and ratio",
         setup=lambda ws: _copy_assets(ws, "chart.png"), check=_chart_check,
         reference=lambda ws: [json.dumps({"top_gpu": "B200", "top_tps": 210, "bottom_gpu": "A100", "ratio": 2.96})],
-        timeout_s=240, par_s=3,
+        timeout_s=240,
         steps=(Step("Keys: top_gpu, top_tps, bottom_gpu, ratio (top_tps / bottom_tps, 2 decimals). " + VISION_PROMPT,
                     attach=("images/chart.png",)),),
     ),

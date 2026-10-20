@@ -1,7 +1,7 @@
 """Result bundles: one directory per run, written by `mengine-bench run`.
 
 Layout:
-    results/<suite>/<date>_<agent>_<model>_<effort>_<run id>/
+    results/<date>_<agent>_<model>_<effort>_<run id>/
         result.json                  scores, per-task data, environment
         summary.md                   human summary
         transcripts/<task>.jsonl.gz  raw agent output per step
@@ -107,7 +107,7 @@ def write_bundle(results: MutableMapping[str, object], out_root: Path, transcrip
     assert isinstance(agent, dict) and isinstance(tasks, list)
     name = bundle_dir_name(str(results["date"]), str(agent["name"]), str(agent["model"]),
                            agent.get("effort"), str(results["run_id"]))
-    bundle_dir = out_root / str(results["suite"]) / name
+    bundle_dir = out_root / name
     (bundle_dir / "transcripts").mkdir(parents=True, exist_ok=False)
     for task in tasks:
         source = transcripts.get(task["id"])

@@ -90,11 +90,11 @@ def test_post_processing_crash_marks_the_task_crash_and_the_suite_continues(
 
     monkeypatch.setattr(cli, "_vision_record", flaky_vision_record)
     out = tmp_path / "results"
-    code = cli.main(["run", "--suite", "fast", "--agent", "cmd", "--cmd", fake_agent("idle", IDLE_AGENT),
+    code = cli.main(["run", "--agent", "cmd", "--cmd", fake_agent("idle", IDLE_AGENT),
                      "--model", "fake/idle", "--tasks", "ds-ab-playtest,bo-pnl-runway", "--out", str(out),
                      "--work", str(tmp_path / "work")])
     assert code == 0
-    [result_file] = out.glob("fast/*/result.json")
+    [result_file] = out.glob("*/result.json")
     tasks = {task["id"]: task for task in json.loads(result_file.read_text(encoding="utf-8"))["tasks"]}
     assert tasks["ds-ab-playtest"]["status"] == "crash"
     assert "PermissionError" in tasks["ds-ab-playtest"]["error"]

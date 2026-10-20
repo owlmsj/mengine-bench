@@ -17,7 +17,7 @@ GIT = shutil.which("git")
 
 def _result(**overrides: object) -> dict[str, object]:
     result: dict[str, object] = {
-        "suite": "full", "bench_version": __version__, "preflight": [], "submitter": "dquill",
+        "bench_version": __version__, "preflight": [], "submitter": "dquill",
         "agent": {"name": "codex", "model": "gpt-x", "effort": "low", "version": "codex-cli 1.0"},
         "judge": {"label": "claude-opus-5-5@xhigh", "votes": 3},
         "totals": {"objective": 90.0, "accuracy": 92.0, "solved": 18, "total": 20, "total_agent_s": 500.0,
@@ -31,7 +31,7 @@ def _result(**overrides: object) -> dict[str, object]:
 
 
 def _bundle(root: Path, result: dict[str, object], summary: str = "clean\n") -> Path:
-    bundle = root / "results" / "full" / "2026-10-19_codex_gpt-x_low_ab12cd34"
+    bundle = root / "results" / "2026-10-19_codex_gpt-x_low_ab12cd34"
     (bundle / "transcripts").mkdir(parents=True)
     (bundle / "result.json").write_text(json.dumps(result), encoding="utf-8")
     (bundle / "summary.md").write_text(summary, encoding="utf-8")
@@ -40,7 +40,7 @@ def _bundle(root: Path, result: dict[str, object], summary: str = "clean\n") -> 
 
 def test_title_and_body_come_from_result_json() -> None:
     result = _result()
-    assert submit.pr_title(result) == "results: FULL codex gpt-x low"
+    assert submit.pr_title(result) == "results: codex gpt-x low"
     body = submit.pr_body(result)
     for expected in ("| agent CLI and version | codex codex-cli 1.0 |", "| judge | claude-opus-5-5@xhigh, 3 vote(s) |",
                      "| OBJECTIVE / ACCURACY / solved | 90.0 / 92.0 / 18/20 |", "| preflight / privacy check | clean"):

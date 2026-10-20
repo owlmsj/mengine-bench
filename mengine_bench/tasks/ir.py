@@ -15,8 +15,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from mengine_bench.core import (
-    FAST,
-    FULL,
     CheckResult,
     EvalTask,
     Step,
@@ -284,12 +282,11 @@ def _web_reference(ws: Path) -> list[str]:
 
 TASKS = [
     EvalTask(
-        id="ir-studio-wiki", category="retrieval", suites=frozenset({FAST, FULL}),
+        id="ir-studio-wiki", category="retrieval",
         provenance="Internal-wiki QA with multi-hop (bug -> changelog -> approvals) and planted distractors",
         summary="Answer 5 multi-hop facts from a studio wiki with distractors, citing files",
         setup=_wiki_setup, check=_wiki_check, reference=_wiki_reference, timeout_s=300,
         # Par: DeepSeek V4.1 Flash, 14.6 s (private v1 FAST run, 2026-09-23).
-        par_s=WIKI_PAR_S,
         steps=(Step("Use the wiki in {WS}/wiki to answer: (1) in which build the fix for BUG-4471 first shipped and "
                     "(2) who approved that build; (3) the maximum number of players in ranked mode on the current "
                     "Neoplastic map; (4) which flag was reverted in PM-12 and (5) to which value. Write "
@@ -297,21 +294,19 @@ TASKS = [
                     "(list of the wiki files used). " + RULES),),
     ),
     EvalTask(
-        id="ir-server-logs", category="retrieval", suites=frozenset({FULL}),
+        id="ir-server-logs", category="retrieval",
         provenance="Game server ops: incident window, root cause and monthly SLO from 3 days of logs",
         summary="Game server log forensics: incident window, root cause and monthly SLO",
         setup=_logs_setup, check=_logs_check, reference=_logs_reference, timeout_s=360,
-        par_s=2 * WIKI_PAR_S,
         steps=(Step("Read {WS}/logs/README.md and investigate the logs in {WS}/logs. Write {WS}/incident.json with "
                     "start and end (format 'YYYY-MM-DD HH:MM:SS'), minutes_down (2 decimals), availability_june_pct "
                     "(3 decimals), slo_999_ok (bool) and root_cause (one sentence). " + RULES),),
     ),
     EvalTask(
-        id="ir-web-facts", category="retrieval", suites=frozenset({FULL}), needs=frozenset({"web"}),
+        id="ir-web-facts", category="retrieval", needs=frozenset({"web"}),
         provenance="Stable public web facts (llama.cpp, vLLM paper, Linux mascot, Rust 1.0) with cited sources",
         summary="Research 4 public facts on the web (llama.cpp, PagedAttention, Linux mascot, Rust 1.0) with sources",
         setup=_web_setup, check=_web_check, reference=_web_reference, timeout_s=480,
-        par_s=2 * WIKI_PAR_S,
         steps=(Step("Search the web and answer ONLY with a JSON object with the keys: llama_cpp_org (GitHub "
                     "organization that owns the official llama.cpp repo), pagedattention_arxiv (arXiv id of the vLLM "
                     "PagedAttention paper), linux_mascot (name of the Linux kernel mascot), rust_1_0_year (year Rust "

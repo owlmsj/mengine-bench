@@ -4,7 +4,7 @@ Ported from the private suite's visual.py. The renderer and the judge are
 module-level hooks so tests inject fakes and the runner slice installs the real
 judge adapter; nothing here calls a model. Deterministic checks gate the task
 (a broken render or missing content cannot be outvoted by style), and
-the aesthetic checklist passes at PASS_RATIO of the judge's majority votes.
+every checklist item must pass by the judge's majority votes.
 
 Grading profile (release review R10): `grade` without a browser or a judge
 falls back to the deterministic gates, which is right for gold self-tests,
@@ -32,7 +32,6 @@ from mengine_bench.core import CheckResult
 from mengine_bench.redact import PathScope, local_names, redact_paths, redact_text
 from mengine_bench.runner.process import kill_tree
 
-PASS_RATIO = 0.7
 RENDERED = "rendered"
 NO_BROWSER = "no browser"
 RENDER_FAILED = "render failed"
@@ -253,7 +252,7 @@ JUDGE: VisionJudge = unavailable_judge
 def grade(ws: Path, html_rel: str, deterministic: list[tuple[str, bool]], checklist: Sequence[str],
           mandatory_items: frozenset[str], min_png_bytes: int,
           render: Renderer | None = None, judge: VisionJudge | None = None) -> VisualCheckResult:
-    result = VisualCheckResult(pass_ratio=PASS_RATIO, mandatory=list(deterministic))
+    result = VisualCheckResult(mandatory=list(deterministic))
     png = ws / "_render" / "shot.png"
     status = (render or RENDER)(ws / html_rel, png)
     if status == NO_BROWSER:
@@ -279,7 +278,7 @@ def judge_screenshot(png: Path, deterministic: Sequence[tuple[str, bool]], scree
     """The visual grade from a screenshot: deterministic gates, the screenshot
     gate, then the judge's checklist. Raises JudgeUnavailable without votes."""
     verdict = judge(png, checklist)
-    result = VisualCheckResult(pass_ratio=PASS_RATIO,
+    result = VisualCheckResult(
                                mandatory=[*deterministic, (SCREENSHOT_CHECK, screenshot_ok)])
     for item in checklist:
         target = result.mandatory if item in mandatory_items else result.checks

@@ -34,11 +34,11 @@ def test_judged_run_records_votes_and_rationales(fake_agent: FakeAgent, tmp_path
     agent.remove("-I")
     judge = json.loads(fake_agent("judge", JUDGE))
     out = tmp_path / "results"
-    assert cli.main(["run", "--suite", "fast", "--agent", "cmd", "--cmd", json.dumps(agent), "--model", "fake/ref",
+    assert cli.main(["run", "--agent", "cmd", "--cmd", json.dumps(agent), "--model", "fake/ref",
                      "--tasks", "ds-ab-playtest", "--out", str(out), "--work", str(tmp_path / "work"),
                      "--judge", "cmd", "--judge-cmd", json.dumps(judge), "--judge-model", "judge-x",
                      "--judge-effort", "high", "--judge-votes", "3"]) == 0
-    [bundle] = out.glob("fast/*")
+    [bundle] = out.glob("*")
     result = json.loads((bundle / "result.json").read_text(encoding="utf-8"))
     [task] = result["tasks"]
     assert task["judge_votes"] == [80, 80, 80] and task["judge_rationales"] == ["solid"] * 3

@@ -16,7 +16,7 @@ from typing import TypedDict
 import psutil
 
 from mengine_bench import __version__
-from mengine_bench.core import SUITES, EvalTask
+from mengine_bench.core import EvalTask
 from mengine_bench.scoring import SuiteScore, TaskScore
 from mengine_bench.visual import PROFILE_RENDERED, PROFILE_UNRENDERED
 
@@ -30,7 +30,6 @@ SUMMARIES_END = "<!-- task-summaries:end -->"
 class TaskDetail(TypedDict):
     """Run facts per task that scoring does not carry."""
 
-    par_s: float
     steps: list[dict[str, object]]
     grading_s: float
     checks: list[dict[str, object]]
@@ -42,7 +41,6 @@ class TaskDetail(TypedDict):
     judge_rationales: list[str]
     judge_errors: list[str]
     answers: list[str]
-    pass_ratio: float
     # Vision checklist ballots, so a reviewer can redo the majority math.
     vision: dict[str, object] | None
 
@@ -50,7 +48,6 @@ class TaskDetail(TypedDict):
 @dataclass(frozen=True)
 class RunMeta:
     date: str
-    suite: str
     agent: str
     model: str
     effort: str | None
@@ -91,15 +88,15 @@ def collect_environment() -> dict[str, object]:
 
 def _task_entry(score: TaskScore, detail: TaskDetail, votes: Sequence[int]) -> dict[str, object]:
     return {
-        "id": score.task_id, "category": score.category, "weight": score.weight, "par_s": detail["par_s"],
+        "id": score.task_id, "category": score.category,
         "status": score.status, "error": detail["error"], "flags": detail["flags"],
         "steps": detail["steps"], "agent_s": None if score.agent_s is None else round(score.agent_s, 2),
         "grading_s": round(detail["grading_s"], 2), "checks": detail["checks"],
         "check_score": detail["check_score"], "mandatory_ok": detail["mandatory_ok"], "passed": detail["passed"],
-        "c": score.correctness, "s": score.speed, "o": round(score.objective, 2),
+        "c": score.correctness, "o": round(score.objective, 2),
         "judge_votes": list(votes), "subjective": score.subjective,
         "judge_rationales": detail["judge_rationales"], "judge_errors": detail["judge_errors"],
-        "answers": detail["answers"], "pass_ratio": detail["pass_ratio"], "vision": detail["vision"],
+        "answers": detail["answers"], "vision": detail["vision"],
     }
 
 
@@ -139,7 +136,7 @@ def build_results(meta: RunMeta, suite: SuiteScore, details: Mapping[str, TaskDe
     return {
         "schema": RESULT_SCHEMA, "bench_version": __version__, "bench_commit": dict(commit),
         "scoring_version": suite.scoring_version, "run_id": meta.run_id, "submitter": meta.submitter,
-        "date": meta.date, "started_at": meta.started_at, "finished_at": meta.finished_at, "suite": meta.suite,
+        "date": meta.date, "started_at": meta.started_at, "finished_at": meta.finished_at,
         "agent": {"name": meta.agent, "model": meta.model, "effort": meta.effort, "version": meta.agent_version},
         "judge": judge,
         "grading": grading,
@@ -187,7 +184,7 @@ def render_summary(results: Mapping[str, object]) -> str:
     if judge is None and results.get("judge_pending"):
         judge_text = "pending (the maintainer runs `mengine-bench judge` on review)"
     lines = [
-        f"# mengine-bench {str(results['suite']).upper()}: {agent['name']} / {agent['model']}",
+        f"# mengine-bench: {agent['name']} / {agent['model']}",
         "",
         f"- Date: {results['date']}; scoring version {results['scoring_version']}; "
         f"effort {_fmt(agent['effort'])}; agent version {_fmt(agent['version'])}; judge {judge_text}; "
@@ -200,8 +197,8 @@ def render_summary(results: Mapping[str, object]) -> str:
         f"- Bench {results['bench_version']} at {_commit_text(results.get('bench_commit'))}; "
         f"submitter {_fmt(results.get('submitter'))}; started {_fmt(results.get('started_at'))}",
         "",
-        "| task | w | status | time (s) | par (s) | checks | c | s | o | judge |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| task | status | time (s) | checks | c | judge |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     tasks = results["tasks"]
     assert isinstance(tasks, list)
@@ -209,35 +206,23 @@ def render_summary(results: Mapping[str, object]) -> str:
         checks = task["checks"]
         passed = sum(1 for check in checks if check["ok"])
         flags = f" ({', '.join(task['flags'])})" if task["flags"] else ""
-        lines.append(f"| {task['id']} | {task['weight']} | {task['status']}{flags} | {_fmt(task['agent_s'])} | "
-                     f"{task['par_s']:g} | {passed}/{len(checks)} | {task['c']:.2f} | {task['s']:.2f} | "
-                     f"{task['o']:.1f} | {_fmt(task['subjective'])} |")
+        lines.append(f"| {task['id']} | {task['status']}{flags} | {_fmt(task['agent_s'])} | "
+                     f"{passed}/{len(checks)} | {task['c']:.2f} | {_fmt(task['subjective'])} |")
     return "\n".join(lines) + "\n"
 
 
 def render_tasks_table(tasks: Iterable[EvalTask]) -> str:
-    lines = ["| id | suite | category | weight | par (s) | what it measures |",
-             "| --- | --- | --- | --- | --- | --- |"]
+    """Task table (#23): id, category and the one-sentence TL;DR."""
+    lines = ["| id | category | TL;DR |", "| --- | --- | --- |"]
     for task in tasks:
-        suites = ", ".join(suite for suite in SUITES if suite in task.suites)
         summary = task.summary.replace("|", "/")
-        lines.append(f"| {task.id} | {suites} | {task.category} | {task.weight} | {task.par_s:g} | {summary} |")
+        lines.append(f"| `{task.id}` | {task.category} | {summary} |")
     return "\n".join(lines) + "\n"
 
 
 def render_task_summaries(tasks: Iterable[EvalTask]) -> str:
-    """README list: one entry per task, grouped by category in catalog order."""
-    by_category: dict[str, list[EvalTask]] = {}
-    for task in tasks:
-        by_category.setdefault(task.category, []).append(task)
-    lines: list[str] = []
-    for category, members in by_category.items():
-        lines += ["", f"**{category}**", ""]
-        for task in members:
-            suites = ", ".join(suite.upper() for suite in SUITES if suite in task.suites)
-            lines.append(f"- `{task.id}` ({suites}; weight {task.weight}; par {task.par_s:g} s): {task.summary}. "
-                         f"Scenario: {task.provenance}.")
-    return "\n".join(lines).lstrip("\n") + "\n"
+    """README task table: the same table as render_tasks_table."""
+    return render_tasks_table(tasks)
 
 
 def replace_tasks_table(doc: str, table: str, begin: str = TASKS_BEGIN, end: str = TASKS_END) -> str:

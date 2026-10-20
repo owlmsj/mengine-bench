@@ -9,7 +9,7 @@ import pytest
 
 from conftest import FakeAgent
 from mengine_bench import cli
-from mengine_bench.core import FULL, CheckResult, EvalTask, Step, read
+from mengine_bench.core import CheckResult, EvalTask, Step, read
 from mengine_bench.runner.agents import CmdAgent
 from mengine_bench.runner.task_run import run_task
 
@@ -30,20 +30,18 @@ def test_run_with_reference_agent_scores_full_marks(fake_agent: FakeAgent, tmp_p
     # -I would hide the installed package from the fake agent; drop it.
     template.remove("-I")
     out = tmp_path / "results"
-    code = cli.main(["run", "--suite", "fast", "--agent", "cmd", "--cmd", json.dumps(template), "--model", "fake/ref",
+    code = cli.main(["run", "--agent", "cmd", "--cmd", json.dumps(template), "--model", "fake/ref",
                      "--tasks", "ds-ab-playtest", "--out", str(out), "--work", str(tmp_path / "work")])
     assert code == 0
-    [result_file] = out.glob("fast/*/result.json")
+    [result_file] = out.glob("*/result.json")
     assert "_cmd_fake-ref_none_" in result_file.parent.name
     assert (result_file.parent / "summary.md").is_file()
     result = json.loads(result_file.read_text(encoding="utf-8"))
     [task] = result["tasks"]
     assert task["status"] == "ok" and task["passed"] and task["c"] == 1.0
-    speed = min(1.0, task["par_s"] / task["agent_s"])
-    assert task["s"] == pytest.approx(speed)
-    assert result["totals"]["objective"] == round(100 * (0.8 + 0.2 * speed), 1)
+    assert result["totals"]["objective"] == 100.0
     assert result["totals"]["solved"] == 1
-    assert result["suite"] == "fast" and result["scoring_version"] == "1.0"
+    assert "suite" not in result
     assert result["agent"] == {"name": "cmd", "model": "fake/ref", "effort": None, "version": None}
     assert {"os", "cpu", "cpu_count", "python"} <= set(result["environment"])
     assert str(tmp_path) not in result_file.read_text(encoding="utf-8"), "results must not leak local paths"
@@ -69,9 +67,9 @@ def _two_step_task(second: Step) -> EvalTask:
         result.add("answers per step", answers == ["first", "second"])
         return result
 
-    return EvalTask(id="two-step", category="test", suites=frozenset({FULL}), provenance="t", summary="t",
+    return EvalTask(id="two-step", category="test", provenance="t", summary="t",
                     setup=setup, steps=(Step("first\nread {WS}/secret.md"), second), check=check,
-                    reference=lambda ws: [], par_s=10.0)
+                    reference=lambda ws: [])
 
 
 def test_fresh_session_hides_files_and_collects_answers(fake_agent: FakeAgent, tmp_path: Path) -> None:
@@ -129,10 +127,10 @@ def _carry_task() -> EvalTask:
         result.add("summary carried", read(ws, "notes/summary.md") == "kept")
         return result
 
-    return EvalTask(id="carry", category="test", suites=frozenset({FULL}), provenance="t", summary="t",
+    return EvalTask(id="carry", category="test", provenance="t", summary="t",
                     setup=setup, steps=(Step("first"), Step("second", fresh_session=True, hide=("source.md",),
                                                               carry=("notes/summary.md",))),
-                    check=check, reference=lambda ws: [], par_s=10.0)
+                    check=check, reference=lambda ws: [])
 
 
 def test_fresh_session_sees_only_carried_files_in_an_isolated_root(fake_agent: FakeAgent, tmp_path: Path) -> None:
@@ -167,8 +165,8 @@ def test_runner_applies_the_unrendered_profile_to_visual_checks(fake_agent: Fake
         result.flags.append(visual.NO_BROWSER)
         return result
 
-    task = EvalTask(id="vis", category="test", suites=frozenset({FULL}), provenance="t", summary="t",
-                    setup=lambda ws: None, steps=(Step("first"),), check=check, reference=lambda ws: [], par_s=1.0)
+    task = EvalTask(id="vis", category="test", provenance="t", summary="t",
+                    setup=lambda ws: None, steps=(Step("first"),), check=check, reference=lambda ws: [])
     agent = CmdAgent(template=fake_agent("echo", ECHO_AGENT), model="m", effort=None)
     record = run_task(task, agent, tmp_path / "run")
     assert record.check is not None and not record.check.passed

@@ -19,8 +19,6 @@ from datetime import date
 from pathlib import Path
 
 from mengine_bench.core import (
-    FAST,
-    FULL,
     CheckResult,
     EvalTask,
     Step,
@@ -267,20 +265,20 @@ def _recon_reference(ws: Path) -> list[str]:
 # (27.5 s), the closest backoffice task.
 TASKS = [
     EvalTask(
-        id="ds-ab-playtest", category="data-science", suites=frozenset({FAST, FULL}),
+        id="ds-ab-playtest", category="data-science",
         provenance="Pixel Arena playtest A/B (arena-panel telemetry); two-proportion z-test on a dirty export",
         summary="Deduplicate telemetry, per-variant rates, lift, two-proportion z-test and ship decision",
-        setup=_ab_setup, check=_ab_check, reference=_ab_reference, timeout_s=300, par_s=25,
+        setup=_ab_setup, check=_ab_check, reference=_ab_reference, timeout_s=300,
         steps=(Step("Read {WS}/telemetry/README.md and analyze {WS}/telemetry/playtest_ab.csv. Write {WS}/ab_result.json with "
                     "the keys sessions_a, sessions_b, rate_a, rate_b (tutorial completion), abs_lift (B-A), rel_lift "
                     "((B-A)/A), p_value (two-sided two-proportion z-test with pooled variance), ship_b (true if p<0.05 and "
                     "B>A), mean_minutes_a, mean_minutes_b. " + RULES),),
     ),
     EvalTask(
-        id="bo-pnl-runway", category="backoffice", suites=frozenset({FAST, FULL}),
+        id="bo-pnl-runway", category="backoffice",
         provenance="Startup monthly close: P&L from a Brazilian-format ledger (`;`, 1.234,56) + chart of accounts, burn and runway",
         summary="Build a monthly P&L (revenue, COGS, margin, opex, EBITDA) from a Brazilian-format ledger and compute burn and runway",
-        setup=_pnl_setup, check=_pnl_check, reference=_pnl_reference, timeout_s=360, par_s=28,
+        setup=_pnl_setup, check=_pnl_check, reference=_pnl_reference, timeout_s=360,
         steps=(Step("Close the startup's half-year using {WS}/finance/ledger.csv (separator ;, Brazilian number format "
                     "1.234,56, dates dd/mm/yyyy, costs negative) and {WS}/finance/chart_of_accounts.csv. Write {WS}/pnl.csv "
                     "with header line,2026-01,...,2026-06 and these lines in this order: revenue (net of refunds), cogs, "
@@ -290,10 +288,10 @@ TASKS = [
                     "1 decimal). " + RULES),),
     ),
     EvalTask(
-        id="bo-reconcile", category="backoffice", suites=frozenset({FULL}),
+        id="bo-reconcile", category="backoffice",
         provenance="Accounts receivable reconciliation: invoices vs bank statement with PIX/TED memo variants and noise",
         summary="Reconcile invoices with a bank statement: unpaid, duplicated and mismatched",
-        setup=_recon_setup, check=_recon_check, reference=_recon_reference, timeout_s=300, par_s=55,
+        setup=_recon_setup, check=_recon_check, reference=_recon_reference, timeout_s=300,
         steps=(Step("Reconcile {WS}/backoffice/invoices.csv with {WS}/backoffice/bank_statement_june.csv (the memo cites "
                     "the invoice in different formats; ignore fees, interest and PIX transfers without an identifiable "
                     "invoice). Write {WS}/reconciliation.json with unpaid (ids without payment), duplicated (ids paid more "

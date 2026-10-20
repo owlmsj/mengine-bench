@@ -52,8 +52,8 @@ def _regrade_visual(task: Task, pending: dict[str, object], png: Path, vision: V
 def _outcome(task: Task) -> TaskOutcome:
     votes = task["judge_votes"]
     assert isinstance(votes, list)
-    return TaskOutcome(task_id=str(task["id"]), category=str(task["category"]), weight=int(task["weight"]),  # type: ignore[call-overload]
-                       par_s=float(task["par_s"]), check_score=float(task["check_score"]),  # type: ignore[arg-type]
+    return TaskOutcome(task_id=str(task["id"]), category=str(task["category"]),
+                       check_score=float(task["check_score"]),  # type: ignore[arg-type]
                        mandatory_ok=bool(task["mandatory_ok"]), passed=bool(task["passed"]),
                        agent_s=None if task["agent_s"] is None else float(task["agent_s"]),  # type: ignore[arg-type]
                        status=str(task["status"]), judge_votes=tuple(int(vote) for vote in votes))
@@ -87,9 +87,9 @@ def judge_bundle(bundle: Path, judge_agent: Agent, votes: int) -> dict[str, obje
                 _regrade_visual(task, packet["vision"], png, vision)
     if not any(task["judge_votes"] for task in tasks):
         raise ValueError(f"received no judge votes for {bundle.name} (see judge_errors); expected a working judge")
-    suite = score_suite(str(result["suite"]), [_outcome(task) for task in tasks], judge=subjective.label)
+    suite = score_suite([_outcome(task) for task in tasks], judge=subjective.label)
     for task, score in zip(tasks, suite.tasks):
-        task.update(c=score.correctness, s=score.speed, o=round(score.objective, 2), subjective=score.subjective)
+        task.update(c=score.correctness, o=round(score.objective, 2), subjective=score.subjective)
     result["totals"] = totals_block(suite)
     result["grading"] = {"visual": visual_grading_profile(task["flags"] for task in tasks)}
     result["judge"] = {"label": subjective.label, "model": judge_agent.model, "effort": judge_agent.effort,

@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mengine_bench import __version__, catalog, visual
-from mengine_bench.core import FULL, SUITES, EvalTask, scratch_root
+from mengine_bench.core import EvalTask, scratch_root
 from mengine_bench.judge import DEFAULT_VOTES, JudgeContext, SubjectiveJudge, VisionChecklistJudge, workspace_diff
 from mengine_bench.bundle import bench_commit, bundle_leaks, run_scope, write_bundle
 from mengine_bench.deferred_judge import judge_bundle
@@ -43,20 +43,19 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="mengine-bench")
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command", required=True)
-    run = sub.add_parser("run", help="run a suite against an agent and write results (--submit opens the PR)")
-    run.add_argument("--suite", choices=SUITES, default=FULL)
+    run = sub.add_parser("run", help="run every task against an agent and write results (--submit opens the PR)")
     run.add_argument("--agent", choices=AGENT_NAMES, required=True)
     run.add_argument("--model", required=True)
     run.add_argument("--effort")
     run.add_argument("--cmd", help='argv template for --agent cmd: JSON list or quoted string with {prompt_file}')
-    run.add_argument("--tasks", default="", help="comma-separated task ids (default: whole suite)")
+    run.add_argument("--tasks", default="", help="comma-separated task ids, for debugging; such a run is never ranked (default: every task)")
     run.add_argument("--judge", choices=JUDGE_CHOICES, default="none",
                      help="judge during the run (default none: the maintainer judges on review)")
     run.add_argument("--judge-model", default=DEFAULT_JUDGE_MODEL)
     run.add_argument("--judge-effort", default=DEFAULT_JUDGE_EFFORT)
     run.add_argument("--judge-votes", type=int, default=DEFAULT_VOTES)
     run.add_argument("--judge-cmd", help="argv template for --judge cmd")
-    run.add_argument("--out", type=Path, default=Path("results"), help="bundles go to <out>/<suite>/<run>/")
+    run.add_argument("--out", type=Path, default=Path("results"), help="bundles go to <out>/<run>/")
     run.add_argument("--submitter", help="public credit in result.json (default with --submit: your GitHub login)")
     run.add_argument("--submit", action="store_true",
                      help="after a clean run, open the pull request with the bundle (needs gh, logged in)")
@@ -65,8 +64,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--allow-unclean", action="store_true",
                      help="run despite preflight findings; they are recorded and the run is not ranked")
     run.add_argument("--dry-run", action="store_true", help="print the plan and the preflight findings; run nothing")
-    listing = sub.add_parser("list", help="list the tasks of a suite")
-    listing.add_argument("--suite", choices=SUITES, default=FULL)
+    sub.add_parser("list", help="list the tasks")
     board = sub.add_parser("leaderboard", help="rank results/**/result.json into LEADERBOARD.md")
     board.add_argument("--results", type=Path, default=Path("results"))
     board.add_argument("--output", type=Path, default=Path("LEADERBOARD.md"))
@@ -102,8 +100,8 @@ def _select(pool: Sequence[EvalTask], ids: str) -> list[EvalTask]:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.command == "list":
-        for task in catalog.tasks(args.suite):
-            print(f"{task.id}\t{task.category}\tw={task.weight}\tpar={task.par_s:g}s")
+        for task in catalog.all_tasks():
+            print(f"{task.id}\t{task.category}\t{task.summary}")
         return 0
     if args.command == "leaderboard":
         return _leaderboard(args)
@@ -146,7 +144,7 @@ def _submit(bundle: Path) -> int:
 
 
 def _run(args: argparse.Namespace) -> int:
-    tasks = _select(catalog.tasks(args.suite), args.tasks)
+    tasks = _select(catalog.all_tasks(), args.tasks)
     if args.agent == "cmd" and not args.cmd:
         raise SystemExit("error: received --agent cmd without --cmd; expected an argv template with {prompt_file}")
     if args.judge == "cmd" and not args.judge_cmd:
@@ -171,7 +169,7 @@ def _run(args: argparse.Namespace) -> int:
     if args.dry_run:
         judge = "on review (maintainer)" if args.judge == "none" else \
             f"{args.judge} {args.judge_model}@{args.judge_effort} x{args.judge_votes}"
-        plan = {"suite": args.suite, "agent": args.agent, "model": args.model, "effort": args.effort,
+        plan = {"agent": args.agent, "model": args.model, "effort": args.effort,
                 "judge": judge, "tasks": [task.id for task in tasks], "dry_run": True, "launches": 0,
                 "preflight": "clean" if not problems else f"{len(problems)} finding(s)"}
         print(json.dumps(plan))
@@ -260,8 +258,8 @@ def _run_tasks(tasks: Sequence[EvalTask], agent: Agent, judge_agent: Agent | Non
         outcomes.append(_outcome(task, record, votes.get(task.id, ())))
         print(f"[{task.id}] {record.status} c={detail['check_score']:.2f} t={record.agent_s:.1f}s", flush=True)
     label = subjective.label if subjective is not None else None
-    suite = score_suite(args.suite, outcomes, judge=label if any(votes.values()) else None)
-    meta = RunMeta(date=datetime.now().strftime("%Y-%m-%d"), suite=args.suite, agent=agent.name, model=args.model,
+    suite = score_suite(outcomes, judge=label if any(votes.values()) else None)
+    meta = RunMeta(date=datetime.now().strftime("%Y-%m-%d"), agent=agent.name, model=args.model,
                    effort=args.effort, agent_version=agent.version(), judge_label=label,
                    judge_votes=args.judge_votes if label else 0, run_id=uuid.uuid4().hex[:8],
                    started_at=started_at, finished_at=_utc_now(), submitter=args.submitter,
@@ -326,7 +324,6 @@ def _detail(task: EvalTask, record: TaskRunRecord) -> TaskDetail:
         checks = [{"name": name, "ok": ok, "mandatory": True} for name, ok in check.mandatory]
         checks += [{"name": name, "ok": ok, "mandatory": False} for name, ok in check.checks]
     return TaskDetail(
-        par_s=task.par_s,
         steps=[{"index": s.index, "wall_s": round(s.wall_s, 2), "exit_code": s.exit_code, "status": s.status}
                for s in record.steps],
         grading_s=record.grading_s, checks=checks,
@@ -335,7 +332,7 @@ def _detail(task: EvalTask, record: TaskRunRecord) -> TaskDetail:
         passed=check.passed if check is not None else False,
         flags=_flags(record), error=_public_error(record.error, record),
         judge_rationales=[], judge_errors=[], answers=list(record.answers),
-        pass_ratio=check.pass_ratio if check is not None else 1.0, vision=None,
+        vision=None,
     )
 
 
@@ -357,7 +354,7 @@ def _public_error(error: str | None, record: TaskRunRecord) -> str | None:
 def _outcome(task: EvalTask, record: TaskRunRecord, votes: tuple[int, ...]) -> TaskOutcome:
     check = record.check
     return TaskOutcome(
-        task_id=task.id, category=task.category, weight=task.weight, par_s=task.par_s,
+        task_id=task.id, category=task.category,
         check_score=check.score if check is not None else 0.0,
         mandatory_ok=check.mandatory_ok if check is not None else False,
         passed=check.passed if check is not None else False,
