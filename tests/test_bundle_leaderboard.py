@@ -113,16 +113,19 @@ def test_scoring_uses_the_recorded_rounded_agent_time() -> None:
     assert run_command._outcome(task, record).agent_s == 0.25
 
 
-def _write_result(results: Path, name: str, objective: float, *, model: str = "m", judge: str | None = None,
-                  task_ids: list[str] | None = None,
-                  bench_version: str = __version__) -> Path:
+def _write_result(results: Path, name: str, score: float | None, *, model: str = "m", judged: bool = True,
+                  task_ids: list[str] | None = None, bench_version: str = __version__) -> Path:
     ids = task_ids if task_ids is not None else [task.id for task in catalog.all_tasks()]
     result = {
-        "scoring_version": "1.0", "date": "2026-10-19", "bench_version": bench_version,
-        "agent": {"name": "cmd", "model": model, "effort": None, "version": None},
-        "judge": None if judge is None else {"model": judge.split("@")[0], "effort": judge.split("@")[1]},
-        "totals": {"score": objective, "correct": objective, "solved": 1, "total": len(ids),
-                   "time_s": 10.0, "judge": 50.0, "cost_usd": None, "cost_basis": "n/a"},
+        "date": "2026-10-19", "bench_version": bench_version, "submitter": "dquill",
+        "agent": {"name": "codex", "model": model, "effort": "high", "version": "codex-cli 0.162.1"},
+        "judge": {"agent": "claude", "model": "claude-opus-5-5", "effort": "xhigh", "rubric": "2.0"} if judged else None,
+        "config": {"personal_instructions": [], "provider": "openai", "mcp": "none"},
+        "environment": {"os": "Linux 6", "cpu": "AMD Ryzen 9 7950X", "cpu_count": 32, "ram_gb": 62.6,
+                        "gpu": "NVIDIA GeForce RTX 4090 (24 GB)"},
+        "totals": {"score": score, "correct": 80.0, "solved": 10, "total": len(ids), "judge": 70.0 if judged else None,
+                   "time_s": 1830.0, "cost_usd": 2.5, "cost_basis": "price", "cost_lower_bound": True,
+                   "tokens": {"input": 1_500_000, "cached_input": 0, "output": 250_000, "reasoning": 0}},
         "tasks": [{"id": task_id} for task_id in ids],
     }
     bundle = results / name
@@ -131,43 +134,57 @@ def _write_result(results: Path, name: str, objective: float, *, model: str = "m
     return bundle
 
 
-def test_leaderboard_ranks_by_objective_and_groups_by_judge(tmp_path: Path) -> None:
+def test_leaderboard_is_one_table_sorted_by_score_with_the_spec_columns(tmp_path: Path) -> None:
     results = tmp_path / "results"
-    _write_result(results, "low", 50.0, model="low-model", judge="judge-x@high")
-    _write_result(results, "high", 90.0, model="high-model", judge="judge-x@high")
-    _write_result(results, "other", 70.0, model="other-model", judge="judge-y@low")
+    _write_result(results, "low", 50.0, model="low-model")
+    _write_result(results, "high", 90.0, model="high-model")
     board = leaderboard.build_leaderboard(results, tmp_path)
-    assert board.ranked == 3 and board.unranked == []
-    plain = board.markdown[board.markdown.index("## judge judge-x@high"):]
-    assert plain.index("| 1 | cmd  | high-model |") < plain.index("| 2 | cmd  | low-model |")
-    assert "[summary](results/high/summary.md)" in plain
-    assert "## judge judge-y@low" in board.markdown
+    assert board.ranked == 2 and board.unranked == []
+    table = board.markdown[board.markdown.index("| # |"):]
+    header = table.splitlines()[0]
+    assert header == ("| # | Score | Correct % | Solved | Judge | Time | Cost | Tokens | Agent | Model | Effort | "
+                      "Hardware | Config | Submitter | Date | Run |")
+    assert table.index("high-model") < table.index("low-model")
+    row = table.splitlines()[2]
+    for cell in ("| 1 | **90.0** | 80.0 | 10/", "| 70.0 | 30 min 30 s | >= $2.50 (price) | 1.75M |",
+                 "| codex codex-cli 0.162.1 | high-model | high |", "AMD Ryzen 9 7950X, NVIDIA GeForce RTX 4090 (24 GB)",
+                 "provider=openai, mcp=none", "| dquill | 2026-10-19 | [run](results/high/summary.md) |"):
+        assert cell in row, (cell, row)
+    assert board.markdown.count("| # |") == 1, "one table"
 
 
 @pytest.mark.parametrize("task_ids", [[TASK], [TASK, TASK]], ids=["subset", "duplicate"])
-def test_leaderboard_lists_partial_runs_apart(tmp_path: Path, task_ids: list[str]) -> None:
+def test_leaderboard_lists_incomplete_runs_apart(tmp_path: Path, task_ids: list[str]) -> None:
     results = tmp_path / "results"
     _write_result(results, "part", 99.0, task_ids=task_ids)
     target = tmp_path / "LEADERBOARD.md"
     assert cli.main(["leaderboard", "--results", str(results), "--output", str(target)]) == 0
     text = target.read_text(encoding="utf-8")
     assert "| 1 | " not in text and "No results yet." in text
-    assert "- `results/part`: not exactly the catalog's task set" in text[text.index("## Not ranked"):]
+    assert "- `results/part`: incomplete" in text[text.index("## Not ranked"):]
 
 
 def test_leaderboard_lists_runs_waiting_for_the_judge_apart(tmp_path: Path) -> None:
     results = tmp_path / "results"
-    _write_result(results, "pending", 99.0)
+    _write_result(results, "pending", None, judged=False)
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 0
     assert board.unranked == [("results/pending", "waiting for the judge (`mengine-bench judge`)")]
 
 
-def test_leaderboard_ranks_only_runs_of_the_current_bench(tmp_path: Path) -> None:
-    # Older benches had other prompts and no preflight: their scores do not compare.
+def test_leaderboard_ranks_the_current_major_minor_only(tmp_path: Path) -> None:
+    # A patch release changes no task, prompt or score, so 1.0.x runs compare; 0.2 runs do not.
     results = tmp_path / "results"
-    _write_result(results, "old", 99.0, bench_version="0.1.0")
-    _write_result(results, "current", 50.0, judge="j@x")
+    _write_result(results, "old", 99.0, bench_version="0.2.0")
+    major, minor, _ = __version__.split(".")
+    _write_result(results, "patch", 60.0, bench_version=f"{major}.{minor}.99")
+    _write_result(results, "current", 50.0)
     board = leaderboard.build_leaderboard(results, tmp_path)
-    assert board.ranked == 1
-    assert board.unranked == [("results/old", f"bench 0.1.0; only bench {__version__} runs are ranked")]
+    assert board.ranked == 2
+    assert board.unranked == [("results/old", f"older bench 0.2.0; only bench {major}.{minor}.x runs are ranked")]
+
+
+def test_bench_is_version_1_0_0() -> None:
+    import tomllib
+    pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
+    assert __version__ == pyproject["project"]["version"] == "1.0.0"

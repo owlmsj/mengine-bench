@@ -138,3 +138,12 @@ def test_run_submit_fails_before_running_without_gh(monkeypatch: pytest.MonkeyPa
     assert not (tmp_path / "results").exists()
     with pytest.raises(SystemExit):
         cli.main(["run", "--agent", "cmd", "--cmd", "x {prompt_file}", "--model", "m", "--submit", "--allow-unclean"])
+
+
+def test_submit_wants_a_bundle_directly_under_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    nested = tmp_path / "results" / "full" / "2026-10-19_codex_gpt-x_low_ab12cd34"
+    (nested / "transcripts").mkdir(parents=True)
+    (nested / "result.json").write_text(json.dumps(_result()), encoding="utf-8")
+    monkeypatch.setattr(submit, "_call", lambda argv, cwd=None, env=None: str(tmp_path))
+    with pytest.raises(SubmitError, match="results/<bundle>"):
+        submit.submit(nested)

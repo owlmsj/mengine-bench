@@ -161,6 +161,13 @@ def hardware_text(environment: object) -> str:
             f"GPU {environment.get('gpu')}")
 
 
+def hardware_short_text(environment: object) -> str:
+    """Leaderboard cell: CPU, GPU and RAM."""
+    if not isinstance(environment, dict):
+        return "-"
+    return f"{environment.get('cpu')}, {environment.get('gpu')}, {round(float(environment.get('ram_gb') or 0))} GB"
+
+
 def judge_text(judge: object) -> str:
     if not isinstance(judge, dict):
         return JUDGE_PENDING

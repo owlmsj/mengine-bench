@@ -134,3 +134,34 @@ def test_judge_refuses_a_bundle_without_packets(tmp_path: Path, capsys: pytest.C
     (bundle / "result.json").write_text(json.dumps({"judge": None, "tasks": [{"id": "x"}]}), encoding="utf-8")
     assert cli.main(["judge", str(bundle), "--judge", "cmd", "--judge-cmd", "x {prompt_file}"]) == 1
     assert "judge/x.json" in capsys.readouterr().out
+
+
+LEAKY_VISUAL_AGENT = """
+import sys
+from pathlib import Path
+from mengine_bench import catalog
+ws = Path(sys.argv[1])
+task = next(t for t in catalog.all_tasks() if t.id == "web-mondrian-landing")
+task.reference(ws)
+page = ws / "landing" / "index.html"
+page.write_text(page.read_text(encoding="utf-8") + "<!-- " + sys.argv[3] + " " + str(ws.resolve()) + " -->",
+                encoding="utf-8")
+print("done")
+"""
+
+
+def test_deliverables_are_stored_verbatim_but_redacted(fake_agent: FakeAgent, tmp_path: Path,
+                                                       capsys: pytest.CaptureFixture[str]) -> None:
+    from fakes import MARKER, fake_secret
+
+    argv = json.loads(_template(fake_agent, "leaky", LEAKY_VISUAL_AGENT)) + [fake_secret("github")]
+    out = tmp_path / "results"
+    assert cli.main(["run", "--agent", "cmd", "--cmd", json.dumps(argv), "--model", "fake/ref",
+                     "--tasks", "web-mondrian-landing", "--out", str(out)]) == 0
+    assert "privacy check: clean" in capsys.readouterr().out
+    [bundle] = out.glob("*")
+    stored = (bundle / "judge" / "web-mondrian-landing" / "landing" / "index.html").read_text(encoding="utf-8")
+    assert "Composition with Red, Blue and Yellow" in stored and "[REDACTED:" in stored
+    assert MARKER not in stored and str(tmp_path) not in stored
+    packet = json.loads((bundle / "judge" / "web-mondrian-landing.json").read_text(encoding="utf-8"))
+    assert (packet["deliverables"], packet["render"]) == (["landing/index.html"], "landing/index.html")
