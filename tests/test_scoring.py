@@ -100,3 +100,29 @@ def test_parse_price_errors_name_the_value_and_the_shape(text: str) -> None:
     with pytest.raises(ValueError, match="input=X,cached=Y,output=Z") as error:
         parse_price(text)
     assert repr(text) in str(error.value)
+
+
+def test_docs_worked_example() -> None:
+    """Locks the worked example in docs/SCORING.md: the numbers and the lines that show them."""
+    from pathlib import Path
+
+    from mengine_bench.report import cost_text, time_text
+
+    rows = [
+        outcome(task_id="A", correctness=1.0, solved=True, agent_s=120.0, judge=80, step_usages=(usage(cost=0.40),)),
+        outcome(task_id="B", correctness=0.6, solved=False, agent_s=300.0, judge=60, step_usages=(usage(cost=0.90),)),
+        outcome(task_id="C", status="timeout", correctness=0.0, solved=False, agent_s=900.0, judge=30,
+                step_usages=(None,)),
+    ]
+    run = score_run(rows)
+    assert (run.correct, run.solved, run.judge, run.score, run.time_s) == (53.3, 1, 56.7, 54.3, 1320.0)
+    totals = {"cost_usd": run.cost.usd, "cost_basis": run.cost.basis, "cost_lower_bound": run.cost.lower_bound}
+    assert (time_text(run.time_s), cost_text(totals)) == ("22 min 00 s", ">= $1.30 (harness)")
+    codex = Usage(2_000_000, 1_500_000, 100_000, None, None, "none")
+    assert round(parse_price("input=1.25,cached=0.125,output=10").cost_usd(codex) or 0, 2) == 1.81
+    doc = (Path(__file__).resolve().parents[1] / "docs" / "SCORING.md").read_text(encoding="utf-8")
+    for line in ("Correct % = 100 x (1.00 + 0.60 + 0.00) / 3 = 53.3; Solved 1/3",
+                 "Judge = (80 + 60 + 30) / 3 = 56.7", "Score = 0.7 x 53.3 + 0.3 x 56.7 = 54.3",
+                 "Time = 120 + 300 + 900 = 1320 s (22 min 00 s)", "Cost = 0.40 + 0.90 = >= $1.30 (harness)",
+                 "(500,000 x 1.25 + 1,500,000 x 0.125 + 100,000 x 10) / 1,000,000 = $1.81"):
+        assert line in " ".join(doc.split()), line
