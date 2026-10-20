@@ -11,7 +11,7 @@ import pytest
 
 from conftest import FakeAgent
 from fakes import MARKER, fake_secret
-from mengine_bench import catalog, cli, leaderboard
+from mengine_bench import __version__, catalog, cli, leaderboard
 from mengine_bench.core import scratch_root
 from mengine_bench.redact import LocalNames
 
@@ -106,10 +106,11 @@ def test_scoring_uses_the_recorded_rounded_agent_time() -> None:
 
 
 def _write_result(results: Path, name: str, objective: float, *, model: str = "m", judge: str | None = None,
-                  visual: str = "rendered", task_ids: list[str] | None = None) -> Path:
+                  visual: str = "rendered", task_ids: list[str] | None = None,
+                  bench_version: str = __version__) -> Path:
     ids = task_ids if task_ids is not None else [task.id for task in catalog.tasks("fast")]
     result = {
-        "suite": "fast", "scoring_version": "1.0", "date": "2026-10-19", "bench_version": "0.1.0",
+        "suite": "fast", "scoring_version": "1.0", "date": "2026-10-19", "bench_version": bench_version,
         "agent": {"name": "cmd", "model": model, "effort": None, "version": None},
         "judge": None if judge is None else {"label": judge},
         "grading": {"visual": visual},
@@ -170,3 +171,13 @@ def test_leaderboard_lists_unclean_runs_apart(tmp_path: Path) -> None:
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 1
     assert board.unranked == [("results/fast/unclean", "started with preflight findings")]
+
+
+def test_leaderboard_ranks_only_runs_of_the_current_bench(tmp_path: Path) -> None:
+    # Older benches had other prompts and no preflight: their scores do not compare.
+    results = tmp_path / "results"
+    _write_result(results, "old", 99.0, bench_version="0.1.0")
+    _write_result(results, "current", 50.0)
+    board = leaderboard.build_leaderboard(results, tmp_path)
+    assert board.ranked == 1
+    assert board.unranked == [("results/fast/old", f"bench 0.1.0; only bench {__version__} runs are ranked")]

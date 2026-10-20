@@ -42,16 +42,36 @@ def test_docs_explain_weight_two_membership(document: str) -> None:
     assert "FULL adds six weight-1 tasks" in text
 
 
-def test_readme_records_measured_baseline_and_clone_steps() -> None:
+def test_readme_records_clone_steps_and_current_runs_only() -> None:
     text = " ".join((ROOT / "README.md").read_text(encoding="utf-8").split())
     for expected in ("git clone https://github.com/owlmsj/mengine-bench.git cd mengine-bench uv sync",
-                     "20 min 10 s wall", "510 s agent time", "Codex gpt-6.1-sol",
-                     "low effort", "judge with 1 vote, as its bundle records", "claude-opus-5-5", "xhigh",
-                     "Both visual tasks were rendered in a browser and graded by the vision judge",
-                     "FAST has no measured run yet", "every tool its harness gives it"):
+                     "every tool its harness gives it", "claude-opus-5-5", "xhigh",
+                     "only runs of the current bench are ranked", "git show fde6c16:LEADERBOARD.md"):
         assert expected in text
-    # The 2026-10-17 bundle records grading.visual "rendered" and a screenshot per visual task.
-    assert 'reported "no browser"' not in text
+    # The 0.1.0 runs left results/: the README must not quote them as current numbers.
+    for retired in ("20 min 10 s wall", "baseline below", "Both runs are on"):
+        assert retired not in text
+
+
+def test_committed_results_are_all_of_the_current_bench() -> None:
+    import json
+    from mengine_bench import __version__
+    for result_file in (ROOT / "results").rglob("result.json"):
+        assert json.loads(result_file.read_text(encoding="utf-8"))["bench_version"] == __version__, result_file
+
+
+def test_readme_moves_every_preflight_instruction_file_aside_and_back(tmp_path: Path) -> None:
+    from mengine_bench.preflight import INSTRUCTION_FILES, global_instruction_files
+    for folder in (".claude", ".codex", ".config/opencode"):
+        for name in INSTRUCTION_FILES:
+            (tmp_path / folder).mkdir(parents=True, exist_ok=True)
+            (tmp_path / folder / name).write_text("x", encoding="utf-8")
+    checked = {path.relative_to(tmp_path).as_posix() for agent in ("claude", "codex", "opencode")
+               for path in global_instruction_files(agent, tmp_path, {})}
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+    hygiene = text[text.index("## Run hygiene"):text.index("## Submitting results")]
+    assert checked and {path for path in checked if f'"{path}"' not in hygiene and f" {path}" not in hygiene} == set()
+    assert "after the run" in hygiene and "mengine-bench-preflight-backup" in hygiene
 
 
 def test_docs_distinguish_all_six_derived_par_times() -> None:
