@@ -138,3 +138,46 @@ def test_reconcile_paid_cent_tolerance(tmp_path: Path, delta: float, expected: b
         mismatch["paid"] += delta
     output.write_text(json.dumps(reconciliation), encoding="utf-8")
     assert business._recon_check(tmp_path, [""]).passed is expected
+
+
+@pytest.mark.parametrize("key,wrong", [
+    ("final_decode", "138.0"),
+    ("final_decode", "38.01"),
+    ("final_decode", "-38.0"),
+    ("final_vram_mib", "17697"),
+    ("discarded_quant", "Q60"),
+    ("discarded_quant", "notQ6_K"),
+    ("pending", "NOTREADME"),
+    ("pending", "check_visionary"),
+    ("file_line", "scripts/start_server.ps1:1650"),
+    ("measure_command", "fake_measure_decode.ps1"),
+])
+def test_handoff_rejects_embedded_answer_tokens(tmp_path: Path, key: str, wrong: str) -> None:
+    from mengine_bench.tasks import compaction
+
+    compaction._handoff_setup(tmp_path)
+    answers = compaction._handoff_reference(tmp_path)
+    payload = json.loads(answers[-1])
+    payload[key] = wrong
+    answers[-1] = json.dumps(payload)
+    result = compaction._handoff_check(tmp_path, answers)
+    assert not result.passed
+    assert f"answer {key}" in result.failed()
+
+
+@pytest.mark.parametrize("key,valid", [
+    ("final_decode", "decode: 38,0 t/s"),
+    ("final_decode", "38.00"),
+    ("discarded_quant", "Q6_K does not fit"),
+    ("pending", "Update README.md"),
+    ("pending", "Remove check_vision.ps1"),
+])
+def test_handoff_accepts_answer_tokens_in_prose(tmp_path: Path, key: str, valid: str) -> None:
+    from mengine_bench.tasks import compaction
+
+    compaction._handoff_setup(tmp_path)
+    answers = compaction._handoff_reference(tmp_path)
+    payload = json.loads(answers[-1])
+    payload[key] = valid
+    answers[-1] = json.dumps(payload)
+    assert compaction._handoff_check(tmp_path, answers).passed

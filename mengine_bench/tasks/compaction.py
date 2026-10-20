@@ -71,12 +71,12 @@ HANDOFF_KEYS = [
     "[agent] Pending: update the evals README, which still cites check_vision.ps1 (the file no longer exists).",
 ]
 HANDOFF_GOLD = {
-    "file_line": r"start_server\.ps1:165",
-    "final_decode": r"38[.,]0",
-    "final_vram_mib": r"7697",
-    "discarded_quant": r"Q6",
-    "pending": r"README|check_vision",
-    "measure_command": r"measure_decode\.ps1",
+    "file_line": r"\bstart_server\.ps1:165\b",
+    "final_decode": r"(?<![\w.,+-])38[.,]0+(?!\w|[.,]\d)",
+    "final_vram_mib": r"(?<![\w.,+-])7697(?:[.,]0+)?(?!\w|[.,]\d)",
+    "discarded_quant": r"\bQ6(?:_K)?\b",
+    "pending": r"\bREADME\b|\bcheck_vision(?:\.ps1)?\b",
+    "measure_command": r"\bmeasure_decode\.ps1\b",
 }
 
 
