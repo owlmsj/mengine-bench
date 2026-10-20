@@ -24,42 +24,41 @@ def tail(argv: list[str]) -> list[str]:
 
 def test_claude_new_session_reads_prompt_from_stdin() -> None:
     agent = ClaudeAgent(model="claude-opus-5-5", effort="xhigh")
-    call = agent.invocation("do it", PROMPT_FILE, WS, session_id=None, attachments=())
+    call = agent.invocation("do it", PROMPT_FILE, WS, attachments=())
     assert tail(call.argv) == ["-p", "--output-format", "stream-json", "--verbose", "--model", "claude-opus-5-5",
                                "--effort", "xhigh", "--permission-mode", "bypassPermissions"]
     assert call.stdin_text == "do it"
     assert Path(call.argv[0]).stem.lower() == "claude"
 
 
-def test_claude_resume_and_compact() -> None:
-    agent = ClaudeAgent(model="m", effort=None)
-    call = agent.invocation("next", PROMPT_FILE, WS, session_id="abc", attachments=())
-    assert tail(call.argv)[-2:] == ["--resume", "abc"]
-    assert "--effort" not in call.argv
-    assert agent.supports_resume and agent.supports_compact
-    assert agent.compact_prompt == "/compact"
+def test_adapters_never_resume_or_compact() -> None:
+    # #23: no task continues a session, so adapters carry no resume or compaction support.
+    agents = [ClaudeAgent(model="m", effort=None), CodexAgent(model="m", effort=None),
+              OpencodeAgent(model="m", effort=None), CmdAgent(template="a {prompt_file}", model="m", effort=None)]
+    for agent in agents:
+        for removed in ("supports_resume", "supports_compact", "compact_prompt"):
+            assert not hasattr(agent, removed), (agent.name, removed)
+        argv = agent.invocation("next", PROMPT_FILE, WS, attachments=()).argv
+        assert not {"--resume", "resume", "--session"} & set(argv), argv
+    assert "--effort" not in ClaudeAgent(model="m", effort=None).invocation("n", PROMPT_FILE, WS, ()).argv
 
 
-def test_codex_new_and_resume() -> None:
+def test_codex_new_session() -> None:
     agent = CodexAgent(model="gpt-6", effort="high")
-    first = agent.invocation("p", PROMPT_FILE, WS, session_id=None, attachments=("images/a.png",))
+    first = agent.invocation("p", PROMPT_FILE, WS, attachments=("images/a.png",))
     assert tail(first.argv) == ["exec", "--json", "--skip-git-repo-check", "-m", "gpt-6",
                                 "-c", 'model_reasoning_effort="high"',
                                 "--dangerously-bypass-approvals-and-sandbox", "-i", "images/a.png", "-"]
     assert first.stdin_text == "p"
-    resumed = agent.invocation("p2", PROMPT_FILE, WS, session_id="t-1", attachments=())
-    assert tail(resumed.argv)[:2] == ["exec", "resume"]
-    assert tail(resumed.argv)[-2:] == ["t-1", "-"]
-    assert agent.supports_resume and not agent.supports_compact
 
 
 def test_opencode_short_prompt_in_argv_long_prompt_on_stdin() -> None:
     agent = OpencodeAgent(model="deepseek/flash", effort="high")
-    short = agent.invocation("hi", PROMPT_FILE, WS, session_id="ses_1", attachments=("a.png",))
+    short = agent.invocation("hi", PROMPT_FILE, WS, attachments=("a.png",))
     assert tail(short.argv) == ["run", "--standalone", "--auto", "--format", "json", "-m", "deepseek/flash#high",
-                                "--session", "ses_1", "--file", "a.png", "hi"]
+                                "--file", "a.png", "hi"]
     assert short.stdin_text is None
-    long = agent.invocation("x" * 40_000, PROMPT_FILE, WS, session_id=None, attachments=())
+    long = agent.invocation("x" * 40_000, PROMPT_FILE, WS, attachments=())
     assert long.argv[-1] == "deepseek/flash#high"
     assert long.stdin_text == "x" * 40_000
 
@@ -67,15 +66,14 @@ def test_opencode_short_prompt_in_argv_long_prompt_on_stdin() -> None:
 def test_cmd_template_substitutes_placeholders_per_argument() -> None:
     template = json.dumps(["python", "my agent.py", "--ws={workspace}", "{prompt_file}", "{model}"])
     agent = CmdAgent(template=template, model="m1", effort=None)
-    call = agent.invocation("p", Path("dir with space") / "p.md", Path("w s"), session_id=None, attachments=())
+    call = agent.invocation("p", Path("dir with space") / "p.md", Path("w s"), attachments=())
     assert call.argv == ["python", "my agent.py", f"--ws={Path('w s')}", str(Path("dir with space") / "p.md"), "m1"]
     assert call.stdin_text is None
-    assert not agent.supports_resume
 
 
 def test_cmd_template_plain_string_is_split_without_a_shell() -> None:
     agent = CmdAgent(template="my-agent --run {prompt_file}", model="m", effort=None)
-    assert agent.invocation("p", Path("p.md"), WS, None, ()).argv == ["my-agent", "--run", "p.md"]
+    assert agent.invocation("p", Path("p.md"), WS, ()).argv == ["my-agent", "--run", "p.md"]
     with pytest.raises(ValueError, match="prompt_file"):
         CmdAgent(template="my-agent --run", model="m", effort=None)
 
@@ -259,9 +257,96 @@ def test_agent_step_runs_with_pwd_set_to_the_workspace(tmp_path: Path, monkeypat
     agent = CmdAgent(template="my-agent {prompt_file}", model="m", effort=None)
     record = SimpleNamespace(steps=[])
     with pytest.raises(Exception, match="could not start agent"):
-        task_run._invoke(agent, SimpleNamespace(timeout_s=5), workspace, tmp_path, "0", "do it",
-                         None, record, (), 0)
+        task_run._invoke(agent, SimpleNamespace(timeout_s=5), workspace, tmp_path, 0, "do it", record, ())
     env = seen["env"]
     assert isinstance(env, dict)
     assert env["PWD"] == str(workspace.resolve())
     assert env.get("PATH") == os.environ.get("PATH")
+
+
+def test_claude_real_usage() -> None:
+    parsed = parse_claude_stream(_jsonl([{
+        "type": "result", "subtype": "success", "is_error": False, "result": "done",
+        "total_cost_usd": 0.00369365,
+        "usage": {"input_tokens": 2, "cache_creation_input_tokens": 17537,
+                  "cache_read_input_tokens": 16405, "output_tokens": 44,
+                  "output_tokens_details": {"thinking_tokens": 40}}, "num_turns": 1,
+    }]), 0)
+    from mengine_bench.runner.agents import Usage
+    assert parsed.usage == Usage(33944, 16405, 44, 40, 0.00369365, "harness")
+
+
+@pytest.mark.parametrize("answer", ["", "   ", "\n\t"])
+def test_claude_empty_answer_rejected(answer: str) -> None:
+    with pytest.raises(AgentError, match="received result=.*expected non-empty answer text"):
+        parse_claude_stream(_jsonl([{**CLAUDE_OK[-1], "result": answer}]), 0)
+
+
+def test_codex_real_usage_sums_all_turns() -> None:
+    from mengine_bench.runner.agents import Usage
+    turn = {"type": "turn.completed", "usage": {
+        "input_tokens": 22329, "cached_input_tokens": 13312, "cache_write_input_tokens": 0,
+        "output_tokens": 5, "reasoning_output_tokens": 0}}
+    events = [turn, {"type": "item.completed", "item": {"type": "agent_message", "text": "done"}}, turn]
+    assert parse_codex_jsonl(_jsonl(events), 0).usage == Usage(44658, 26624, 10, 0, None, "none")
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_opencode_usage_sums_steps(partial: bool) -> None:
+    from mengine_bench.runner.agents import Usage
+    finish = {"type": "step_finish", "part": {"reason": "stop", "cost": 0.25,
+              "tokens": {"input": 10, "output": 5, "reasoning": 2, "cache": {"read": 7, "write": 3}}}}
+    events = [finish, finish]
+    if partial:
+        events.append({"type": "step_start"})
+    events.append({"type": "text", "part": {"text": "done"}})
+    assert parse_opencode_jsonl(_jsonl(events), 0).usage == Usage(
+        40, 14, 10, 4, 0.5, "partial" if partial else "harness")
+
+
+@pytest.mark.parametrize("bad", [None, "3", True, -1, 1.5, {}, []])
+def test_malformed_usage_fields_are_unknown(bad: object) -> None:
+    parsed = parse_claude_stream(_jsonl([{**CLAUDE_OK[-1], "total_cost_usd": "bad",
+        "usage": {"input_tokens": bad, "cache_creation_input_tokens": 2,
+                  "cache_read_input_tokens": bad, "output_tokens": bad,
+                  "output_tokens_details": {"thinking_tokens": bad}}}]), 0)
+    from mengine_bench.runner.agents import Usage
+    assert parsed.usage == Usage(None, None, None, None, None, "none")
+
+
+def test_opencode_without_finish_has_unknown_partial_usage() -> None:
+    from mengine_bench.runner.agents import Usage
+    events = [{"type": "step_start"}, {"type": "text", "part": {"text": "done"}}]
+    assert parse_opencode_jsonl(_jsonl(events), 0).usage == Usage(None, None, None, None, None, "partial")
+
+
+def test_task_usage_totals_preserve_unknown_cost() -> None:
+    from mengine_bench.runner.agents import Usage
+    from mengine_bench.runner.task_run import StepRecord, TaskRunRecord
+    record = TaskRunRecord("usage")
+    assert record.usage is None
+    record.steps.append(StepRecord(0, 1.0, 0, "ok", usage=Usage(10, 2, 3, 1, 0.2, "harness")))
+    record.steps.append(StepRecord(1, 1.0, None, "timeout"))
+    assert record.usage == Usage(10, 2, 3, 1, 0.2, "harness")
+    record.steps.append(StepRecord(2, 1.0, 0, "ok", usage=Usage(5, 1, 2, None, None, "none")))
+    assert record.usage == Usage(15, 3, 5, None, None, "none")
+
+
+def test_codex_malformed_turn_does_not_become_zero() -> None:
+    from mengine_bench.runner.agents import Usage
+    events = [{"type": "item.completed", "item": {"type": "agent_message", "text": "done"}},
+              {"type": "turn.completed", "usage": {"input_tokens": 10, "output_tokens": 5}},
+              {"type": "turn.completed", "usage": {"input_tokens": "bad", "output_tokens": 2}}]
+    assert parse_codex_jsonl(_jsonl(events), 0).usage == Usage(None, None, 7, None, None, "none")
+
+
+@pytest.mark.parametrize("cost", [None, "bad", True, -1, float("nan"), float("inf")])
+def test_opencode_invalid_cost_and_tokens_are_unknown(cost: object) -> None:
+    from mengine_bench.runner.agents import Usage
+    events = [{"type": "text", "part": {"text": "done"}},
+              {"type": "step_finish", "part": {"reason": "stop", "cost": cost, "tokens": []}}]
+    assert parse_opencode_jsonl(_jsonl(events), 0).usage == Usage(None, None, None, None, None, "none")
+
+
+def test_cmd_usage_is_unmeasured() -> None:
+    assert CmdAgent("agent {prompt_file}", "m", None).parse("done", 0).usage is None

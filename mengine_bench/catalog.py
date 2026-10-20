@@ -12,7 +12,7 @@ from collections.abc import Iterable
 from types import ModuleType
 
 from mengine_bench import tasks as tasks_package
-from mengine_bench.core import SUITES, EvalTask
+from mengine_bench.core import EvalTask
 
 
 def discover_task_modules() -> list[ModuleType]:
@@ -36,17 +36,5 @@ def collect(modules: Iterable[ModuleType]) -> list[EvalTask]:
     return found
 
 
-def select(found: Iterable[EvalTask], suite: str) -> list[EvalTask]:
-    if suite not in SUITES:
-        raise ValueError(f"received suite={suite!r}; expected one of {SUITES}")
-    return [task for task in found if suite in task.suites]
-
-
 def all_tasks() -> list[EvalTask]:
     return collect(discover_task_modules())
-
-
-def tasks(suite: str) -> list[EvalTask]:
-    if suite not in SUITES:
-        raise ValueError(f"received suite={suite!r}; expected one of {SUITES}")
-    return select(all_tasks(), suite)

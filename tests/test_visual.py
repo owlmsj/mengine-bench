@@ -1,88 +1,93 @@
-"""Visual grading: browser discovery, gates, judge hook and 0.7 vote ratio."""
+"""Visual tasks: deterministic content gates at run time; the headless render serves only the maintainer's judge."""
 
 from __future__ import annotations
 
+import subprocess
 import sys
-from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
-from mengine_bench import visual
-from mengine_bench.core import write
+from mengine_bench import catalog, visual
+from mengine_bench.core import CheckResult, write
 from mengine_bench.tasks import visual as visual_tasks
 
-CHECKLIST = ("style ok", "palette ok", "no overlap", "cta visible", "grid ok")
-MANDATORY = frozenset({"no overlap", "cta visible"})
-DETERMINISTIC = [("file exists", True)]
+LANDING = next(task for task in visual_tasks.TASKS if task.id == "web-mondrian-landing")
+SCENE = next(task for task in visual_tasks.TASKS if task.id == "3d-voxel-landscape")
 
 
-def fake_render(html: Path, png: Path) -> str:
-    png.parent.mkdir(parents=True, exist_ok=True)
-    png.write_bytes(b"\x89PNG" + b"0" * 20_000)
-    return visual.RENDERED
+def _solved(task: object, ws: Path) -> CheckResult:
+    ws.mkdir()
+    task.setup(ws)  # type: ignore[attr-defined]
+    return task.check(ws, task.reference(ws))  # type: ignore[attr-defined]
 
 
-def judge_failing(*items: str) -> visual.VisionJudge:
-    def judge(png: Path, checklist: Sequence[str]) -> dict[str, bool]:
-        return {item: item not in items for item in checklist}
-    return judge
+def test_landing_ships_a_local_factsheet_instead_of_web_research(tmp_path: Path) -> None:
+    LANDING.setup(tmp_path)
+    sheet = (tmp_path / visual_tasks.FACTSHEET).read_text(encoding="utf-8")
+    for fact in ("Composition with Red, Blue and Yellow", "Piet Mondrian", "1930", "De Stijl",
+                 visual_tasks.FACTSHEET_SOURCE):
+        assert fact in sheet
+    prompt = LANDING.steps[0].prompt
+    assert "FACTSHEET.md" in prompt and "web" not in prompt.lower()
+    assert "web" not in LANDING.needs
 
 
-def grade(tmp_path: Path, judge: visual.VisionJudge, deterministic: list[tuple[str, bool]] = DETERMINISTIC):
-    write(tmp_path, "page.html", "<html></html>")
-    return visual.grade(tmp_path, "page.html", deterministic, CHECKLIST, MANDATORY, 10_000,
-                        render=fake_render, judge=judge)
+def test_landing_source_gate_wants_the_factsheet_url(tmp_path: Path) -> None:
+    assert _solved(LANDING, tmp_path / "ok").passed
+    ws = tmp_path / "other-link"
+    ws.mkdir()
+    LANDING.setup(ws)
+    LANDING.reference(ws)
+    page = ws / visual_tasks.LANDING
+    page.write_text(page.read_text(encoding="utf-8").replace(visual_tasks.FACTSHEET_SOURCE, "https://example.org/x"),
+                    encoding="utf-8")
+    result = LANDING.check(ws, ["done"])
+    assert "links to the fact sheet's source" in result.failed() and not result.passed
 
 
-def test_all_items_pass(tmp_path: Path) -> None:
-    result = grade(tmp_path, judge_failing())
-    assert result.passed and result.flags == []
+def test_scene_pins_the_three_js_version(tmp_path: Path) -> None:
+    assert visual_tasks.THREE_URL in SCENE.steps[0].prompt
+    assert _solved(SCENE, tmp_path / "ok").passed
+    ws = tmp_path / "unpinned"
+    ws.mkdir()
+    SCENE.reference(ws)
+    page = ws / visual_tasks.SCENE
+    page.write_text(page.read_text(encoding="utf-8").replace("three@0.170.0", "three"), encoding="utf-8")
+    result = SCENE.check(ws, ["done"])
+    assert result.failed() == ["imports three.js 0.170.0 from the CDN"]
 
 
-def test_aesthetic_items_pass_at_seventy_percent(tmp_path: Path) -> None:
-    # 3 aesthetic items: one miss = 0.67 < 0.7 fails.
-    assert not grade(tmp_path, judge_failing("style ok")).passed
-    # 4 aesthetic items: one miss = 0.75 passes.
-    write(tmp_path, "page.html", "<html></html>")
-    four = (*CHECKLIST, "hierarchy ok")
-    result = visual.grade(tmp_path, "page.html", DETERMINISTIC, four, MANDATORY, 10_000,
-                          render=fake_render, judge=judge_failing("style ok"))
-    assert result.passed and result.pass_ratio == visual.PASS_RATIO == 0.7
+def test_visual_checks_are_deterministic_and_never_start_a_browser(tmp_path: Path,
+                                                                   monkeypatch: pytest.MonkeyPatch) -> None:
+    def no_browser(*args: object, **kwargs: object) -> None:
+        raise AssertionError("a visual check started a process")
+
+    monkeypatch.setattr(subprocess, "Popen", no_browser)
+    for task in visual_tasks.TASKS:
+        result = _solved(task, tmp_path / task.id)
+        assert type(result) is CheckResult and result.passed
+        assert not any("vision" in name or "screenshot" in name for name, _ in [*result.mandatory, *result.checks])
 
 
-def test_mandatory_visual_item_cannot_be_outvoted(tmp_path: Path) -> None:
-    result = grade(tmp_path, judge_failing("cta visible"))
-    assert not result.passed and "vision: cta visible" in result.failed()
+def test_missing_page_fails_the_gate_and_scores_zero(tmp_path: Path) -> None:
+    for task in visual_tasks.TASKS:
+        ws = tmp_path / task.id
+        ws.mkdir()
+        task.setup(ws)
+        result = task.check(ws, [""])
+        assert not result.mandatory_ok and result.score == 0.0
 
 
-def test_failed_deterministic_gate_blocks(tmp_path: Path) -> None:
-    assert not grade(tmp_path, judge_failing(), [("file exists", False)]).passed
+def test_visual_tasks_declare_their_page_as_deliverable() -> None:
+    assert LANDING.deliverables == (visual_tasks.LANDING,)
+    assert SCENE.deliverables == (visual_tasks.SCENE,)
 
 
-def test_blank_screenshot_gates(tmp_path: Path) -> None:
-    def tiny_render(html: Path, png: Path) -> str:
-        png.parent.mkdir(parents=True, exist_ok=True)
-        png.write_bytes(b"\x89PNG")
-        return visual.RENDERED
-
-    write(tmp_path, "page.html", "<html></html>")
-    result = visual.grade(tmp_path, "page.html", DETERMINISTIC, CHECKLIST, MANDATORY, 10_000,
-                          render=tiny_render, judge=judge_failing())
-    assert not result.passed
-
-
-def test_no_browser_grades_deterministic_only_and_flags(tmp_path: Path) -> None:
-    write(tmp_path, "page.html", "<html></html>")
-    result = visual.grade(tmp_path, "page.html", DETERMINISTIC, CHECKLIST, MANDATORY, 10_000,
-                          render=lambda html, png: visual.NO_BROWSER, judge=judge_failing())
-    assert result.passed and result.flags == ["no browser"]
-
-
-def test_unavailable_judge_flags_and_keeps_screenshot_gate(tmp_path: Path) -> None:
-    result = grade(tmp_path, visual.unavailable_judge)
-    assert result.passed and result.flags == ["no judge"]
-    assert ("screenshot rendered with content", True) in result.mandatory
+def test_render_module_has_no_run_time_grading() -> None:
+    for removed in ("grade", "JUDGE", "RENDER", "enforce_rendered_profile", "PendingVision", "VisualCheckResult",
+                    "PASS_RATIO", "PROFILE_UNRENDERED", "judge_screenshot"):
+        assert not hasattr(visual, removed), removed
 
 
 def test_find_browser_uses_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -115,33 +120,6 @@ def test_reference_landing_renders_with_content(tmp_path: Path) -> None:
     assert visual.screenshot_has_content(png, 10_000)
 
 
-# R10 (release review): without a browser or a vision judge the textual gates
-# alone scored 100. The run's grading profile is now explicit and an
-# unrendered visual task can never count as solved.
-@pytest.mark.parametrize("render, judge, flag", [
-    (lambda html, png: visual.NO_BROWSER, judge_failing(), "no browser"),
-    (fake_render, visual.unavailable_judge, "no judge"),
-])
-def test_unrendered_profile_caps_visual_tasks(tmp_path: Path, render: visual.Renderer,
-                                              judge: visual.VisionJudge, flag: str) -> None:
-    write(tmp_path, "page.html", "<html></html>")
-    result = visual.grade(tmp_path, "page.html", DETERMINISTIC, CHECKLIST, MANDATORY, 10_000,
-                          render=render, judge=judge)
-    assert visual.enforce_rendered_profile(result) == visual.PROFILE_UNRENDERED
-    assert not result.passed and (visual.PROFILE_CHECK, False) in result.mandatory
-    assert result.flags == [flag, visual.PROFILE_UNRENDERED]
-    assert visual.enforce_rendered_profile(result) == visual.PROFILE_UNRENDERED
-    assert result.mandatory.count((visual.PROFILE_CHECK, False)) == 1, "idempotent"
-
-
-def test_rendered_profile_leaves_judged_tasks_alone(tmp_path: Path) -> None:
-    result = grade(tmp_path, judge_failing())
-    assert visual.enforce_rendered_profile(result) == visual.PROFILE_RENDERED
-    assert result.passed and result.flags == []
-    from mengine_bench.core import CheckResult
-    assert visual.enforce_rendered_profile(CheckResult()) is None, "non-visual tasks have no profile"
-
-
 def test_find_browser_env_override_and_standard_locations(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(visual.shutil, "which", lambda name: None)
     custom = tmp_path / "my browser.exe"
@@ -169,39 +147,6 @@ def test_browser_install_candidates_cover_each_os() -> None:
     assert {"/opt/microsoft/msedge/msedge", "/opt/google/chrome/chrome", "/snap/bin/chromium"} <= set(linux)
 
 
-VISUAL_REFERENCE_AGENT = """
-import sys
-from pathlib import Path
-from mengine_bench import catalog
-task = next(t for t in catalog.all_tasks() if t.id == "web-mondrian-landing")
-sys.stdout.write(task.reference(Path(sys.argv[1]))[-1] or "done")
-"""
-
-
-def test_no_browser_run_is_recorded_unrendered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    import json
-    import sys
-
-    from mengine_bench import cli
-
-    script = tmp_path / "fakes" / "visual_ref.py"
-    script.parent.mkdir(parents=True)
-    script.write_text(VISUAL_REFERENCE_AGENT, encoding="utf-8")
-    monkeypatch.setattr(visual, "RENDER", lambda html, png: visual.NO_BROWSER)
-    out = tmp_path / "r"
-    template = json.dumps([sys.executable, str(script), "{workspace}", "{prompt_file}"])
-    assert cli.main(["run", "--suite", "fast", "--agent", "cmd", "--cmd", template, "--model", "fake/ref",
-                     "--tasks", "web-mondrian-landing", "--out", str(out), "--work", str(tmp_path / "w")]) == 0
-    [bundle] = out.glob("fast/*")
-    result = json.loads((bundle / "result.json").read_text(encoding="utf-8"))
-    assert result["grading"] == {"visual": "unrendered"}
-    [task] = result["tasks"]
-    assert task["passed"] is False and task["c"] <= 0.5
-    assert "unrendered" in task["flags"]
-    assert result["totals"]["solved"] == 0
-    assert "visual grading: unrendered" in (bundle / "summary.md").read_text(encoding="utf-8")
-
-
 # Headless Chrome on Ubuntu could not screenshot without the container flags,
 # and the failure said only "render failed".
 LINUX_ONLY = ("--disable-dev-shm-usage", "--disable-gpu")
@@ -218,7 +163,8 @@ def test_headless_flags_linux_sandbox_only_for_root() -> None:
 def test_headless_flags_windows_and_mac_unchanged(system: str) -> None:
     flags = visual.headless_browser_flags(system, is_root=True)
     assert flags == ["--headless=new", "--no-first-run", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
-                     "--hide-scrollbars", "--window-size=1440,900", "--virtual-time-budget=8000"]
+                     "--hide-scrollbars", "--window-size=1440,900", "--virtual-time-budget=8000",
+                     visual.RENDER_HOST_RULES]
 
 
 FAILING_BROWSER = r"""
@@ -246,3 +192,36 @@ def test_render_failure_reason_carries_redacted_browser_stderr(tmp_path: Path) -
     assert secret not in status
     assert "noise line 49" not in status, "only the first stderr lines"
     assert visual.is_render_failure(status) and not visual.is_render_failure(visual.RENDERED)
+
+
+@pytest.mark.parametrize("system", ["Windows", "Linux", "Darwin"])
+def test_the_judge_render_reaches_only_the_pinned_cdn_and_fonts(system: str) -> None:
+    # A contributor's page runs on the maintainer's machine (#23 review): every
+    # host but the three.js CDN and Google Fonts fails to resolve.
+    [rules] = [flag for flag in visual.headless_browser_flags(system, is_root=False)
+               if flag.startswith("--host-resolver-rules=")]
+    assert rules.startswith("--host-resolver-rules=MAP * ~NOTFOUND")
+    for host in ("cdn.jsdelivr.net", "fonts.googleapis.com", "fonts.gstatic.com"):
+        assert f"EXCLUDE {host}" in rules
+
+
+@pytest.mark.parametrize("task_id", ["web-mondrian-landing", "3d-voxel-landscape"])
+def test_a_commented_out_page_earns_no_checks(task_id: str, tmp_path: Path) -> None:
+    # Content inside <!-- --> never renders, so it must not pass content gates (#23 review).
+    task = next(t for t in catalog.all_tasks() if t.id == task_id)
+    task.setup(tmp_path)
+    task.reference(tmp_path)
+    page = tmp_path / str(task.render_target)
+    page.write_text("<!doctype html><html><body><!--\n" + page.read_text(encoding="utf-8").replace("-->", "")
+                    + "\n--></body></html>" + " " * 2500, encoding="utf-8")
+    result = task.check(tmp_path, [""])
+    assert result.score == 0.0 and not result.passed
+
+
+def test_source_link_may_space_around_the_equals_sign(tmp_path: Path) -> None:
+    task = next(t for t in catalog.all_tasks() if t.id == "web-mondrian-landing")
+    task.setup(tmp_path)
+    answers = task.reference(tmp_path)
+    page = tmp_path / "landing" / "index.html"
+    page.write_text(page.read_text(encoding="utf-8").replace("href=", "href = "), encoding="utf-8")
+    assert task.check(tmp_path, answers).passed

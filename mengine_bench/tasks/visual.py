@@ -1,9 +1,11 @@
-"""One-shot visual artifact tasks: a researched landing page and a 3D scene.
+"""One-shot visual artifact tasks: a landing page from a local fact sheet and a 3D scene.
 
-One user request, no second turn: the agent must research, design and ship a
-complete single-file artifact. Grading = deterministic checks (file, facts,
-palette, three.js usage, non-blank render) as gates + a vision checklist
-answered by a judge; aesthetics pass at 70% (mengine_bench.visual).
+One user request, no second turn: the agent must design and ship a complete
+single-file page. The run grades deterministic content gates only (file,
+facts, source link, palette, pinned three.js usage), so anyone reproduces the
+grade without a browser (#23). The page is a deliverable: the bundle keeps it
+verbatim and only the maintainer's `mengine-bench judge` renders it headless
+for the rendered-look part of the Judge grade.
 Ported from the private suite; the landing subject was replaced with a public
 art-history topic that keeps the Mondrian visual brief.
 """
@@ -16,12 +18,10 @@ import unicodedata
 from collections.abc import Sequence
 from pathlib import Path
 
-from mengine_bench import visual
-from mengine_bench.core import FAST, FULL, CheckResult, EvalTask, Step, has, read, write
+from mengine_bench.core import CheckResult, EvalTask, Step, has, read, write
 
 ONE_SHOT = ("This is your ONLY request: there will be no second turn and no answers to questions. "
             "Deliver the complete, working final file. Work only inside {WS}.")
-MIN_PNG_BYTES = 10_000
 
 
 def _plain(text: str) -> str:
@@ -50,46 +50,62 @@ def _mondrian_palette(html: str) -> bool:
     return bool(red and blue and yellow and black)
 
 
-# Broken renders and missing required content cannot be outvoted by style.
-MANDATORY_VISUAL = frozenset({
-    "No text overlapping, clipped or overflowing its block",
-    "A visible button or call to action exists",
-    "The page looks finished: no lorem ipsum, placeholders or broken empty areas",
-    "Finished look, no glitches, black screen or broken geometry",
-})
-
 # ------------------------------------------------------ web-mondrian-landing --
 
 LANDING = "landing/index.html"
-LANDING_CHECKLIST = (
-    "Piet Mondrian style composition: rectangular blocks separated by thick black lines",
-    "Palette dominated by red, blue, yellow, white and black",
-    "Hero at the top with a large, legible title",
-    "Clear typographic hierarchy (title, subtitles and body are distinguishable)",
-    "No text overlapping, clipped or overflowing its block",
-    "A visible button or call to action exists",
-    "Asymmetric grid (blocks of different sizes, not a uniform grid)",
-    "The page looks finished: no lorem ipsum, placeholders or broken empty areas",
-)
+FACTSHEET = "FACTSHEET.md"
+FACTSHEET_SOURCE = "https://en.wikipedia.org/wiki/Composition_with_Red,_Blue_and_Yellow"
+# #23: a local fact sheet replaces web research, so every harness gets the same facts.
+FACTSHEET_TEXT = f"""# Fact sheet: Composition with Red, Blue and Yellow
+
+Source: {FACTSHEET_SOURCE}
+
+- Title: Composition with Red, Blue and Yellow (also listed as Composition II in Red, Blue, and Yellow)
+- Painter: Piet Mondrian (1872-1944), Dutch painter
+- Year: 1930
+- Medium: oil on canvas
+- Collection: Kunsthaus Zurich
+- Movement: De Stijl, founded in the Netherlands in 1917 by Theo van Doesburg and Piet Mondrian
+- Principles (Neoplasticism): only horizontal and vertical lines, the three primary colours red, blue and
+  yellow, and the non-colours white, grey and black
+- The picture: a large red square at the top right, a small blue square at the bottom left and a small yellow
+  rectangle at the bottom right, divided by thick black lines on a white ground
+- Why it matters: its asymmetric balance of a few primary-colour blocks became a reference for modern graphic
+  design and architecture
+"""
+# Agents may percent-encode the comma of the source URL.
+SOURCE_LINK = r"href\s*=\s*[\"']https?://en\.wikipedia\.org/wiki/Composition_with_Red(,|%2C)_Blue_and_Yellow[\"'#]"
+
+
+def _rendered_source(ws: Path, rel: str) -> str:
+    """The page without HTML and CSS/JS block comments: commented-out content never renders (#23 review)."""
+    text = read(ws, rel) or ""
+    return re.sub(r"/\*.*?\*/", "", re.sub(r"<!--.*?-->", "", text, flags=re.S), flags=re.S)
+
+
+def _visible_chars(html: str) -> int:
+    # Padding with whitespace does not make a page.
+    return len("".join(html.split()))
+
+
+def _landing_setup(ws: Path) -> None:
+    write(ws, FACTSHEET, FACTSHEET_TEXT)
 
 
 def _landing_check(ws: Path, answers: Sequence[str]) -> CheckResult:
-    html = read(ws, LANDING) or ""
+    html = _rendered_source(ws, LANDING)
     plain = _plain(html)
-    deterministic = [
-        ("index.html exists with content", len(html) > 1500),
-        ("has a page title and an h1", has(html, r"<title>[^<]{3,}</title>") and has(html, r"<h1\b")),
-        ("names the painting (Composition with Red, Blue and Yellow)",
-         has(plain, r"composition\s+(ii\s+)?with\s+red,?\s+blue,?\s+and\s+yellow")),
-        ("names the painter (Piet Mondrian)", "piet mondrian" in plain),
-        ("states the year 1930", "1930" in plain),
-        ("names the De Stijl movement", "de stijl" in plain),
-        ("links to an external source", has(html, r'href="https?://')),
-        ("CSS with the Mondrian palette (red, blue, yellow, black)", _mondrian_palette(html)),
-        ("has a call-to-action element",
-         has(html, r"<button\b|<a\b[^>]*(class|role)=\"[^\"]*(cta|btn|button)")),
-    ]
-    return visual.grade(ws, LANDING, deterministic, LANDING_CHECKLIST, MANDATORY_VISUAL, MIN_PNG_BYTES)
+    result = CheckResult(mandatory=[("index.html exists with content", _visible_chars(html) > 1500)])
+    result.add("has a page title and an h1", has(html, r"<title>[^<]{3,}</title>") and has(html, r"<h1\b"))
+    result.add("names the painting (Composition with Red, Blue and Yellow)",
+               has(plain, r"composition\s+(ii\s+)?(with|in)\s+red,?\s+blue,?\s+and\s+yellow"))
+    result.add("names the painter (Piet Mondrian)", "piet mondrian" in plain)
+    result.add("states the year 1930", "1930" in plain)
+    result.add("names the De Stijl movement", "de stijl" in plain)
+    result.add("links to the fact sheet's source", has(html, SOURCE_LINK))
+    result.add("CSS with the Mondrian palette (red, blue, yellow, black)", _mondrian_palette(html))
+    result.add("has a call-to-action element", has(html, r"<button\b|<a\b[^>]*(class|role)=\"[^\"]*(cta|btn|button)"))
+    return result
 
 
 LANDING_REFERENCE = """<!doctype html>
@@ -119,29 +135,20 @@ Source: <a href="https://en.wikipedia.org/wiki/De_Stijl">De Stijl on Wikipedia</
 # -------------------------------------------------------- 3d-voxel-landscape --
 
 SCENE = "scene/index.html"
-SCENE_CHECKLIST = (
-    "Large, recognisable conical mountain with a snowy peak (Mount Fuji)",
-    "Multi-tier pagoda in a red tone",
-    "Pink trees or canopies (cherry blossoms)",
-    "Sky with atmosphere (gradient, sunset, haze or clouds)",
-    "Evident low poly or voxel style (flat facets or cubes)",
-    "Layered composition: foreground, middle ground and background",
-    "The scene fills the frame (not a small object in a void)",
-    "Finished look, no glitches, black screen or broken geometry",
-)
+# #23: one pinned three.js build, so a run does not depend on what "latest" is that day.
+THREE_URL = "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"
 
 
 def _scene_check(ws: Path, answers: Sequence[str]) -> CheckResult:
-    html = read(ws, SCENE) or ""
-    deterministic = [
-        ("index.html exists with content", len(html) > 2000),
-        ("imports three.js from a CDN", has(html, r"(cdn\.jsdelivr\.net|unpkg\.com|cdnjs\.cloudflare\.com)[^\"']*three")),
-        ("creates a WebGLRenderer", "WebGLRenderer" in html),
-        ("animation loop", has(html, r"requestAnimationFrame|setAnimationLoop")),
-        ("low poly or voxel geometry in the code", has(html, r"BoxGeometry|InstancedMesh|flatShading")),
-        ("no external models or textures", not has(html, r"\.(glb|gltf|obj|fbx|jpe?g|png|hdr)['\"]")),
-    ]
-    return visual.grade(ws, SCENE, deterministic, SCENE_CHECKLIST, MANDATORY_VISUAL, MIN_PNG_BYTES)
+    html = _rendered_source(ws, SCENE)
+    result = CheckResult(mandatory=[("index.html exists with content", _visible_chars(html) > 2000)])
+    result.add("imports three.js 0.170.0 from the CDN",
+               has(html, r"(cdn\.jsdelivr\.net/npm|unpkg\.com)/three@0\.170\.0/"))
+    result.add("creates a WebGLRenderer", "WebGLRenderer" in html)
+    result.add("animation loop", has(html, r"requestAnimationFrame|setAnimationLoop"))
+    result.add("low poly or voxel geometry in the code", has(html, r"BoxGeometry|InstancedMesh|flatShading"))
+    result.add("no external models or textures", not has(html, r"\.(glb|gltf|obj|fbx|jpe?g|png|hdr)['\"]"))
+    return result
 
 
 SCENE_REFERENCE = """<!doctype html>
@@ -205,37 +212,33 @@ def _ship(ws: Path, rel: str, html: str) -> list[str]:
 
 TASKS = [
     EvalTask(
-        id="web-mondrian-landing", category="web-design", suites=frozenset({FAST, FULL}), needs=frozenset({"web"}),
-        provenance="One-shot research + front-end: Piet Mondrian's Composition with Red, Blue and Yellow (1930)",
-        summary="ONE-SHOT: research the painting and ship a Mondrian-style landing page; checks + vision checklist",
-        setup=lambda ws: None, check=_landing_check,
+        id="web-mondrian-landing", category="web-design",
+        provenance="One-shot front-end from a local fact sheet: Piet Mondrian's Composition with Red, Blue and "
+                   "Yellow (1930)",
+        summary="Build a Mondrian-style landing page about one painting from a local fact sheet, in one request.",
+        setup=_landing_setup, check=_landing_check,
         reference=lambda ws: _ship(ws, LANDING, LANDING_REFERENCE),
-        # Long one-shot: research + design + build in a single request.
-        weight=2,
-        # Par: DeepSeek V4.1 Flash one-shot run, 345 s (private v1 FAST runs, 2026-09-24).
-        par_s=345.0, timeout_s=900,
-        steps=(Step("Research on the web Piet Mondrian's painting \"Composition with Red, Blue and Yellow\" (1930) and "
-                    "the De Stijl movement. Create {WS}/landing/index.html: a single-file landing page (HTML + inline "
-                    "CSS; Google Fonts allowed; no frameworks) telling its story, with art direction inspired by Piet "
-                    "Mondrian (asymmetric grid of rectangles, thick black lines, red, blue, yellow and white). Include "
-                    "a page title, a hero, sections with the key facts (the painter, the year, the movement and its "
-                    "principles, why the work matters), a call-to-action button and a link to the source. "
-                    + ONE_SHOT),),
+        timeout_s=900, deliverables=(LANDING,),
+        steps=(Step("Read {WS}/FACTSHEET.md: the facts about Piet Mondrian's painting \"Composition with Red, Blue "
+                    "and Yellow\" (1930) and the De Stijl movement. Create {WS}/landing/index.html: a single-file "
+                    "landing page (HTML + inline CSS; Google Fonts allowed; no frameworks) telling its story, with "
+                    "art direction inspired by Piet Mondrian (asymmetric grid of rectangles, thick black lines, red, "
+                    "blue, yellow and white). Include a page title, a hero, sections with the key facts (the "
+                    "painter, the year, the movement and its principles, why the work matters), a call-to-action "
+                    "button and a link to the source URL given in the fact sheet. " + ONE_SHOT),),
     ),
     EvalTask(
-        id="3d-voxel-landscape", category="3d", suites=frozenset({FAST, FULL}),
+        id="3d-voxel-landscape", category="3d",
         provenance="One-shot procedural 3D (Design Arena style): Mt. Fuji + Chureito pagoda + sakura in low poly/voxel",
-        summary="ONE-SHOT: three.js voxel/low poly scene of Fuji with pagoda and cherry trees; checks + vision checklist",
+        summary="Build a three.js low poly or voxel scene of Mount Fuji with a pagoda and cherry trees, in one request.",
         setup=lambda ws: None, check=_scene_check,
         reference=lambda ws: _ship(ws, SCENE, SCENE_REFERENCE),
-        weight=2,
-        # Par: DeepSeek V4.1 Flash one-shot run, 295 s (private v1 FAST runs, 2026-09-24).
-        par_s=295.0, timeout_s=900,
-        steps=(Step("Create {WS}/scene/index.html: a single-file 3D scene with three.js loaded from a CDN "
-                    "(cdn.jsdelivr.net or unpkg.com), in low poly or voxel style, showing the classic view of Mount "
-                    "Fuji with the Chureito pagoda (red, five tiers) and cherry trees in bloom in the foreground, with "
-                    "an atmospheric sky (dusk or haze). All geometry must be procedural (no external models or "
-                    "textures). The camera must frame the composition on load; include a subtle animation. "
-                    + ONE_SHOT),),
+        timeout_s=900, deliverables=(SCENE,),
+        steps=(Step("Create {WS}/scene/index.html: a single-file 3D scene with three.js 0.170.0 loaded from "
+                    f"{THREE_URL} (an import map is fine), in low poly or voxel style, showing the classic view of "
+                    "Mount Fuji with the Chureito pagoda (red, five tiers) and cherry trees in bloom in the "
+                    "foreground, with an atmospheric sky (dusk or haze). All geometry must be procedural (no "
+                    "external models or textures). The camera must frame the composition on load; include a "
+                    "subtle animation. " + ONE_SHOT),),
     ),
 ]

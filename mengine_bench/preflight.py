@@ -1,13 +1,14 @@
-"""Run hygiene: refuse to start a run that could be contaminated.
+"""Run hygiene: block a run that could read other solutions; record personal instructions.
 
-Agent harnesses load instruction files on their own: Claude Code reads
+Earlier runs' workspaces next to this one hold other agents' solutions (gold
+contamination), so a run refuses to start while any is left on disk.
+
+Agent harnesses also load instruction files on their own: Claude Code reads
 ~/.claude/CLAUDE.md and every CLAUDE.md above its cwd, Codex reads
 ~/.codex/AGENTS.md, opencode reads ~/.config/opencode/AGENTS.md and
-~/.claude/CLAUDE.md, and both read AGENTS.md above the cwd. Personal
-instructions there would steer the run and leak into its transcripts. Earlier
-runs' workspaces next to this one hold other agents' solutions. A run starts
-only when none of these exist, or with --allow-unclean, which records them in
-result.json so the run is listed apart.
+~/.claude/CLAUDE.md, and they read AGENTS.md above the cwd. Since #23 those
+are part of the configuration under test: they are warnings, recorded by file
+name only in result.json `config.personal_instructions`, never a block.
 """
 
 from __future__ import annotations
@@ -33,15 +34,31 @@ def global_instruction_files(agent: str, home: Path, env: Mapping[str, str]) -> 
     return [path for path in candidates if path.is_file()]
 
 
-def ancestor_problems(work: Path) -> list[str]:
-    """Instruction files or a git checkout in `work` or any directory above it."""
-    problems: list[str] = []
+def _public_name(path: Path, home: Path) -> str:
+    # Published in result.json: a home-relative name, never the user's full path.
+    try:
+        return "~/" + path.resolve().relative_to(home.resolve()).as_posix()
+    except ValueError:
+        return path.name
+
+
+def ancestor_instructions(work: Path) -> list[str]:
+    """Instruction files or a git checkout in `work` or any directory above it, by name only."""
+    found: list[str] = []
     for folder in (work, *work.parents):
-        problems += [f"instruction file above the workspaces: {folder / name}"
-                     for name in INSTRUCTION_FILES if (folder / name).is_file()]
+        found += [f"{name} above the workspaces" for name in INSTRUCTION_FILES if (folder / name).is_file()]
         if (folder / ".git").exists():
-            problems.append(f"workspaces inside a git checkout: {folder}")
-    return problems
+            found.append("git checkout around the workspaces")
+    return found
+
+
+def personal_instructions(agent: str, work: Path, home: Path | None = None,
+                          env: Mapping[str, str] | None = None) -> list[str]:
+    """Warnings for result.json `config.personal_instructions`; empty when none apply."""
+    env = {} if env is None else env
+    home = Path.home() if home is None else home
+    found = [_public_name(path, home) for path in global_instruction_files(agent, home, env)]
+    return found + ancestor_instructions(work.resolve())
 
 
 def leftover_runs(scratch: Path, work: Path, temp: Path) -> list[Path]:
@@ -51,13 +68,7 @@ def leftover_runs(scratch: Path, work: Path, temp: Path) -> list[Path]:
     return found + sorted(temp.glob(FRESH_PREFIX + "*"))
 
 
-def contamination(agent: str, work: Path, scratch: Path, home: Path | None = None,
-                  env: Mapping[str, str] | None = None) -> list[str]:
-    """Every reason this run would not start clean; empty when clean."""
-    env = {} if env is None else env
-    home = Path.home() if home is None else home
-    problems = [f"{agent} global instructions: {path}" for path in global_instruction_files(agent, home, env)]
-    problems += ancestor_problems(work.resolve())
-    problems += [f"earlier run left on disk: {path}"
-                 for path in leftover_runs(scratch, work, Path(tempfile.gettempdir()))]
-    return problems
+def blocking_problems(scratch: Path, work: Path, temp: Path | None = None) -> list[str]:
+    """Every reason this run must not start; empty when it may."""
+    temp = Path(tempfile.gettempdir()) if temp is None else temp
+    return [f"earlier run left on disk: {path}" for path in leftover_runs(scratch, work, temp)]

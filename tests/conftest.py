@@ -17,7 +17,8 @@ def isolated_preflight(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest
     """The real preflight reads this machine's home and temp dir; runner tests
     must not depend on them (tests/test_preflight.py covers it with fakes)."""
     from mengine_bench import cli
-    monkeypatch.setattr(cli, "contamination", lambda *args, **kwargs: [])
+    monkeypatch.setattr(cli, "personal_instructions", lambda *args, **kwargs: [])
+    monkeypatch.setattr(cli, "blocking_problems", lambda *args, **kwargs: [])
     monkeypatch.setenv("MENGINE_BENCH_SCRATCH", str(tmp_path_factory.mktemp("scratch")))
 
 

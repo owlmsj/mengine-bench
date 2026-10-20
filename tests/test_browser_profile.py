@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from conftest import FakeAgent
-from mengine_bench import cli, visual
+from mengine_bench import cli, run_command, visual
 from mengine_bench.runner import task_run
 
 # Mimics Edge: the launcher writes the screenshot and exits while a helper
@@ -79,22 +79,22 @@ IDLE_AGENT = "print('done')\n"
 
 def test_post_processing_crash_marks_the_task_crash_and_the_suite_continues(
         fake_agent: FakeAgent, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    real_vision_record = cli._vision_record
+    real_judge_packet = run_command._judge_packet
     calls: list[int] = []
 
-    def flaky_vision_record(vision: object) -> object:
+    def flaky_judge_packet(*args: object) -> object:
         calls.append(1)
         if len(calls) == 1:
             raise PermissionError(13, "Permission denied", "data_0")
-        return real_vision_record(vision)  # type: ignore[arg-type]
+        return real_judge_packet(*args)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(cli, "_vision_record", flaky_vision_record)
+    monkeypatch.setattr(run_command, "_judge_packet", flaky_judge_packet)
     out = tmp_path / "results"
-    code = cli.main(["run", "--suite", "fast", "--agent", "cmd", "--cmd", fake_agent("idle", IDLE_AGENT),
+    code = cli.main(["run", "--agent", "cmd", "--cmd", fake_agent("idle", IDLE_AGENT),
                      "--model", "fake/idle", "--tasks", "ds-ab-playtest,bo-pnl-runway", "--out", str(out),
                      "--work", str(tmp_path / "work")])
     assert code == 0
-    [result_file] = out.glob("fast/*/result.json")
+    [result_file] = out.glob("*/result.json")
     tasks = {task["id"]: task for task in json.loads(result_file.read_text(encoding="utf-8"))["tasks"]}
     assert tasks["ds-ab-playtest"]["status"] == "crash"
     assert "PermissionError" in tasks["ds-ab-playtest"]["error"]

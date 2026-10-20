@@ -1,16 +1,9 @@
-"""Visual grading: headless screenshot, deterministic gates and a vision-judge hook.
+"""Headless Chromium screenshots of a task's HTML deliverable.
 
-Ported from the private suite's visual.py. The renderer and the judge are
-module-level hooks so tests inject fakes and the runner slice installs the real
-judge adapter; nothing here calls a model. Deterministic checks gate the task
-(a broken render or missing content cannot be outvoted by style), and
-the aesthetic checklist passes at PASS_RATIO of the judge's majority votes.
-
-Grading profile (release review R10): `grade` without a browser or a judge
-falls back to the deterministic gates, which is right for gold self-tests,
-but a run graded that way never saw the page. The runner calls
-`enforce_rendered_profile` on every real run, which marks such a task
-"unrendered" with a failing mandatory check: not solved, c capped at 0.5.
+Only the maintainer's `mengine-bench judge` renders (#23): runs grade visual
+tasks on deterministic content gates, so contributors need no browser and the
+render never changes CHECKS. The judge sees the screenshot for the
+rendered-look part of its rubric; a blank or failed render scores 0 there.
 """
 
 from __future__ import annotations
@@ -21,23 +14,18 @@ import shutil
 import subprocess
 import tempfile
 import time
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import IO, Protocol
+from typing import IO
 
 import psutil
 
-from mengine_bench.core import CheckResult
 from mengine_bench.redact import PathScope, local_names, redact_paths, redact_text
 from mengine_bench.runner.process import kill_tree
 
-PASS_RATIO = 0.7
 RENDERED = "rendered"
 NO_BROWSER = "no browser"
 RENDER_FAILED = "render failed"
-NO_JUDGE = "no judge"
-SCREENSHOT_CHECK = "screenshot rendered with content"
 # Chromium-family executables share the --headless/--screenshot flags.
 BROWSER_NAMES = ("msedge", "microsoft-edge", "microsoft-edge-stable", "chrome", "google-chrome",
                  "google-chrome-stable", "chromium", "chromium-browser")
@@ -46,53 +34,20 @@ RENDER_TIMEOUT_S = 120
 BROWSER_EXIT_WAIT_S = 5.0
 PROFILE_REMOVE_ATTEMPTS = 10
 PROFILE_REMOVE_DELAY_S = 0.5
-PROFILE_RENDERED = "rendered"
-PROFILE_UNRENDERED = "unrendered"
-PROFILE_CHECK = "graded rendered: browser screenshot and vision judge"
-_UNRENDERED_CAUSES = (NO_BROWSER, NO_JUDGE)
 STDERR_REASON_LINES = 8
 STDERR_REASON_LINE_CHARS = 300
 # SwiftShader keeps WebGL scenes rendering on GPU-less hosts; the virtual
 # time budget lets animation loops and fonts settle before the capture.
+# Contributors' pages run on the maintainer's machine (#23 review): only the pinned
+# three.js CDN and Google Fonts resolve; a file:// page cannot read other local
+# files in Chromium by default.
+RENDER_HOST_RULES = ("--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE cdn.jsdelivr.net, "
+                     "EXCLUDE fonts.googleapis.com, EXCLUDE fonts.gstatic.com")
 _HEADLESS_FLAGS = ("--headless=new", "--no-first-run", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
-                   "--hide-scrollbars", "--window-size=1440,900", "--virtual-time-budget=8000")
+                   "--hide-scrollbars", "--window-size=1440,900", "--virtual-time-budget=8000", RENDER_HOST_RULES)
 # Containers have a tiny /dev/shm and no GPU; headless Chrome on Ubuntu
 # failed to screenshot without these.
 _LINUX_FLAGS = ("--disable-dev-shm-usage", "--disable-gpu")
-
-
-class JudgeUnavailable(RuntimeError):
-    """No vision judge configured: the task is graded on deterministic checks only."""
-
-
-class VisionJudge(Protocol):
-    def __call__(self, png: Path, checklist: Sequence[str]) -> dict[str, bool]: ...
-
-
-Renderer = Callable[[Path, Path], str]
-
-
-@dataclass(frozen=True)
-class PendingVision:
-    """A rendered screenshot no judge has seen yet: what `mengine-bench judge`
-    needs to finish the visual grade later (judge/<task>.json and .png)."""
-
-    png: Path
-    checklist: tuple[str, ...]
-    mandatory_items: tuple[str, ...]
-    deterministic: tuple[tuple[str, bool], ...]
-    screenshot_ok: bool
-
-    def record(self) -> dict[str, object]:
-        return {"checklist": list(self.checklist), "mandatory_items": list(self.mandatory_items),
-                "deterministic": [[name, ok] for name, ok in self.deterministic], "screenshot_ok": self.screenshot_ok}
-
-
-@dataclass
-class VisualCheckResult(CheckResult):
-    # Degraded grading modes ("no browser", "no judge") are reported, not hidden.
-    flags: list[str] = field(default_factory=list)
-    pending_vision: PendingVision | None = None
 
 
 def browser_install_candidates(system: str | None = None, env: Mapping[str, str] | None = None) -> list[Path]:
@@ -237,76 +192,6 @@ def _remove_profile(profile: Path) -> None:
         time.sleep(PROFILE_REMOVE_DELAY_S)
 
 
-def unavailable_judge(png: Path, checklist: Sequence[str]) -> dict[str, bool]:
-    raise JudgeUnavailable(f"received no vision judge for {png.name}; expected one installed in visual.JUDGE")
-
-
 def screenshot_has_content(png: Path, min_bytes: int) -> bool:
     # A blank or black page compresses to a tiny PNG; a real layout does not.
     return png.is_file() and png.stat().st_size >= min_bytes
-
-
-RENDER: Renderer = render_headless
-JUDGE: VisionJudge = unavailable_judge
-
-
-def grade(ws: Path, html_rel: str, deterministic: list[tuple[str, bool]], checklist: Sequence[str],
-          mandatory_items: frozenset[str], min_png_bytes: int,
-          render: Renderer | None = None, judge: VisionJudge | None = None) -> VisualCheckResult:
-    result = VisualCheckResult(pass_ratio=PASS_RATIO, mandatory=list(deterministic))
-    png = ws / "_render" / "shot.png"
-    status = (render or RENDER)(ws / html_rel, png)
-    if status == NO_BROWSER:
-        return _deterministic_only(result, deterministic, NO_BROWSER)
-    rendered = status == RENDERED
-    screenshot_ok = rendered and screenshot_has_content(png, min_png_bytes)
-    result.mandatory.append((SCREENSHOT_CHECK, screenshot_ok))
-    if not rendered:
-        return _deterministic_only(result, deterministic, None)
-    try:
-        return judge_screenshot(png, deterministic, screenshot_ok, checklist, mandatory_items, judge or JUDGE)
-    except JudgeUnavailable:
-        degraded = _deterministic_only(result, deterministic, NO_JUDGE)
-        degraded.pending_vision = PendingVision(png=png, checklist=tuple(checklist),
-                                                mandatory_items=tuple(sorted(mandatory_items)),
-                                                deterministic=tuple(deterministic), screenshot_ok=screenshot_ok)
-        return degraded
-
-
-def judge_screenshot(png: Path, deterministic: Sequence[tuple[str, bool]], screenshot_ok: bool,
-                     checklist: Sequence[str], mandatory_items: frozenset[str],
-                     judge: VisionJudge) -> VisualCheckResult:
-    """The visual grade from a screenshot: deterministic gates, the screenshot
-    gate, then the judge's checklist. Raises JudgeUnavailable without votes."""
-    verdict = judge(png, checklist)
-    result = VisualCheckResult(pass_ratio=PASS_RATIO,
-                               mandatory=[*deterministic, (SCREENSHOT_CHECK, screenshot_ok)])
-    for item in checklist:
-        target = result.mandatory if item in mandatory_items else result.checks
-        target.append((f"vision: {item}", verdict.get(item) is True))
-    return result
-
-
-def enforce_rendered_profile(check: CheckResult | None) -> str | None:
-    """Grading profile of one task's check; None for non-visual tasks.
-
-    Idempotent.
-    """
-    if not isinstance(check, VisualCheckResult):
-        return None
-    if not any(flag in _UNRENDERED_CAUSES for flag in check.flags):
-        return PROFILE_RENDERED
-    if PROFILE_UNRENDERED not in check.flags:
-        check.mandatory.append((PROFILE_CHECK, False))
-        check.flags.append(PROFILE_UNRENDERED)
-    return PROFILE_UNRENDERED
-
-
-def _deterministic_only(result: VisualCheckResult, deterministic: list[tuple[str, bool]],
-                        flag: str | None) -> VisualCheckResult:
-    # Mirror the gates as scored checks so correctness stays the share of
-    # deterministic checks instead of an empty (zero) checklist.
-    result.checks.extend(deterministic)
-    if flag:
-        result.flags.append(flag)
-    return result

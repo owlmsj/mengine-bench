@@ -20,7 +20,9 @@ from pathlib import Path
 
 from mengine_bench import __version__
 from mengine_bench.bundle import RESULT_NAME, bundle_leaks
+from mengine_bench.leaderboard import major_minor
 from mengine_bench.redact import local_names
+from mengine_bench.report import config_text, cost_text, time_text
 
 UPSTREAM = "owlmsj/mengine-bench"
 UPSTREAM_BRANCH = "main"
@@ -51,10 +53,9 @@ def gh_login() -> str:
 def submission_problems(bundle: Path, result: Mapping[str, object]) -> list[str]:
     """Why this bundle must not be published (empty when it can be)."""
     problems = []
-    if result.get("bench_version") != __version__:
-        problems.append(f"received bench {result.get('bench_version')}; expected {__version__}: run with this bench")
-    if result.get("preflight") != []:
-        problems.append("the run did not start clean (result.json `preflight`); fix it and run again")
+    if major_minor(result.get("bench_version")) != major_minor(__version__):
+        problems.append(f"received bench {result.get('bench_version')}; expected {major_minor(__version__)}.x: "
+                        "run with this bench")
     submitter = result.get("submitter")
     names = local_names().allowing(submitter if isinstance(submitter, str) else None)
     problems += [f"privacy check: {name}: {', '.join(sorted(kinds))}" for name, kinds in
@@ -65,34 +66,33 @@ def submission_problems(bundle: Path, result: Mapping[str, object]) -> list[str]
 def pr_title(result: Mapping[str, object]) -> str:
     agent = result["agent"]
     assert isinstance(agent, dict)
-    return (f"results: {str(result['suite']).upper()} {agent['name']} {agent['model']} "
+    return (f"results: {agent['name']} {agent['model']} "
             f"{agent.get('effort') or 'default effort'}")
 
 
 def pr_body(result: Mapping[str, object]) -> str:
     agent, totals, environment = result["agent"], result["totals"], result["environment"]
-    judge, commit, grading = result.get("judge"), result.get("bench_commit"), result.get("grading")
+    judge, commit = result.get("judge"), result.get("bench_commit")
     assert isinstance(agent, dict) and isinstance(totals, dict) and isinstance(environment, dict)
-    judge_text = f"{judge['label']}, {judge.get('votes')} vote(s)" if isinstance(judge, dict) else "none"
-    if judge is None and result.get("judge_pending"):
-        judge_text = "pending: the maintainer runs `mengine-bench judge` on review"
+    judge_text = "pending: the maintainer runs `mengine-bench judge` on review"
+    if isinstance(judge, dict):
+        judge_text = f"{judge.get('model')}@{judge.get('effort')}, rubric {judge.get('rubric')}"
     commit_text = (f"{commit.get('sha')} (dirty: {commit.get('dirty')})" if isinstance(commit, dict) else "unknown")
     rows = [
-        ("suite", result["suite"]),
         ("agent CLI and version", f"{agent['name']} {agent.get('version') or 'unknown'}"),
         ("model id", agent["model"]),
         ("effort", agent.get("effort") or "default"),
         ("judge", judge_text),
-        ("OBJECTIVE / ACCURACY / solved", f"{totals['objective']} / {totals.get('accuracy')} / "
-                                          f"{totals['solved']}/{totals['total']}"),
-        ("SUBJECTIVE / COMPOSITE", f"{totals.get('subjective')} / {totals.get('composite')}"),
-        ("agent time (s)", totals.get("total_agent_s")),
+        ("Correct % / solved", f"{totals['correct']} / {totals['solved']}/{totals['total']}"),
+        ("Judge / Score", f"{totals.get('judge')} / {totals.get('score')} (set by the maintainer's judge)"),
+        ("Time", time_text(totals.get("time_s"))),
+        ("Cost", cost_text(totals)),
         ("wall time", f"{result.get('started_at')} to {result.get('finished_at')}"),
-        ("visual grading", grading.get("visual") if isinstance(grading, dict) else "unknown"),
         ("bench version and commit", f"{result['bench_version']} at {commit_text}"),
         ("machine", f"{environment.get('os')}, {environment.get('cpu')}, {environment.get('ram_gb')} GB RAM, "
                     f"GPU {environment.get('gpu') or 'none'}"),
-        ("preflight / privacy check", "clean / clean"),
+        ("config", config_text(result.get("config"))),
+        ("privacy check", "clean"),
     ]
     table = "\n".join(f"| {name} | {value} |" for name, value in rows)
     return ("Adds one result bundle, written by `mengine-bench run` and submitted with `mengine-bench submit`; "
@@ -121,8 +121,8 @@ def submit(bundle: Path) -> str:
         raise SubmitError("received a bundle that cannot be published:\n- " + "\n- ".join(problems))
     repo = Path(_call(["git", "rev-parse", "--show-toplevel"], cwd=bundle)).resolve()
     parts = bundle.relative_to(repo).parts
-    if len(parts) != 3 or parts[0] != "results":
-        raise SubmitError(f"received bundle {bundle}; expected <bench clone>/results/<suite>/<bundle>")
+    if len(parts) != 2 or parts[0] != "results":
+        raise SubmitError(f"received bundle {bundle}; expected <bench clone>/results/<bundle>")
     user = json.loads(_call(["gh", "api", "user"]))
     login = str(user["login"])
     author = (login, f"{user['id']}+{login}@users.noreply.github.com")

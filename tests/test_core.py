@@ -5,8 +5,6 @@ from pathlib import Path
 import pytest
 
 from mengine_bench.core import (
-    FAST,
-    FULL,
     CheckResult,
     EvalTask,
     Step,
@@ -22,29 +20,25 @@ from mengine_bench.core import (
 
 def make_task(**overrides: object) -> EvalTask:
     base: dict[str, object] = dict(
-        id="demo", category="coding", suites=frozenset({FAST, FULL}), provenance="test",
+        id="demo", category="coding", provenance="test",
         summary="demo", setup=lambda ws: None, steps=(Step("do it"),),
-        check=lambda ws, answers: CheckResult(), reference=lambda ws: [], par_s=60.0,
+        check=lambda ws, answers: CheckResult(), reference=lambda ws: [],
     )
     base.update(overrides)
     return EvalTask(**base)  # type: ignore[arg-type]
 
 
-def test_task_defaults_weight_one() -> None:
+def test_task_has_no_suite_weight_or_par_and_no_deliverables_by_default() -> None:
     task = make_task()
-    assert task.weight == 1 and task.par_s == 60.0
+    assert task.deliverables == ()
+    for removed in ("suites", "weight", "par_s"):
+        assert not hasattr(task, removed)
+    with pytest.raises(TypeError):
+        make_task(weight=2)
 
 
-def test_task_rejects_unknown_suite() -> None:
-    with pytest.raises(ValueError, match="agentic"):
-        make_task(suites=frozenset({"agentic"}))
-
-
-def test_task_rejects_bad_weight_and_par() -> None:
-    with pytest.raises(ValueError, match="weight 3"):
-        make_task(weight=3)
-    with pytest.raises(ValueError, match="par_s 0"):
-        make_task(par_s=0)
+def test_task_keeps_declared_deliverables() -> None:
+    assert make_task(deliverables=("site/index.html",)).deliverables == ("site/index.html",)
 
 
 def test_task_requires_steps() -> None:
@@ -52,18 +46,20 @@ def test_task_requires_steps() -> None:
         make_task(steps=())
 
 
-def test_check_result_mandatory_gates_pass() -> None:
+def test_failed_mandatory_gate_zeroes_the_score() -> None:
+    # #23: a failed gate used to keep up to 0.5; now the task scores 0.
     result = CheckResult(mandatory=[("render", False)])
     result.add("a", True)
-    assert result.score == 1.0 and not result.passed and not result.mandatory_ok
+    assert result.score == 0.0 and not result.passed and not result.mandatory_ok
     assert result.failed() == ["render"]
 
 
-def test_check_result_pass_ratio() -> None:
-    result = CheckResult(pass_ratio=0.5)
+def test_check_result_passes_only_with_every_check() -> None:
+    result = CheckResult(mandatory=[("gate", True)])
     result.add("a", True)
     result.add("b", False)
-    assert result.passed
+    assert result.score == 0.5 and not result.passed
+    assert not hasattr(result, "pass_ratio")
 
 
 def test_file_helpers(tmp_path: Path) -> None:

@@ -1,12 +1,12 @@
 """Result bundles: one directory per run, written by `mengine-bench run`.
 
 Layout:
-    results/<suite>/<date>_<agent>_<model>_<effort>_<run id>/
+    results/<date>_<agent>_<model>_<effort>_<run id>/
         result.json                  scores, per-task data, environment
         summary.md                   human summary
         transcripts/<task>.jsonl.gz  raw agent output per step
-        judge/<task>.json            judge evidence, when the run had no judge
-        judge/<task>.png             visual tasks: the screenshot for the vision judge
+        judge/<task>.json            judge evidence for `mengine-bench judge`
+        judge/<task>/<file>          each declared deliverable, verbatim after redaction
 
 Everything in a bundle is public once merged, so every text passes the secret
 and local-path redaction first.
@@ -99,15 +99,15 @@ def public_json(value: object, scope: PathScope) -> object:
 
 def write_bundle(results: MutableMapping[str, object], out_root: Path, transcripts: Mapping[str, Path],
                  scope: PathScope, packets: Mapping[str, Mapping[str, object]] | None = None,
-                 screenshots: Mapping[str, Path] | None = None) -> Path:
+                 deliverables: Mapping[str, Mapping[str, Path]] | None = None) -> Path:
     """Write the bundle for `results`; `transcripts` maps a task id to its raw transcript dir,
-    `packets` and `screenshots` hold the judge evidence of a run without a judge."""
+    `packets` holds the judge evidence and `deliverables` maps a task id to {relative path: file}."""
     agent = results["agent"]
     tasks = results["tasks"]
     assert isinstance(agent, dict) and isinstance(tasks, list)
     name = bundle_dir_name(str(results["date"]), str(agent["name"]), str(agent["model"]),
                            agent.get("effort"), str(results["run_id"]))
-    bundle_dir = out_root / str(results["suite"]) / name
+    bundle_dir = out_root / name
     (bundle_dir / "transcripts").mkdir(parents=True, exist_ok=False)
     for task in tasks:
         source = transcripts.get(task["id"])
@@ -122,10 +122,8 @@ def write_bundle(results: MutableMapping[str, object], out_root: Path, transcrip
         (bundle_dir / JUDGE_DIR / f"{task_id}.json").write_text(
             json.dumps(public_json(packet, scope), indent=1, ensure_ascii=False) + "\n", encoding="utf-8",
             newline="\n")
-    for task_id, png in (screenshots or {}).items():
-        if png.is_file():
-            (bundle_dir / JUDGE_DIR).mkdir(exist_ok=True)
-            shutil.copyfile(png, bundle_dir / JUDGE_DIR / f"{task_id}.png")
+    for task_id, files in (deliverables or {}).items():
+        _write_deliverables(bundle_dir / JUDGE_DIR / task_id, files, scope)
     public = public_json(results, scope)
     assert isinstance(public, dict)
     (bundle_dir / RESULT_NAME).write_text(json.dumps(public, indent=2, ensure_ascii=False) + "\n",
@@ -135,12 +133,22 @@ def write_bundle(results: MutableMapping[str, object], out_root: Path, transcrip
     return bundle_dir
 
 
+def _write_deliverables(target: Path, files: Mapping[str, Path], scope: PathScope) -> None:
+    """Store each deliverable under its workspace-relative path, redacted like every other text."""
+    for relative, source in files.items():
+        if not source.is_file():
+            continue
+        dest = target / relative
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        text = source.read_text(encoding="utf-8", errors="replace")
+        dest.write_text(public_text(text, scope), encoding="utf-8", newline="")
+
+
 def bundle_leaks(bundle_dir: Path, names: LocalNames) -> dict[str, dict[str, int]]:
     """Per file, what redaction missed (counts only: the output is pasted into PRs)."""
     found: dict[str, dict[str, int]] = {}
     for path in sorted(bundle_dir.rglob("*")):
-        # Screenshots are pixels, not text: a byte run there is not a leak.
-        if not path.is_file() or path.suffix == ".png":
+        if not path.is_file():
             continue
         raw = gzip.decompress(path.read_bytes()) if path.suffix == ".gz" else path.read_bytes()
         leaks = find_leaks(raw.decode("utf-8", errors="replace"), names)
