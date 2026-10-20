@@ -222,3 +222,20 @@ def test_judge_redacts_what_it_writes_to_result_json(fake_agent: FakeAgent, tmp_
     assert _judge(fake_agent, bundle, leaky) == 0
     text = (bundle / "result.json").read_text(encoding="utf-8")
     assert "corp-mail.net" not in text and '"judge": 70' in text
+
+
+def test_a_symlink_in_the_stored_deliverables_fails_the_render(
+        fake_agent: FakeAgent, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A PR could commit a link to a maintainer file next to the page (#23 review).
+    bundle = _run(fake_agent, tmp_path / "results", "web-mondrian-landing", VISUAL_AGENT)
+    secret = tmp_path / "secret.txt"
+    secret.write_text("maintainer", encoding="utf-8")
+    try:
+        (bundle / "judge" / "web-mondrian-landing" / "landing" / "data.txt").symlink_to(secret)
+    except OSError:
+        pytest.skip("this OS account cannot create symlinks")
+    called: list[Path] = []
+    monkeypatch.setattr(bundle_judge, "render_headless", lambda html, png: called.append(html) or visual.RENDERED)
+    assert _judge(fake_agent, bundle) == 0
+    [task] = json.loads((bundle / "result.json").read_text(encoding="utf-8"))["tasks"]
+    assert called == [] and task["judge"] == 0 and "symlink" in task["judge_rationale"]

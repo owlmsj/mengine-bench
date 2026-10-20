@@ -64,9 +64,14 @@ def _render_verdict(bundle: Path, task_id: str, packet: JudgePacket, judge: Rubr
     """Render the stored page outside the bundle; the judge sees the screenshot, a failed render scores 0."""
     stored = bundle / JUDGE_DIR / task_id
     site = workdir / "site"
+    page = str(packet.render)
+    # copytree would follow a link a PR committed next to the page into a maintainer file (#23 review).
+    links = [path for path in stored.rglob("*") if path.is_symlink()] if stored.is_dir() else []
+    if links:
+        return TaskVerdict(score=0, rationale=f"render of {page} refused: symlink in the stored deliverables "
+                                              f"({links[0].name}); judge 0 for this task")
     if stored.is_dir():
         shutil.copytree(stored, site)
-    page = str(packet.render)
     png = workdir / "render" / "shot.png"
     status = render(site / page, png)
     if status != RENDERED or not screenshot_has_content(png, BLANK_PNG_BYTES):

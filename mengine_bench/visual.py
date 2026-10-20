@@ -38,8 +38,13 @@ STDERR_REASON_LINES = 8
 STDERR_REASON_LINE_CHARS = 300
 # SwiftShader keeps WebGL scenes rendering on GPU-less hosts; the virtual
 # time budget lets animation loops and fonts settle before the capture.
+# Contributors' pages run on the maintainer's machine (#23 review): only the pinned
+# three.js CDN and Google Fonts resolve; a file:// page cannot read other local
+# files in Chromium by default.
+RENDER_HOST_RULES = ("--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE cdn.jsdelivr.net, "
+                     "EXCLUDE fonts.googleapis.com, EXCLUDE fonts.gstatic.com")
 _HEADLESS_FLAGS = ("--headless=new", "--no-first-run", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
-                   "--hide-scrollbars", "--window-size=1440,900", "--virtual-time-budget=8000")
+                   "--hide-scrollbars", "--window-size=1440,900", "--virtual-time-budget=8000", RENDER_HOST_RULES)
 # Containers have a tiny /dev/shm and no GPU; headless Chrome on Ubuntu
 # failed to screenshot without these.
 _LINUX_FLAGS = ("--disable-dev-shm-usage", "--disable-gpu")

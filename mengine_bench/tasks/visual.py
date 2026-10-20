@@ -74,7 +74,18 @@ Source: {FACTSHEET_SOURCE}
   design and architecture
 """
 # Agents may percent-encode the comma of the source URL.
-SOURCE_LINK = r"href=[\"']https?://en\.wikipedia\.org/wiki/Composition_with_Red(,|%2C)_Blue_and_Yellow[\"'#]"
+SOURCE_LINK = r"href\s*=\s*[\"']https?://en\.wikipedia\.org/wiki/Composition_with_Red(,|%2C)_Blue_and_Yellow[\"'#]"
+
+
+def _rendered_source(ws: Path, rel: str) -> str:
+    """The page without HTML and CSS/JS block comments: commented-out content never renders (#23 review)."""
+    text = read(ws, rel) or ""
+    return re.sub(r"/\*.*?\*/", "", re.sub(r"<!--.*?-->", "", text, flags=re.S), flags=re.S)
+
+
+def _visible_chars(html: str) -> int:
+    # Padding with whitespace does not make a page.
+    return len("".join(html.split()))
 
 
 def _landing_setup(ws: Path) -> None:
@@ -82,9 +93,9 @@ def _landing_setup(ws: Path) -> None:
 
 
 def _landing_check(ws: Path, answers: Sequence[str]) -> CheckResult:
-    html = read(ws, LANDING) or ""
+    html = _rendered_source(ws, LANDING)
     plain = _plain(html)
-    result = CheckResult(mandatory=[("index.html exists with content", len(html) > 1500)])
+    result = CheckResult(mandatory=[("index.html exists with content", _visible_chars(html) > 1500)])
     result.add("has a page title and an h1", has(html, r"<title>[^<]{3,}</title>") and has(html, r"<h1\b"))
     result.add("names the painting (Composition with Red, Blue and Yellow)",
                has(plain, r"composition\s+(ii\s+)?(with|in)\s+red,?\s+blue,?\s+and\s+yellow"))
@@ -129,8 +140,8 @@ THREE_URL = "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"
 
 
 def _scene_check(ws: Path, answers: Sequence[str]) -> CheckResult:
-    html = read(ws, SCENE) or ""
-    result = CheckResult(mandatory=[("index.html exists with content", len(html) > 2000)])
+    html = _rendered_source(ws, SCENE)
+    result = CheckResult(mandatory=[("index.html exists with content", _visible_chars(html) > 2000)])
     result.add("imports three.js 0.170.0 from the CDN",
                has(html, r"(cdn\.jsdelivr\.net/npm|unpkg\.com)/three@0\.170\.0/"))
     result.add("creates a WebGLRenderer", "WebGLRenderer" in html)

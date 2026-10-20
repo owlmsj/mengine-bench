@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from mengine_bench import visual
+from mengine_bench import catalog, visual
 from mengine_bench.core import CheckResult, write
 from mengine_bench.tasks import visual as visual_tasks
 
@@ -163,7 +163,8 @@ def test_headless_flags_linux_sandbox_only_for_root() -> None:
 def test_headless_flags_windows_and_mac_unchanged(system: str) -> None:
     flags = visual.headless_browser_flags(system, is_root=True)
     assert flags == ["--headless=new", "--no-first-run", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
-                     "--hide-scrollbars", "--window-size=1440,900", "--virtual-time-budget=8000"]
+                     "--hide-scrollbars", "--window-size=1440,900", "--virtual-time-budget=8000",
+                     visual.RENDER_HOST_RULES]
 
 
 FAILING_BROWSER = r"""
@@ -191,3 +192,36 @@ def test_render_failure_reason_carries_redacted_browser_stderr(tmp_path: Path) -
     assert secret not in status
     assert "noise line 49" not in status, "only the first stderr lines"
     assert visual.is_render_failure(status) and not visual.is_render_failure(visual.RENDERED)
+
+
+@pytest.mark.parametrize("system", ["Windows", "Linux", "Darwin"])
+def test_the_judge_render_reaches_only_the_pinned_cdn_and_fonts(system: str) -> None:
+    # A contributor's page runs on the maintainer's machine (#23 review): every
+    # host but the three.js CDN and Google Fonts fails to resolve.
+    [rules] = [flag for flag in visual.headless_browser_flags(system, is_root=False)
+               if flag.startswith("--host-resolver-rules=")]
+    assert rules.startswith("--host-resolver-rules=MAP * ~NOTFOUND")
+    for host in ("cdn.jsdelivr.net", "fonts.googleapis.com", "fonts.gstatic.com"):
+        assert f"EXCLUDE {host}" in rules
+
+
+@pytest.mark.parametrize("task_id", ["web-mondrian-landing", "3d-voxel-landscape"])
+def test_a_commented_out_page_earns_no_checks(task_id: str, tmp_path: Path) -> None:
+    # Content inside <!-- --> never renders, so it must not pass content gates (#23 review).
+    task = next(t for t in catalog.all_tasks() if t.id == task_id)
+    task.setup(tmp_path)
+    task.reference(tmp_path)
+    page = tmp_path / str(task.render_target)
+    page.write_text("<!doctype html><html><body><!--\n" + page.read_text(encoding="utf-8").replace("-->", "")
+                    + "\n--></body></html>" + " " * 2500, encoding="utf-8")
+    result = task.check(tmp_path, [""])
+    assert result.score == 0.0 and not result.passed
+
+
+def test_source_link_may_space_around_the_equals_sign(tmp_path: Path) -> None:
+    task = next(t for t in catalog.all_tasks() if t.id == "web-mondrian-landing")
+    task.setup(tmp_path)
+    answers = task.reference(tmp_path)
+    page = tmp_path / "landing" / "index.html"
+    page.write_text(page.read_text(encoding="utf-8").replace("href=", "href = "), encoding="utf-8")
+    assert task.check(tmp_path, answers).passed
