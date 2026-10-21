@@ -135,6 +135,17 @@ def test_retrieval_and_integration_summaries_are_short_sentences(task: EvalTask)
     ("The /data volume ran out of space, causing save failures", True),  # PR #25, issue #26
     ("Disk /data full: No space left on device", True),
     ("The data disk filled up and saves failed with no space left", True),
+    # #28 B1: every storage noun and every way of saying "full" names the same cause.
+    ("The /data partition filled up", True),
+    ("The mount at /data reached 100% usage", True),
+    ("Filesystem capacity exhausted on the data volume", True),
+    ("The storage was exhausted by old backups", True),
+    ("The server ran out of disk on /data", True),
+    ("Saves hit ENOSPC on /data", True),
+    ("The host was out of storage space", True),
+    ("The /data mount was at 100.0% capacity", True),
+    ("The disk was not full; a bad RCON password locked the server", False),
+    ("Watchdog killed the server (exit code 137); the disk wasn't full", False),
     ("Watchdog restarted the unresponsive server", False),
     ("RCON auth failed from a bad password", False),
 ])

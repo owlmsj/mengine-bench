@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -232,12 +233,21 @@ def _logs_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result.add("June availability",
                close(got.get("availability_june_pct"), float(str(exp["availability_june_pct"])), 0.001))
     result.add("SLO 99.9 met", got.get("slo_999_ok") is exp["slo_999_ok"])
-    result.add("root cause = /data disk full",
-               # #26: "the /data volume ran out of space" is the same cause as "disk full".
-               has(str(got.get("root_cause", "")),
-                   r"(disk|disco|volume|storage|/data)\b.{0,40}(full|cheio|space|espa)|out of (disk )?space"
-                   r"|no space left"))
+    result.add("root cause = /data disk full", _names_disk_full(str(got.get("root_cause", ""))))
     return result
+
+
+# #26, #28: every storage noun and every way of saying "full" name the same cause.
+DISK_FULL_CAUSE = (r"(disk|disco|volume|partition|mount|file\s?system|storage|/data)\b.{0,40}"
+                   r"(full|cheio|fill|capacity|exhaust|100(\.0+)?\s?%|space|espa)"
+                   r"|out of (disk |storage )?space|ran out of (disk|space|storage)|no space left|\benospc\b")
+# #28: "the disk was not full; ...RCON" names the disk only to rule it out.
+DISK_FULL_NEGATION = r"\b(not|never|without)\b|n't\b"
+
+
+def _names_disk_full(root_cause: str) -> bool:
+    clauses = re.split(r"[;!?]|\.\s|\bbut\b", root_cause)
+    return any(has(clause, DISK_FULL_CAUSE) and not has(clause, DISK_FULL_NEGATION) for clause in clauses)
 
 
 def _logs_reference(ws: Path) -> list[str]:
