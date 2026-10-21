@@ -269,3 +269,39 @@ def test_landing_accepts_legitimate_markup_but_not_missing_facts(
     page.write_text(edit(page.read_text(encoding="utf-8")), encoding="utf-8")
     result = LANDING.check(tmp_path, answers)
     assert result.mandatory_ok and result.failed() == failed
+
+
+IMPORT_CHECK = "imports three.js 0.170.0 from the CDN"
+ASSET_CHECK = "no external models or textures"
+SCENE_END = "</script></body></html>"
+
+
+def _low_poly_as(geometry: str) -> Callable[[str], str]:
+    return lambda page: page.replace("BoxGeometry", geometry).replace(", flatShading: true", "")
+
+
+@pytest.mark.parametrize("edit,failed", [
+    # #28 B5: other low poly primitives and a download link are legitimate.
+    *((_low_poly_as(f"{shape}Geometry"), []) for shape in ("Cone", "Cylinder", "Icosahedron", "Dodecahedron",
+                                                            "Tetrahedron")),
+    (lambda page: page.replace(SCENE_END, '</script><a download="fuji.png" href="fuji.png">Save</a></body></html>'),
+     []),
+    (lambda page: page.replace("renderer.setAnimationLoop", 'const shot = "fuji.png";\nrenderer.setAnimationLoop'),
+     []),
+    # The judge render resolves only jsDelivr, so unpkg would check but render blank.
+    (lambda page: page.replace("cdn.jsdelivr.net/npm/three@", "unpkg.com/three@"), [IMPORT_CHECK]),
+    (lambda page: page.replace("renderer.setAnimationLoop", 'new THREE.TextureLoader().load("https://example.org/sky.webp");'
+                               "\nrenderer.setAnimationLoop"), [ASSET_CHECK]),
+    (lambda page: page.replace("renderer.setAnimationLoop", "loader.load('models/fuji.glb', g => scene.add(g.scene));"
+                               "\nrenderer.setAnimationLoop"), [ASSET_CHECK]),
+    (lambda page: page.replace("<body>", '<body><img src="sky.jpg" alt="">'), [ASSET_CHECK]),
+    (lambda page: page.replace("overflow:hidden;", "overflow:hidden;background-image:url(https://example.org/sky);"),
+     [ASSET_CHECK]),
+])
+def test_scene_accepts_low_poly_forms_but_not_external_assets(
+        tmp_path: Path, edit: Callable[[str], str], failed: list[str]) -> None:
+    answers = SCENE.reference(tmp_path)
+    page = tmp_path / visual_tasks.SCENE
+    page.write_text(edit(page.read_text(encoding="utf-8")), encoding="utf-8")
+    result = SCENE.check(tmp_path, answers)
+    assert result.mandatory_ok and result.failed() == failed

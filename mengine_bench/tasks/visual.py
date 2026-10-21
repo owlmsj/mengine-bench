@@ -149,19 +149,32 @@ Source: <a href="https://en.wikipedia.org/wiki/De_Stijl">De Stijl on Wikipedia</
 
 SCENE = "scene/index.html"
 # #23: one pinned three.js build, so a run does not depend on what "latest" is that day.
-THREE_URL = "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"
+THREE_PACKAGE_URL = "https://cdn.jsdelivr.net/npm/three@0.170.0/"
+THREE_URL = THREE_PACKAGE_URL + "build/three.module.js"
 
 
 def _scene_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     html = _rendered_source(ws, SCENE)
     result = CheckResult(mandatory=[("index.html exists with content", _visible_chars(html) > 2000)])
-    result.add("imports three.js 0.170.0 from the CDN",
-               has(html, r"(cdn\.jsdelivr\.net/npm|unpkg\.com)/three@0\.170\.0/"))
+    # #28: only jsDelivr; the judge render resolves no other CDN, so unpkg would check but render blank.
+    result.add("imports three.js 0.170.0 from the CDN", has(html, r"cdn\.jsdelivr\.net/npm/three@0\.170\.0/"))
     result.add("creates a WebGLRenderer", "WebGLRenderer" in html)
     result.add("animation loop", has(html, r"requestAnimationFrame|setAnimationLoop"))
-    result.add("low poly or voxel geometry in the code", has(html, r"BoxGeometry|InstancedMesh|flatShading"))
-    result.add("no external models or textures", not has(html, r"\.(glb|gltf|obj|fbx|jpe?g|png|hdr)['\"]"))
+    result.add("low poly or voxel geometry in the code",
+               has(html, r"(Box|Cone|Cylinder|Icosahedron|Dodecahedron|Tetrahedron)Geometry|InstancedMesh|flatShading"))
+    result.add("no external models or textures", not _loaded_external_assets(html))
     return result
+
+
+# #28: a resource the page loads, not any string that ends in .png (a "fuji.png" download link is fine).
+LOADED_RESOURCE = r"(?:\.load(?:Async)?\s*\(\s*|\bsrc\s*=\s*|\burl\(\s*)[\"'`]?([^\"'`)\s>]+)"
+ASSET_FILE = r"\.(glb|gltf|obj|fbx|jpe?g|png|webp|hdr|exr|ktx2)([?#].*)?$"
+
+
+def _loaded_external_assets(html: str) -> list[str]:
+    targets = re.findall(LOADED_RESOURCE, html, flags=re.I)
+    remote = [t for t in targets if re.match(r"(https?:)?//", t, flags=re.I) and not t.startswith(THREE_PACKAGE_URL)]
+    return remote + [t for t in targets if re.search(ASSET_FILE, t, flags=re.I)]
 
 
 SCENE_REFERENCE = """<!doctype html>
