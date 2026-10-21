@@ -256,3 +256,20 @@ def test_part1_summaries_are_short_sentences(task: EvalTask) -> None:
     assert task.summary.endswith(".") and task.summary.count(".") == 1
     assert "\n" not in task.summary
     assert task.provenance
+
+
+@pytest.mark.parametrize("key,value,expected", [
+    ("sessions_a", "900", True), ("sessions_b", "900.0", True),
+    ("sessions_a", 900, True), ("sessions_a", "900.1", False),
+    ("sessions_b", 970, False), ("sessions_a", "nan", False),
+    ("ship_b", "true", False), ("ship_b", 1, False),
+])
+def test_ab_numeric_counts_keep_exact_method(
+    tmp_path: Path, key: str, value: object, expected: bool,
+) -> None:
+    from mengine_bench.tasks import business
+
+    payload = business._ab_expected()
+    payload[key] = value
+    (tmp_path / "ab_result.json").write_text(json.dumps(payload), encoding="utf-8")
+    assert business._ab_check(tmp_path, [""]).passed is expected

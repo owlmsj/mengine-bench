@@ -92,7 +92,7 @@ def _ab_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     exp = _ab_expected()
     got = read_json(ws, "ab_result.json")
     got = got if isinstance(got, dict) else {}
-    result.add("deduplicated session counts", got.get("sessions_a") == exp["sessions_a"] and got.get("sessions_b") == exp["sessions_b"])
+    result.add("deduplicated session counts", close(got.get("sessions_a"), exp["sessions_a"], 0) and close(got.get("sessions_b"), exp["sessions_b"], 0))
     result.add("completion rates", close(got.get("rate_a"), float(exp["rate_a"]), 1e-3) and close(got.get("rate_b"), float(exp["rate_b"]), 1e-3))
     result.add("absolute and relative lift", close(got.get("abs_lift"), float(exp["abs_lift"]), 1e-3) and close(got.get("rel_lift"), float(exp["rel_lift"]), 2e-3))
     result.add("two-proportion z-test p-value", close(got.get("p_value"), float(exp["p_value"]), max(1e-3, float(exp["p_value"]) * 0.05)))
@@ -276,7 +276,8 @@ TASKS = [
         steps=(Step("Read {WS}/telemetry/README.md and analyze {WS}/telemetry/playtest_ab.csv. Write {WS}/ab_result.json with "
                     "the keys sessions_a, sessions_b, rate_a, rate_b (tutorial completion), abs_lift (B-A), rel_lift "
                     "((B-A)/A), p_value (two-sided two-proportion z-test with pooled variance), ship_b (true if p<0.05 and "
-                    "B>A), mean_minutes_a, mean_minutes_b. " + RULES),),
+                    "B>A), mean_minutes_a, mean_minutes_b. Counts are integers; ship_b is a JSON boolean. "
+                    "Rates, lifts and p_value are fractions (0-1) with 4 decimals; mean minutes use 2 decimals. " + RULES),),
     ),
     EvalTask(
         id="bo-pnl-runway", category="backoffice",
