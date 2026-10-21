@@ -171,9 +171,14 @@ LOADED_RESOURCE = r"(?:\.load(?:Async)?\s*\(\s*|\bsrc\s*=\s*|\burl\(\s*)[\"'`]?(
 ASSET_FILE = r"\.(glb|gltf|obj|fbx|jpe?g|png|webp|hdr|exr|ktx2)([?#].*)?$"
 
 
+# #28 review: the judge render resolves Google Fonts as well as the pinned three.js package.
+ALLOWED_FONT_URLS = ("https://fonts.googleapis.com/", "https://fonts.gstatic.com/")
+
+
 def _loaded_external_assets(html: str) -> list[str]:
     targets = re.findall(LOADED_RESOURCE, html, flags=re.I)
-    remote = [t for t in targets if re.match(r"(https?:)?//", t, flags=re.I) and not t.startswith(THREE_PACKAGE_URL)]
+    remote = [t for t in targets if re.match(r"(https?:)?//", t, flags=re.I)
+              and not t.startswith((THREE_PACKAGE_URL, *ALLOWED_FONT_URLS))]
     return remote + [t for t in targets if re.search(ASSET_FILE, t, flags=re.I)]
 
 

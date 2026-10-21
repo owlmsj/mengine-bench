@@ -264,8 +264,9 @@ def _logs_check(ws: Path, answers: Sequence[str]) -> CheckResult:
 DISK_FULL_CAUSE = (r"(disk|disco|volume|partition|mount|file\s?system|storage|/data)\b.{0,40}"
                    r"(full|cheio|fill|capacity|exhaust|100(\.0+)?\s?%|space|espa)"
                    r"|out of (disk |storage )?space|ran out of (disk|space|storage)|no space left|\benospc\b")
-# #28: "the disk was not full; ...RCON" names the disk only to rule it out.
-DISK_FULL_NEGATION = r"\b(not|never|without)\b|n't\b"
+# #28: "the disk was not full; ...RCON" names the disk only to rule it out. The negation must sit right
+# before "full"/"the cause": "couldn't save because the disk was full" still names the disk.
+DISK_FULL_NEGATION = r"(\bnot|\bnever|n't)\s+(\w+\s+){0,2}?(full|out of|the (root )?cause)"
 
 
 def _names_disk_full(root_cause: str) -> bool:

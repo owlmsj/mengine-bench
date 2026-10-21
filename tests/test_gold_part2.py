@@ -174,6 +174,8 @@ def test_retrieval_and_integration_summaries_are_short_sentences(task: EvalTask)
     ("Saves hit ENOSPC on /data", True),
     ("The host was out of storage space", True),
     ("The /data mount was at 100.0% capacity", True),
+    ("The server couldn't save because the /data disk was full", True),  # #28 review: "n't" elsewhere
+    ("Saves failed: the /data disk was left without free space", True),
     ("The disk was not full; a bad RCON password locked the server", False),
     ("Watchdog killed the server (exit code 137); the disk wasn't full", False),
     ("Watchdog restarted the unresponsive server", False),

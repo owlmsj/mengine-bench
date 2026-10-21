@@ -289,6 +289,9 @@ def _low_poly_as(geometry: str) -> Callable[[str], str]:
     (lambda page: page.replace("renderer.setAnimationLoop", 'const shot = "fuji.png";\nrenderer.setAnimationLoop'),
      []),
     # The judge render resolves only jsDelivr, so unpkg would check but render blank.
+    # The judge render resolves Google Fonts too (#28 review).
+    (lambda page: page.replace("overflow:hidden;", "overflow:hidden;}@import url(https://fonts.googleapis.com/css2"
+                               "?family=Inter);x{"), []),
     (lambda page: page.replace("cdn.jsdelivr.net/npm/three@", "unpkg.com/three@"), [IMPORT_CHECK]),
     (lambda page: page.replace("renderer.setAnimationLoop", 'new THREE.TextureLoader().load("https://example.org/sky.webp");'
                                "\nrenderer.setAnimationLoop"), [ASSET_CHECK]),
