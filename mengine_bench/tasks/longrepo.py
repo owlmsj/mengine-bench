@@ -216,14 +216,14 @@ from arena_server.persistence.store import load, save
 from arena_server.services.match_service import finish_match
 
 
-def play(cfg_file_data, env, won, kills, credits=0):
+def play(cfg_file_data, env, won, kills, credits=0, name="p"):
     with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:
         path = None
         if cfg_file_data is not None:
             path = Path(tmp) / "c.json"
             path.write_text(json.dumps(cfg_file_data))
         cfg = load_config(path, env=env)
-        profile = Profile("p", level=7, credits=credits, cosmetics=["a", "b"])
+        profile = Profile(name, level=7, credits=credits, cosmetics=["a", "b"])
         finish_match(profile, won=won, kills=kills, cfg=cfg)
         save(profile, Path(tmp) / "p.json")
         return load(Path(tmp) / "p.json")
@@ -239,6 +239,30 @@ class Hidden(unittest.TestCase):
     def test_round_trip_keeps_everything(self):
         p = play(None, {}, False, 0, 40)
         self.assertEqual((p.level, p.credits, p.cosmetics), (7, 640, ["a", "b"]))
+
+    # #28: documented behavior the visible test does not exercise; a fix must keep it.
+    # Each scenario also goes through a fixed bug, so the untouched backend earns none of them.
+    def test_half_up_tie_rounds_up(self):
+        self.assertEqual(play({"win_base": 1000}, {"ARENA_WIN_BASE": "1425"}, True, 0).credits, 1430)
+
+    def test_persisted_name_survives(self):
+        p = play(None, {}, True, 1, 10, name="Player One")
+        self.assertEqual((p.name, p.credits), ("Player One", 960))
+
+    def test_real_environment_when_env_is_none(self):
+        import os
+        saved = os.environ.get("ARENA_KILL_BONUS")
+        os.environ["ARENA_KILL_BONUS"] = "80"
+        try:
+            with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:
+                path = Path(tmp) / "c.json"
+                path.write_text(json.dumps({"kill_bonus": 50}))
+                self.assertEqual(load_config(path, env=None)["kill_bonus"], 80)
+        finally:
+            if saved is None:
+                del os.environ["ARENA_KILL_BONUS"]
+            else:
+                os.environ["ARENA_KILL_BONUS"] = saved
 
 
 if __name__ == "__main__":
@@ -259,7 +283,8 @@ def _check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     untouched = all(_sha(read(ws, rel) or "") == _sha(FILES[rel]) for rel in PROTECTED)
     result.mandatory.append(("existing tests untouched", untouched))
-    for scenario in ("config_override_and_persistence", "env_float_wins_over_file", "round_trip_keeps_everything"):
+    for scenario in ("config_override_and_persistence", "env_float_wins_over_file", "round_trip_keeps_everything",
+                     "half_up_tie_rounds_up", "persisted_name_survives", "real_environment_when_env_is_none"):
         selection = ("\n\ndef load_tests(loader, tests, pattern):\n"
                      f"    return unittest.TestSuite([Hidden('test_{scenario}')])\n")
         ok, _ = run_hidden_tests(ws, HIDDEN + selection)
@@ -302,7 +327,8 @@ TASKS = [
         timeout_s=900,
         steps=(Step("The backend in {WS} (Pixel Arena) has the integration test in {WS}/tests/integration failing, "
                     "while the unit tests pass. Find and fix ALL root causes following the specification in {WS}/docs "
-                    "(not just the symptom of the visible test). Do not change any existing test. At the end run the "
+                    "(not just the symptom of the visible test). Do not change any existing test. Use the Python "
+                    "standard library only. At the end run the "
                     "whole suite with `python -m unittest discover -s tests -t .` from {WS}. This is your ONLY "
                     "request: there will be no second turn; deliver everything fixed and summarize the root cause + "
                     "file:line of each bug."),),
