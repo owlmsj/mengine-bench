@@ -329,6 +329,7 @@ def test_changelog_normalizes_only_build_prefixes(
 
 @pytest.mark.parametrize("key,value,expected", [
     ("top_gpu", " b200 ", True), ("bottom_gpu", " a 100 ", True),
+    ("top_gpu", "NVIDIA B200", True), ("bottom_gpu", "Nvidia A100 GPU", True),
     ("top_gpu", "NOT-B200: H100", False), ("bottom_gpu", "NOT-A100: H100", False),
     ("top_gpu", "B2000", False), ("bottom_gpu", "H100", False),
     ("ratio", 2.96, True), ("ratio", "2.964", True), ("ratio", 2.966, False),
@@ -358,6 +359,7 @@ def test_chart_normalizes_names_and_uses_rounded_ratio(
     ("pending", "Update README.md", True), ("pending", "Fix the README", True),
     ("pending", "Remove check_vision.ps1 from README", True),
     ("pending", "Edit README", True), ("pending", "Replace the README reference", True),
+    ("pending", "evals README still cites check_vision.ps1", True),
     ("pending", "README is up to date; nothing remains", False),
     ("pending", "Remove check_vision.ps1", False),
 ])

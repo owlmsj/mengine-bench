@@ -75,7 +75,8 @@ HANDOFF_GOLD = {
     "final_decode": r"(?<![\w.,+-])38(?:[.,]0+)?(?!\w|[.,]\d)",
     "final_vram_mib": r"(?<![\w.,+-])7697(?:[.,]0+)?(?!\w|[.,]\d)",
     "discarded_quant": r"\bQ6(?:_K)?\b",
-    "pending": r"(?=.*\bREADME\b)(?=.*\b(?:update|fix|remove|edit|replace)\b)",
+    # #28: the README with what is wrong in it (an action, or the stale check_vision reference).
+    "pending": r"(?=.*\bREADME\b)(?=.*\b(?:update|fix|remove|edit|replace|check_vision))",
     "measure_command": r"(?=.*\bmeasure_decode\.ps1\b)(?=.*\b131072\b)(?=.*\b1024\b)",
 }
 
