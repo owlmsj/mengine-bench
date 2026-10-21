@@ -123,6 +123,36 @@ def test_longrepo_reference_fixes_only_two_modules(tmp_path: Path) -> None:
     assert longrepo._check(tmp_path, answers).passed
 
 
+BANKERS_PAYOUT = "    return int(round(raw / 10) * 10)\n"
+DROPS_REAL_ENV = "    env = {} if env is None else env\n"
+LOSES_NAME = 'Profile(name=data["name"],'
+
+
+@pytest.mark.parametrize("module,broken,check", [
+    # #28 B3: a fix must not break documented behavior the visible test does not exercise.
+    ("arena_server/economy/payout.py", ("    return int(math.floor(raw / 10 + 0.5) * 10)\n", BANKERS_PAYOUT),
+     "hidden half up tie rounds up"),
+    ("arena_server/config/loader.py", ("    env = os.environ if env is None else env\n", DROPS_REAL_ENV),
+     "hidden real environment when env is none"),
+    ("arena_server/persistence/codec.py", (LOSES_NAME, 'Profile(name=data["name"].lower(),'),
+     "hidden persisted name survives"),
+])
+def test_longrepo_hidden_tests_catch_a_fix_that_breaks_documented_behavior(
+        tmp_path: Path, module: str, broken: tuple[str, str], check: str) -> None:
+    longrepo._setup(tmp_path)
+    answers = longrepo._reference(tmp_path)
+    assert longrepo._check(tmp_path, answers).passed
+    source = (tmp_path / module).read_text(encoding="utf-8")
+    assert broken[0] in source, f"{module}: expected {broken[0]!r} in the reference"
+    (tmp_path / module).write_text(source.replace(broken[0], broken[1]), encoding="utf-8")
+    result = longrepo._check(tmp_path, answers)
+    assert dict(result.checks)[check] is False and not result.passed
+
+
+def test_longrepo_prompt_says_standard_library_only() -> None:
+    assert "standard library only" in longrepo.TASKS[0].steps[0].prompt
+
+
 @pytest.mark.parametrize("task", (*ir.TASKS, *longrepo.TASKS), ids=lambda task: task.id)
 def test_retrieval_and_integration_summaries_are_short_sentences(task: EvalTask) -> None:
     assert 0 < len(task.summary) <= 120
