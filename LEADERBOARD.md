@@ -6,4 +6,6 @@ Cost are separate columns. Runs are self-reported by each submitter and judged
 by the maintainer on review; the transcripts are in each bundle. Only complete,
 judged runs of the current bench version are ranked.
 
-No results yet.
+| # | Score | Correct % | Solved | Judge | Time | Cost | Tokens | Agent | Model | Effort | Hardware | Config | Submitter | Date | Run |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | **94.6** | 100.0 | 14/14 | 81.9 | 8 min 36 s | $1.41 (price) | 1.48M | codex codex-cli 0.163.0 | gpt-6.1-sol | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | service_tier=fast, price_source=developers.openai.com/api... | - | 2026-10-20 | [run](results/2026-10-20_codex_gpt-6.1-sol_low_9c8acda0/summary.md) |
