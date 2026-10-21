@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -225,3 +227,45 @@ def test_source_link_may_space_around_the_equals_sign(tmp_path: Path) -> None:
     page = tmp_path / "landing" / "index.html"
     page.write_text(page.read_text(encoding="utf-8").replace("href=", "href = "), encoding="utf-8")
     assert task.check(tmp_path, answers).passed
+
+
+# #28 B4: a compact but complete page (794 visible chars) earns every check.
+COMPACT_LANDING = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<title>Mondrian 1930</title>
+<style>body{margin:0;font-family:sans-serif;background:#111}main{display:grid;grid-template-columns:2fr 1fr;gap:10px;padding:10px}
+section{background:#fff;padding:20px}.r{background:#d40920}.b{background:#1356a2;color:#fff}.y{background:#f7d842}</style></head>
+<body><main><section class="r"><h1>Composition with Red, Blue and Yellow</h1><p>Painted by Piet Mondrian in 1930.</p></section>
+<section class="y"><h2>De Stijl</h2><p>A Dutch movement of straight lines and primary colours, founded in 1917.</p></section>
+<section class="b"><h2>Why it matters</h2><p>Its asymmetric balance shaped modern design.</p>
+<button>See it</button> <a href="https://en.wikipedia.org/wiki/Composition_with_Red,_Blue_and_Yellow">Source</a></section>
+</main></body></html>
+"""
+NAME = "Composition with Red, Blue and Yellow"
+
+
+@pytest.mark.parametrize("edit,failed", [
+    (lambda page: page.replace(f"<h1>{NAME}</h1>",
+                               "<h1>Composition with <span>Red</span>, <span>Blue</span> and <span>Yellow</span></h1>")
+     .replace(f"<title>{NAME}</title>", "<title>Mondrian 1930</title>"), []),
+    (lambda page: page.replace("Piet Mondrian", "Piet <em>Mondrian</em>"), []),
+    (lambda page: page.replace('<a class="cta"', "<a class='cta'"), []),
+    (lambda page: page.replace('_Blue_and_Yellow">Read', "_Blue_and_Yellow/\">Read"), []),
+    (lambda page: page.replace('_Blue_and_Yellow">Read', "_Blue_and_Yellow?lang=en'>Read")
+     .replace('href="https://en.wikipedia.org/wiki/Composition', "href='https://en.wikipedia.org/wiki/Composition"),
+     []),
+    (lambda page: COMPACT_LANDING, []),
+    # Wrong pages stay wrong.
+    (lambda page: page.replace('_Blue_and_Yellow">Read', '_Blue_and_Yellow_II">Read'),
+     ["links to the fact sheet's source"]),
+    (lambda page: re.sub(r"<style>.*?</style>", "<style>body{font-family:sans-serif;color:#555;background:#eee}"
+                                                "</style>", page, flags=re.S),
+     ["CSS with the Mondrian palette (red, blue, yellow, black)"]),
+])
+def test_landing_accepts_legitimate_markup_but_not_missing_facts(
+        tmp_path: Path, edit: Callable[[str], str], failed: list[str]) -> None:
+    LANDING.setup(tmp_path)
+    answers = LANDING.reference(tmp_path)
+    page = tmp_path / visual_tasks.LANDING
+    page.write_text(edit(page.read_text(encoding="utf-8")), encoding="utf-8")
+    result = LANDING.check(tmp_path, answers)
+    assert result.mandatory_ok and result.failed() == failed
