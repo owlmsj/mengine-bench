@@ -92,7 +92,7 @@ def _ab_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     exp = _ab_expected()
     got = read_json(ws, "ab_result.json")
     got = got if isinstance(got, dict) else {}
-    result.add("deduplicated session counts", got.get("sessions_a") == exp["sessions_a"] and got.get("sessions_b") == exp["sessions_b"])
+    result.add("deduplicated session counts", close(got.get("sessions_a"), exp["sessions_a"], 0) and close(got.get("sessions_b"), exp["sessions_b"], 0))
     result.add("completion rates", close(got.get("rate_a"), float(exp["rate_a"]), 1e-3) and close(got.get("rate_b"), float(exp["rate_b"]), 1e-3))
     result.add("absolute and relative lift", close(got.get("abs_lift"), float(exp["abs_lift"]), 1e-3) and close(got.get("rel_lift"), float(exp["rel_lift"]), 2e-3))
     result.add("two-proportion z-test p-value", close(got.get("p_value"), float(exp["p_value"]), max(1e-3, float(exp["p_value"]) * 0.05)))
@@ -179,8 +179,9 @@ def _pnl_setup(ws: Path) -> None:
 def _pnl_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     table, runway = _pnl_expected()
-    got = {row.get("line"): row for row in csv.DictReader(io.StringIO(read(ws, "pnl.csv") or ""))}
-    result.add("pnl.csv lines in order", list(got) == PNL_LINES)
+    rows = list(csv.DictReader(io.StringIO(read(ws, "pnl.csv") or "")))
+    got = {row.get("line"): row for row in rows}
+    result.add("pnl.csv lines in order", [row.get("line") for row in rows] == PNL_LINES)
     for line in PNL_LINES:
         tol = 0.02 if line == "gross_margin_pct" else 1.0
         result.add(f"{line} per month", line in got and all(close(got[line].get(ym), table[line][ym], tol) for ym in MONTHS))
@@ -240,16 +241,21 @@ def _recon_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     got = read_json(ws, "reconciliation.json")
     got = got if isinstance(got, dict) else {}
-    result.add("unpaid invoices", sorted(got.get("unpaid") or []) == RECON["unpaid"])
-    result.add("duplicated payments", sorted(got.get("duplicated") or []) == RECON["duplicated"])
-    mism = got.get("mismatched") or []
-    ids = sorted(str(m.get("id")) for m in mism if isinstance(m, dict))
-    result.add("mismatched amounts", ids == RECON["mismatched"])
+    for key, label in (("unpaid", "unpaid invoices"), ("duplicated", "duplicated payments")):
+        entries = got.get(key)
+        ids = sorted(str(entry.get("id") if isinstance(entry, dict) else entry)
+                     for entry in entries) if isinstance(entries, list) else []
+        result.add(label, ids == RECON[key])
+    mism = got.get("mismatched")
+    valid_mismatches = isinstance(mism, list) and all(isinstance(m, dict) for m in mism)
+    mism = [m for m in mism if m.get("id") not in RECON["duplicated"]] if valid_mismatches else []
+    ids = sorted(str(m.get("id")) for m in mism)
+    result.add("mismatched amounts", valid_mismatches and ids == RECON["mismatched"])
     invoiced = {i: v for i, _, v in _invoices()}
     paid = {"INV-1021": round(invoiced["INV-1021"] - 250.0, 2), "INV-1036": round(invoiced["INV-1036"] * 0.9, 2)}
-    result.add("invoiced vs paid on mismatches", ids == RECON["mismatched"] and all(
+    result.add("invoiced vs paid on mismatches", valid_mismatches and ids == RECON["mismatched"] and all(
         close(m.get("invoiced"), invoiced[str(m.get("id"))], 0.01)
-        and close(m.get("paid"), paid[str(m.get("id"))], 0.01) for m in mism if isinstance(m, dict)))
+        and close(m.get("paid"), paid[str(m.get("id"))], 0.01) for m in mism))
     return result
 
 
@@ -271,7 +277,8 @@ TASKS = [
         steps=(Step("Read {WS}/telemetry/README.md and analyze {WS}/telemetry/playtest_ab.csv. Write {WS}/ab_result.json with "
                     "the keys sessions_a, sessions_b, rate_a, rate_b (tutorial completion), abs_lift (B-A), rel_lift "
                     "((B-A)/A), p_value (two-sided two-proportion z-test with pooled variance), ship_b (true if p<0.05 and "
-                    "B>A), mean_minutes_a, mean_minutes_b. " + RULES),),
+                    "B>A), mean_minutes_a, mean_minutes_b. Counts are integers; ship_b is a JSON boolean. "
+                    "Rates, lifts and p_value are fractions (0-1) with 4 decimals; mean minutes use 2 decimals. " + RULES),),
     ),
     EvalTask(
         id="bo-pnl-runway", category="backoffice",
@@ -294,6 +301,8 @@ TASKS = [
         steps=(Step("Reconcile {WS}/backoffice/invoices.csv with {WS}/backoffice/bank_statement_june.csv (the memo cites "
                     "the invoice in different formats; ignore fees, interest and PIX transfers without an identifiable "
                     "invoice). Write {WS}/reconciliation.json with unpaid (ids without payment), duplicated (ids paid more "
-                    "than once) and mismatched (list of objects id, invoiced, paid when the paid amount differs). " + RULES),),
+                    "than once) and mismatched (list of objects id, invoiced, paid when the paid amount differs). "
+                    "Categories are exclusive: a duplicated invoice is NOT also mismatched. For mismatched, compare "
+                    "a single payment with its invoice. " + RULES),),
     ),
 ]

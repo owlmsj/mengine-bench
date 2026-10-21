@@ -26,7 +26,8 @@ ONE_SHOT = ("This is your ONLY request: there will be no second turn and no answ
 
 def _plain(text: str) -> str:
     # Agents write accents and HTML entities (&eacute;); fold both before matching.
-    text = html_lib.unescape(text)
+    # #28: inline markup inside a fact ("Piet <em>Mondrian</em>") is still the fact.
+    text = html_lib.unescape(re.sub(r"<[^>]*>", "", text))
     return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii").lower()
 
 
@@ -40,9 +41,16 @@ def _hex_colors(html: str) -> list[tuple[int, int, int]]:
     return colors
 
 
+def _style_text(html: str) -> str:
+    # #28: color words count only where they style something, not in prose like the painting's title.
+    blocks = re.findall(r"<style\b[^>]*>(.*?)</style>", html, flags=re.S | re.I)
+    attributes = re.findall(r"\bstyle\s*=\s*(?:\"([^\"]*)\"|'([^']*)')", html, flags=re.I)
+    return " ".join([*blocks, *(double or single for double, single in attributes)]).lower()
+
+
 def _mondrian_palette(html: str) -> bool:
     colors = _hex_colors(html)
-    names = _plain(html)
+    names = _style_text(html)
     red = any(r > 170 and g < 90 and b < 90 for r, g, b in colors) or re.search(r"\bred\b", names)
     blue = any(b > 110 and r < 90 and g < 140 for r, g, b in colors) or re.search(r"\bblue\b", names)
     yellow = any(r > 200 and g > 160 and b < 110 for r, g, b in colors) or re.search(r"\byellow\b", names)
@@ -73,8 +81,12 @@ Source: {FACTSHEET_SOURCE}
 - Why it matters: its asymmetric balance of a few primary-colour blocks became a reference for modern graphic
   design and architecture
 """
-# Agents may percent-encode the comma of the source URL.
-SOURCE_LINK = r"href\s*=\s*[\"']https?://en\.wikipedia\.org/wiki/Composition_with_Red(,|%2C)_Blue_and_Yellow[\"'#]"
+# Agents may percent-encode the comma of the source URL; #28: a trailing slash or query is the same page.
+SOURCE_LINK = r"href\s*=\s*[\"']https?://en\.wikipedia\.org/wiki/Composition_with_Red(,|%2C)_Blue_and_Yellow[\"'#/?]"
+# #28: single or double quotes around the class/role value.
+CTA_ELEMENT = r"<button\b|<a\b[^>]*(class|role)\s*=\s*[\"'][^\"']*(cta|btn|button)"
+# #28: a compact but complete page passes; the gate only rejects an empty or stub page.
+LANDING_MIN_VISIBLE_CHARS = 300
 
 
 def _rendered_source(ws: Path, rel: str) -> str:
@@ -95,7 +107,8 @@ def _landing_setup(ws: Path) -> None:
 def _landing_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     html = _rendered_source(ws, LANDING)
     plain = _plain(html)
-    result = CheckResult(mandatory=[("index.html exists with content", _visible_chars(html) > 1500)])
+    result = CheckResult(mandatory=[("index.html exists with content",
+                                     _visible_chars(html) > LANDING_MIN_VISIBLE_CHARS)])
     result.add("has a page title and an h1", has(html, r"<title>[^<]{3,}</title>") and has(html, r"<h1\b"))
     result.add("names the painting (Composition with Red, Blue and Yellow)",
                has(plain, r"composition\s+(ii\s+)?(with|in)\s+red,?\s+blue,?\s+and\s+yellow"))
@@ -104,7 +117,7 @@ def _landing_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result.add("names the De Stijl movement", "de stijl" in plain)
     result.add("links to the fact sheet's source", has(html, SOURCE_LINK))
     result.add("CSS with the Mondrian palette (red, blue, yellow, black)", _mondrian_palette(html))
-    result.add("has a call-to-action element", has(html, r"<button\b|<a\b[^>]*(class|role)=\"[^\"]*(cta|btn|button)"))
+    result.add("has a call-to-action element", has(html, CTA_ELEMENT))
     return result
 
 
@@ -136,19 +149,37 @@ Source: <a href="https://en.wikipedia.org/wiki/De_Stijl">De Stijl on Wikipedia</
 
 SCENE = "scene/index.html"
 # #23: one pinned three.js build, so a run does not depend on what "latest" is that day.
-THREE_URL = "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"
+THREE_PACKAGE_URL = "https://cdn.jsdelivr.net/npm/three@0.170.0/"
+THREE_URL = THREE_PACKAGE_URL + "build/three.module.js"
 
 
 def _scene_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     html = _rendered_source(ws, SCENE)
     result = CheckResult(mandatory=[("index.html exists with content", _visible_chars(html) > 2000)])
-    result.add("imports three.js 0.170.0 from the CDN",
-               has(html, r"(cdn\.jsdelivr\.net/npm|unpkg\.com)/three@0\.170\.0/"))
+    # #28: only jsDelivr; the judge render resolves no other CDN, so unpkg would check but render blank.
+    result.add("imports three.js 0.170.0 from the CDN", has(html, r"cdn\.jsdelivr\.net/npm/three@0\.170\.0/"))
     result.add("creates a WebGLRenderer", "WebGLRenderer" in html)
     result.add("animation loop", has(html, r"requestAnimationFrame|setAnimationLoop"))
-    result.add("low poly or voxel geometry in the code", has(html, r"BoxGeometry|InstancedMesh|flatShading"))
-    result.add("no external models or textures", not has(html, r"\.(glb|gltf|obj|fbx|jpe?g|png|hdr)['\"]"))
+    result.add("low poly or voxel geometry in the code",
+               has(html, r"(Box|Cone|Cylinder|Icosahedron|Dodecahedron|Tetrahedron)Geometry|InstancedMesh|flatShading"))
+    result.add("no external models or textures", not _loaded_external_assets(html))
     return result
+
+
+# #28: a resource the page loads, not any string that ends in .png (a "fuji.png" download link is fine).
+LOADED_RESOURCE = r"(?:\.load(?:Async)?\s*\(\s*|\bsrc\s*=\s*|\burl\(\s*)[\"'`]?([^\"'`)\s>]+)"
+ASSET_FILE = r"\.(glb|gltf|obj|fbx|jpe?g|png|webp|hdr|exr|ktx2)([?#].*)?$"
+
+
+# #28 review: the judge render resolves Google Fonts as well as the pinned three.js package.
+ALLOWED_FONT_URLS = ("https://fonts.googleapis.com/", "https://fonts.gstatic.com/")
+
+
+def _loaded_external_assets(html: str) -> list[str]:
+    targets = re.findall(LOADED_RESOURCE, html, flags=re.I)
+    remote = [t for t in targets if re.match(r"(https?:)?//", t, flags=re.I)
+              and not t.startswith((THREE_PACKAGE_URL, *ALLOWED_FONT_URLS))]
+    return remote + [t for t in targets if re.search(ASSET_FILE, t, flags=re.I)]
 
 
 SCENE_REFERENCE = """<!doctype html>

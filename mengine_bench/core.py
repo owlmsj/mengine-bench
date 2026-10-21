@@ -121,7 +121,7 @@ def read(ws: Path, rel: str) -> str | None:
     path = ws / rel
     if not path.is_file():
         return None
-    return path.read_text(encoding="utf-8", errors="replace")
+    return path.read_text(encoding="utf-8-sig", errors="replace")
 
 
 def read_json(ws: Path, rel: str) -> object | None:
