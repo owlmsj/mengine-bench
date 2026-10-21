@@ -383,3 +383,21 @@ def test_handoff_spill_credit_requires_a_number(tmp_path: Path, answer: str, exp
     from mengine_bench.tasks import compaction
 
     assert compaction._handoff_check(tmp_path, [answer]).score == expected
+
+
+@pytest.mark.parametrize("original,replacement,expected", [
+    ('"D": 3', '"D": 3', True),
+    ('"D": 3', '"D": 1', False),
+    ("def find_path(grid):", 'def find_path(grid):\n    if grid == ["S..G"]:\n        return None', False),
+])
+def test_astar_hidden_tests_reject_wrong_door_cost_and_visible_regression(
+    tmp_path: Path, original: str, replacement: str, expected: bool,
+) -> None:
+    from mengine_bench.tasks import gamedev
+
+    gamedev._astar_setup(tmp_path)
+    assert original in gamedev.ASTAR_REFERENCE
+    (tmp_path / "pathfind.py").write_text(
+        gamedev.ASTAR_REFERENCE.replace(original, replacement), encoding="utf-8",
+    )
+    assert gamedev._astar_check(tmp_path, [""]).passed is expected
