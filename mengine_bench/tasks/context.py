@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import shutil
 from collections.abc import Sequence
 from datetime import date, timedelta
@@ -21,7 +22,6 @@ from mengine_bench.core import (
     Step,
     answer_json,
     close,
-    has,
     write,
 )
 
@@ -73,8 +73,10 @@ def _changelog_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     gold = _changelog()[1]
     got = answer_json(answers)
-    result.add("build that changed recoil_multiplier (not _ads)", str(got.get("build_change")) == gold["build_change"])
-    result.add("build that reverted it", str(got.get("build_revert")) == gold["build_revert"])
+    builds = {key: re.sub(r"^(?:build\s*|v\s*)", "", str(got.get(key, "")).strip(), flags=re.IGNORECASE)
+              for key in ("build_change", "build_revert")}
+    result.add("build that changed recoil_multiplier (not _ads)", builds["build_change"] == gold["build_change"])
+    result.add("build that reverted it", builds["build_revert"] == gold["build_revert"])
     result.add("revert date", str(got.get("revert_date")) == gold["revert_date"])
     result.add("revert approver", str(got.get("revert_approver", "")).strip().lower() == str(gold["revert_approver"]).lower())
     result.add("builds between the two (exclusive)", close(got.get("builds_between"), 162, 0))
@@ -98,10 +100,10 @@ def _copy_assets(ws: Path, *names: str) -> None:
 def _chart_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     got = answer_json(answers)
-    result.add("GPU with the highest TPS", has(str(got.get("top_gpu", "")), r"B200"))
+    result.add("GPU with the highest TPS", "".join(str(got.get("top_gpu", "")).split()).upper() == "B200")
     result.add("value of the tallest bar", close(got.get("top_tps"), 210, 0))
-    result.add("GPU with the lowest TPS", has(str(got.get("bottom_gpu", "")), r"A100"))
-    result.add("ratio top/bottom (2 decimals)", close(got.get("ratio"), 210 / 71, 0.011))
+    result.add("GPU with the lowest TPS", "".join(str(got.get("bottom_gpu", "")).split()).upper() == "A100")
+    result.add("ratio top/bottom (2 decimals)", close(got.get("ratio"), 2.96, 0.005))
     return result
 
 
