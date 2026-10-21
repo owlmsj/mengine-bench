@@ -273,3 +273,24 @@ def test_ab_numeric_counts_keep_exact_method(
     payload[key] = value
     (tmp_path / "ab_result.json").write_text(json.dumps(payload), encoding="utf-8")
     assert business._ab_check(tmp_path, [""]).passed is expected
+
+
+@pytest.mark.parametrize("case,expected", [
+    ("reference", True), ("duplicate", False), ("reordered", False), ("missing", False),
+])
+def test_pnl_checks_every_line_in_order(tmp_path: Path, case: str, expected: bool) -> None:
+    from mengine_bench.tasks import business
+
+    business._pnl_reference(tmp_path)
+    output = tmp_path / "pnl.csv"
+    lines = output.read_text(encoding="utf-8").splitlines()
+    if case == "duplicate":
+        lines.insert(2, lines[1])
+    if case == "reordered":
+        lines[1], lines[2] = lines[2], lines[1]
+    if case == "missing":
+        lines.pop()
+    output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    result = business._pnl_check(tmp_path, [""])
+    assert dict(result.checks)["pnl.csv lines in order"] is expected
+    assert result.passed is expected

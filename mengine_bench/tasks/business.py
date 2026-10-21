@@ -179,8 +179,9 @@ def _pnl_setup(ws: Path) -> None:
 def _pnl_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     table, runway = _pnl_expected()
-    got = {row.get("line"): row for row in csv.DictReader(io.StringIO(read(ws, "pnl.csv") or ""))}
-    result.add("pnl.csv lines in order", list(got) == PNL_LINES)
+    rows = list(csv.DictReader(io.StringIO(read(ws, "pnl.csv") or "")))
+    got = {row.get("line"): row for row in rows}
+    result.add("pnl.csv lines in order", [row.get("line") for row in rows] == PNL_LINES)
     for line in PNL_LINES:
         tol = 0.02 if line == "gross_margin_pct" else 1.0
         result.add(f"{line} per month", line in got and all(close(got[line].get(ym), table[line][ym], tol) for ym in MONTHS))
