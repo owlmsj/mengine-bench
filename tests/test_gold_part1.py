@@ -200,7 +200,7 @@ def test_handoff_rejects_embedded_answer_tokens(tmp_path: Path, key: str, wrong:
     ("final_decode", "38"),
     ("discarded_quant", "Q6_K does not fit"),
     ("pending", "Update README.md"),
-    ("pending", "Remove check_vision.ps1"),
+    ("pending", "Remove check_vision.ps1 from README"),
 ])
 def test_handoff_accepts_answer_tokens_in_prose(tmp_path: Path, key: str, valid: str) -> None:
     from mengine_bench.tasks import compaction
@@ -342,3 +342,44 @@ def test_chart_normalizes_names_and_uses_rounded_ratio(
     payload = {"top_gpu": "B200", "top_tps": 210, "bottom_gpu": "A100", "ratio": 2.96}
     payload[key] = value
     assert context._chart_check(tmp_path, [json.dumps(payload)]).passed is expected
+
+
+@pytest.mark.parametrize("key,value,expected", [
+    ("final_vram_mib", "7697 MiB (7881 was the spilled reading)", True),
+    ("final_vram_mib", "7881 MiB, corrected to 7697", False),
+    ("final_vram_mib", "7697.1", False), ("final_vram_mib", "", False),
+    ("file_line", "start_server.ps1, line 165", True),
+    ("file_line", "start_server.ps1:1650", False),
+    ("measure_command", "measure_decode.ps1 131072 1024", True),
+    ("measure_command", "measure_decode.ps1", False),
+    ("measure_command", "measure_decode.ps1 131072", False),
+    ("measure_command", "measure_decode.ps1 1024", False),
+    ("measure_command", "measure_decode.ps1 1310720 10240", False),
+    ("pending", "Update README.md", True), ("pending", "Fix the README", True),
+    ("pending", "Remove check_vision.ps1 from README", True),
+    ("pending", "Edit README", True), ("pending", "Replace the README reference", True),
+    ("pending", "README is up to date; nothing remains", False),
+    ("pending", "Remove check_vision.ps1", False),
+])
+def test_handoff_retains_final_measurement_command_and_pending_action(
+    tmp_path: Path, key: str, value: object, expected: bool,
+) -> None:
+    from mengine_bench.tasks import compaction
+
+    answers = compaction._handoff_reference(tmp_path)
+    payload = json.loads(answers[-1])
+    payload[key] = value
+    answers[-1] = json.dumps(payload)
+    result = compaction._handoff_check(tmp_path, answers)
+    assert dict(result.checks)[f"answer {key}"] is expected
+    assert result.passed is expected
+
+
+@pytest.mark.parametrize("answer,expected", [
+    ("", 0.0), ("{}", 0.0), ('{"final_vram_mib": ""}', 0.0),
+    ('{"final_vram_mib": 7697}', 0.2), ('{"final_vram_mib": 7881}', 0.0),
+])
+def test_handoff_spill_credit_requires_a_number(tmp_path: Path, answer: str, expected: float) -> None:
+    from mengine_bench.tasks import compaction
+
+    assert compaction._handoff_check(tmp_path, [answer]).score == expected
