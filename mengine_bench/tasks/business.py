@@ -240,16 +240,21 @@ def _recon_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     got = read_json(ws, "reconciliation.json")
     got = got if isinstance(got, dict) else {}
-    result.add("unpaid invoices", sorted(got.get("unpaid") or []) == RECON["unpaid"])
-    result.add("duplicated payments", sorted(got.get("duplicated") or []) == RECON["duplicated"])
-    mism = got.get("mismatched") or []
-    ids = sorted(str(m.get("id")) for m in mism if isinstance(m, dict))
-    result.add("mismatched amounts", ids == RECON["mismatched"])
+    for key, label in (("unpaid", "unpaid invoices"), ("duplicated", "duplicated payments")):
+        entries = got.get(key)
+        ids = sorted(str(entry.get("id") if isinstance(entry, dict) else entry)
+                     for entry in entries) if isinstance(entries, list) else []
+        result.add(label, ids == RECON[key])
+    mism = got.get("mismatched")
+    valid_mismatches = isinstance(mism, list) and all(isinstance(m, dict) for m in mism)
+    mism = [m for m in mism if m.get("id") not in RECON["duplicated"]] if valid_mismatches else []
+    ids = sorted(str(m.get("id")) for m in mism)
+    result.add("mismatched amounts", valid_mismatches and ids == RECON["mismatched"])
     invoiced = {i: v for i, _, v in _invoices()}
     paid = {"INV-1021": round(invoiced["INV-1021"] - 250.0, 2), "INV-1036": round(invoiced["INV-1036"] * 0.9, 2)}
-    result.add("invoiced vs paid on mismatches", ids == RECON["mismatched"] and all(
+    result.add("invoiced vs paid on mismatches", valid_mismatches and ids == RECON["mismatched"] and all(
         close(m.get("invoiced"), invoiced[str(m.get("id"))], 0.01)
-        and close(m.get("paid"), paid[str(m.get("id"))], 0.01) for m in mism if isinstance(m, dict)))
+        and close(m.get("paid"), paid[str(m.get("id"))], 0.01) for m in mism))
     return result
 
 
@@ -294,6 +299,8 @@ TASKS = [
         steps=(Step("Reconcile {WS}/backoffice/invoices.csv with {WS}/backoffice/bank_statement_june.csv (the memo cites "
                     "the invoice in different formats; ignore fees, interest and PIX transfers without an identifiable "
                     "invoice). Write {WS}/reconciliation.json with unpaid (ids without payment), duplicated (ids paid more "
-                    "than once) and mismatched (list of objects id, invoiced, paid when the paid amount differs). " + RULES),),
+                    "than once) and mismatched (list of objects id, invoiced, paid when the paid amount differs). "
+                    "Categories are exclusive: a duplicated invoice is NOT also mismatched. For mismatched, compare "
+                    "a single payment with its invoice. " + RULES),),
     ),
 ]

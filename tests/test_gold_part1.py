@@ -136,6 +136,39 @@ def test_reconcile_paid_cent_tolerance(tmp_path: Path, delta: float, expected: b
     assert business._recon_check(tmp_path, [""]).passed is expected
 
 
+@pytest.mark.parametrize("case,expected", [
+    ("strings", True), ("objects", True), ("mixed", True), ("duplicate_mismatch", True),
+    ("non_object_mismatch", False), ("wrong_id", False), ("missing_id", False),
+    ("repeated_id", False), ("non_list", False),
+])
+def test_reconcile_id_forms_and_exclusive_categories(tmp_path: Path, case: str, expected: bool) -> None:
+    from mengine_bench.tasks import business
+
+    business._recon_reference(tmp_path)
+    output = tmp_path / "reconciliation.json"
+    reconciliation = json.loads(output.read_text(encoding="utf-8"))
+    if case in ("objects", "mixed"):
+        for key in ("unpaid", "duplicated"):
+            reconciliation[key] = [
+                {"id": inv} if case == "objects" or i == 0 else inv
+                for i, inv in enumerate(reconciliation[key])
+            ]
+    if case == "duplicate_mismatch":
+        reconciliation["mismatched"].append({"id": "INV-1015", "invoiced": 10, "paid": 20})
+    if case == "non_object_mismatch":
+        reconciliation["mismatched"].append("WRONG")
+    if case == "wrong_id":
+        reconciliation["unpaid"][0] = "WRONG"
+    if case == "missing_id":
+        reconciliation["unpaid"][0] = {}
+    if case == "repeated_id":
+        reconciliation["unpaid"].append(reconciliation["unpaid"][0])
+    if case == "non_list":
+        reconciliation["mismatched"] = {"id": "INV-1021"}
+    output.write_text(json.dumps(reconciliation), encoding="utf-8")
+    assert business._recon_check(tmp_path, [""]).passed is expected
+
+
 @pytest.mark.parametrize("key,wrong", [
     ("final_decode", "138.0"),
     ("final_decode", "38.01"),
