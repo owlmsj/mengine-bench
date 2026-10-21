@@ -310,3 +310,18 @@ def test_funnel_accepts_only_exact_numeric_users(tmp_path: Path, count: str, exp
     lines[1] = ",".join(fields)
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
     assert funnel._funnel_check(tmp_path, [""]).passed is expected
+
+
+@pytest.mark.parametrize("key", ["build_change", "build_revert"])
+@pytest.mark.parametrize("form,expected", [
+    ("{}", True), ("Build {}", True), ("v{}", True), ("  build {}  ", True),
+    ("{}0", False), ("NotBuild {}", False), ("0.9.180", False),
+])
+def test_changelog_normalizes_only_build_prefixes(
+    tmp_path: Path, key: str, form: str, expected: bool,
+) -> None:
+    from mengine_bench.tasks import context
+
+    payload = json.loads(context._changelog_reference(tmp_path)[0])
+    payload[key] = form.format(payload[key])
+    assert context._changelog_check(tmp_path, [json.dumps(payload)]).passed is expected
