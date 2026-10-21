@@ -401,3 +401,27 @@ def test_astar_hidden_tests_reject_wrong_door_cost_and_visible_regression(
         gamedev.ASTAR_REFERENCE.replace(original, replacement), encoding="utf-8",
     )
     assert gamedev._astar_check(tmp_path, [""]).passed is expected
+
+
+@pytest.mark.parametrize("original,replacement,expected", [
+    ("pb.x + bb.w", "pb.x + bb.w", True),
+    ("pb.x + bb.w", "pb.x + ba.w", False),
+    ("pb.y + bb.h", "pb.y + ba.h", False),
+    ("pa.x < pb.x", "pa.x <= pb.x", False),
+    ("pa.y < pb.y", "pa.y <= pb.y", False),
+])
+def test_ecs_hidden_collision_rejects_wrong_sizes_and_negative_edge_contacts(
+    tmp_path: Path, original: str, replacement: str, expected: bool,
+) -> None:
+    from mengine_bench.tasks import gamedev
+
+    gamedev._ecs_setup(tmp_path)
+    gamedev._ecs_reference(tmp_path)
+    collision = tmp_path / "arena_ecs/systems/collision.py"
+    source = collision.read_text(encoding="utf-8")
+    assert original in source
+    collision.write_text(source.replace(original, replacement), encoding="utf-8")
+    result = gamedev._ecs_check(tmp_path, [""])
+    assert result.mandatory_ok
+    assert dict(result.checks)["hidden movement"]
+    assert dict(result.checks)["hidden collision"] is expected
