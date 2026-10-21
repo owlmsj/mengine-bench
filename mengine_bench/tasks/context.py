@@ -22,7 +22,6 @@ from mengine_bench.core import (
     Step,
     answer_json,
     close,
-    has,
     write,
 )
 
@@ -101,10 +100,10 @@ def _copy_assets(ws: Path, *names: str) -> None:
 def _chart_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     got = answer_json(answers)
-    result.add("GPU with the highest TPS", has(str(got.get("top_gpu", "")), r"B200"))
+    result.add("GPU with the highest TPS", "".join(str(got.get("top_gpu", "")).split()).upper() == "B200")
     result.add("value of the tallest bar", close(got.get("top_tps"), 210, 0))
-    result.add("GPU with the lowest TPS", has(str(got.get("bottom_gpu", "")), r"A100"))
-    result.add("ratio top/bottom (2 decimals)", close(got.get("ratio"), 210 / 71, 0.011))
+    result.add("GPU with the lowest TPS", "".join(str(got.get("bottom_gpu", "")).split()).upper() == "A100")
+    result.add("ratio top/bottom (2 decimals)", close(got.get("ratio"), 2.96, 0.005))
     return result
 
 

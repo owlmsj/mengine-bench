@@ -325,3 +325,20 @@ def test_changelog_normalizes_only_build_prefixes(
     payload = json.loads(context._changelog_reference(tmp_path)[0])
     payload[key] = form.format(payload[key])
     assert context._changelog_check(tmp_path, [json.dumps(payload)]).passed is expected
+
+
+@pytest.mark.parametrize("key,value,expected", [
+    ("top_gpu", " b200 ", True), ("bottom_gpu", " a 100 ", True),
+    ("top_gpu", "NOT-B200: H100", False), ("bottom_gpu", "NOT-A100: H100", False),
+    ("top_gpu", "B2000", False), ("bottom_gpu", "H100", False),
+    ("ratio", 2.96, True), ("ratio", "2.964", True), ("ratio", 2.966, False),
+    ("ratio", 2.95, False), ("ratio", "nan", False),
+])
+def test_chart_normalizes_names_and_uses_rounded_ratio(
+    tmp_path: Path, key: str, value: object, expected: bool,
+) -> None:
+    from mengine_bench.tasks import context
+
+    payload = {"top_gpu": "B200", "top_tps": 210, "bottom_gpu": "A100", "ratio": 2.96}
+    payload[key] = value
+    assert context._chart_check(tmp_path, [json.dumps(payload)]).passed is expected
