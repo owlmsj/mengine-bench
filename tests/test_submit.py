@@ -44,7 +44,7 @@ def test_title_and_body_come_from_result_json() -> None:
     assert submit.pr_title(result) == "results: codex gpt-x low"
     body = submit.pr_body(result)
     for expected in ("| agent CLI and version | codex codex-cli 1.0 |", "| judge | pending: the maintainer runs `mengine-bench judge` on review |",
-                     "| Correct % / solved | 90.0 / 12/14 |", "| Cost | >= $3.20 (price) |", "| Time | 8 min 20 s |", "| config | personal_instructions=~/.codex/AGENTS.md; provider=openai |"):
+                     "| Correct % / solved | 90.0 / 12/14 |", "| Judge / Score | 85.0 / 88.5 |", "| Cost | >= $3.20 (price) |", "| Time | 8 min 20 s |", "| config | personal_instructions=~/.codex/AGENTS.md; provider=openai |"):
         assert expected in body
 
 
@@ -154,3 +154,10 @@ def test_a_patch_release_bundle_is_publishable(tmp_path: Path) -> None:
     major, minor, _ = __version__.split(".")
     result = _result(bench_version=f"{major}.{minor}.99")
     assert submit.submission_problems(_bundle(tmp_path, result), result) == []
+
+
+def test_body_says_the_judge_is_pending_before_the_maintainer_judges() -> None:
+    # PR #25 printed "None / None" for an unjudged run.
+    result = _result()
+    result["totals"].update(judge=None, score=None)
+    assert "| Judge / Score | pending (set by the maintainer's judge) |" in submit.pr_body(result)
