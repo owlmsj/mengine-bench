@@ -84,7 +84,8 @@ def pr_body(result: Mapping[str, object]) -> str:
         ("effort", agent.get("effort") or "default"),
         ("judge", judge_text),
         ("Correct % / solved", f"{totals['correct']} / {totals['solved']}/{totals['total']}"),
-        ("Judge / Score", f"{totals.get('judge')} / {totals.get('score')} (set by the maintainer's judge)"),
+        ("Judge / Score", "pending (set by the maintainer's judge)" if totals.get("score") is None
+         else f"{totals.get('judge')} / {totals.get('score')}"),
         ("Time", time_text(totals.get("time_s"))),
         ("Cost", cost_text(totals)),
         ("wall time", f"{result.get('started_at')} to {result.get('finished_at')}"),

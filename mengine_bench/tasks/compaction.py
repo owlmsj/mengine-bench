@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from mengine_bench.core import (
     EvalTask,
     Step,
     answer_json,
+    close,
     has,
     read,
     write,
@@ -69,12 +71,13 @@ HANDOFF_KEYS = [
     "[agent] Pending: update the evals README, which still cites check_vision.ps1 (the file no longer exists).",
 ]
 HANDOFF_GOLD = {
-    "file_line": r"\bstart_server\.ps1:165\b",
+    "file_line": r"\bstart_server\.ps1\D{0,12}165\b",
     "final_decode": r"(?<![\w.,+-])38(?:[.,]0+)?(?!\w|[.,]\d)",
     "final_vram_mib": r"(?<![\w.,+-])7697(?:[.,]0+)?(?!\w|[.,]\d)",
     "discarded_quant": r"\bQ6(?:_K)?\b",
-    "pending": r"\bREADME\b|\bcheck_vision(?:\.ps1)?\b",
-    "measure_command": r"\bmeasure_decode\.ps1\b",
+    # #28: the README with what is wrong in it (an action, or the stale check_vision reference).
+    "pending": r"(?=.*\bREADME\b)(?=.*\b(?:update|fix|remove|edit|replace|check_vision))",
+    "measure_command": r"(?=.*\bmeasure_decode\.ps1\b)(?=.*\b131072\b)(?=.*\b1024\b)",
 }
 
 
@@ -86,9 +89,11 @@ def _handoff_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     _summary_check(result, read(ws, "HANDOFF.md"), 1500, ["--no-mmproj-offload", "7697"])
     got = answer_json(answers)
+    vram = re.search(r"[-+]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:[eE][-+]?\d+)?", str(got.get("final_vram_mib", "")))
+    got["final_vram_mib"] = vram.group() if vram else ""
     for key, pattern in HANDOFF_GOLD.items():
         result.add(f"answer {key}", has(str(got.get(key, "")), pattern))
-    result.add("does not repeat the spilled VRAM as final", "7881" not in str(got.get("final_vram_mib", "")))
+    result.add("does not repeat the spilled VRAM as final", vram is not None and not close(vram.group(), 7881, 0))
     return result
 
 
@@ -98,7 +103,7 @@ def _handoff_reference(ws: Path) -> list[str]:
           "`pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`. Pending: evals README "
           "(check_vision.ps1 is gone).\n")
     return ["ok", json.dumps({"file_line": "scripts/start_server.ps1:165", "final_decode": "38.0",
-                              "final_vram_mib": 7697, "discarded_quant": "Q6_K", "pending": "evals README",
+                              "final_vram_mib": 7697, "discarded_quant": "Q6_K", "pending": "Update evals README",
                               "measure_command": "pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024"})]
 
 

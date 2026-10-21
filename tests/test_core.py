@@ -76,6 +76,18 @@ def test_close_and_has() -> None:
     assert has("Hello\nWorld", "hello.world") and not has(None, "x")
 
 
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
+@pytest.mark.parametrize("text,expected", [('{"x": 1}', {"x": 1}), ("{", None)])
+def test_file_helpers_accept_bom_without_accepting_invalid_json(
+    tmp_path: Path, encoding: str, text: str, expected: object,
+) -> None:
+    (tmp_path / "answer.json").write_text(text, encoding=encoding)
+    assert read(tmp_path, "answer.json") == text
+    assert read_json(tmp_path, "answer.json") == expected
+    (tmp_path / "answer.csv").write_text("name,count\nplayer,1\n", encoding=encoding)
+    assert read(tmp_path, "answer.csv") == "name,count\nplayer,1\n"
+
+
 def test_answer_json_takes_last_top_level_object() -> None:
     text = 'first {"a": 1} then ```{"b": {"c": 2}}```'
     assert answer_json([text]) == {"b": {"c": 2}}
