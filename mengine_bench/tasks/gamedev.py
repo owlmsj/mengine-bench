@@ -347,7 +347,7 @@ def _ecs_reference(ws: Path) -> list[str]:
     return ["fixed movement.py:5 and collision.py:8"]
 
 
-RULES = "Write your files inside {WS}. Do not ask for confirmation; finish the task and summarize in 2 lines."
+RULES = "Python standard library only. Write your files inside {WS}. Do not ask for confirmation; finish the task and summarize in 2 lines."
 
 TASKS = [
     EvalTask(

@@ -425,3 +425,17 @@ def test_ecs_hidden_collision_rejects_wrong_sizes_and_negative_edge_contacts(
     assert result.mandatory_ok
     assert dict(result.checks)["hidden movement"]
     assert dict(result.checks)["hidden collision"] is expected
+
+
+@pytest.mark.parametrize("task_id", ["gd-astar-doors", "gd-ecs-collision-bug"])
+@pytest.mark.parametrize("solved", [True, False])
+def test_gamedev_stdlib_prompts_keep_accept_reject_contract(
+    tmp_path: Path, task_id: str, solved: bool,
+) -> None:
+    from mengine_bench.tasks import gamedev
+
+    task = next(task for task in gamedev.TASKS if task.id == task_id)
+    assert all("Python standard library only" in step.prompt for step in task.steps)
+    task.setup(tmp_path)
+    answers = task.reference(tmp_path) if solved else [""]
+    assert task.check(tmp_path, answers).passed is solved
