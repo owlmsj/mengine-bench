@@ -6,6 +6,7 @@ Visual tasks are graded on deterministic checks only, at run time too (#23).
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -128,3 +129,21 @@ def test_retrieval_and_integration_summaries_are_short_sentences(task: EvalTask)
     assert task.summary.endswith(".") and task.summary.count(".") == 1
     assert "\n" not in task.summary
     assert task.provenance
+
+
+@pytest.mark.parametrize("root_cause,ok", [
+    ("The /data volume ran out of space, causing save failures", True),  # PR #25, issue #26
+    ("Disk /data full: No space left on device", True),
+    ("The data disk filled up and saves failed with no space left", True),
+    ("Watchdog restarted the unresponsive server", False),
+    ("RCON auth failed from a bad password", False),
+])
+def test_logs_root_cause_accepts_every_out_of_space_wording(tmp_path: Path, root_cause: str, ok: bool) -> None:
+    from mengine_bench.tasks import ir
+
+    ir._logs_setup(tmp_path)
+    answers = ir._logs_reference(tmp_path)
+    incident = json.loads((tmp_path / "incident.json").read_text(encoding="utf-8"))
+    incident["root_cause"] = root_cause
+    (tmp_path / "incident.json").write_text(json.dumps(incident), encoding="utf-8")
+    assert ir._logs_check(tmp_path, answers).passed is ok

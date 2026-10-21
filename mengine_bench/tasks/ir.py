@@ -233,7 +233,10 @@ def _logs_check(ws: Path, answers: Sequence[str]) -> CheckResult:
                close(got.get("availability_june_pct"), float(str(exp["availability_june_pct"])), 0.001))
     result.add("SLO 99.9 met", got.get("slo_999_ok") is exp["slo_999_ok"])
     result.add("root cause = /data disk full",
-               has(str(got.get("root_cause", "")), r"(disk|disco).{0,40}(full|cheio|space|espa)|no space left"))
+               # #26: "the /data volume ran out of space" is the same cause as "disk full".
+               has(str(got.get("root_cause", "")),
+                   r"(disk|disco|volume|storage|/data)\b.{0,40}(full|cheio|space|espa)|out of (disk )?space"
+                   r"|no space left"))
     return result
 
 
