@@ -294,3 +294,19 @@ def test_pnl_checks_every_line_in_order(tmp_path: Path, case: str, expected: boo
     result = business._pnl_check(tmp_path, [""])
     assert dict(result.checks)["pnl.csv lines in order"] is expected
     assert result.passed is expected
+
+
+@pytest.mark.parametrize("count,expected", [
+    ("{count}", True), ("{count}.0", True), ("{count}.1", False), ("0", False), ("nan", False),
+])
+def test_funnel_accepts_only_exact_numeric_users(tmp_path: Path, count: str, expected: bool) -> None:
+    from mengine_bench.tasks import funnel
+
+    funnel._funnel_reference(tmp_path)
+    output = tmp_path / "funnel.csv"
+    lines = output.read_text(encoding="utf-8").splitlines()
+    fields = lines[1].split(",")
+    fields[2] = count.format(count=fields[2])
+    lines[1] = ",".join(fields)
+    output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    assert funnel._funnel_check(tmp_path, [""]).passed is expected

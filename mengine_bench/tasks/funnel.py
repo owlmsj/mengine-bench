@@ -97,7 +97,7 @@ def _funnel_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     got = list(csv.DictReader(io.StringIO(read(ws, "funnel.csv") or "")))
     keys = [(g.get("platform"), g.get("step")) for g in got]
     result.add("platform x step rows in funnel order", keys == [(e[0], e[1]) for e in exp])
-    result.add("users per step", len(got) == len(exp) and all(str(g.get("users")) == str(e[2]) for g, e in zip(got, exp, strict=False)))
+    result.add("users per step", len(got) == len(exp) and all(close(g.get("users"), e[2], 0) for g, e in zip(got, exp, strict=False)))
     result.add("conversion from previous step", len(got) == len(exp) and all(close(g.get("conv_from_prev"), e[3], 1e-4) for g, e in zip(got, exp, strict=False)))
     return result
 
