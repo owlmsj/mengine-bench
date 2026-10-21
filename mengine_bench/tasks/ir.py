@@ -143,14 +143,37 @@ def _wiki_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     got = read_json(ws, "answers.json")
     got = got if isinstance(got, dict) else {}
-    result.add("build with the BUG-4471 fix", str(got.get("build")) == WIKI_GOLD["build"])
-    result.add("who approved that build", str(got.get("approver", "")).strip().lower() == "alice sato")
-    result.add("ranked max on the current Neoplastic", close(got.get("neoplastic_ranked_max"), 10, 0))
+    # #28: "Build 0.14.3" and "v0.14.3" name the same build.
+    build = re.sub(r"^\s*(build\s*)?v?", "", str(got.get("build", "")), flags=re.IGNORECASE).strip()
+    result.add("build with the BUG-4471 fix", build == WIKI_GOLD["build"])
+    result.add("who approved that build",
+               has(str(got.get("approver", "")), r"^\s*alice sato\s*(\([^()]*\))?\s*$"))
+    result.add("ranked max on the current Neoplastic", close(_first_number(got.get("neoplastic_ranked_max")), 10, 0))
     result.add("flag reverted in PM-12", str(got.get("flag")) == WIKI_GOLD["flag"])
-    result.add("restored value", close(got.get("restored_value"), 120, 0))
-    sources = " ".join(str(s) for s in (got.get("sources") or []))
-    result.add("sources cited", all(src.split("/")[-1] in sources for src in WIKI_SOURCES))
+    result.add("restored value", close(_first_number(got.get("restored_value")), 120, 0))
+    cited = _cited_paths(got.get("sources"))
+    result.add("sources cited", all(_is_cited(src, cited) for src in WIKI_SOURCES))
     return result
+
+
+def _first_number(value: object) -> object:
+    # #28: "10 players" and "120 ms" carry the number with its unit.
+    if not isinstance(value, str):
+        return value
+    match = re.search(r"-?\d+(\.\d+)?", value)
+    return match.group(0) if match else value
+
+
+def _cited_paths(sources: object) -> list[str]:
+    # #28: sources may be a list, a dict of lists or one string; read the paths out of its JSON text.
+    text = json.dumps(sources)
+    return [re.sub(r"\\+", "/", path) for path in re.findall(r"[\w.:/\\-]+\.md", text)]
+
+
+def _is_cited(src: str, cited: Sequence[str]) -> bool:
+    # A bare basename, or a path that ends with the real wiki-relative one ("missing/x.md" is not x.md).
+    basename = src.split("/")[-1]
+    return any(path == basename or path == src or path.endswith("/" + src) for path in cited)
 
 
 def _wiki_reference(ws: Path) -> list[str]:
