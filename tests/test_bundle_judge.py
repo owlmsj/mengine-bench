@@ -251,3 +251,38 @@ def test_a_symlink_in_the_stored_deliverables_fails_the_render(
     assert _judge(fake_agent, bundle) == 0
     [task] = json.loads((bundle / "result.json").read_text(encoding="utf-8"))["tasks"]
     assert called == [] and task["judge"] == 0 and "symlink" in task["judge_rationale"]
+
+
+def test_a_render_that_fails_is_tried_again_before_a_zero(fake_agent: FakeAgent, tmp_path: Path,
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    # #68: one 120 s browser timeout zeroed a page that rendered in 4 of 5 more tries.
+    bundle = _run(fake_agent, tmp_path / "results", "web-mondrian-landing", VISUAL_AGENT)
+    calls: list[Path] = []
+
+    def flaky_render(html: Path, png: Path) -> str:
+        calls.append(html)
+        if len(calls) < 3:
+            return f"{visual.RENDER_FAILED}: timeout after 120s"
+        png.parent.mkdir(parents=True, exist_ok=True)
+        png.write_bytes(b"x" * 20_000)
+        return visual.RENDERED
+
+    monkeypatch.setattr(bundle_judge, "render_headless", flaky_render)
+    assert _judge(fake_agent, bundle) == 0
+    [task] = json.loads((bundle / "result.json").read_text(encoding="utf-8"))["tasks"]
+    assert len(calls) == 3 and task["judge"] == 80
+
+
+def test_a_render_that_keeps_failing_still_scores_zero(fake_agent: FakeAgent, tmp_path: Path,
+                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    bundle = _run(fake_agent, tmp_path / "results", "web-mondrian-landing", VISUAL_AGENT)
+    calls: list[Path] = []
+
+    def broken_render(html: Path, png: Path) -> str:
+        calls.append(html)
+        return f"{visual.RENDER_FAILED}: timeout after 120s"
+
+    monkeypatch.setattr(bundle_judge, "render_headless", broken_render)
+    assert _judge(fake_agent, bundle) == 0
+    [task] = json.loads((bundle / "result.json").read_text(encoding="utf-8"))["tasks"]
+    assert len(calls) == 3 and task["judge"] == 0

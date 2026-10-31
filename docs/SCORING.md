@@ -54,7 +54,7 @@ the judge as context with the instruction not to re-score correctness.
 
 For a visual task the maintainer's machine renders the stored page with headless
 Chromium (Edge, Chrome or Chromium; `MENGINE_BENCH_BROWSER` overrides it) and the
-judge sees the screenshot. A blank or failed render gives that task a judge of 0, unless the
+judge sees the screenshot. A render that fails is tried up to 3 times. A blank or failed render gives that task a judge of 0, unless the
 run was stopped at its limit: then the judge votes on what exists, with no screenshot.
 The judge never changes the checks.
 
