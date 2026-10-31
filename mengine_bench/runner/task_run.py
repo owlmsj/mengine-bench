@@ -29,6 +29,7 @@ from pathlib import Path
 from mengine_bench.core import CheckResult, EvalTask
 from mengine_bench.runner import process
 from mengine_bench.runner.agents import Agent, AgentError, Usage, sum_usage
+from mengine_bench.runner.stats import RunStats, merge_stats, stream_stats
 
 # Browser user-data dirs an agent left in the workspace; their cache files can
 # stay locked by a live browser, and they are never part of the solution.
@@ -54,6 +55,8 @@ class StepRecord:
     error: str | None = None
     # Failed steps remain unmeasured because incomplete streams cannot establish usage (#23).
     usage: Usage | None = None
+    # From the stream, so a step stopped at its limit still has them (#39).
+    stats: RunStats = field(default_factory=RunStats)
 
 
 @dataclass
@@ -71,6 +74,10 @@ class TaskRunRecord:
     @property
     def usage(self) -> Usage | None:
         return sum_usage([step.usage for step in self.steps if step.usage is not None])
+
+    @property
+    def stats(self) -> RunStats:
+        return merge_stats(step.stats for step in self.steps)
 
     @property
     def agent_s(self) -> float:
@@ -206,16 +213,17 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: in
         print(f"[{task.id}] step {label}: killed {result.reaped} process(es) the agent left running", flush=True)
     (transcripts / f"step-{label}.stdout.txt").write_text(result.stdout, encoding="utf-8")
     (transcripts / f"step-{label}.stderr.txt").write_text(result.stderr, encoding="utf-8")
+    stats = stream_stats(result.stdout)
     if result.timed_out:
         message = f"step {label} exceeded the {task.timeout_s}s timeout"
-        record.steps.append(StepRecord(index, result.wall_s, None, "timeout", message))
+        record.steps.append(StepRecord(index, result.wall_s, None, "timeout", message, stats=stats))
         raise StepFailed("timeout", message)
     try:
         parsed = agent.parse(result.stdout, result.exit_code or 0)
     except AgentError as error:
-        record.steps.append(StepRecord(index, result.wall_s, result.exit_code, "crash", str(error)))
+        record.steps.append(StepRecord(index, result.wall_s, result.exit_code, "crash", str(error), stats=stats))
         raise StepFailed("crash", f"step {label}: {error}") from error
-    record.steps.append(StepRecord(index, result.wall_s, result.exit_code, "ok", usage=parsed.usage))
+    record.steps.append(StepRecord(index, result.wall_s, result.exit_code, "ok", usage=parsed.usage, stats=stats))
     return parsed.answer
 
 

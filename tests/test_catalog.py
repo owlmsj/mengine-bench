@@ -43,3 +43,11 @@ def test_duplicate_ids_are_rejected() -> None:
     two.TASKS = [task("dup")]  # type: ignore[attr-defined]
     with pytest.raises(ValueError, match="'dup'"):
         catalog.collect([one, two])
+
+
+def test_every_task_has_room_to_finish() -> None:
+    """#39: GLM 5.3 lost a task at 300 s and took 306 s on another; DeepSeek stopped at 900 s with all checks passing."""
+    limits = {task.id: task.timeout_s for task in catalog.all_tasks()}
+    assert min(limits.values()) >= 600, limits
+    assert {task for task, limit in limits.items() if limit == 1800} == {
+        "gd-integration-repo", "web-mondrian-landing", "3d-voxel-landscape"}

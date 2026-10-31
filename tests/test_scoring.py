@@ -29,11 +29,17 @@ def test_correct_is_the_mean_share_and_time_is_the_total() -> None:
     assert run.judge is None and run.score is None
 
 
-@pytest.mark.parametrize("status", ["timeout", "crash"])
-def test_timeout_and_crash_count_zero_but_keep_their_time(status: str) -> None:
-    run = score_run([outcome(status=status, correctness=0.8, agent_s=900.0, step_usages=(None,))])
+def test_a_crash_counts_zero_but_keeps_its_time() -> None:
+    run = score_run([outcome(status="crash", correctness=0.8, agent_s=900.0, step_usages=(None,))])
     assert (run.correct, run.solved, run.time_s) == (0.0, 0, 900.0)
     assert run.tasks[0].correctness == 0.0
+
+
+def test_a_timeout_keeps_what_was_delivered_but_is_never_solved() -> None:
+    # #39: the DeepSeek API run stopped at the limit with 9/9 and 6/6 checks and scored 0.
+    run = score_run([outcome(status="timeout", correctness=0.8, solved=True, agent_s=900.0, step_usages=(None,))])
+    assert (run.correct, run.solved, run.time_s) == (80.0, 0, 900.0)
+    assert run.tasks[0].correctness == 0.8 and not run.tasks[0].solved
 
 
 def test_score_blends_correct_and_judge_70_30() -> None:

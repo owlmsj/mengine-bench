@@ -324,7 +324,7 @@ TASKS = [
         provenance="Long-horizon SWE: ~100-file game backend, 2 layered bugs only visible end to end; spec in docs/",
         summary="Fix configuration priority and saved player credits in a game server without changing existing tests.",
         setup=_setup, check=_check, reference=_reference,
-        timeout_s=900,
+        timeout_s=1800,
         steps=(Step("The backend in {WS} (Pixel Arena) has the integration test in {WS}/tests/integration failing, "
                     "while the unit tests pass. Find and fix ALL root causes following the specification in {WS}/docs "
                     "(not just the symptom of the visible test). Do not change any existing test. Use the Python "

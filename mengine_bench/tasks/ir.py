@@ -284,7 +284,7 @@ TASKS = [
         id="ir-studio-wiki", category="retrieval",
         provenance="Internal-wiki QA with multi-hop (bug -> changelog -> approvals) and planted distractors",
         summary="Find release and game details across a studio wiki and cite the files that support each answer.",
-        setup=_wiki_setup, check=_wiki_check, reference=_wiki_reference, timeout_s=300,
+        setup=_wiki_setup, check=_wiki_check, reference=_wiki_reference, timeout_s=900,
         steps=(Step("Use the wiki in {WS}/wiki to answer: (1) in which build the fix for BUG-4471 first shipped and "
                     "(2) who approved that build; (3) the maximum number of players in ranked mode on the current "
                     "Neoplastic map; (4) which flag was reverted in PM-12 and (5) to which value. Write "
@@ -295,7 +295,7 @@ TASKS = [
         id="ir-server-logs", category="retrieval",
         provenance="Game server ops: incident window, root cause and monthly SLO from 3 days of logs",
         summary="Read game server logs to explain an outage and calculate downtime and monthly availability.",
-        setup=_logs_setup, check=_logs_check, reference=_logs_reference, timeout_s=360,
+        setup=_logs_setup, check=_logs_check, reference=_logs_reference, timeout_s=900,
         steps=(Step("Read {WS}/logs/README.md and investigate the logs in {WS}/logs. Write {WS}/incident.json with "
                     "start and end (format 'YYYY-MM-DD HH:MM:SS'), minutes_down (2 decimals), availability_june_pct "
                     "(3 decimals), slo_999_ok (bool) and root_cause (one sentence). " + RULES),),

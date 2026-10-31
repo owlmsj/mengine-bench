@@ -121,7 +121,7 @@ TASKS = [
         id="lc-changelog", category="long-context",
         provenance="AA-LCR style multi-hop over a long build changelog with near-duplicate distractor keys",
         summary="Find when a setting changed and was restored in a long changelog, including who approved the change.",
-        setup=_changelog_setup, check=_changelog_check, reference=_changelog_reference, timeout_s=300,
+        setup=_changelog_setup, check=_changelog_check, reference=_changelog_reference, timeout_s=900,
         steps=(Step("Keys: build_change (build that changed recoil_multiplier from 1.0 to 0.85; beware of parameters "
                     "with similar names), build_revert (build that set it back to 1.0), revert_date (YYYY-MM-DD), "
                     "revert_approver, builds_between (how many builds lie between the two, exclusive). " + LC_PROMPT,
@@ -133,7 +133,7 @@ TASKS = [
         summary="Read a bar chart to identify the fastest and slowest GPUs and compare their speeds.",
         setup=lambda ws: _copy_assets(ws, "chart.png"), check=_chart_check,
         reference=lambda ws: [json.dumps({"top_gpu": "B200", "top_tps": 210, "bottom_gpu": "A100", "ratio": 2.96})],
-        timeout_s=240,
+        timeout_s=600,
         steps=(Step("Keys: top_gpu, top_tps, bottom_gpu, ratio (top_tps / bottom_tps, 2 decimals). " + VISION_PROMPT,
                     attach=("images/chart.png",)),),
     ),

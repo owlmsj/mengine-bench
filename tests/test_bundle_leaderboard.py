@@ -53,7 +53,8 @@ def test_bundle_holds_result_summary_and_redacted_transcripts(fake_agent: FakeAg
     packet_text = (bundle / f"judge/{TASK}.json").read_text(encoding="utf-8")
     packet = json.loads(packet_text)
     assert set(packet) == {"task_id", "prompts", "answers", "diff", "transcript_tail", "checks", "deliverables",
-                           "render"}
+                           "render", "status", "stats"}
+    assert packet["status"] == "ok" and "turn_tps_median" not in packet["stats"]
     assert packet["diff"] and env_secret not in packet_text and str(tmp_path) not in packet_text
     result = json.loads((bundle / "result.json").read_text(encoding="utf-8"))
     assert result["submitter"] == "Alice Example"
@@ -119,13 +120,14 @@ def _write_result(results: Path, name: str, score: float | None, *, model: str =
     result = {
         "date": "2026-10-19", "bench_version": bench_version, "submitter": "dquill",
         "agent": {"name": "codex", "model": model, "effort": "high", "version": "codex-cli 0.162.1"},
-        "judge": {"agent": "claude", "model": "claude-opus-5-5", "effort": "xhigh", "rubric": "2.0"} if judged else None,
+        "judge": {"agent": "claude", "model": "claude-opus-5-5", "effort": "xhigh", "rubric": "2.1"} if judged else None,
         "config": {"personal_instructions": [], "provider": "openai", "mcp": "none"},
         "environment": {"os": "Linux 6", "cpu": "AMD Ryzen 9 7950X", "cpu_count": 32, "ram_gb": 62.6,
                         "gpu": "NVIDIA GeForce RTX 4090 (24 GB)"},
         "totals": {"score": score, "correct": 80.0, "solved": 10, "total": len(ids), "judge": 70.0 if judged else None,
                    "time_s": 1830.0, "cost_usd": 2.5, "cost_basis": "price", "cost_lower_bound": True,
-                   "tokens": {"input": 1_500_000, "cached_input": 0, "output": 250_000, "reasoning": 0}},
+                   "tokens": {"input": 1_500_000, "cached_input": 0, "output": 250_000, "reasoning": 0},
+                   "timeouts": 1, "stats": {"generated_tokens": 3400, "model_turns": 12}},
         "tasks": [{"id": task_id} for task_id in ids],
     }
     bundle = results / name
@@ -142,11 +144,11 @@ def test_leaderboard_is_one_table_sorted_by_score_with_the_spec_columns(tmp_path
     assert board.ranked == 2 and board.unranked == []
     table = board.markdown[board.markdown.index("| # |"):]
     header = table.splitlines()[0]
-    assert header == ("| # | Score | Correct % | Solved | Judge | Time | Cost | Tokens | Agent | Model | Effort | "
+    assert header == ("| # | Score | Correct % | Solved | Judge | Time | Timeouts | Cost | Tokens | Generated | Turns | Agent | Model | Effort | "
                       "Hardware | Config | Submitter | Date | Run |")
     assert table.index("high-model") < table.index("low-model")
     row = table.splitlines()[2]
-    for cell in ("| 1 | **90.0** | 80.0 | 10/", "| 70.0 | 30 min 30 s | >= $2.50 (price) | 1.75M |",
+    for cell in ("| 1 | **90.0** | 80.0 | 10/", "| 70.0 | 30 min 30 s | 1 | >= $2.50 (price) | 1.75M | 3.4k | 12 |",
                  "| codex codex-cli 0.162.1 | high-model | high |", "AMD Ryzen 9 7950X, NVIDIA GeForce RTX 4090 (24 GB)",
                  "provider=openai, mcp=none", "| dquill | 2026-10-19 | [run](results/high/summary.md) |"):
         assert cell in row, (cell, row)
@@ -184,10 +186,10 @@ def test_leaderboard_ranks_the_current_major_minor_only(tmp_path: Path) -> None:
     assert board.unranked == [("results/old", f"older bench 0.2.0; only bench {major}.{minor}.x runs are ranked")]
 
 
-def test_bench_is_version_1_0_x() -> None:
+def test_bench_is_version_1_1_x() -> None:
     import tomllib
     pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
-    assert __version__ == pyproject["project"]["version"] and __version__.startswith("1.0.")
+    assert __version__ == pyproject["project"]["version"] and __version__.startswith("1.1.")
 
 
 def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:
@@ -201,7 +203,7 @@ def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 0
     assert board.unranked == [("results/cheap-judge",
-                               "judged by claude claude-haiku-5-5@xhigh rubric 2.0; only claude claude-opus-5-5@xhigh rubric 2.0 judges are ranked")]
+                               "judged by claude claude-haiku-5-5@xhigh rubric 2.1; only claude claude-opus-5-5@xhigh rubric 2.1 judges are ranked")]
 
 
 @pytest.mark.parametrize("field,value", [("agent", "cmd"), ("rubric", "1.0")])
