@@ -1,0 +1,53 @@
+{
+ "task_id": "ir-server-logs",
+ "prompts": [
+  "Read {WS}/logs/README.md and investigate the logs in {WS}/logs. Write {WS}/incident.json with start and end (format 'YYYY-MM-DD HH:MM:SS'), minutes_down (2 decimals), availability_june_pct (3 decimals), slo_999_ok (bool) and root_cause (one sentence). Write your files inside {WS}. Do not ask for confirmation."
+ ],
+ "answers": [
+  "Verified: exactly one incident, one `server ready` line. Writing the report.\n\n[goal] Find the June incident in ./logs and write ./incident.json with downtime, availability, SLO check, root cause.\n\n[action] Grepped all 3 logs for `ERROR|FATAL|ready|savegame|no space|disk` (case-insensitive). Note: log lines are partly out of order (e.g., `09:12:40 ERROR RCON auth failed` sits between 07:58 and 08:19 lines in 06-01), so I matched on timestamps, not line position. The RCON error on 06-01 is unrelated (no save error, no downtime). The single incident is in `gameserver-2026-06-02.log`:\n\n```\n2026-06-02 03:10:02 WARN disk /data usage 97% (free 3.1 GB)\n2026-06-02 03:17:42 ERROR SaveGame failed: write /data/game/Saved/Level.sav: No space left on device\n2026-06-02 03:18:05 FATAL watchdog: server unresponsive for 20s, restarting\n2026-06-02 03:52:10 INFO backup rotation freed 38.2 GB on /data\n2026-06-02 03:53:31 INFO server ready, accepting players\n```\n\n[result] Wrote `incident.json` (re-read and parsed OK):\n- start `2026-06-02 03:17:42`, end `2026-06-02 03:53:31` (first save error → 'server ready', per README)\n- minutes_down = 35.82 (35 min 49 s = 35.8166…, rounded)\n- availability_june_pct = 99.917 ((43200 − 35.8167)/43200 × 100 = 99.91709…, June = 30 days)\n- slo_999_ok = true (99.917 ≥ 99.9)\n- root_cause: /data disk full → SaveGame failures → watchdog restart loop (exit 137) until backup rotation freed 38.2 GB.\n\n[next] Nothing pending; optionally add disk-usage alerting below 97% to prevent a repeat."
+ ],
+ "diff": "A AGENTS.md\nA incident.json\n\n--- AGENTS.md ---\nUse any tool you have. Read and write local files only inside this directory.\r\nDo not print credentials, environment variables or personal data: this session is published.\r\n\n\n--- incident.json ---\n{\n  \"start\": \"2026-06-02 03:17:42\",\n  \"end\": \"2026-06-02 03:53:31\",\n  \"minutes_down\": 35.82,\n  \"availability_june_pct\": 99.917,\n  \"slo_999_ok\": true,\n  \"root_cause\": \"The /data volume ran out of disk space (WARN 97% usage at 03:10:02, then 'No space left on device' SaveGame failures), crashing the server into a watchdog restart loop (exit code 137) until backup rotation freed 38.2 GB and the server came back up.\"\n}\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ Get-ChildItem -Recurse . | Select-Object FullName, Length | Format-Table -AutoSize\n$ Get-ChildItem .\\logs | ForEach-Object { $_.Name + \"  \" + $_.Length }\n$ Get-Content .\\logs\\gameserver-2026-06-01.log -TotalCount 20; Write-Output \"---COUNT---\"; (Get-Content .\\logs\\gameserver-2026-06-01.log).Count; (Get-Content .\\logs\\gameserver-2026-06-02.log).Count; (Get-Content .\\logs\\gameserver-2026-06-03.log).Count\n$ Select-String -Path .\\logs\\*.log -Pattern 'ERROR|WARN|ready|save' | Select-Object -First 60 | ForEach-Object { $_.Filename + \":\" + $_.LineNumber + \": \" + $_.Line }\n$ Select-String -Path .\\logs\\*.log -Pattern 'ERROR|FATAL|ready' | ForEach-Object { $_.Filename + \":\" + $_.LineNumber + \": \" + $_.Line }\n$ $f='.\\logs\\gameserver-2026-06-02.log'; (Get-Content $f)[240..300] | ForEach-Object { $_ }\n$ $start=[datetime]'2026-06-02 03:17:42'; $end=[datetime]'2026-06-02 03:53:31'; $mins=($end-$start).TotalMinutes; $juneMin=30*24*60; $avail=($juneMin-$mins)/$juneMin*100; Write-Output (\"minutes_down_raw=\" + $mins); Write-Output (\"minutes_down_2dp=\" + [math]::Round($mins,2)); Write-Output (\"avail_raw=\"\n$ Select-String -Path .\\logs\\*.log -Pattern 'savegame|no space|ready|disk' -CaseSensitive:$false | ForEach-Object { $_.Filename + \":\" + $_.LineNumber + \": \" + $_.Line } | Sort-Object\n$ $j = Get-Content .\\incident.json -Raw | ConvertFrom-Json; $j | ConvertTo-Json; Write-Output (\"parsed_ok=\" + ($j.start + \"|\" + $j.end + \"|\" + $j.minutes_down + \"|\" + $j.availability_june_pct + \"|\" + $j.slo_999_ok))\n\nStream tail:\nility_june_pct\\\": 99.917,\\r\\n  \\\"slo_999_ok\\\": true,\\r\\n  \\\"root_cause\\\": \\\"The /data volume ran out of disk space (WARN 97% usage at 03:10:02, then 'No space left on device' SaveGame failures), crashing the server into a watchdog restart loop (exit code 137) until backup rotation freed 38.2 GB and the server came back up.\\\"\\r\\n}\\r\\nparsed_ok=2026-06-02 03:17:42|2026-06-02 03:53:31|35.82|99.917|True\\r\\n\",\"title\":\"shell\",\"metadata\":{\"metadata\":{\"status\":\"completed\",\"truncated\":false,\"exit\":0},\"content\":[{\"type\":\"text\",\"text\":\"{\\r\\n  \\\"start\\\": \\\"2026-06-02 03:17:42\\\",\\r\\n  \\\"end\\\": \\\"2026-06-02 03:53:31\\\",\\r\\n  \\\"minutes_down\\\": 35.82,\\r\\n  \\\"availability_june_pct\\\": 99.917,\\r\\n  \\\"slo_999_ok\\\": true,\\r\\n  \\\"root_cause\\\": \\\"The /data volume ran out of disk space (WARN 97% usage at 03:10:02, then 'No space left on device' SaveGame failures), crashing the server into a watchdog restart loop (exit code 137) until backup rotation freed 38.2 GB and the server came back up.\\\"\\r\\n}\\r\\nparsed_ok=2026-06-02 03:17:42|2026-06-02 03:53:31|35.82|99.917|True\\r\\n\"}],\"providerCall\":{\"executed\":false},\"providerResult\":{\"executed\":false},\"rawInput\":\"{\\\"command\\\": \\\"$j = Get-Content .\\\\\\\\incident.json -Raw | ConvertFrom-Json; $j | ConvertTo-Json; Write-Output (\\\\\\\"parsed_ok=\\\\\\\" + ($j.start + \\\\\\\"|\\\\\\\" + $j.end + \\\\\\\"|\\\\\\\" + $j.minutes_down + \\\\\\\"|\\\\\\\" + $j.availability_june_pct + \\\\\\\"|\\\\\\\" + $j.slo_999_ok))\\\", \\\"workdir\\\": \\\"<WORKSPACE>\\\"}\"},\"time\":{\"start\":1793457191271,\"end\":1793457194584}}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793457194585,\"sessionID\":\"ses_e6da0d4baffeEyLOq6gSET7QUm\",\"part\":{\"id\":\"prt_192610659001h3gfQ5ouYc0RF0\",\"sessionID\":\"ses_e6da0d4baffeEyLOq6gSET7QUm\",\"messageID\":\"msg_19260e5710010YSYzhzSpGK4pa\",\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"cost\":0,\"tokens\":{\"input\":1382,\"output\":158,\"reasoning\":12,\"cache\":{\"read\":19584,\"write\":0}}}}\n\n{\"type\":\"step_start\",\"timestamp\":1793457198196,\"sessionID\":\"ses_e6da0d4baffeEyLOq6gSET7QUm\",\"part\":{\"id\":\"prt_192611474001RXk91ZkDXFb0iV\",\"sessionID\":\"ses_e6da0d4baffeEyLOq6gSET7QUm\",\"messageID\":\"msg_192610661001Tf8yjcCPbHxOXT\",\"type\":\"step-start\"}}\n\n{\"type\":\"text\",\"timestamp\":1793457213711,\"sessionID\":\"ses_e6da0d4baffeEyLOq6gSET7QUm\",\"part\":{\"id\":\"prt_192610661001Tf8yjcCPbHxOXT_text-0\",\"sessionID\":\"ses_e6da0d4baffeEyLOq6gSET7QUm\",\"messageID\":\"msg_192610661001Tf8yjcCPbHxOXT\",\"type\":\"text\",\"text\":\"[goal] Find the June incident in ./logs and write ./incident.json with downtime, availability, SLO check, root cause.\\n\\n[action] Grepped all 3 logs for `ERROR|FATAL|ready|savegame|no space|disk` (case-insensitive). Note: log lines are partly out of order (e.g., `09:12:40 ERROR RCON auth failed` sits between 07:58 and 08:19 lines in 06-01), so I matched on timestamps, not line position. The RCON error on 06-01 is unrelated (no save error, no downtime). The single incident is in `gameserver-2026-06-02.log`:\\n\\n```\\n2026-06-02 03:10:02 WARN disk /data usage 97% (free 3.1 GB)\\n2026-06-02 03:17:42 ERROR SaveGame failed: write /data/game/Saved/Level.sav: No space left on device\\n2026-06-02 03:18:05 FATAL watchdog: server unresponsive for 20s, restarting\\n2026-06-02 03:52:10 INFO backup rotation freed 38.2 GB on /data\\n2026-06-02 03:53:31 INFO server ready, accepting players\\n```\\n\\n[result] Wrote `incident.json` (re-read and parsed OK):\\n- start `2026-06-02 03:17:42`, end `2026-06-02 03:53:31` (first save error → 'server ready', per README)\\n- minutes_down = 35.82 (35 min 49 s = 35.8166…, rounded)\\n- availability_june_pct = 99.917 ((43200 − 35.8167)/43200 × 100 = 99.91709…, June = 30 days)\\n- slo_999_ok = true (99.917 ≥ 99.9)\\n- root_cause: /data disk full → SaveGame failures → watchdog restart loop (exit 137) until backup rotation freed 38.2 GB.\\n\\n[next] Nothing pending; optionally add disk-usage alerting below 97% to prevent a repeat.\",\"time\":{\"start\":1793457194605,\"end\":1793457213711}}}\n\n",
+ "checks": [
+  [
+   "incident start",
+   true
+  ],
+  [
+   "incident end",
+   true
+  ],
+  [
+   "minutes down",
+   true
+  ],
+  [
+   "June availability",
+   true
+  ],
+  [
+   "SLO 99.9 met",
+   true
+  ],
+  [
+   "root cause = /data disk full",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 10,
+  "tool_calls": 11,
+  "tool_errors": 0,
+  "shell_commands": 9,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 4161,
+  "reasoning_tokens": 2408,
+  "largest_turn_tokens": 1877
+ },
+ "deliverables": [],
+ "render": null
+}
