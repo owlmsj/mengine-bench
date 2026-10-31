@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import zlib
 from pathlib import Path
 
 import pytest
@@ -66,6 +67,22 @@ def _git(repo: Path, *args: str) -> str:
 
 
 @pytest.mark.skipif(GIT is None, reason="git not on PATH")
+def _png(*chunks: tuple[bytes, bytes]) -> bytes:
+    body = b"".join(len(data).to_bytes(4, "big") + kind + data + zlib.crc32(kind + data).to_bytes(4, "big")
+                    for kind, data in chunks)
+    return b"\x89PNG\r\n\x1a\n" + body
+
+
+def test_png_pixels_are_not_text_but_its_text_chunks_are(tmp_path: Path) -> None:
+    # Compressed pixels of a judge screenshot held `a@a.aa` by chance (#42).
+    bundle = _bundle(tmp_path, _result())
+    shot = bundle / "screen.png"
+    shot.write_bytes(_png((b"IHDR", bytes(13)), (b"IDAT", b"\xffx@y.zz\xff"), (b"IEND", b"")))
+    assert submit.submission_problems(bundle, _result()) == []
+    shot.write_bytes(_png((b"tEXt", b"Author\0someone@corp.dev"), (b"IDAT", b"\xffx@y.zz\xff"), (b"IEND", b"")))
+    assert submit.submission_problems(bundle, _result()) == ["privacy check: screen.png: email"]
+
+
 def test_commit_holds_base_plus_bundle_and_leaves_the_checkout_alone(tmp_path: Path) -> None:
     repo = tmp_path / "clone"
     repo.mkdir()
