@@ -1,0 +1,41 @@
+{
+ "task_id": "ds-sql-funnel",
+ "prompts": [
+  "In {WS}/analytics.db (SQLite: users, events) compute the funnel install -> tutorial_complete -> first_match -> purchase per platform. Rules: ignore users with is_test=1 and events whose user_id is not in users; a step only counts at or after the same user's previous step, with no time limit; use the first valid occurrence of each step. Write {WS}/funnel.csv with platform,step,users,conv_from_prev (4 decimals; 1.0 on install), platform pc first then steamdeck, steps in funnel order. Write your files inside {WS}. Do not ask for confirmation; finish and summarize in 2 lines."
+ ],
+ "answers": [
+  "[goal] Compute platform funnels. [action] Wrote [funnel.csv](funnel.csv) with ordered steps and four-decimal conversions.\n[result] “PASS: all 8 funnel counts match independent per-user verification; CSV has 8 rows.” [next] Complete."
+ ],
+ "diff": "A AGENTS.md\nA funnel.csv\n\n--- AGENTS.md ---\nUse any tool you have. Read and write local files only inside this directory.\r\nDo not print credentials, environment variables or personal data: this session is published.\r\n\n\n--- funnel.csv ---\nplatform,step,users,conv_from_prev\r\npc,install,470,1.0000\r\npc,tutorial_complete,389,0.8277\r\npc,first_match,326,0.8380\r\npc,purchase,269,0.8252\r\nsteamdeck,install,192,1.0000\r\nsteamdeck,tutorial_complete,128,0.6667\r\nsteamdeck,first_match,87,0.6797\r\nsteamdeck,purchase,61,0.7011\r\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"Get-ChildItem -Name; python -c \\\"import sqlite3; c=sqlite3.connect('analytics.db'); print(c.execute('SELECT sql FROM sqlite_master WHERE type=\\\\'table\\\\'').fetchall())\\\"\"\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"python -c \\\"import sqlite3; c=sqlite3.connect('analytics.db'); print('platforms',c.execute('select platform,count(*) from users group by platform').fetchall()); print('events',c.ex\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"@'\nimport csv\nimport sqlite3\nfrom collections import defaultdict\nfrom decimal import Decimal, ROUND_HALF_UP\n\nsteps = ('install', 'tutorial_complete', 'first_match', 'purchase')\nwit\n\nStream tail:\nu JOIN events e ON e.user_id = u.user_id\\n            WHERE COALESCE(u.is_test, 0) \\\"'!= 1 AND e.name = '\\\"'install'\\n            GROUP BY u.user_id, u.platform\\n        ), tutorials AS (\\n            SELECT p.user_id, p.platform, MIN(e.ts) AS ts\\n            FROM installs p JOIN events e ON e.user_id = p.user_id\\n            WHERE e.name = 'tutorial_complete' AND e.ts >= p.ts\\n            GROUP BY p.user_id, p.platform\\n        ), matches AS (\\n            SELECT p.user_id, p.platform, MIN(e.ts) AS ts\\n            FROM tutorials p JOIN events e ON e.user_id = p.user_id\\n            WHERE e.name = 'first_match' AND e.ts >= p.ts\\n            GROUP BY p.user_id, p.platform\\n        ), purchases AS (\\n            SELECT p.user_id, p.platform, MIN(e.ts) AS ts\\n            FROM matches p JOIN events e ON e.user_id = p.user_id\\n            WHERE e.name = 'purchase' AND e.ts >= p.ts\\n            GROUP BY p.user_id, p.platform\\n        )\\n        SELECT platform, 'install', COUNT(*) FROM installs GROUP BY platform\\n        UNION ALL SELECT platform, 'tutorial_complete', COUNT(*) FROM tutorials GROUP BY platform\\n        UNION ALL SELECT platform, 'first_match', COUNT(*) FROM matches GROUP BY platform\\n        UNION ALL SELECT platform, 'purchase', COUNT(*) FROM purchases GROUP BY platform\\n    ''').fetchall()\\n    counts = {(p, s): n for p, s, n in rows}\\n    # Independently walk each user's chronological occurrences to verify SQL.\\n    occurrences = defaultdict(lambda: defaultdict(list))\\n    for uid, name, ts in conn.execute('SELECT user_id, name, ts FROM events'):\\n        occurrences[uid][name].append(ts)\\n    expected = defaultdict(int)\\n    for uid, platform in conn.execute('SELECT user_id, platform FROM users WHERE COALESCE(is_test, 0) \\\"'!= 1'\\\"'):\\n        previous = None\\n        for step in steps:\\n            valid = [ts for ts in occurrences[uid][step] if previous is None or ts >= previous]\\n            if not valid:\\n                break\\n            previous = min(valid)\\n            expected[platform, step] += 1\\n    assert all(counts.get((p, s), 0) == expected[p, s] for p in ('pc', 'steamdeck') for s in steps)\\n\\nwith open('funnel.csv', 'w', newline='', encoding='utf-8') as stream:\\n    writer = csv.writer(stream)\\n    writer.writerow(('platform', 'step', 'users', 'conv_from_prev'))\\n    for platform in ('pc', 'steamdeck'):\\n        previous_count = None\\n        for step in steps:\\n            count = counts.get((platform, step), 0)\\n            ratio = Decimal(1) if previous_count is None else Decimal(count) / Decimal(previous_count) if previous_count else Decimal(0)\\n            writer.writerow((platform, step, count, str(ratio.quantize(Decimal('0.0001'), rounding=ROUND_HALF_UP))))\\n            previous_count = count\\nwith open('funnel.csv', encoding='utf-8', newline='') as stream:\\n    result = list(csv.reader(stream))\\nassert len(result) == 9\\nprint('PASS: all 8 funnel counts match independent per-user verification; CSV has 8 rows.')\\nprint(open('funnel.csv', encoding='utf-8').read(), end='')\\n'@ | python -\\\"\",\"aggregated_output\":\"PASS: all 8 funnel counts match independent per-user verification; CSV has 8 rows.\\r\\nplatform,step,users,conv_from_prev\\r\\npc,install,470,1.0000\\r\\npc,tutorial_complete,389,0.8277\\r\\npc,first_match,326,0.8380\\r\\npc,purchase,269,0.8252\\r\\nsteamdeck,install,192,1.0000\\r\\nsteamdeck,tutorial_complete,128,0.6667\\r\\nsteamdeck,first_match,87,0.6797\\r\\nsteamdeck,purchase,61,0.7011\\r\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_4\",\"type\":\"agent_message\",\"text\":\"[goal] Compute platform funnels. [action] Wrote [funnel.csv](funnel.csv) with ordered steps and four-decimal conversions.\\n[result] “PASS: all 8 funnel counts match independent per-user verification; CSV has 8 rows.” [next] Complete.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":92329,\"cached_input_tokens\":82176,\"cache_write_input_tokens\":0,\"output_tokens\":1172,\"reasoning_output_tokens\":19}}\n",
+ "checks": [
+  [
+   "platform x step rows in funnel order",
+   true
+  ],
+  [
+   "users per step",
+   true
+  ],
+  [
+   "conversion from previous step",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 3,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1172,
+  "reasoning_tokens": 19,
+  "largest_turn_tokens": 1172
+ },
+ "deliverables": [],
+ "render": null
+}
