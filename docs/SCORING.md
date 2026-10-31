@@ -61,14 +61,14 @@ formula can be refined later from many runs.
 
 | Field | What it is |
 | --- | --- |
-| `model_turns`, `tool_calls`, `tool_errors` | Turns of the model, tool calls, tool calls that failed |
+| `model_turns`, `tool_calls`, `tool_errors` | Model calls (Codex reports one per step, so this does not compare across harnesses), tool calls, tool calls that failed |
 | `shell_commands`, `shell_failures` | Shell tool calls, and those with a non-zero exit |
 | `file_writes` | Write and edit tool calls |
 | `repeated_tool_calls` | Calls identical to an earlier one in the same step |
 | `outside_path_uses` | Tool paths and shell commands that hold `../` or `..\\`; a hint, since a subfolder can name its parent |
 | `input_tokens`, `cached_input_tokens` | Prompt tokens, and the part read from cache |
-| `generated_tokens`, `reasoning_tokens` | Everything generated, reasoning included, and the reasoning part |
-| `largest_turn_tokens` | The largest single turn |
+| `generated_tokens`, `reasoning_tokens` | Everything generated, reasoning included, and the reasoning part; on Claude, a run stopped before its result gives a lower bound |
+| `largest_turn_tokens` | The largest single turn; Claude does not report it |
 | `first_tool_s`, `first_write_s`, `last_event_s` | Seconds from the first event; opencode only |
 | `tool_s`, `wait_s` | Time in tools, and between turns (prefill, queue); opencode only |
 | `turn_tps_median` | Median generated tokens per second, turns of 500 tokens or more; opencode only |

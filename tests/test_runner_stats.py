@@ -105,6 +105,36 @@ def test_claude_stream_ties_errors_to_their_tool_call() -> None:
     assert (record["input_tokens"], record["generated_tokens"], record["reasoning_tokens"]) == (10, 40, 10)
 
 
+def _claude_assistant(message_id: str, output: int, *content: dict[str, object]) -> dict[str, object]:
+    usage = {"input_tokens": 2, "cache_creation_input_tokens": 50, "cache_read_input_tokens": 100, "output_tokens": output}
+    return {"type": "assistant", "message": {"id": message_id, "usage": usage, "content": list(content)}}
+
+
+CLAUDE_MESSAGES = [
+    # One model call streams one event per block, all with the same id and the same early usage (#53).
+    _claude_assistant("m1", 16, {"type": "tool_use", "id": "a", "name": "Read", "input": {"file_path": "x"}}),
+    _claude_assistant("m1", 16, {"type": "tool_use", "id": "b", "name": "Read", "input": {"file_path": "y"}}),
+    _claude_assistant("m2", 5, {"type": "text", "text": "done"}),
+]
+
+
+def test_claude_counts_model_calls_and_takes_tokens_from_the_result() -> None:
+    final = {"type": "result", "subtype": "success", "is_error": False, "result": "done", "usage": {
+        "input_tokens": 14, "cache_creation_input_tokens": 55, "cache_read_input_tokens": 312, "output_tokens": 14510,
+        "output_tokens_details": {"thinking_tokens": 3070}}}
+    record = stats_record(stream_stats(_jsonl([*CLAUDE_MESSAGES, final])))
+    assert (record["model_turns"], record["tool_calls"]) == (2, 2)
+    assert (record["input_tokens"], record["cached_input_tokens"]) == (381, 312)
+    assert (record["generated_tokens"], record["reasoning_tokens"]) == (14510, 3070)
+    # The stream holds only early counts, so one turn's size is unknown.
+    assert record["largest_turn_tokens"] is None
+
+
+def test_a_stopped_claude_run_counts_each_call_once() -> None:
+    record = stats_record(stream_stats(_jsonl(CLAUDE_MESSAGES)))
+    assert (record["model_turns"], record["input_tokens"], record["generated_tokens"]) == (2, 304, 21)
+
+
 def test_an_unknown_stream_is_unmeasured_not_zero_tokens() -> None:
     record = stats_record(stream_stats("plain text\nno events here"))
     assert record["model_turns"] == 0 and record["generated_tokens"] is None and record["turn_tps_median"] is None

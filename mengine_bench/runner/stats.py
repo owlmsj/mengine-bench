@@ -197,24 +197,35 @@ def _claude_stats(events: list[dict[str, object]]) -> RunStats:
     seen: set[str] = set()
     failed = {str(block.get("tool_use_id")) for event in events if event.get("type") == "user"
               for block in _claude_blocks(event) if block.get("type") == "tool_result" and block.get("is_error")}
-    for event in events:
+    usage_by_call: dict[str, Mapping[str, object]] = {}
+    for index, event in enumerate(events):
         if event.get("type") != "assistant":
             continue
         message = _mapping(event.get("message"))
         usage = _mapping(message.get("usage"))
         if usage:
-            read = _count(usage.get("cache_read_input_tokens"))
-            total = _count(usage.get("input_tokens")) + _count(usage.get("cache_creation_input_tokens")) + read
-            thinking = _count(_mapping(usage.get("output_tokens_details")).get("thinking_tokens"))
-            stats.model_turns += 1
-            _note_tokens(stats, total, read, _count(usage.get("output_tokens")), thinking)
+            # One model call streams one event per block, all with its id (#53).
+            usage_by_call[str(message.get("id") or index)] = usage
         for block in _claude_blocks(event):
             if block.get("type") == "tool_use":
                 error = str(block.get("id")) in failed
                 # Claude marks a failed shell command only as an errored tool result.
                 _note_tool(stats, seen, str(block.get("name") or ""), block.get("input"), failed=error,
                            exit_code=1 if error else 0)
+    stats.model_turns = len(usage_by_call)
+    # Stream usage holds only early output counts; the result has the totals, so a stopped run is a lower bound.
+    results = [event for event in events if event.get("type") == "result" and _mapping(event.get("usage"))]
+    for usage in [_mapping(results[-1].get("usage"))] if results else usage_by_call.values():
+        _note_claude_usage(stats, usage)
+    stats.largest_turn_tokens = None
     return stats
+
+
+def _note_claude_usage(stats: RunStats, usage: Mapping[str, object]) -> None:
+    read = _count(usage.get("cache_read_input_tokens"))
+    total = _count(usage.get("input_tokens")) + _count(usage.get("cache_creation_input_tokens")) + read
+    thinking = _count(_mapping(usage.get("output_tokens_details")).get("thinking_tokens"))
+    _note_tokens(stats, total, read, _count(usage.get("output_tokens")), thinking)
 
 
 def _claude_blocks(event: Mapping[str, object]) -> list[Mapping[str, object]]:
