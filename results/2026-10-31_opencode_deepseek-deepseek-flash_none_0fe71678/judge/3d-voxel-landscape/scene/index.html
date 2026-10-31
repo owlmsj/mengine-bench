@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fuji at Dusk</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #18203a; }
+  #sky {
+    position: fixed; inset: 0; width: 100%; height: 100%; display: block; z-index: 0;
+    background: linear-gradient(to bottom, #131c39 0%, #3d3d69 17%, #8f6370 30%, #e8a077 37%, #fbd7b2 41%, #eed8c1 44%);
+  }
+  #scene-canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; z-index: 1; }
+  .vignette {
+    position: fixed; inset: 0; z-index: 2; pointer-events: none;
+    background: radial-gradient(ellipse at 50% 46%, rgba(0,0,0,0) 58%, rgba(26,18,38,0.3) 100%);
+  }
+  .caption {
+    position: fixed; left: 26px; bottom: 22px; z-index: 3; pointer-events: none;
+    font-family: Georgia, "Times New Roman", serif; color: #f8e6d2;
+    text-shadow: 0 1px 8px rgba(40, 18, 30, 0.55);
+    line-height: 1.35; opacity: 0; transition: opacity 2.4s ease 1.2s;
+  }
+  .caption .jp { font-size: 15px; letter-spacing: 0.5em; opacity: 0.88; }
+  .caption .en { font-size: 12px; letter-spacing: 0.28em; text-transform: uppercase; opacity: 0.74; margin-top: 6px; }
+  body.ready .caption { opacity: 1; }
+</style>
+</head>
+<body>
+<canvas id="sky"></canvas>
+<canvas id="scene-canvas"></canvas>
+<div class="vignette"></div>
+<div class="caption">
+  <div class="jp">&#x5BCC;&#x58EB;&#x5C71;</div>
+  <div class="en">Mount Fuji &middot; Chureito Pagoda</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+// ---------------------------------------------------------------------------
+// Fuji at dusk: a low-poly / voxel diorama of Mount Fuji behind the Chureito
+// pagoda, cherry trees in bloom and a hazy sunset. Every mesh is procedural
+// (height fields, instanced boxes, tetrahedron petals); only the three.js
+// module is loaded remotely.
+// ---------------------------------------------------------------------------
+
+const renderer = new THREE.WebGLRenderer({
+  canvas: document.getElementById('scene-canvas'),
+  antialias: true,
+  alpha: true,
+  powerPreference: 'high-performance',
+});
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setClearColor(0x000000, 0);
+
+const scene = new THREE.Scene();
+// light warm haze: just enough to melt the valley floor, not enough to bleach
+// Fuji's snow cap (a denser exponential fog washed the whole cone pale)
+scene.fog = new THREE.FogExp2(0xf8d3b2, 0.0001);
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 1, 16000);
+// vantage from the hilltop meadow: pagoda right of centre, cherry trees in front
+const cameraAnchor = new THREE.Vector3(346, 47, 612);
+camera.position.copy(cameraAnchor);
+// look above the pagoda: summit crown floats high in the frame, haze below
+const lookTarget = new THREE.Vector3(150, 455, -5400);
+
+const sunDirection = new THREE.Vector3(-0.25, 0.18, -1).normalize();
+
+// ---------------------------------------------------------------------------
+// Deterministic helpers
+// ---------------------------------------------------------------------------
+
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function smoothstep(edge0, edge1, x) {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+function hash2(ix, iz) {
+  let h = Math.imul(ix | 0, 374761393) ^ Math.imul(iz | 0, 668265263);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+function valueNoise(x, z) {
+  const ix = Math.floor(x), iz = Math.floor(z);
+  const fx = x - ix, fz = z - iz;
+  const ux = fx * fx * (3 - 2 * fx), uz = fz * fz * (3 - 2 * fz);
+  const a = hash2(ix, iz), b = hash2(ix + 1, iz);
+  const c = hash2(ix, iz + 1), d = hash2(ix + 1, iz + 1);
+  return (a * (1 - ux) + b * ux) * (1 - uz) + (c * (1 - ux) + d * ux) * uz;
+}
+
+function fbm(x, z) {
+  return 0.55 * valueNoise(x, z)
+    + 0.3 * valueNoise(x * 2.07 + 5.3, z * 2.07 + 1.7)
+    + 0.15 * valueNoise(x * 4.31 + 11.1, z * 4.31 + 7.3);
+}
+
+// Ordered 4x4 dither (Bayer) breaks up posterised shading without visible lines.
+const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+const bayerGlsl = `float bayer4(vec2 p) {
+  ivec2 q = ivec2(mod(p, 4.0));
+  int i = q.y * 4 + q.x;
+  float v = 0.0;
+  ${BAYER4.map((n, i) => `if (i == ${i}) v = ${(n / 16).toFixed(4)};`).join('\n  ')}
+  return v;
+}`;
+
+const UNIT_BOX = new THREE.BoxGeometry(1, 1, 1);
+const UP = new THREE.Vector3(0, 1, 0);
+
+function matte(color, levels = 5, amount = 0.5) {
+  const material = new THREE.MeshLambertMaterial({ color, flatShading: true });
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.toonLevels = { value: levels };
+    shader.uniforms.toonMix = { value: amount };
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform float toonLevels;
+        uniform float toonMix;
+        ${bayerGlsl}`)
+      .replace('#include <dithering_fragment>', `
+        vec3 graded = pow(clamp(gl_FragColor.rgb, 0.0, 1.0), vec3(0.85));
+        float luma = dot(graded, vec3(0.299, 0.587, 0.114));
+        // posterise only where there is light to quantise; highlights stay smooth
+        float band = floor(luma * toonLevels + bayer4(gl_FragCoord.xy)) / toonLevels;
+        float postAmount = toonMix * smoothstep(0.004, 0.05, fwidth(luma)) * (1.0 - smoothstep(0.55, 0.8, luma));
+        gl_FragColor = vec4(mix(graded, graded * (band / max(luma, 0.001)), postAmount), gl_FragColor.a);
+        // dusk haze glaze: keeps mid tones warm instead of milky grey
+        gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.95, 0.7, 0.52), 0.18);
+        #include <dithering_fragment>`);
+  };
+  material.customProgramCacheKey = () => `voxel-toon-${levels}-${amount}`;
+  return material;
+}
+
+// ---------------------------------------------------------------------------
+// Dusk sky painted into a low-res canvas sitting behind the WebGL canvas
+// ---------------------------------------------------------------------------
+
+const skyCanvas = document.getElementById('sky');
+const skyToneCurve = new Uint8Array(256);
+for (let i = 0; i < 256; i++) skyToneCurve[i] = Math.round(Math.pow(i / 255, 0.85) * 255);
+
+function paintDuskSky() {
+  const width = Math.max(320, Math.round(window.innerWidth / 4));
+  const height = Math.max(220, Math.round(window.innerHeight / 4));
+  skyCanvas.width = width;
+  skyCanvas.height = height;
+  const context = skyCanvas.getContext('2d');
+  const image = context.createImageData(width, height);
+
+  const zenith = new THREE.Color('#151d3c');
+  const upper = new THREE.Color('#403c6b');
+  const mid = new THREE.Color('#ab6470');
+  const afterglow = new THREE.Color('#f5ab7b');
+  const horizon = new THREE.Color('#fcd9b5');
+  const ground = new THREE.Color('#f3d4ba');
+  const color = new THREE.Color();
+
+  for (let y = 0; y < height; y++) {
+    const sy = 1 - (y + 0.5) / height;
+    const horizonLine = 0.2;
+    for (let x = 0; x < width; x++) {
+      const sx = (x + 0.5) / width;
+      const glow = Math.exp(-Math.pow((sx - 0.46) / 0.45, 2));
+      const bandLine = horizonLine - 0.02 * (1 - glow);
+
+      if (sy <= bandLine) {
+        // below the ridge: pale haze, never a hard line
+        const t = smoothstep(0, 0.26, bandLine - sy);
+        color.copy(horizon).lerp(afterglow, t * 0.4).lerp(ground, t * 0.55);
+      } else if (sy <= horizonLine + 0.035) {
+        color.copy(horizon);
+      } else if (sy <= horizonLine + 0.1) {
+        color.copy(horizon).lerp(afterglow, smoothstep(horizonLine + 0.035, horizonLine + 0.1, sy) * (0.45 + 0.55 * (1 - glow)));
+      } else if (sy <= 0.56) {
+        color.copy(afterglow).lerp(mid, smoothstep(0.3, 0.56, sy));
+        if (glow > 0.5) color.lerp(horizon, (glow - 0.5) * 0.22 * (1 - smoothstep(0.32, 0.5, sy)));
+      } else if (sy <= 0.76) {
+        color.copy(mid).lerp(upper, smoothstep(0.56, 0.76, sy));
+      } else {
+        color.copy(upper).lerp(zenith, smoothstep(0.76, 0.98, sy));
+      }
+
+      const index = (y * width + x) * 4;
+      image.data[index] = skyToneCurve[Math.round(color.r * 255)];
+      image.data[index + 1] = skyToneCurve[Math.round(color.g * 255)];
+      image.data[index + 2] = skyToneCurve[Math.round(color.b * 255)];
+      image.data[index + 3] = 255;
+    }
+  }
+  context.putImageData(image, 0, 0);
+}
+
+paintDuskSky();
+
+// ---------------------------------------------------------------------------
+// Light: rim sun behind Fuji, cool sky bounce, soft frontal fill for the
+// vermilion pagoda and the blossoms
+// ---------------------------------------------------------------------------
+
+// total light lands near 2.0 so lit faces stay below the 0.85-white point and
+// keep their hue through the posterised shading
+scene.add(new THREE.HemisphereLight(0xfbd0b0, 0x5a5a70, 1.02));
+const sunLight = new THREE.DirectionalLight(0xffb27f, 0.7);
+sunLight.position.copy(sunDirection).multiplyScalar(1000);
+sunLight.target.position.set(400, 90, -6000);
+const skyFill = new THREE.DirectionalLight(0xffd2bc, 0.45);
+skyFill.position.set(0.35, 0.85, 1);
+skyFill.target.position.set(400, 90, -6000);
+scene.add(sunLight, sunLight.target, skyFill, skyFill.target);
+
+// ---------------------------------------------------------------------------
+// Height fields
+// ---------------------------------------------------------------------------
+
+// Summit crown sits just left of the pagoda so the two hero shapes interlock.
+const FUJI = { x: 0, z: -6800, baseRadius: 3600, height: 2400, peakDX: -150, peakDZ: 0 };
+
+const HILL = { x: 420, z: 120, baseRadius: 820, height: 26 };
+
+function hillHeight(x, z) {
+  // falloff hits zero at baseRadius, so the surrounding valley stays flat
+  const u = Math.max(0, 1 - Math.hypot(x - HILL.x, z - HILL.z) / HILL.baseRadius);
+  const mound = (fbm(x * 0.0055 + 11.0, z * 0.0055 + 3.0) - 0.5) * 7 * smoothstep(0.0, 0.2, u) * smoothstep(1.0, 0.5, u);
+  // water-meadow swells across the wider grounds for foreground depth
+  const swell = Math.pow(fbm(x * 0.0021 + 21.0, z * 0.0021 + 5.0), 2.2) * 16;
+  return Math.max(0, HILL.height * Math.pow(u, 1.35) + mound + swell);
+}
+
+// Page background matches the lowest sky band so any strip of canvas outside the
+// generated sky never flashes a mismatched colour while resizing.
+document.body.style.backgroundColor = '#5f3a4c';
+
+// ---------------------------------------------------------------------------
+// Terrain voxel cells: Fuji, the pagoda hill, flanking hills and valley haze.
+// Cell layout is [x, y, z, colourHex].
+// ---------------------------------------------------------------------------
+
+const FUJI_VOXEL = 11;
+const HILL_VOXEL = 6;
+
+const rockBands = ['#4a5470', '#58617f', '#68718c', '#7b8399'];
+const snowBands = ['#cdd6e6', '#dee5f0', '#eef2f8', '#ffffff'];
+const hillBands = ['#7c8b68', '#889875', '#95a482', '#a2af8d'];
+const ridgeBand = '#8fa0bb';
+const lakeBands = ['#f7cfae', '#efbea0'];
+
+const fujiCells = [];
+const hillCells = [];
+const ridgeCells = [];
+const lakeCells = [];
+
+// Height along the cone: steep crown easing into a broad concavely curved foot.
+function fujiHeight(x, z) {
+  const dx = x - FUJI.x - FUJI.peakDX;
+  const dz = z - FUJI.z - FUJI.peakDZ;
+  const distance = Math.hypot(dx, dz);
+  const angle = Math.atan2(dz, dx);
+  const t = THREE.MathUtils.clamp(distance / FUJI.baseRadius, 0, 1);
+  let height = FUJI.height * Math.pow(1 - t, 1.32) * (1 - 0.12 * t * t);
+  // long radial gullies + noise so the cone is not a perfect matte pyramid
+  const gutter = 0.5 + 0.5 * Math.sin(angle * 9 + Math.sin(angle * 3.7) * 1.2);
+  const noise = fbm(Math.cos(angle) * 2.4 + 4.1, distance * 0.0016 + 9.2);
+  height += (distance / FUJI.baseRadius) * 110 * (gutter - 0.5 + (noise - 0.5) * 0.8);
+  // shallow crater dip at the summit
+  if (distance < 150) height -= (1 - distance / 150) * 22;
+  return Math.max(0, height);
+}
+
+function fujiVoxelColour(x, z, y) {
+  const rel = y / FUJI.height;
+  const angle = Math.atan2(z - FUJI.z - FUJI.peakDZ, x - FUJI.x - FUJI.peakDX);
+  // radial streaks split the snow cap into fingers above a ragged line.
+  // Streaks are sampled in a seam-free way: noise along the circle direction.
+  const streakNoise = fbm(x * 0.0022 + 7.5, z * 0.0022 + 2.0) * 0.7
+    + fbm(Math.cos(angle) * 1.7 + 3.3, Math.sin(angle) * 1.7 + 9.1) * 0.6;
+  const local = fbm(x * 0.0019 + 13.0, z * 0.0019 + 2.0);
+  const snowLine = 0.62 + (local - 0.5) * 0.2 + (streakNoise - 0.65) * 0.3;
+  if (rel > snowLine) return snowBands[Math.min(3, 1 + Math.floor(local * 3))];
+  return rockBands[Math.min(3, Math.floor(local * 4))];
+}
+
+function buildVoxelFuji() {
+  const reach = Math.ceil(FUJI.baseRadius / FUJI_VOXEL) + 1;
+  for (let ix = -reach; ix <= reach; ix++) {
+    for (let iz = -reach; iz <= reach; iz++) {
+      const x = FUJI.x + (ix + 0.5) * FUJI_VOXEL;
+      const z = FUJI.z + (iz + 0.5) * FUJI_VOXEL;
+      const height = fujiHeight(x, z);
+      if (height < FUJI_VOXEL) continue;
+      const top = Math.round(height / FUJI_VOXEL) * FUJI_VOXEL + FUJI_VOXEL * 0.5;
+      const colour = fujiVoxelColour(x, z, top);
+      // a skirt cell below the top keeps steep flanks from showing gaps
+      fujiCells.push(x, top, z, colour);
+      fujiCells.push(x, top - FUJI_VOXEL, z, rockBands[1]);
+    }
+  }
+}
+
+buildVoxelFuji();
+
+// ---------------------------------------------------------------------------
+// Hill under the pagoda: full columns so and tree roots sit on solid ground.
+// hillVoxelSurface() reports the same stepped top that buildVoxelHill() emits.
+// ---------------------------------------------------------------------------
+
+function hillVoxelSurface(x, z) {
+  // tallest of the four columns around the point, so nothing ever floats
+  let surface = 0;
+  for (const [ox, oz] of [[-HILL_VOXEL / 2, -HILL_VOXEL / 2], [HILL_VOXEL / 2, -HILL_VOXEL / 2], [-HILL_VOXEL / 2, HILL_VOXEL / 2], [HILL_VOXEL / 2, HILL_VOXEL / 2]]) {
+    surface = Math.max(surface, Math.floor(hillHeight(x + ox, z + oz) / HILL_VOXEL) * HILL_VOXEL + HILL_VOXEL / 2);
+  }
+  return surface;
+}
+
+function buildVoxelHill() {
+  const cols = Math.ceil((HILL.baseRadius * 2) / HILL_VOXEL);
+  for (let iz = 0; iz < cols; iz++) {
+    for (let ix = 0; ix < cols; ix++) {
+      const x = HILL.x - HILL.baseRadius + (ix + 0.5) * HILL_VOXEL;
+      const z = HILL.z - HILL.baseRadius + (iz + 0.5) * HILL_VOXEL;
+      const height = hillHeight(x, z);
+      if (height < 2) continue;
+      const tint = smoothstep(-0.1, 1.0, fbm(x * 0.0016 + 40.5, z * 0.0016 + 12.25));
+      const colour = hillBands[Math.min(3, Math.floor(tint * 4))];
+      const top = Math.floor(height / HILL_VOXEL) * HILL_VOXEL + HILL_VOXEL / 2;
+      for (let y = HILL_VOXEL / 2; y <= top + 0.01; y += HILL_VOXEL) {
+        hillCells.push(x, y, z, colour);
+      }
+    }
+  }
+}
+
+buildVoxelHill();
+
+// ---------------------------------------------------------------------------
+// Foreground ridge line: low voxel hills wrapping the valley rim
+// ---------------------------------------------------------------------------
+
+function buildRidges() {
+  // low forest hills closing the valley between the hilltop and Fuji's foot
+  for (let x = -6000; x < 6200; x += 60) {
+    const nearHill = Math.abs(x - HILL.x) < HILL.baseRadius + 250;
+    if (nearHill) continue;
+    const profile = Math.pow(Math.abs(Math.sin(x * 0.00062 + 1.3)) * 0.7 + fbm(x * 0.0012, 4.4) * 0.6, 1.8);
+    const height = 70 * profile;
+    if (height < 10) continue;
+    for (let z = -720; z <= -600; z += 40) {
+      for (let y = 12; y <= height; y += 30) ridgeCells.push(x, y, z, ridgeBand);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Valley floor haze at the foot of the volcano: a pale, unbroken band that
+// reads as water and mist catching the last light
+// ---------------------------------------------------------------------------
+
+function buildLake() {
+  for (let x = -16000; x <= 16000; x += 60) {
+    for (let z = -2400; z <= -700; z += 60) {
+      const tint = fbm(x * 0.0014 + 3.0, z * 0.0014 + 7.0);
+      lakeCells.push(x, hillHeight(x, z) + 0.4, z, lakeBands[tint > 0.5 ? 0 : 1]);
+    }
+  }
+}
+
+buildRidges();
+buildLake();
+
+// ---------------------------------------------------------------------------
+// Voxel terrain layers. Each layer is a single InstancedMesh; the page
+// background already covers the far distance, so the Fuji cone needs only
+// enough voxels per column to keep its silhouette solid against the sky.
+// ---------------------------------------------------------------------------
+
+function addTerrainLayer(name, cells, voxelSize, levels, posterise) {
+  if (!cells.length) return null;
+  const mesh = new THREE.InstancedMesh(UNIT_BOX, matte('#ffffff', levels, posterise), cells.length / 4);
+  mesh.name = name;
+  const dummy = new THREE.Object3D();
+  dummy.scale.setScalar(voxelSize);
+  const tint = new THREE.Color();
+  for (let i = 0; i < mesh.count; i++) {
+    const cell = i * 4;
+    dummy.position.set(cells[cell], cells[cell + 1], cells[cell + 2]);
+    dummy.updateMatrix();
+    mesh.setMatrixAt(i, dummy.matrix);
+    mesh.setColorAt(i, tint.set(cells[cell + 3]));
+  }
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  mesh.computeBoundingSphere();
+  scene.add(mesh);
+  return mesh;
+}
+
+addTerrainLayer('ridges', ridgeCells, 34, 5, 0.2);
+addTerrainLayer('fuji', fujiCells, FUJI_VOXEL, 6, 0.25);
+addTerrainLayer('lake', lakeCells, 120, 4, 0.15);
+addTerrainLayer('hill', hillCells, HILL_VOXEL, 6, 0.35);
+
+// ---------------------------------------------------------------------------
+// Chureito pagoda: stone podium, five vermilion storeys, wide tiled hip roofs
+// with upturned corner tips, gold sorin. Built as one rigid box batch at the
+// origin, then lifted onto the hilltop at PAGEANT_X / PAGEANT_Z.
+// ---------------------------------------------------------------------------
+
+class BoxBatch {
+  constructor() { this.boxes = []; }
+  push(newPosition, newScale, newColor, newQuaternion = null) {
+    this.boxes.push({ position: newPosition, scale: newScale, color: newColor, quaternion: newQuaternion });
+  }
+  build(levels = 5, amount = 0.45) {
+    const mesh = new THREE.InstancedMesh(UNIT_BOX, matte('#ffffff', levels, amount), this.boxes.length);
+    const dummy = new THREE.Object3D();
+    const tint = new THREE.Color();
+    this.boxes.forEach((box, i) => {
+      dummy.position.copy(box.position);
+      dummy.scale.copy(box.scale);
+      if (box.quaternion) dummy.quaternion.copy(box.quaternion);
+      else dummy.quaternion.identity();
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+      mesh.setColorAt(i, tint.copy(box.color));
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.computeBoundingSphere();
+    return mesh;
+  }
+}
+
+const VERMILION = {
+  deep: new THREE.Color('#7f1f16'),
+  base: new THREE.Color('#a92b1c'),
+  body: new THREE.Color('#c03a26'),
+  lit: new THREE.Color('#d54c31'),
+  edge: new THREE.Color('#e26144'),
+};
+const ROOF_TILE = {
+  lip: new THREE.Color('#23242a'),
+  base: new THREE.Color('#31323a'),
+  high: new THREE.Color('#3d3f47'),
+  ridge: new THREE.Color('#5c5f65'),
+};
+const STONE = {
+  base: new THREE.Color('#a79e8d'),
+  dark: new THREE.Color('#877f71'),
+};
+const GOLD = new THREE.Color('#c9a052');
+const GOLD_LIGHT = new THREE.Color('#e3c17c');
+const LACQUER = new THREE.Color('#2a2321');
+const DOOR_SHADOW = new THREE.Color('#3d1a13');
+const PLASTER = new THREE.Color('#ecdcc2');
+
+// Storey proportions follow the real Chureito silhouette: wide eaves, chunky
+// vermilion bodies, balconies that step in with each tier.
+const PAGODA_STOREYS = [
+  { half: 30, body: 26, overhang: 22 },
+  { half: 26, body: 22, overhang: 20 },
+  { half: 22.5, body: 20, overhang: 18 },
+  { half: 19, body: 18, overhang: 16 },
+  { half: 16, body: 17, overhang: 15 },
+];
+const PAGODA_STONE_HEIGHT = 14;
+
+function addRoof(batch, baseY, eaveHalf, nextHalf) {
+  const thickness = 3.2;
+  const eaveY = baseY + 1.6;
+  const lipDepth = 7;
+
+  // flat eave slabs around the square, with a lifted outer lip
+  batch.push(new THREE.Vector3(0, eaveY, eaveHalf), new THREE.Vector3(eaveHalf * 2 + lipDepth, thickness, lipDepth), ROOF_TILE.lip);
+  batch.push(new THREE.Vector3(0, eaveY, -eaveHalf), new THREE.Vector3(eaveHalf * 2 + lipDepth, thickness, lipDepth), ROOF_TILE.lip);
+  batch.push(new THREE.Vector3(eaveHalf, eaveY, 0), new THREE.Vector3(lipDepth, thickness, eaveHalf * 2 - lipDepth), ROOF_TILE.lip);
+  batch.push(new THREE.Vector3(-eaveHalf, eaveY, 0), new THREE.Vector3(lipDepth, thickness, eaveHalf * 2 - lipDepth), ROOF_TILE.lip);
+
+  // hipped tile mass: two stepped slabs stepping up toward the next storey
+  batch.push(new THREE.Vector3(0, eaveY + thickness / 2 + 2.6, 0), new THREE.Vector3(eaveHalf * 1.5, 5.4, eaveHalf * 1.5), ROOF_TILE.base);
+  batch.push(new THREE.Vector3(0, eaveY + thickness / 2 + 6.0, 0), new THREE.Vector3(nextHalf * 2 + 7, 3.4, nextHalf * 2 + 7), ROOF_TILE.high);
+
+  // tile ridges running down every hip
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      batch.push(new THREE.Vector3(sx * eaveHalf * 0.72, eaveY + thickness / 2 + 2.6, sz * eaveHalf * 0.72), new THREE.Vector3(3, 5.8, 3), ROOF_TILE.ridge);
+    }
+  }
+
+  // upturned corner tips
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      const tipQuat = new THREE.Quaternion().setFromEuler(new THREE.Euler(sz * -0.3, 0, sx * 0.3));
+      batch.push(new THREE.Vector3(sx * (eaveHalf + 4), eaveY + 3.4, sz * (eaveHalf + 4)), new THREE.Vector3(12, 3.2, 12), ROOF_TILE.lip, tipQuat);
+      batch.push(new THREE.Vector3(sx * (eaveHalf - 2), eaveY - 5, sz * (eaveHalf - 2)), new THREE.Vector3(4.5, 9, 4.5), VERMILION.deep);
+    }
+  }
+
+  // vermilion bracket blocks under the eave (kumimono)
+  const brackets = 6;
+  for (let b = 0; b < brackets; b++) {
+    const along = -eaveHalf + 8 + (b * (eaveHalf * 2 - 16)) / (brackets - 1);
+    for (const side of [-1, 1]) {
+      batch.push(new THREE.Vector3(along, baseY - 6, side * (eaveHalf - 8)), new THREE.Vector3(4.5, 7, 4.5), VERMILION.base);
+      batch.push(new THREE.Vector3(side * (eaveHalf - 8), baseY - 6, along), new THREE.Vector3(4.5, 7, 4.5), VERMILION.base);
+    }
+  }
+}
+
+function buildPagoda() {
+  const batch = new BoxBatch();
+  let y = 0;
+
+  // stone podium
+  batch.push(new THREE.Vector3(0, y + 3, 0), new THREE.Vector3(132, 6, 132), STONE.dark);
+  batch.push(new THREE.Vector3(0, y + 8, 0), new THREE.Vector3(120, 4, 120), STONE.base);
+  y += 10;
+  batch.push(new THREE.Vector3(0, y + 2, 0), new THREE.Vector3(100, 4, 100), VERMILION.deep);
+  y += 4;
+  for (let step = 0; step < 3; step++) {
+    batch.push(new THREE.Vector3(0, step * 2.2 + 1.1, 60 + (2 - step) * 5), new THREE.Vector3(30, 2.2 + step * 2.2, 10), STONE.base);
+  }
+
+  PAGODA_STOREYS.forEach((storey, index) => {
+    const half = storey.half;
+    const nextHalf = index + 1 < PAGODA_STOREYS.length ? PAGODA_STOREYS[index + 1].half : half * 0.75;
+
+    // storey body, corner posts, recessed doors on all four sides
+    batch.push(new THREE.Vector3(0, y + storey.body / 2, 0), new THREE.Vector3(half * 2 - 3, storey.body, half * 2 - 3), VERMILION.body);
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        batch.push(new THREE.Vector3(sx * (half - 2.5), y + storey.body / 2, sz * (half - 2.5)), new THREE.Vector3(5, storey.body + 1, 5), VERMILION.lit);
+      }
+    }
+    batch.push(new THREE.Vector3(0, y + storey.body * 0.42, half - 0.8), new THREE.Vector3(half * 1.05, storey.body * 0.72, 2), DOOR_SHADOW);
+    batch.push(new THREE.Vector3(0, y + storey.body * 0.42, -(half - 0.8)), new THREE.Vector3(half * 1.05, storey.body * 0.72, 2), DOOR_SHADOW);
+    for (const sx of [-1, 1]) {
+      batch.push(new THREE.Vector3(sx * (half - 0.8), y + storey.body * 0.42, 0), new THREE.Vector3(2, storey.body * 0.72, half * 1.05), DOOR_SHADOW);
+    }
+    // white plaster wainscot + vermilion head beam
+    batch.push(new THREE.Vector3(0, y + 3.5, half - 0.3), new THREE.Vector3(half * 2 - 7, 4, 1.2), PLASTER);
+    batch.push(new THREE.Vector3(0, y + storey.body - 3, 0), new THREE.Vector3(half * 2 + 1.5, 5, half * 2 + 1.5), VERMILION.edge);
+
+    // balcony band below upper storeys
+    if (index > 0) {
+      batch.push(new THREE.Vector3(0, y - 1.2, 0), new THREE.Vector3(half * 2 + 10, 2.6, half * 2 + 10), VERMILION.deep);
+      batch.push(new THREE.Vector3(0, y + 2.4, 0), new THREE.Vector3(half * 2 + 10, 1.8, half * 2 + 10), VERMILION.base);
+    }
+
+    addRoof(batch, y + storey.body, half + storey.overhang, nextHalf);
+    y += storey.body + 12;
+  });
+
+  // sorin: gold mast, seven rings, flame
+  const spireBase = y - 2;
+  batch.push(new THREE.Vector3(0, spireBase + 4, 0), new THREE.Vector3(26, 8, 26), LACQUER);
+  batch.push(new THREE.Vector3(0, spireBase + 32, 0), new THREE.Vector3(4.2, 56, 4.2), GOLD);
+  for (let ring = 0; ring < 7; ring++) {
+    const ringSize = 14 - ring * 1.1;
+    batch.push(new THREE.Vector3(0, spireBase + 12 + ring * 5.6, 0), new THREE.Vector3(ringSize, 2.2, ringSize), ring % 2 ? GOLD_LIGHT : GOLD);
+  }
+  const flameQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 4);
+  batch.push(new THREE.Vector3(0, spireBase + 58, 0), new THREE.Vector3(8, 4.6, 8), GOLD_LIGHT, flameQuat);
+  batch.push(new THREE.Vector3(0, spireBase + 64, 0), new THREE.Vector3(3, 7, 3), GOLD_LIGHT);
+  batch.push(new THREE.Vector3(0, spireBase + 70, 0), new THREE.Vector3(5.4, 2, 5.4), GOLD_LIGHT, flameQuat);
+
+  return batch.build(5, 0.45);
+}
+
+const PAGEANT_X = 512;
+const PAGEANT_Z = 170;
+const pagodaMesh = buildPagoda();
+// 0.72 scale keeps the whole spire inside the frame at the load camera
+pagodaMesh.scale.setScalar(0.72);
+pagodaMesh.position.set(PAGEANT_X, hillVoxelSurface(PAGEANT_X, PAGEANT_Z) - 0.5, PAGEANT_Z);
+scene.add(pagodaMesh);
+
+// ---------------------------------------------------------------------------
+// Cherry trees: chunky box limbs under faceted blossom canopies. Each canopy
+// lobe is its own InstancedMesh so it can sway around the trunk top.
+// ---------------------------------------------------------------------------
+
+const BARK_COLORS = [new THREE.Color('#6b4a40'), new THREE.Color('#574036')];
+const PETAL_RAMPS = [
+  ['#cf6f8f', '#e89db4', '#f7c3d4', '#fde4ec'],
+  ['#c1628a', '#dd8baa', '#f2b6c9', '#fbdce7'],
+  ['#e096ae', '#f0bcca', '#fcdbe4', '#fff3f7'],
+].map((rampHexes) => rampHexes.map((hex) => new THREE.Color(hex)));
+
+const swayLobes = [];
+const PETAL_FIELD = { minX: 230, maxX: 660, minZ: 160, maxZ: 520, baseY: 24, height: 96 };
+
+function addLimbBoxes(batch, rng, from, to, thickness) {
+  const direction = to.clone().sub(from);
+  const length = direction.length();
+  if (length < 0.05) return;
+  direction.normalize();
+  const rotation = new THREE.Quaternion().setFromUnitVectors(UP, direction);
+  const steps = Math.max(1, Math.round(length / 0.45));
+  for (let s = 0; s < steps; s++) {
+    const t = (s + 0.5) / steps;
+    const position = from.clone().lerp(to, t);
+    const taper = 1 - t * 0.28;
+    const colour = BARK_COLORS[s % 2].clone().multiplyScalar(0.9 + rng() * 0.3);
+    batch.push(position, new THREE.Vector3(thickness * taper, (length / steps) * 1.35, thickness * taper), colour, rotation);
+  }
+}
+
+function buildBlossomLobe(batch, rng, center, radii, ramp, density) {
+  // voxel count scales with lobe volume; density is tuned per tree below
+  const count = Math.max(20, Math.round(radii.x * radii.y * radii.z * 22 * density));
+  for (let i = 0; i < count; i++) {
+    const theta = rng() * Math.PI * 2;
+    const cosPhi = rng() * 2 - 1;
+    const sinPhi = Math.sqrt(1 - cosPhi * cosPhi);
+    const radius = Math.cbrt(rng()) * 0.96;
+    const offset = new THREE.Vector3(
+      Math.cos(theta) * sinPhi * radii.x * radius,
+      cosPhi * radii.y * radius,
+      Math.sin(theta) * sinPhi * radii.z * radius,
+    );
+    // sunlit crown, shadowed underside: petals climb the ramp with height
+    const level = Math.min(0.999, Math.max(0, (offset.y / radii.y + 1) * 0.5 + (rng() - 0.5) * 0.2));
+    const scaled = level * 3;
+    const lower = Math.floor(scaled);
+    const colour = ramp[lower].clone().lerp(ramp[Math.min(3, lower + 1)], scaled - lower);
+    colour.multiplyScalar(0.93 + rng() * 0.14);
+    const size = 1.1 + rng() * 0.95;
+    const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(rng() * 0.7 - 0.35, rng() * Math.PI * 2, rng() * 0.7 - 0.35));
+    batch.push(center.clone().add(offset), new THREE.Vector3(size, size * (0.78 + rng() * 0.4), size), colour, rotation);
+  }
+}
+
+function addSwayLobe(treeGroup, batch, center, phase, amplitude) {
+  if (!batch.boxes.length) return;
+  const mesh = batch.build(6, 0.3);
+  const base = mesh.instanceMatrix.array.slice();
+  treeGroup.add(mesh);
+  swayLobes.push({ mesh, base, center: center.clone(), phase, amplitude, count: mesh.instanceMatrix.count });
+}
+
+function createCherryTree(spec) {
+  const rng = mulberry32(spec.seed);
+  const treeGroup = new THREE.Group();
+  const branches = new BoxBatch();
+  const ramp = PETAL_RAMPS[spec.ramp];
+
+  const trunkTop = new THREE.Vector3(spec.lean.x, spec.trunkHeight, spec.lean.z);
+  const trunkKnee = trunkTop.clone().multiplyScalar(0.55).add(new THREE.Vector3((rng() - 0.5) * 1.4, 0, (rng() - 0.5) * 1.4));
+  addLimbBoxes(branches, rng, new THREE.Vector3(0, -3, 0), trunkKnee, spec.thickness);
+  addLimbBoxes(branches, rng, trunkKnee, trunkTop, spec.thickness * 0.8);
+
+  for (let root = 0; root < 4; root++) {
+    const angle = (root / 4) * Math.PI * 2 + rng() * 0.6;
+    addLimbBoxes(
+      branches, rng,
+      new THREE.Vector3(0, 0.8, 0),
+      new THREE.Vector3(Math.cos(angle) * spec.thickness * 1.9, -2.2, Math.sin(angle) * spec.thickness * 1.9),
+      spec.thickness * 0.75,
+    );
+  }
+
+  for (let limb = 0; limb < spec.limbs; limb++) {
+    const angle = (limb / spec.limbs) * Math.PI * 2 + spec.seed * 0.37 + rng() * 0.5;
+    const reach = spec.canopyRadius * (0.5 + rng() * 0.5);
+    const limbEnd = new THREE.Vector3(
+      trunkTop.x + Math.cos(angle) * reach,
+      trunkTop.y + spec.limbLift * (0.45 + rng() * 0.75),
+      trunkTop.z + Math.sin(angle) * reach,
+    );
+    const limbKnee = trunkTop.clone().lerp(limbEnd, 0.55).add(new THREE.Vector3(0, 0.5 + rng() * 1.2, 0));
+    addLimbBoxes(branches, rng, trunkTop, limbKnee, spec.thickness * 0.62);
+    addLimbBoxes(branches, rng, limbKnee, limbEnd, spec.thickness * 0.45);
+
+    // twigs poking out of the blossom
+    for (let twig = 0; twig < 2; twig++) {
+      const twigAngle = angle + (rng() - 0.5) * 1.4;
+      const twigEnd = limbEnd.clone().add(new THREE.Vector3(Math.cos(twigAngle) * reach * 0.45, 1.2 + rng() * 1.8, Math.sin(twigAngle) * reach * 0.45));
+      addLimbBoxes(branches, rng, limbKnee.clone().lerp(limbEnd, 0.7), twigEnd, spec.thickness * 0.32);
+    }
+
+    const lobeRadius = spec.canopyRadius * (0.5 + rng() * 0.18);
+    const lobeCenter = limbEnd.clone().add(new THREE.Vector3(0, lobeRadius * 0.3, 0));
+    const lobe = new BoxBatch();
+    buildBlossomLobe(lobe, rng, lobeCenter, new THREE.Vector3(lobeRadius, lobeRadius * 0.72, lobeRadius), ramp, spec.density);
+    addSwayLobe(treeGroup, lobe, trunkTop, rng() * Math.PI * 2, 0.7 + rng() * 0.6);
+  }
+
+  const crownCenter = trunkTop.clone().add(new THREE.Vector3(0, spec.canopyRadius * 0.6, 0));
+  const crown = new BoxBatch();
+  buildBlossomLobe(crown, rng, crownCenter, new THREE.Vector3(spec.canopyRadius * 0.82, spec.canopyRadius * 0.64, spec.canopyRadius * 0.82), ramp, spec.density * 1.15);
+  addSwayLobe(treeGroup, crown, trunkTop, rng() * Math.PI * 2, 0.9);
+
+  treeGroup.add(branches.build(5, 0.5));
+  treeGroup.position.set(spec.x, spec.y, spec.z);
+  treeGroup.rotation.y = spec.rotationY;
+  scene.add(treeGroup);
+  return treeGroup;
+}
+
+// scale shrinks the near trees into the foreground without rebuilding them
+const CHERRY_SPECS = [
+  { seed: 11, x: 296, z: 368, rotationY: 0.3, trunkHeight: 9.5, thickness: 2.6, lean: new THREE.Vector3(-2.2, 0, 1.2), canopyRadius: 10.5, limbs: 5, limbLift: 4.2, density: 0.5, ramp: 0, scale: 1.25 },
+  { seed: 23, x: 572, z: 356, rotationY: -0.5, trunkHeight: 8.0, thickness: 2.3, lean: new THREE.Vector3(2.0, 0, 1.6), canopyRadius: 10.8, limbs: 6, limbLift: 3.6, density: 0.48, ramp: 1, scale: 1.3 },
+  { seed: 37, x: 604, z: 600, rotationY: 1.0, trunkHeight: 10.0, thickness: 2.9, lean: new THREE.Vector3(0.5, 0, 2.4), canopyRadius: 10.2, limbs: 5, limbLift: 4.6, density: 0.46, ramp: 2, scale: 1.15 },
+  { seed: 51, x: 196, z: 452, rotationY: 2.1, trunkHeight: 7.0, thickness: 2.1, lean: new THREE.Vector3(-2.4, 0, 0.6), canopyRadius: 8.8, limbs: 5, limbLift: 3.2, density: 0.44, ramp: 0, scale: 1.1 },
+  { seed: 67, x: 664, z: 386, rotationY: -1.4, trunkHeight: 6.6, thickness: 2.0, lean: new THREE.Vector3(2.2, 0, 0.8), canopyRadius: 8.2, limbs: 5, limbLift: 3.0, density: 0.42, ramp: 2, scale: 0.9 },
+  { seed: 83, x: 138, z: 196, rotationY: 0.9, trunkHeight: 6.0, thickness: 1.9, lean: new THREE.Vector3(-1.5, 0, 1.2), canopyRadius: 7.4, limbs: 4, limbLift: 2.8, density: 0.4, ramp: 1, scale: 0.8 },
+  { seed: 97, x: 712, z: 214, rotationY: -2.3, trunkHeight: 5.8, thickness: 1.8, lean: new THREE.Vector3(1.2, 0, 1.4), canopyRadius: 7.0, limbs: 4, limbLift: 2.6, density: 0.4, ramp: 0, scale: 0.75 },
+  { seed: 113, x: 300, z: 512, rotationY: 0.6, trunkHeight: 6.4, thickness: 2.0, lean: new THREE.Vector3(-0.9, 0, 1.6), canopyRadius: 7.8, limbs: 5, limbLift: 2.9, density: 0.4, ramp: 2, scale: 0.85 },
+];
+
+for (const spec of CHERRY_SPECS) {
+  // ground the root flare at the lowest nearby column so no bark hangs in air
+  spec.y = hillVoxelSurface(spec.x, spec.z) - 1.0;
+  const tree = createCherryTree(spec);
+  tree.scale.setScalar(spec.scale);
+}
+
+// Stone lanterns lining the approach path in front of the pagoda
+const LANTERN_COLOR = new THREE.Color('#cfc6b2');
+const LANTERN_ROOF = new THREE.Color('#3a3632');
+const LANTERN_WINDOW = new THREE.Color('#ffd79a');
+const lanternBatch = new BoxBatch();
+for (let step = 0; step < 4; step++) {
+  const z = PAGEANT_Z + 74 + step * 30;
+  for (const side of [-1, 1]) {
+    const x = PAGEANT_X + side * 32;
+    const y = hillVoxelSurface(x, z);
+    lanternBatch.push(new THREE.Vector3(x, y + 3, z), new THREE.Vector3(3.6, 6, 3.6), LANTERN_COLOR);
+    lanternBatch.push(new THREE.Vector3(x, y + 8.6, z), new THREE.Vector3(5.6, 4.8, 5.6), LANTERN_WINDOW);
+    lanternBatch.push(new THREE.Vector3(x, y + 13.2, z), new THREE.Vector3(9, 2.4, 9), LANTERN_ROOF);
+  }
+}
+scene.add(lanternBatch.build(5, 0.4));
+
+// ---------------------------------------------------------------------------
+// Falling petals around the cherry trees
+// ---------------------------------------------------------------------------
+
+const PETAL_COUNT = 420;
+const petalMesh = new THREE.InstancedMesh(new THREE.TetrahedronGeometry(0.5, 0), matte('#f8dfe7', 6, 0.3), PETAL_COUNT);
+petalMesh.frustumCulled = false;
+scene.add(petalMesh);
+
+const petals = [];
+{
+  const rng = mulberry32(4711);
+  const petalTints = ['#fce6ec', '#f6cfdb', '#fff4f7', '#f0bfcd'];
+  const tint = new THREE.Color();
+  for (let i = 0; i < PETAL_COUNT; i++) {
+    petals.push({
+      x: PETAL_FIELD.minX + rng() * (PETAL_FIELD.maxX - PETAL_FIELD.minX),
+      y: rng() * PETAL_FIELD.height,
+      z: PETAL_FIELD.minZ + rng() * (PETAL_FIELD.maxZ - PETAL_FIELD.minZ),
+      fall: 0.9 + rng() * 1.5,
+      swing: 1.2 + rng() * 2.4,
+      swingSpeed: 0.5 + rng() * 0.7,
+      phase: rng() * Math.PI * 2,
+      spinX: (rng() - 0.5) * 3.4,
+      spinZ: (rng() - 0.5) * 3.4,
+      scale: 0.8 + rng() * 0.9,
+    });
+    petalMesh.setColorAt(i, tint.set(petalTints[i % petalTints.length]));
+  }
+  if (petalMesh.instanceColor) petalMesh.instanceColor.needsUpdate = true;
+}
+
+// ---------------------------------------------------------------------------
+// Camera framing (aspect aware) and animation
+// ---------------------------------------------------------------------------
+
+function frameCamera() {
+  const aspect = window.innerWidth / window.innerHeight;
+  const baseFov = THREE.MathUtils.degToRad(50);
+  const horizontalFov = 2 * Math.atan(Math.tan(baseFov / 2) * aspect);
+  // tall/narrow screens get a wider vertical fov so the pagoda stays framed
+  const verticalFov = baseFov * Math.max(1, THREE.MathUtils.degToRad(46) / horizontalFov);
+  camera.fov = THREE.MathUtils.radToDeg(verticalFov);
+  camera.aspect = aspect;
+  camera.updateProjectionMatrix();
+  camera.lookAt(lookTarget);
+}
+
+const clock = new THREE.Clock();
+
+function updateSway(elapsed) {
+  for (const lobe of swayLobes) {
+    const array = lobe.mesh.instanceMatrix.array;
+    array.set(lobe.base);
+    const phase = elapsed * 0.65 + lobe.phase;
+    const swayX = Math.sin(phase) * 0.011 * lobe.amplitude;
+    const swayZ = Math.cos(phase * 0.8) * 0.008 * lobe.amplitude;
+    for (let i = 0; i < lobe.count; i++) {
+      const o = i * 16;
+      array[o + 12] += swayX * (array[o + 13] - lobe.center.y);
+      array[o + 14] += swayZ * (array[o + 13] - lobe.center.y);
+    }
+    lobe.mesh.instanceMatrix.needsUpdate = true;
+  }
+}
+
+function updatePetals(elapsed, delta) {
+  const array = petalMesh.instanceMatrix.array;
+  for (let i = 0; i < PETAL_COUNT; i++) {
+    const petal = petals[i];
+    petal.y -= petal.fall * delta;
+    if (petal.y < 0) petal.y += PETAL_FIELD.height;
+    const x = petal.x + Math.sin(elapsed * petal.swingSpeed + petal.phase) * petal.swing;
+    const z = petal.z + Math.cos(elapsed * petal.swingSpeed * 0.8 + petal.phase) * petal.swing;
+    const cosX = Math.cos(elapsed * petal.spinX + petal.phase);
+    const sinX = Math.sin(elapsed * petal.spinX + petal.phase);
+    const cosZ = Math.cos(elapsed * petal.spinZ);
+    const sinZ = Math.sin(elapsed * petal.spinZ);
+    const s = petal.scale;
+    const o = i * 16;
+    array[o] = cosZ * s; array[o + 1] = sinZ * cosX * s; array[o + 2] = -sinZ * sinX * s; array[o + 3] = 0;
+    array[o + 4] = 0; array[o + 5] = cosX * s; array[o + 6] = sinX * s; array[o + 7] = 0;
+    array[o + 8] = -sinZ * s; array[o + 9] = cosZ * cosX * s; array[o + 10] = cosZ * sinX * s; array[o + 11] = 0;
+    array[o + 12] = x;
+    array[o + 13] = PETAL_FIELD.baseY + petal.y;
+    array[o + 14] = z;
+    array[o + 15] = 1;
+  }
+  petalMesh.instanceMatrix.needsUpdate = true;
+}
+
+function updateCamera(elapsed) {
+  // a breath of drift so the still frame feels alive without losing framing
+  camera.position.set(
+    cameraAnchor.x + Math.sin(elapsed * 0.11) * 1.4,
+    cameraAnchor.y + Math.sin(elapsed * 0.083 + 1.3) * 0.9,
+    cameraAnchor.z,
+  );
+  camera.lookAt(lookTarget);
+}
+
+function renderFrame() {
+  const delta = Math.min(clock.getDelta(), 0.05);
+  const elapsed = clock.elapsedTime;
+  updateSway(elapsed);
+  updatePetals(elapsed, delta);
+  updateCamera(elapsed);
+  renderer.render(scene, camera);
+  requestAnimationFrame(renderFrame);
+}
+
+function handleResize() {
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  paintDuskSky();
+  frameCamera();
+}
+
+window.addEventListener('resize', handleResize);
+
+frameCamera();
+renderer.render(scene, camera);
+document.body.classList.add('ready');
+requestAnimationFrame(renderFrame);
+
+</script>
+</body>
+</html>
+

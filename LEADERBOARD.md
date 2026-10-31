@@ -6,7 +6,9 @@ and the run statistics are separate columns. Runs are self-reported by each subm
 by the maintainer on review; the transcripts are in each bundle. Only complete,
 judged runs of the current bench version are ranked.
 
-No results yet.
+| # | Score | Correct % | Solved | Judge | Time | Timeouts | Cost | Tokens | Generated | Turns | Agent | Model | Effort | Hardware | Config | Submitter | Date | Run |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | **87.3** | 93.6 | 11/14 | 72.7 | 29 min 35 s | 0 | n/a | 48.51M | 163.2k | 508 | opencode opencode v2.2.2 | deepseek/deepseek-flash | none | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=deepseek-api, model=DeepSeek V4.1 Flash, quant=f... | owlmsj | 2026-10-31 | [run](results/2026-10-31_opencode_deepseek-deepseek-flash_none_0fe71678/summary.md) |
 
 ## Not ranked
 

@@ -1,0 +1,73 @@
+{
+ "task_id": "bo-pnl-runway",
+ "prompts": [
+  "Close the startup's half-year using {WS}/finance/ledger.csv (separator ;, Brazilian number format 1.234,56, dates dd/mm/yyyy, costs negative) and {WS}/finance/chart_of_accounts.csv. Write {WS}/pnl.csv with header line,2026-01,...,2026-06 and these lines in this order: revenue (net of refunds), cogs, gross_profit, gross_margin_pct (0-100), sales_marketing, rnd, ga, ebitda; costs as positive numbers, 2 decimals. Financial result does NOT go into EBITDA. Write {WS}/runway.json with burn_avg_3m (mean of -ebitda from April to June) and runway_months (balance in {WS}/finance/cash_balance.txt / burn, 1 decimal). Write your files inside {WS}. Do not ask for confirmation."
+ ],
+ "answers": [
+  "[goal] Close H1-2026: build `pnl.csv` from the ledger and `runway.json` from April–June EBITDA.\n\n[action] Parsed `finance/ledger.csv` (Brazilian format) with exact decimals, mapped every account through `finance/chart_of_accounts.csv` (no unmapped accounts found), computed revenue net of refunds, COGS, gross profit and margin, the three OPEX groups, and EBITDA excluding financial lines 6.1.01/6.1.02. Script kept in `tmp/compute_pnl.py`. Ran an independent recount of the ledger that returned the same per-account totals; EBITDA per month equals gross_profit minus sales_marketing, rnd and ga for all six months (`check ebitda==gp-sm-rnd-ga: True`).\n\n[result]\n`pnl.csv`\n```\nline,2026-01,2026-02,2026-03,2026-04,2026-05,2026-06\nrevenue,200510.87,216328.06,219066.17,238163.26,243032.89,272391.57\ncogs,60091.92,64278.71,69096.05,70867.73,73973.13,75162.69\ngross_profit,140418.95,152049.35,149970.12,167295.53,169059.76,197228.88\ngross_margin_pct,70.03,70.29,68.46,70.24,69.56,72.41\nsales_marketing,143475.23,138161.28,135519.34,139688.11,138680.10,151896.54\nrnd,163396.33,182271.02,171742.87,179804.44,185905.30,189990.01\nga,43826.35,43917.13,47233.36,44753.63,46420.18,48310.55\nebitda,-210278.96,-212300.08,-204525.45,-196950.65,-201945.82,-192968.22\n```\n`runway.json`\n```\n{\n  \"burn_avg_3m\": 197288.23,\n  \"runway_months\": 9.4\n}\n```\nBurn = mean of (196,950.65; 201,945.82; 192,968.22) = 197,288.23. Balance 1,847,350.40 / 197,288.23 = 9.3637 → 9.4.\n\n[low confidence] None of the figures are cross-checked against an external source; they come only from the ledger and chart of accounts in the repo.\n\n[next] None required."
+ ],
+ "diff": "A AGENTS.md\nA pnl.csv\nA runway.json\nA tmp/compute_pnl.py\n\n--- AGENTS.md ---\nUse any tool you have. Read and write local files only inside this directory.\r\nDo not print credentials, environment variables or personal data: this session is published.\r\n\n\n--- pnl.csv ---\nline,2026-01,2026-02,2026-03,2026-04,2026-05,2026-06\nrevenue,200510.87,216328.06,219066.17,238163.26,243032.89,272391.57\ncogs,60091.92,64278.71,69096.05,70867.73,73973.13,75162.69\ngross_profit,140418.95,152049.35,149970.12,167295.53,169059.76,197228.88\ngross_margin_pct,70.03,70.29,68.46,70.24,69.56,72.41\nsales_marketing,143475.23,138161.28,135519.34,139688.11,138680.10,151896.54\nrnd,163396.33,182271.02,171742.87,179804.44,185905.30,189990.01\nga,43826.35,43917.13,47233.36,44753.63,46420.18,48310.55\nebitda,-210278.96,-212300.08,-204525.45,-196950.65,-201945.82,-192968.22\n\n\n--- runway.json ---\n{\r\n  \"burn_avg_3m\": 197288.23,\r\n  \"runway_months\": 9.4\r\n}\n\n--- tmp/compute_pnl.py ---\nimport csv, json, decimal\nfrom decimal import Decimal\n\ndecimal.getcontext().prec = 28\nD = Decimal\n\n\ndef br(s):\n    return D(s.strip().replace('.', '').replace(',', '.'))\n\n\ndef num(x):\n    return float(x)\n\n\ncoa = {}\nwith open('finance/chart_of_accounts.csv', encoding='utf-8') as f:\n    for row in csv.DictReader(f, delimiter=';'):\n        coa[row['account']] = row['pnl_line']\n\nlines = ['revenue', 'cogs', 'sales_marketing', 'rnd', 'ga', 'financial']\nmonths = ['2026-%02d' % m for m in range(1, 7)]\nlvl = {l: {m: D(0) for m in months} for l in lines}\nunknown = set()\nwith open('finance/ledger.csv', encoding='utf-8') as f:\n    for row in csv.DictReader(f, delimiter=';'):\n        d, m, y = row['date'].split('/')\n        key = '%s-%s' % (y, m)\n        acc = row['account']\n        if acc not in coa:\n            unknown.add(acc)\n            continue\n        lvl[coa[acc]][key] += br(row['amount'])\n\nassert not unknown, 'accounts missing from chart_of_accounts: %s' % sorted(unknown)\n\ndef neg(x):\n    return -x\n\ncogs = {m: neg(lvl['cogs'][m]) for m in months}\nsm = {m: neg(lvl['sales_marketing'][m]) for m in months}\nrnd = {m: neg(lvl['rnd'][m]) for m in months}\nga = {m: neg(lvl['ga'][m]) for m in months}\ngp = {m: lvl['revenue'][m] - cogs[m] for m in months}\ngm = {m: (gp[m] / lvl['revenue'][m] * 100) for m in months}\nebitda = {m: gp[m] - sm[m] - rnd[m] - ga[m] for m in months}\n\ndef r2(x):\n    return x.quantize(D('0.01'), rounding=decimal.ROUND_HALF_UP)\n\nout = [['line'] + months]\nfor name, data in [('revenue', lvl['revenue']), ('cogs', cogs), ('gross_profit', gp),\n                   ('gross_margin_pct', gm), ('sales_marketing', sm), ('rnd', rnd),\n                   ('ga', ga), ('ebitda', ebitda)]:\n    out.append([name] + ['%.2f' % r2(data[m]) for m in months])\nwith open('pnl.csv', 'w', encoding='utf-8', newline='') as f:\n    w = csv.writer(f, lineterminator='\\n')\n    w.writerows(out)\n\n# also print re-adding rounded values for consistency check\nburn = (neg(ebitda['2026-04']) + neg(ebitda['2026-05']) + neg(ebitda['2026-06'])) / 3\nwith open('finance/cash_balance.txt', encoding='utf-8') as f:\n    txt = f.read()\nbal = br(txt.split('R$')[1].strip())\nrunway = bal / burn\njson.dump({'burn_avg_3m': round(float(r2(burn)), 2),\n           'runway_months': round(float(D(str(runway)).quantize(D('0.1'), rounding=decimal.ROUND_HALF_UP)), 1)},\n          open('runway.json', 'w', encoding='utf-8'), indent=2)\nprint('financial (excluded from ebitda):', {m: str(r2(lvl['financial'][m])) for m in months})\nprint('balance', bal, 'burn', burn, 'runway', runway)\nprint(open('pnl.csv', encoding='utf-8').read())\nprint(open('runway.json', encoding='utf-8').read())\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ ls -R . ; echo; cat finance/chart_of_accounts.csv; echo; cat finance/cash_balance.txt\n$ python tmp/compute_pnl.py\n$ python -c \"\nimport csv,decimal,collections,json\nD=decimal.Decimal\ndef b(s): return D(s.replace('.','').replace(',','.'))\ncoa={r['account']:r['pnl_line'] for r in csv.DictReader(open('finance/chart_of_accounts.csv'),delimiter=';')}\nt=collections.defaultdict(lambda: collections.defaultdict(D))\nfor r i\n$ python -c \"\nfrom decimal import Decimal as D, getcontext\ngetcontext().prec=28\neb=['-196950.65','-201945.82','-192968.22']\nburn=sum(-D(x) for x in eb)/3\nprint(burn, D('1847350.40')/burn)\nprint((D('196950.65')+D('201945.82')+D('192968.22'))/3)\nprint(D('197288.23')*9.4)\n\"\n$ python -c \"\nfrom decimal import Decimal as D\nb=D('197288.23'); print(round(float(D('1847350.40')/b),1), D('1847350.40')/b)\nprint([round(float(D('1847350.40')/b),1)])\n\"\n\nStream tail:\n8,\"reasoning\":0,\"cache\":{\"read\":15360,\"write\":0}}}}\n\n{\"type\":\"step_start\",\"timestamp\":1793450015051,\"sessionID\":\"ses_e6e0cda77ffe41PUJNdAMJJdnj\",\"part\":{\"id\":\"prt_191f3794b001g0Qs45e6oTnx7Y\",\"sessionID\":\"ses_e6e0cda77ffe41PUJNdAMJJdnj\",\"messageID\":\"msg_191f373be0014OZz1xlIpryLfw\",\"type\":\"step-start\"}}\n\n{\"type\":\"tool_use\",\"timestamp\":1793450015714,\"sessionID\":\"ses_e6e0cda77ffe41PUJNdAMJJdnj\",\"part\":{\"partID\":\"prt_191f3794f001vws5UXsVFsNPHH\",\"sessionID\":\"ses_e6e0cda77ffe41PUJNdAMJJdnj\",\"messageID\":\"msg_191f373be0014OZz1xlIpryLfw\",\"type\":\"tool\",\"id\":\"call_00_wQpRCpNugmwvIt6ZFyYJ4760\",\"tool\":\"shell\",\"state\":{\"status\":\"completed\",\"input\":{\"command\":\"python -c \\\"\\nfrom decimal import Decimal as D\\nb=D('197288.23'); print(round(float(D('1847350.40')/b),1), D('1847350.40')/b)\\nprint([round(float(D('1847350.40')/b),1)])\\n\\\"\"},\"output\":\"9.4 9.363713182484327625626728974\\r\\n[9.4]\\r\\n\",\"title\":\"shell\",\"metadata\":{\"metadata\":{\"status\":\"completed\",\"truncated\":false,\"exit\":0},\"content\":[{\"type\":\"text\",\"text\":\"9.4 9.363713182484327625626728974\\r\\n[9.4]\\r\\n\"}],\"providerCall\":{\"executed\":false},\"providerResult\":{\"executed\":false},\"rawInput\":\"{\\\"command\\\": \\\"python -c \\\\\\\"\\\\nfrom decimal import Decimal as D\\\\nb=D('197288.23'); print(round(float(D('1847350.40')/b),1), D('1847350.40')/b)\\\\nprint([round(float(D('1847350.40')/b),1)])\\\\n\\\\\\\"\\\"}\"},\"time\":{\"start\":1793450015055,\"end\":1793450015714}}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793450015715,\"sessionID\":\"ses_e6e0cda77ffe41PUJNdAMJJdnj\",\"part\":{\"id\":\"prt_191f37be30019JUY7FLRhSJjP8\",\"sessionID\":\"ses_e6e0cda77ffe41PUJNdAMJJdnj\",\"messageID\":\"msg_191f373be0014OZz1xlIpryLfw\",\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"cost\":0.00013036799999999998,\"tokens\":{\"input\":144,\"output\":100,\"reasoning\":0,\"cache\":{\"read\":16256,\"write\":0}}}}\n\n{\"type\":\"step_start\",\"timestamp\":1793450017244,\"sessionID\":\"ses_e6e0cda77ffe41PUJNdAMJJdnj\",\"part\":{\"id\":\"prt_191f381dc001TpaUNnZ0V0AOUd\",\"sessionID\":\"ses_e6e0cda77ffe41PUJNdAMJJdnj\",\"messageID\":\"msg_191f37be9001e1LHDJXKyCtm7k\",\"type\":\"step-start\"}}\n\n{\"type\":\"text\",\"timestamp\":1793450019987,\"sessionID\":\"ses_e6e0cda77ffe41PUJNdAMJJdnj\",\"part\":{\"id\":\"prt_191f37be9001e1LHDJXKyCtm7k_text-0\",\"sessionID\":\"ses_e6e0cda77ffe41PUJNdAMJJdnj\",\"messageID\":\"msg_191f37be9001e1LHDJXKyCtm7k\",\"type\":\"text\",\"text\":\"[goal] Close H1-2026: build `pnl.csv` from the ledger and `runway.json` from April–June EBITDA.\\n\\n[action] Parsed `finance/ledger.csv` (Brazilian format) with exact decimals, mapped every account through `finance/chart_of_accounts.csv` (no unmapped accounts found), computed revenue net of refunds, COGS, gross profit and margin, the three OPEX groups, and EBITDA excluding financial lines 6.1.01/6.1.02. Script kept in `tmp/compute_pnl.py`. Ran an independent recount of the ledger that returned the same per-account totals; EBITDA per month equals gross_profit minus sales_marketing, rnd and ga for all six months (`check ebitda==gp-sm-rnd-ga: True`).\\n\\n[result]\\n`pnl.csv`\\n```\\nline,2026-01,2026-02,2026-03,2026-04,2026-05,2026-06\\nrevenue,200510.87,216328.06,219066.17,238163.26,243032.89,272391.57\\ncogs,60091.92,64278.71,69096.05,70867.73,73973.13,75162.69\\ngross_profit,140418.95,152049.35,149970.12,167295.53,169059.76,197228.88\\ngross_margin_pct,70.03,70.29,68.46,70.24,69.56,72.41\\nsales_marketing,143475.23,138161.28,135519.34,139688.11,138680.10,151896.54\\nrnd,163396.33,182271.02,171742.87,179804.44,185905.30,189990.01\\nga,43826.35,43917.13,47233.36,44753.63,46420.18,48310.55\\nebitda,-210278.96,-212300.08,-204525.45,-196950.65,-201945.82,-192968.22\\n```\\n`runway.json`\\n```\\n{\\n  \\\"burn_avg_3m\\\": 197288.23,\\n  \\\"runway_months\\\": 9.4\\n}\\n```\\nBurn = mean of (196,950.65; 201,945.82; 192,968.22) = 197,288.23. Balance 1,847,350.40 / 197,288.23 = 9.3637 → 9.4.\\n\\n[low confidence] None of the figures are cross-checked against an external source; they come only from the ledger and chart of accounts in the repo.\\n\\n[next] None required.\",\"time\":{\"start\":1793450015732,\"end\":1793450019987}}}\n\n",
+ "checks": [
+  [
+   "pnl.csv lines in order",
+   true
+  ],
+  [
+   "revenue per month",
+   true
+  ],
+  [
+   "cogs per month",
+   true
+  ],
+  [
+   "gross_profit per month",
+   true
+  ],
+  [
+   "gross_margin_pct per month",
+   true
+  ],
+  [
+   "sales_marketing per month",
+   true
+  ],
+  [
+   "rnd per month",
+   true
+  ],
+  [
+   "ga per month",
+   true
+  ],
+  [
+   "ebitda per month",
+   true
+  ],
+  [
+   "3-month average burn",
+   true
+  ],
+  [
+   "runway in months",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 10,
+  "tool_calls": 9,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 3,
+  "file_writes": 2,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 1884,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 968
+ },
+ "deliverables": [],
+ "render": null
+}
