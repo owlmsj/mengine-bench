@@ -2,9 +2,11 @@
 
 A parent-to-child walk cannot find a process whose parent already exited, which
 is what PowerShell `Start-Process` and any daemon leave behind. So membership is
-decided when the process starts: a Windows Job or a POSIX session. What leaves
-the session on purpose is then found by what it holds: the workspace as its
-current directory or on its command line.
+decided when the process starts: a Windows Job or a POSIX session. On Windows a
+Job is not enough: packaged pwsh 7.6.9 creates every child outside the caller's
+Job, measured even when the Job denies breakaway, so DescendantWatch reads the
+parent links while they last. What leaves on purpose is then found by what it
+holds: the workspace as its current directory or on its command line.
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -21,6 +24,7 @@ import psutil
 
 KILL_WAIT_S = 10
 POLL_S = 0.05
+OBSERVE_EVERY_S = 0.25
 
 
 class OrphanSurvived(RuntimeError):
@@ -67,6 +71,56 @@ class PosixSession:
 
     def close(self) -> None:
         self._sid = None
+
+
+class DescendantWatch:
+    """Everything born under `root_pid`, read from parent links while they exist."""
+
+    def __init__(self, root_pid: int) -> None:
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        # pid to creation time, so a reused pid is never mistaken for a descendant.
+        self._born = {root_pid: self._created(root_pid) or 0.0}
+        threading.Thread(target=self._watch, name="bench-descendants", daemon=True).start()
+
+    @staticmethod
+    def _created(pid: int) -> float | None:
+        try:
+            return psutil.Process(pid).create_time()
+        except psutil.Error:
+            return None
+
+    def _watch(self) -> None:
+        while not self._stop.wait(OBSERVE_EVERY_S):
+            with self._lock:
+                self._observe()
+
+    def _observe(self) -> None:
+        # One snapshot for all rows; Process.ppid() would take one per process on Windows.
+        rows = psutil._ppid_map()
+        known = -1
+        while known != len(self._born):
+            known = len(self._born)
+            for pid, parent in rows.items():
+                if pid in self._born or parent not in self._born:
+                    continue
+                created = self._created(pid)
+                if created is not None and created >= self._born[parent]:
+                    self._born[pid] = created
+        # This snapshot already lists every child of a parent that just died, so the
+        # parent can go: keeping it would let a reused pid adopt strangers.
+        self._born = {pid: created for pid, created in self._born.items() if self._created(pid) == created}
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def kill_all(self) -> int:
+        self._stop.set()
+        with self._lock:
+            self._observe()
+            alive = [psutil.Process(pid) for pid in self._born if self._created(pid) is not None]
+        _settle(alive)
+        return len(alive)
 
 
 class WindowsJob:
@@ -118,6 +172,7 @@ class WindowsJob:
         if not self._kernel32.SetInformationJobObject(self._job, self.EXTENDED_LIMIT_INFORMATION,
                                                       ctypes.byref(limits), ctypes.sizeof(limits)):
             raise OSError(ctypes.get_last_error(), "received failure setting KILL_ON_JOB_CLOSE; expected success")
+        self._descendants: DescendantWatch | None = None
 
     def adopt(self, proc: subprocess.Popen[bytes]) -> None:
         process = int(proc._handle)  # type: ignore[attr-defined]
@@ -125,6 +180,7 @@ class WindowsJob:
             error = ctypes.get_last_error()
             proc.kill()
             raise OSError(error, f"received failure assigning pid {proc.pid} to its Job; expected it contained")
+        self._descendants = DescendantWatch(proc.pid)
         status = self._ntdll.NtResumeProcess(process)
         if status != 0:
             proc.kill()
@@ -155,9 +211,13 @@ class WindowsJob:
             if time.monotonic() > deadline:
                 raise OrphanSurvived(f"received {self._active()} live Job members after {KILL_WAIT_S}s; expected 0")
             time.sleep(POLL_S)
+        if self._descendants is not None:
+            leftovers += self._descendants.kill_all()
         return leftovers
 
     def close(self) -> None:
+        if self._descendants is not None:
+            self._descendants.stop()
         if self._job:
             self._kernel32.CloseHandle(self._job)
             self._job = None

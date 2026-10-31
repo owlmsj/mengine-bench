@@ -104,6 +104,28 @@ def test_start_process_is_contained_and_the_workspace_can_be_removed(ws: Path) -
         _kill_leftover(pid)
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Start-Process is the Windows incident (owlmsj/mengine#785)")
+@pytest.mark.parametrize("shell", ["powershell", "pwsh"])
+def test_start_process_is_reaped_with_nothing_tying_it_to_the_workspace(shell: str, ws: Path, tmp_path: Path) -> None:
+    # Packaged pwsh creates every child outside the Job, and here neither cwd nor argv
+    # names the workspace, so the sweep cannot help: only the parent link finds it.
+    if not shutil.which(shell):
+        pytest.skip(f"{shell} is not installed")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    sleeper = elsewhere / "sleeper.py"
+    sleeper.write_text(SLEEP, encoding="utf-8")
+    command = (f"$p = Start-Process -FilePath '{sys.executable}' -ArgumentList '{sleeper}' -PassThru -WindowStyle Hidden "
+               f"-WorkingDirectory '{elsewhere}'; Set-Content -Encoding ascii -Path detached.pid -Value $p.Id")
+    result = run_process([shell, "-NoProfile", "-NonInteractive", "-Command", command], ws, timeout_s=60)
+    pid = int((ws / "detached.pid").read_text().strip())
+    try:
+        assert result.exit_code == 0, result.stderr
+        assert _gone(pid), f"Start-Process child {pid} outlived the run"
+    finally:
+        _kill_leftover(pid)
+
+
 def test_a_process_outside_the_run_holding_the_workspace_is_swept(ws: Path, tmp_path: Path) -> None:
     # What escapes containment (a daemon that left the session) is found by what it holds.
     by_cwd = subprocess.Popen([sys.executable, "-c", SLEEP], cwd=ws)
