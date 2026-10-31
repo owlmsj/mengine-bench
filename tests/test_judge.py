@@ -53,7 +53,7 @@ def test_parse_rejects_malformed_or_out_of_range(reply: str) -> None:
 
 def test_rubric_grades_the_complement_of_the_checks() -> None:
     prompt = build_judge_prompt(CONTEXT, screenshot=False)
-    assert RUBRIC_VERSION == "2.2" and "rubric 2.2" in prompt
+    assert RUBRIC_VERSION == "2.3" and "rubric 2.3" in prompt
     for needle in ("Approach and code/solution quality: 40", "Deliverable and instruction following: 30",
                    "Self-verification: 30", "do not re-score correctness", "Fix the bug", "fixed", "M a.py",
                    "...done", "[FAIL] no regressions", '{"score"'):

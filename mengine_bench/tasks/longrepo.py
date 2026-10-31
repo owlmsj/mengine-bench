@@ -19,6 +19,7 @@ from mengine_bench.core import (
     Step,
     read,
     run_hidden_tests,
+    run_workspace_tests,
     write,
 )
 
@@ -289,6 +290,9 @@ def _check(ws: Path, answers: Sequence[str]) -> CheckResult:
                      f"    return unittest.TestSuite([Hidden('test_{scenario}')])\n")
         ok, _ = run_hidden_tests(ws, HIDDEN + selection)
         result.add(f"hidden {scenario.replace('_', ' ')}", ok)
+    # #59: the prompt asks for a green suite, and the hidden scenarios do not reach most of the code.
+    modules = [rel[:-3].replace("/", ".") for rel in PROTECTED if rel.endswith(".py") and "/test_" in rel]
+    result.add("existing test suite passes", run_workspace_tests(ws, modules))
     return result
 
 

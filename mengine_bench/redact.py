@@ -212,7 +212,12 @@ def _dir_patterns(paths: tuple[Path, ...]) -> list[re.Pattern[str]]:
     return [_dir_pattern(Path(form)) for form in sorted(forms, key=lambda form: (-len(form), form))]
 
 
+# Every step runs in a temp workspace of its own (#59), named the same way on every machine.
+_TEMP_WORKSPACE = re.compile(r"[^\s\"'`<>|,;=()]*mengine-bench-fresh-[\w-]+" + _SEP + r"workspace", re.IGNORECASE)
+
+
 def redact_paths(text: str, scope: PathScope) -> str:
+    text = _TEMP_WORKSPACE.sub(WORKSPACE, text)
     for label, paths in ((WORKSPACE, scope.workspaces), (WORKDIR, scope.workdirs)):
         for pattern in _dir_patterns(paths):
             text = pattern.sub(label, text)

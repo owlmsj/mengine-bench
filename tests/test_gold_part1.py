@@ -137,7 +137,7 @@ def test_reconcile_paid_cent_tolerance(tmp_path: Path, delta: float, expected: b
 
 
 @pytest.mark.parametrize("case,expected", [
-    ("strings", True), ("objects", True), ("mixed", True), ("duplicate_mismatch", True),
+    ("strings", True), ("objects", True), ("mixed", True), ("duplicate_mismatch", False),
     ("non_object_mismatch", False), ("wrong_id", False), ("missing_id", False),
     ("repeated_id", False), ("non_list", False),
 ])
@@ -328,19 +328,19 @@ def test_changelog_normalizes_only_build_prefixes(
 
 
 @pytest.mark.parametrize("key,value,expected", [
-    ("top_gpu", " b200 ", True), ("bottom_gpu", " a 100 ", True),
-    ("top_gpu", "NVIDIA B200", True), ("bottom_gpu", "Nvidia A100 GPU", True),
-    ("top_gpu", "NOT-B200: H100", False), ("bottom_gpu", "NOT-A100: H100", False),
-    ("top_gpu", "B2000", False), ("bottom_gpu", "H100", False),
-    ("ratio", 2.96, True), ("ratio", "2.964", True), ("ratio", 2.966, False),
-    ("ratio", 2.95, False), ("ratio", "nan", False),
+    ("top_gpu", " h200 ", True), ("bottom_gpu", " 40 90 ", True),
+    ("top_gpu", "NVIDIA H200", True), ("bottom_gpu", "Nvidia 4090 GPU", True),
+    ("top_gpu", "NOT-H200: H100", False), ("bottom_gpu", "NOT-4090: H100", False),
+    ("top_gpu", "H2000", False), ("bottom_gpu", "H100", False),
+    ("ratio", 6.0, True), ("ratio", "5.8", True), ("ratio", 7.3, False),
+    ("ratio", 4.7, False), ("ratio", "nan", False),
 ])
-def test_chart_normalizes_names_and_uses_rounded_ratio(
+def test_chart_normalizes_names_and_reads_the_ratio_with_a_margin(
     tmp_path: Path, key: str, value: object, expected: bool,
 ) -> None:
     from mengine_bench.tasks import context
 
-    payload = {"top_gpu": "B200", "top_tps": 210, "bottom_gpu": "A100", "ratio": 2.96}
+    payload = {"top_gpu": "H200", "top_tps": 180, "bottom_gpu": "4090", "ratio": 6.0}
     payload[key] = value
     assert context._chart_check(tmp_path, [json.dumps(payload)]).passed is expected
 
@@ -379,7 +379,7 @@ def test_handoff_retains_final_measurement_command_and_pending_action(
 
 @pytest.mark.parametrize("answer,expected", [
     ("", 0.0), ("{}", 0.0), ('{"final_vram_mib": ""}', 0.0),
-    ('{"final_vram_mib": 7697}', 0.2), ('{"final_vram_mib": 7881}', 0.0),
+    ('{"final_vram_mib": 7697}', 2 / 11), ('{"final_vram_mib": 7881}', 0.0),
 ])
 def test_handoff_spill_credit_requires_a_number(tmp_path: Path, answer: str, expected: float) -> None:
     from mengine_bench.tasks import compaction

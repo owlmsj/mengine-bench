@@ -165,29 +165,42 @@ def has(text: str | None, pattern: str) -> bool:
     return bool(text) and re.search(pattern, text or "", re.IGNORECASE | re.DOTALL) is not None
 
 
+# Isolated, with the folders appended: a workspace unittest.py or heapq.py cannot replace the standard one (#59).
+UNITTEST_BOOTSTRAP = ("import os, sys, unittest; sys.path += sys.argv[1].split(os.pathsep); "
+                      "unittest.main(module=None, argv=['unittest', '-q', *sys.argv[2:]])")
+
+
+def _run_unittest(cwd: Path, paths: Sequence[Path], names: Sequence[str], timeout_s: int) -> tuple[bool, str]:
+    env = {"PYTHONPATH": os.pathsep.join(map(str, paths)), "PYTHONDONTWRITEBYTECODE": "1"}
+    # Windows needs SYSTEMROOT for sockets/random even in a minimal env.
+    env.update({name: os.environ[name] for name in ("SYSTEMROOT", "TEMP", "TMP") if name in os.environ})
+    argv = [sys.executable, "-I", "-c", UNITTEST_BOOTSTRAP, os.pathsep.join(map(str, paths)), *names]
+    try:
+        proc = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout_s, check=False)
+    except subprocess.TimeoutExpired:
+        return False, f"tests exceeded {timeout_s}s"
+    tail = (proc.stdout + proc.stderr).strip().splitlines()[-3:]
+    return proc.returncode == 0, " | ".join(tail)
+
+
 def run_hidden_tests(ws: Path, test_source: str, timeout_s: int = 60) -> tuple[bool, str]:
     """Run gold unittest code the agent never saw, importing modules from ws."""
     with tempfile.TemporaryDirectory(prefix="bench-hidden-", dir=scratch_root()) as tmp:
-        test_file = Path(tmp) / "test_hidden_gold.py"
-        test_file.write_text(test_source, encoding="utf-8")
-        env = {"PYTHONPATH": str(ws), "PYTHONDONTWRITEBYTECODE": "1"}
-        # Windows needs SYSTEMROOT for sockets/random even in a minimal env.
-        if "SYSTEMROOT" in os.environ:
-            env["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
-        try:
-            proc = subprocess.run(
-                [sys.executable, "-m", "unittest", "-q", test_file.name],
-                cwd=tmp,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=timeout_s,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            return False, f"hidden tests exceeded {timeout_s}s"
-    tail = (proc.stdout + proc.stderr).strip().splitlines()[-3:]
-    return proc.returncode == 0, " | ".join(tail)
+        (Path(tmp) / "test_hidden_gold.py").write_text(test_source, encoding="utf-8")
+        return _run_unittest(Path(tmp), [Path(tmp), ws], ["test_hidden_gold"], timeout_s)
+
+
+def run_workspace_tests(ws: Path, modules: Sequence[str], timeout_s: int = 60) -> bool:
+    """Run test modules that live in the workspace, from its root."""
+    return _run_unittest(ws, [ws], modules, timeout_s)[0]
+
+
+def only_number(value: object) -> object:
+    """The number in "10 players" or "2.96x"; a text with two different numbers stays text, so "10 or 12" fails."""
+    if not isinstance(value, str):
+        return value
+    numbers = {float(found) for found in re.findall(r"-?\d+(?:\.\d+)?", value)}
+    return str(numbers.pop()) if len(numbers) == 1 else value
 
 
 def answer_json(answers: Sequence[str], index: int = -1) -> dict[str, object]:
