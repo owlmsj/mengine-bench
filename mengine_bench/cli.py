@@ -216,7 +216,7 @@ def _leaderboard(args: argparse.Namespace) -> int:
     args.output.write_text(board.markdown, encoding="utf-8", newline="\n")
     for name, reason in board.unranked:
         print(f"not ranked: {name}: {reason}")
-    print(f"wrote {args.output}: {board.ranked} ranked run(s), {len(board.unranked)} not ranked")
+    print(f"wrote {args.output}: {board.ranked} ranked run(s), {board.history} in history, {len(board.unranked)} not ranked")
     return 0
 
 

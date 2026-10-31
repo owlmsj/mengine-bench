@@ -14,7 +14,8 @@ the Score, and a Cost kept apart.
 
 The formulas live in `mengine_bench/scoring.py`. Runs compare when they ran the
 same bench major.minor (1.2.x); a patch release changes no task, prompt or score. A run is one sample:
-runs within 1 point of each other at the top get a repeat before anyone calls a winner.
+runs within 1 point of each other at the top get a repeat before anyone calls a winner. Rankings of older
+versions stay in LEADERBOARD.md as history, with the Scores of their own formula.
 
 ## Checks: c_i
 

@@ -182,8 +182,24 @@ def test_leaderboard_ranks_the_current_major_minor_only(tmp_path: Path) -> None:
     _write_result(results, "patch", 60.0, bench_version=f"{major}.{minor}.99")
     _write_result(results, "current", 50.0)
     board = leaderboard.build_leaderboard(results, tmp_path)
-    assert board.ranked == 2
-    assert board.unranked == [("results/old", f"older bench 0.2.0; only bench {major}.{minor}.x runs are ranked")]
+    assert board.ranked == 2 and board.history == 1 and board.unranked == []
+
+
+def test_an_older_ranking_stays_on_the_board_as_history(tmp_path: Path) -> None:
+    # #41: the owner keeps the previous version's ranking; its Scores use that version's formula.
+    results = tmp_path / "results"
+    _write_result(results, "old-low", 40.0, model="old-low-model", bench_version="0.2.0")
+    _write_result(results, "old-high", 99.0, model="old-high-model", bench_version="0.2.1")
+    _write_result(results, "older", 70.0, model="older-model", bench_version="0.1.0")
+    _write_result(results, "old-pending", None, judged=False, bench_version="0.2.0")
+    _write_result(results, "current", 50.0, model="current-model")
+    board = leaderboard.build_leaderboard(results, tmp_path)
+    assert (board.ranked, board.history) == (1, 3)
+    text = board.markdown
+    order = [text.index(mark) for mark in ("current-model", "## Bench 0.2 (history)", "old-high-model", "old-low-model",
+                                           "## Bench 0.1 (history)", "older-model", "## Not ranked")]
+    assert order == sorted(order)
+    assert [name for name, _ in board.unranked] == ["results/old-pending"]
 
 
 def test_bench_is_version_1_2_x() -> None:
