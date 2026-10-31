@@ -29,12 +29,13 @@ from mengine_bench.redact import PathScope, local_names
 from mengine_bench.report import render_summary
 from mengine_bench.runner.agents import Agent
 from mengine_bench.scoring import combined_score, judge_mean, speed_points
-from mengine_bench.visual import RENDERED, render_headless, screenshot_has_content
+from mengine_bench.visual import RENDERED, is_render_failure, render_headless, screenshot_has_content
 
 TaskEntry = MutableMapping[str, object]
 Renderer = Callable[[Path, Path], str]
 # A blank or black 1440x900 page compresses far below this; a real layout does not.
 BLANK_PNG_BYTES = 10_000
+RENDER_ATTEMPTS = 3
 
 
 @dataclass(frozen=True)
@@ -74,7 +75,11 @@ def _render_verdict(bundle: Path, task_id: str, packet: JudgePacket, judge: Rubr
     if stored.is_dir():
         shutil.copytree(stored, site)
     png = workdir / "render" / "shot.png"
-    status = render(site / page, png)
+    # #68: a browser timeout is not the page's fault until it repeats.
+    for _ in range(RENDER_ATTEMPTS):
+        status = render(site / page, png)
+        if not is_render_failure(status):
+            break
     if status != RENDERED or not screenshot_has_content(png, BLANK_PNG_BYTES):
         if packet.context.status == "timeout":
             # #41: a run stopped at its limit is graded on what exists, never zeroed for a missing page.
