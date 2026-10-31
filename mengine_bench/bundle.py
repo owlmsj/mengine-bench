@@ -144,6 +144,22 @@ def _write_deliverables(target: Path, files: Mapping[str, Path], scope: PathScop
         dest.write_text(public_text(text, scope), encoding="utf-8", newline="")
 
 
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def _without_png_pixels(raw: bytes) -> bytes:
+    """Compressed pixels fit text patterns by chance (#42); the PNG's text chunks still get scanned."""
+    if not raw.startswith(PNG_SIGNATURE):
+        return raw
+    kept, offset = [], len(PNG_SIGNATURE)
+    while offset < len(raw):
+        end = offset + 12 + int.from_bytes(raw[offset:offset + 4], "big")
+        if raw[offset + 4:offset + 8] != b"IDAT":
+            kept.append(raw[offset:end])
+        offset = end
+    return b"".join(kept)
+
+
 def bundle_leaks(bundle_dir: Path, names: LocalNames) -> dict[str, dict[str, int]]:
     """Per file, what redaction missed (counts only: the output is pasted into PRs)."""
     found: dict[str, dict[str, int]] = {}
@@ -151,7 +167,7 @@ def bundle_leaks(bundle_dir: Path, names: LocalNames) -> dict[str, dict[str, int
         if not path.is_file():
             continue
         raw = gzip.decompress(path.read_bytes()) if path.suffix == ".gz" else path.read_bytes()
-        leaks = find_leaks(raw.decode("utf-8", errors="replace"), names)
+        leaks = find_leaks(_without_png_pixels(raw).decode("utf-8", errors="replace"), names)
         if leaks:
             found[path.relative_to(bundle_dir).as_posix()] = leaks
     return found
