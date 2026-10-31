@@ -46,6 +46,9 @@ class CheckResult:
     # Gates: any failure here means not solved and score 0 (#23: no partial
     # credit for checks that pass because the gate's work was skipped).
     mandatory: list[tuple[str, bool]] = field(default_factory=list)
+    # Gates a run stopped at its limit may still miss: a page cut short earns what it holds (#41).
+    # A gate that guards the tests is never here, so tampering earns nothing.
+    waived_at_limit: tuple[str, ...] = ()
 
     def add(self, name: str, ok: bool) -> None:
         self.checks.append((name, bool(ok)))
@@ -62,6 +65,13 @@ class CheckResult:
     def score(self) -> float:
         """Correctness 0..1: the share of scored checks passed, 0 on a failed gate."""
         if not self.checks or not self.mandatory_ok:
+            return 0.0
+        return sum(ok for _, ok in self.checks) / len(self.checks)
+
+    @property
+    def partial_score(self) -> float:
+        """Correctness of a run stopped at its limit: the same share, without the waived gates."""
+        if not self.checks or not all(ok or name in self.waived_at_limit for name, ok in self.mandatory):
             return 0.0
         return sum(ok for _, ok in self.checks) / len(self.checks)
 
@@ -85,7 +95,7 @@ class EvalTask:
     check: Check
     reference: Reference
     needs: frozenset[str] = frozenset()
-    timeout_s: int = 900
+    timeout_s: int = 120
     # Workspace files stored verbatim in the bundle for the maintainer's judge
     # (visual tasks: the page it renders).
     deliverables: tuple[str, ...] = ()

@@ -239,3 +239,41 @@ def test_a_step_stopped_at_its_limit_still_grades_and_measures(tmp_path: Path, m
     assert record.stats.first_write_s == 1.0
     run = score_run([_outcome(task, record)])
     assert (run.correct, run.solved, run.time_s) == (100.0, 0, 900.0)
+
+
+def test_a_thin_page_at_the_limit_gets_partial_credit(tmp_path: Path) -> None:
+    """#41: a timeout never zeroes what was delivered; with nothing delivered there is nothing to credit."""
+    from mengine_bench import catalog
+    from mengine_bench.core import write
+    from mengine_bench.run_command import _outcome
+    from mengine_bench.runner.task_run import TaskRunRecord
+    from mengine_bench.tasks import visual
+
+    empty = visual._scene_check(tmp_path, [""])
+    assert empty.partial_score == 0.0
+    write(tmp_path, visual.SCENE, '<script src="https://cdn.jsdelivr.net/npm/three@0.170.0/x.js"></script>WebGLRenderer')
+    thin = visual._scene_check(tmp_path, [""])
+    assert thin.score == 0.0 and 0.0 < thin.partial_score < 1.0
+    task = next(item for item in catalog.all_tasks() if item.id == "3d-voxel-landscape")
+    stopped = TaskRunRecord(task_id=task.id, status="timeout", check=thin)
+    finished = TaskRunRecord(task_id=task.id, status="ok", check=thin)
+    assert _outcome(task, stopped).correctness == thin.partial_score
+    assert _outcome(task, finished).correctness == 0.0
+
+
+def test_a_timeout_never_waives_a_gate_that_guards_the_tests() -> None:
+    tampered = CheckResult(mandatory=[("existing tests untouched", False)], checks=[("hidden tests", True)])
+    assert tampered.partial_score == 0.0
+
+
+def test_the_agent_is_told_the_limit_and_how_it_is_graded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mengine_bench.runner import process
+    from mengine_bench.runner.agents import OpencodeAgent
+
+    task = EvalTask(id="limit", category="test", provenance="test", summary="test", setup=lambda ws: None,
+                    check=lambda ws, answers: CheckResult(), reference=lambda ws: [""], steps=(Step("go"),), timeout_s=120)
+    monkeypatch.setattr(process, "run_process", lambda *args, **kwargs: process.ProcessResult("", "", None, True, 120.0))
+    run_task(task, OpencodeAgent("m", None), tmp_path / "run")
+    [prompt] = (tmp_path / "run").rglob("step-0.md")
+    text = prompt.read_text(encoding="utf-8")
+    assert text.startswith("go") and "2 min" in text and "as it stands" in text

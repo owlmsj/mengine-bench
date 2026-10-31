@@ -441,3 +441,16 @@ def test_gamedev_stdlib_prompts_keep_accept_reject_contract(
     task.setup(tmp_path)
     answers = task.reference(tmp_path) if solved else [""]
     assert task.check(tmp_path, answers).passed is solved
+
+
+def test_runway_uses_the_june_balance_not_the_older_line(tmp_path: Path) -> None:
+    # #41: the balance file also holds May, and the close is at the end of June.
+    from mengine_bench.tasks import business
+    business._pnl_setup(tmp_path)
+    answers = business._pnl_reference(tmp_path)
+    assert business._pnl_check(tmp_path, answers).passed
+    assert "31/05/2026" in (tmp_path / "finance" / "cash_balance.txt").read_text(encoding="utf-8")
+    runway = json.loads((tmp_path / "runway.json").read_text(encoding="utf-8"))
+    runway["runway_months"] = round(business.CASH_MAY / runway["burn_avg_3m"], 1)
+    (tmp_path / "runway.json").write_text(json.dumps(runway), encoding="utf-8")
+    assert not business._pnl_check(tmp_path, answers).passed

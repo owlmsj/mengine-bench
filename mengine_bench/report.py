@@ -16,7 +16,7 @@ from mengine_bench.runner.agents import Usage
 from mengine_bench.runner.stats import RunStats, merge_stats, stats_record
 from mengine_bench.scoring import Price, RunScore, TaskScore, TokenTotals
 
-RESULT_SCHEMA = "mengine-bench/result@6"
+RESULT_SCHEMA = "mengine-bench/result@7"
 # What the judge sees of a run's statistics. No time or speed: they depend on the hardware
 # and would point at a local or hosted model, and the judge grades without knowing which (#39).
 JUDGE_STATS = ("model_turns", "tool_calls", "tool_errors", "shell_commands", "shell_failures", "file_writes",
@@ -93,6 +93,7 @@ def _task_entry(score: TaskScore, detail: TaskDetail) -> dict[str, object]:
 def totals_block(run: RunScore) -> dict[str, object]:
     return {
         "score": run.score, "correct": run.correct, "solved": run.solved, "total": run.total, "judge": run.judge,
+        "speed": run.speed,
         "time_s": run.time_s, "cost_usd": run.cost.usd, "cost_basis": run.cost.basis,
         "cost_lower_bound": run.cost.lower_bound, "tokens": _tokens_record(run.tokens),
     }
@@ -213,10 +214,10 @@ def render_summary(results: Mapping[str, object]) -> str:
         f"# mengine-bench {results['bench_version']}: {agent['name']} {agent.get('version') or ''} / "
         f"{agent['model']} ({agent.get('effort') or 'default effort'})",
         "",
-        "| Score | Correct % | Solved | Judge | Time | Cost | Tokens |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| Score | Correct % | Solved | Judge | Speed | Time | Cost | Tokens |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
         f"| **{_fmt(totals['score'])}** | {_fmt(totals['correct'])} | {totals['solved']}/{totals['total']} | "
-        f"{_fmt(totals['judge'])} | {time_text(totals['time_s'])} | {cost_text(totals)} | "
+        f"{_fmt(totals['judge'])} | {_fmt(totals.get('speed'))} | {time_text(totals['time_s'])} | {cost_text(totals)} | "
         f"{tokens_text(totals.get('tokens'))} |",
         "",
         f"- Judge: {judge_text(results.get('judge'))}",

@@ -5,10 +5,11 @@ judge/<task>.json (prompts, answers, workspace diff, transcript tail, checks,
 all redacted) and each declared deliverable verbatim (redacted) under
 judge/<task>/<file>. The maintainer runs this while reviewing the result pull
 request, so contributors need no judge and every ranked run is judged the
-same way: one rubric 2.1 vote per task. For a task whose deliverable is an
+same way: one rubric 2.2 vote per task. For a task whose deliverable is an
 HTML page, the stored page is rendered headless in a temp dir and the judge
 sees the screenshot, kept as judge/<task>.png for audit; a blank or failed
-render scores that task's judge 0. Nothing is written unless every task ends
+render scores that task's judge 0, unless the run was stopped at its limit:
+then the judge votes on what exists. Nothing is written unless every task ends
 with a vote.
 """
 
@@ -27,7 +28,7 @@ from mengine_bench.judge import RUBRIC_VERSION, JudgeContext, RubricJudge, TaskV
 from mengine_bench.redact import PathScope, local_names
 from mengine_bench.report import render_summary
 from mengine_bench.runner.agents import Agent
-from mengine_bench.scoring import combined_score, judge_mean
+from mengine_bench.scoring import combined_score, judge_mean, speed_points
 from mengine_bench.visual import RENDERED, render_headless, screenshot_has_content
 
 TaskEntry = MutableMapping[str, object]
@@ -75,6 +76,9 @@ def _render_verdict(bundle: Path, task_id: str, packet: JudgePacket, judge: Rubr
     png = workdir / "render" / "shot.png"
     status = render(site / page, png)
     if status != RENDERED or not screenshot_has_content(png, BLANK_PNG_BYTES):
+        if packet.context.status == "timeout":
+            # #41: a run stopped at its limit is graded on what exists, never zeroed for a missing page.
+            return judge.grade(packet.context, workdir / "judge")
         reason = status if status != RENDERED else f"blank screenshot (< {BLANK_PNG_BYTES} bytes)"
         return TaskVerdict(score=0, rationale=f"render of {page} failed: {reason}; judge 0 for this task")
     return judge.grade(packet.context, workdir / "judge", png)
@@ -116,7 +120,8 @@ def judge_bundle(bundle: Path, judge_agent: Agent, render: Renderer | None = Non
     # The judge changes Judge and Score only: checks, Correct %, Time and Cost stay as the run published them.
     totals = result["totals"]
     totals["judge"] = judge_mean([verdicts[str(task["id"])].score for task in tasks])
-    totals["score"] = combined_score(float(totals["correct"]), totals["judge"])
+    totals["speed"] = speed_points(float(totals["time_s"]))
+    totals["score"] = combined_score(float(totals["correct"]), totals["judge"], totals["speed"])
     result["judge"] = {"agent": judge_agent.name, "model": judge_agent.model, "effort": judge_agent.effort,
                        "rubric": RUBRIC_VERSION}
     # Rationales and errors come from the maintainer's machine: redact them like the run's own text.

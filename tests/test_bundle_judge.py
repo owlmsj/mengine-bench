@@ -77,9 +77,10 @@ def test_judging_the_bundle_sets_one_vote_per_task(fake_agent: FakeAgent, tmp_pa
     [task] = result["tasks"]
     assert (task["judge"], task["judge_rationale"]) == (80, "solid")
     assert task["checks"] == before["tasks"][0]["checks"], "the judge never changes the checks"
-    assert result["judge"] == {"agent": "cmd", "model": "judge-x", "effort": "high", "rubric": "2.1"}
+    assert result["judge"] == {"agent": "cmd", "model": "judge-x", "effort": "high", "rubric": "2.2"}
     totals = result["totals"]
-    assert totals["judge"] == 80.0 and totals["score"] == round(0.7 * totals["correct"] + 0.3 * 80.0, 1)
+    assert totals["judge"] == 80.0
+    assert totals["score"] == round(0.6 * totals["correct"] + 0.25 * 80.0 + 0.15 * totals["speed"], 1)
     assert {key: totals[key] for key in ("correct", "time_s", "cost_usd")} == \
         {key: before["totals"][key] for key in ("correct", "time_s", "cost_usd")}
     assert _judge(fake_agent, bundle) == 1, "a judged bundle is not judged twice"
@@ -119,6 +120,17 @@ def test_failed_render_scores_the_judge_zero_without_asking(fake_agent: FakeAgen
     assert not (tmp_path / "fakes" / "judge.seen").exists(), "no judge call for a failed render"
     [task] = json.loads((bundle / "result.json").read_text(encoding="utf-8"))["tasks"]
     assert task["judge"] == 0 and "no browser" in task["judge_rationale"]
+
+
+def test_a_timed_out_visual_task_still_gets_a_vote_without_a_render(fake_agent: FakeAgent, tmp_path: Path,
+                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    # #41: stopping at the limit is graded, never zeroed because no page could be rendered yet.
+    bundle = _run(fake_agent, tmp_path / "results", "web-mondrian-landing", VISUAL_AGENT)
+    _edit_packet(bundle, "web-mondrian-landing", status="timeout")
+    monkeypatch.setattr(bundle_judge, "render_headless", lambda html, png: visual.NO_BROWSER)
+    assert _judge(fake_agent, bundle) == 0
+    [task] = json.loads((bundle / "result.json").read_text(encoding="utf-8"))["tasks"]
+    assert (task["judge"], task["judge_rationale"]) == (80, "solid")
 
 
 def test_judge_refuses_to_write_when_a_task_has_no_vote(fake_agent: FakeAgent, tmp_path: Path,

@@ -120,8 +120,8 @@ def _judge(args: argparse.Namespace) -> int:
         return 1
     totals = result["totals"]
     assert isinstance(totals, dict)
-    print(f"judged {args.bundle.name}: Score {totals['score']} = 0.7 x correct {totals['correct']} "
-          f"+ 0.3 x judge {totals['judge']}")
+    print(f"judged {args.bundle.name}: Score {totals['score']} = 0.6 x correct {totals['correct']} "
+          f"+ 0.25 x judge {totals['judge']} + 0.15 x speed {totals['speed']}")
     print("updated result.json and summary.md; commit them with LEADERBOARD.md")
     return 0
 

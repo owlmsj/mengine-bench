@@ -43,6 +43,9 @@ BROWSER_PROFILE_DIRS = frozenset({"_browser-profile", ".browser-profile", "brows
 # transcripts are published.
 WORKSPACE_RULES = ("Use any tool you have. Read and write local files only inside this directory.\n"
                    "Do not print credentials, environment variables or personal data: this session is published.\n")
+# #41: without this a model can plan until the limit and leave nothing to grade.
+TIME_LIMIT_NOTE = ("\n\nYou have {minutes} min for this step. The folder is graded as it stands when time runs out, "
+                   "so write a first complete version early.")
 COPY_IGNORE = shutil.ignore_patterns(".git", "tmp", "__pycache__", "_render")
 
 
@@ -138,6 +141,7 @@ def run_task(task: EvalTask, agent: Agent, root: Path, fresh_root: Path | None =
                 settle_workspace(workspace, root, workspace_index)
                 workspace, workspace_index = fresh, index
             prompt = render_prompt(task, index, workspace, root / "hidden" / str(index))
+            prompt += TIME_LIMIT_NOTE.format(minutes=f"{task.timeout_s / 60:g}")
             (workspace / "AGENTS.md").write_text(WORKSPACE_RULES, encoding="utf-8")
             _run_step(agent, task, workspace, root, index, prompt, record)
         except StepFailed as failure:

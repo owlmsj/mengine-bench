@@ -179,11 +179,17 @@ def _public_error(error: str | None, record: TaskRunRecord) -> str | None:
     return error.replace(root, "<workspace>").replace(str(record.workspace.parent), "<workspace>")
 
 
+def _correctness(record: TaskRunRecord) -> float:
+    if record.check is None:
+        return 0.0
+    return record.check.partial_score if record.status == "timeout" else record.check.score
+
+
 def _outcome(task: EvalTask, record: TaskRunRecord) -> TaskOutcome:
     check = record.check
     return TaskOutcome(
         task_id=task.id, status=record.status,
-        correctness=check.score if check is not None else 0.0,
+        correctness=_correctness(record),
         solved=check.passed if check is not None else False,
         # Score the exact time result.json records, so the totals follow
         # from the published task times.
