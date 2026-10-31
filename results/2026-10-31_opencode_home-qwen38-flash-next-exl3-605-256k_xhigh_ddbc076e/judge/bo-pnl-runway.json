@@ -1,0 +1,73 @@
+{
+ "task_id": "bo-pnl-runway",
+ "prompts": [
+  "Close the startup's half-year using {WS}/finance/ledger.csv (separator ;, Brazilian number format 1.234,56, dates dd/mm/yyyy, costs negative) and {WS}/finance/chart_of_accounts.csv. Write {WS}/pnl.csv with header line,2026-01,...,2026-06 and these lines in this order: revenue (net of refunds), cogs, gross_profit, gross_margin_pct (0-100), sales_marketing, rnd, ga, ebitda; costs as positive numbers, 2 decimals. Financial result does NOT go into EBITDA. Write {WS}/runway.json with burn_avg_3m (mean of -ebitda from April to June) and runway_months (balance in {WS}/finance/cash_balance.txt / burn, 1 decimal). Write your files inside {WS}. Do not ask for confirmation."
+ ],
+ "answers": [
+  "\n\n[goal] Fechamento do 1º semestre: pnl.csv e runway.json a partir do ledger.\n\n[action] Script python (em `tmp/tmp_build.py`) parseou `finance/ledger.csv` (86 linhas, todas jan–jun/2026), mapeou contas via `chart_of_accounts.csv`, converteu formato BR, excluiu contas `6.1.*` (resultado financeiro, 12 linhas) e somou reembolsos (3.1.09, negativos) dentro de revenue líquida.\n\n[result] `pnl.csv` (custos positivos, 2 casas):\n\n```\nline,2026-01,2026-02,2026-03,2026-04,2026-05,2026-06\nrevenue,200510.87,216328.06,219066.17,238163.26,243032.89,272391.57\ncogs,60091.92,64278.71,69096.05,70867.73,73973.13,75162.69\ngross_profit,140418.95,152049.35,149970.12,167295.53,169059.76,197228.88\ngross_margin_pct,70.03,70.29,68.46,70.24,69.56,72.41\nsales_marketing,143475.23,138161.28,135519.34,139688.11,138680.10,151896.54\nrnd,163396.33,182271.02,171742.87,179804.44,185905.30,189990.01\nga,43826.35,43917.13,47233.36,44753.63,46420.18,48310.55\nebitda,-210278.96,-212300.08,-204525.45,-196950.65,-201945.82,-192968.22\n```\n\n`runway.json`: `burn_avg_3m` = média de -ebitda abr–jun = **197288.23**; saldo mais recente em `cash_balance.txt` (30/06/2026) = 1.847.350,40 → `runway_months` = **9.4**.\n\n[next] Nada pendente; arquivos gravados na raiz do workspace, script auxiliar movido para `tmp/`."
+ ],
+ "diff": "A pnl.csv\nA runway.json\nA tmp/tmp_build.py\n\n--- pnl.csv ---\nline,2026-01,2026-02,2026-03,2026-04,2026-05,2026-06\nrevenue,200510.87,216328.06,219066.17,238163.26,243032.89,272391.57\ncogs,60091.92,64278.71,69096.05,70867.73,73973.13,75162.69\ngross_profit,140418.95,152049.35,149970.12,167295.53,169059.76,197228.88\ngross_margin_pct,70.03,70.29,68.46,70.24,69.56,72.41\nsales_marketing,143475.23,138161.28,135519.34,139688.11,138680.10,151896.54\nrnd,163396.33,182271.02,171742.87,179804.44,185905.30,189990.01\nga,43826.35,43917.13,47233.36,44753.63,46420.18,48310.55\nebitda,-210278.96,-212300.08,-204525.45,-196950.65,-201945.82,-192968.22\n\n\n--- runway.json ---\n{\r\n  \"burn_avg_3m\": 197288.23,\r\n  \"runway_months\": 9.4\r\n}\r\n\n\n--- tmp/tmp_build.py ---\nimport csv, json, re\nfrom collections import defaultdict\n\ndef br(s):\n    s = s.strip().replace(\".\", \"\").replace(\",\", \".\")\n    return float(s)\n\ncoa = {}\nwith open(\"finance/chart_of_accounts.csv\", encoding=\"utf-8\") as f:\n    for row in csv.DictReader(f, delimiter=\";\"):\n        coa[row[\"account\"].strip()] = row[\"pnl_line\"].strip()\n\nmonths = [\"2026-01\",\"2026-02\",\"2026-03\",\"2026-04\",\"2026-05\",\"2026-06\"]\nlines = [\"revenue\",\"cogs\",\"sales_marketing\",\"rnd\",\"ga\"]\nagg = defaultdict(float)\nwith open(\"finance/ledger.csv\", encoding=\"utf-8\") as f:\n    for row in csv.DictReader(f, delimiter=\";\"):\n        d = row[\"date\"].strip()\n        dd, mm, yyyy = d.split(\"/\")\n        key = f\"{yyyy}-{mm}\"\n        if key not in months:\n            continue\n        line = coa[row[\"account\"].strip()]\n        if line == \"financial\":\n            continue\n        agg[(key, line)] += br(row[\"amount\"])\n\n# revenue net of refunds: 3.1.09 already maps to revenue and is negative -> included\nrows = {}\nrows[\"revenue\"] = [agg[(m,\"revenue\")] for m in months]\nrows[\"cogs\"] = [-agg[(m,\"cogs\")] for m in months]\nrows[\"gross_profit\"] = [r-c for r,c in zip(rows[\"revenue\"], rows[\"cogs\"])]\nrows[\"gross_margin_pct\"] = [(gp/rev*100 if rev else 0.0) for gp,rev in zip(rows[\"gross_profit\"], rows[\"revenue\"])]\nrows[\"sales_marketing\"] = [-agg[(m,\"sales_marketing\")] for m in months]\nrows[\"rnd\"] = [-agg[(m,\"rnd\")] for m in months]\nrows[\"ga\"] = [-agg[(m,\"ga\")] for m in months]\nrows[\"ebitda\"] = [gp-sm-rd-ga for gp,sm,rd,ga in zip(rows[\"gross_profit\"],rows[\"sales_marketing\"],rows[\"rnd\"],rows[\"ga\"])]\n\norder = [\"revenue\",\"cogs\",\"gross_profit\",\"gross_margin_pct\",\"sales_marketing\",\"rnd\",\"ga\",\"ebitda\"]\nwith open(\"pnl.csv\",\"w\",newline=\"\",encoding=\"utf-8\") as f:\n    w = csv.writer(f, lineterminator=\"\\n\")\n    w.writerow([\"line\"]+months)\n    for k in order:\n        w.writerow([k]+[f\"{v:.2f}\" for v in rows[k]])\n\nburn = -sum(rows[\"ebitda\"][3:])/3.0\nbal = 1847350.40\nrunway = round(bal/burn,1) if burn > 0 else None\nwith open(\"runway.json\",\"w\",encoding=\"utf-8\") as f:\n    json.dump({\"burn_avg_3m\": round(burn,2), \"runway_months\": runway}, f, indent=2)\n    f.write(\"\\n\")\nprint(open(\"pnl.csv\").read())\nprint(open(\"runway.json\").read())",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ ls -R . | head -50; echo \"---\"; cat ./finance/cash_balance.txt; echo \"---\"; cat ./finance/chart_of_accounts.csv; echo \"---\"; head -40 ./finance/ledger.csv\n$ python tmp_build.py\n$ python -c \"\nimport csv\nrows=list(csv.DictReader(open('finance/ledger.csv',encoding='utf-8'),delimiter=';'))\nprint(len(rows))\nprint(sorted({r['date'].split('/')[1]+'/'+r['date'].split('/')[2] for r in rows}))\nprint([r for r in rows if '3.1.09' in r['account']])\nprint(sum(1 for r in rows if r['account\n$ mkdir -Force tmp | Out-Null; Move-Item tmp_build.py tmp/ -Force; ls\n\nStream tail:\nh-0uho9g4l\\\\workspace\\r\\n\\r\\n\\u001b[32;1mMode   \\u001b[0m\\u001b[32;1m              LastWriteTime\\u001b[0m \\u001b[32;1;3m        Length\\u001b[0m\\u001b[32;1m Name\\u001b[0m\\r\\n\\u001b[32;1m----   \\u001b[0m \\u001b[32;1m             -------------\\u001b[0m \\u001b[32;1m        ------\\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\nd----          31/10/2026    19:41                \\u001b[44;1mfinance\\u001b[0m\\r\\nd----          31/10/2026    19:42                \\u001b[44;1mtmp\\u001b[0m\\r\\n-a---          31/10/2026    19:41            171 AGENTS.md\\r\\n-a---          31/10/2026    19:41            576 pnl.csv\\r\\n-a---          31/10/2026    19:41             59 runway.json\\r\\n\\r\\n\",\"title\":\"shell\",\"metadata\":{\"metadata\":{\"status\":\"completed\",\"truncated\":false,\"exit\":0},\"content\":[{\"type\":\"text\",\"text\":\"\\r\\n    Directory: <WORKSPACE>\\r\\n\\r\\n\\u001b[32;1mMode   \\u001b[0m\\u001b[32;1m              LastWriteTime\\u001b[0m \\u001b[32;1;3m        Length\\u001b[0m\\u001b[32;1m Name\\u001b[0m\\r\\n\\u001b[32;1m----   \\u001b[0m \\u001b[32;1m             -------------\\u001b[0m \\u001b[32;1m        ------\\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\nd----          31/10/2026    19:41                \\u001b[44;1mfinance\\u001b[0m\\r\\nd----          31/10/2026    19:42                \\u001b[44;1mtmp\\u001b[0m\\r\\n-a---          31/10/2026    19:41            171 AGENTS.md\\r\\n-a---          31/10/2026    19:41            576 pnl.csv\\r\\n-a---          31/10/2026    19:41             59 runway.json\\r\\n\\r\\n\"}],\"providerCall\":{\"executed\":false},\"providerResult\":{\"executed\":false},\"rawInput\":\"{\\\"command\\\": \\\"mkdir -Force tmp | Out-Null; Move-Item tmp_build.py tmp/ -Force; ls\\\"}\"},\"time\":{\"start\":1793486522823,\"end\":1793486523178}}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793486523180,\"sessionID\":\"ses_e6bdfb736ffeorDCyMjNFjLPkc\",\"part\":{\"id\":\"prt_194208b2c001tscnZ3mywx2hGW\",\"sessionID\":\"ses_e6bdfb736ffeorDCyMjNFjLPkc\",\"messageID\":\"msg_1942081870014KER2R2DvP3JPz\",\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"cost\":0,\"tokens\":{\"input\":572,\"output\":248,\"reasoning\":0,\"cache\":{\"read\":12032,\"write\":0}}}}\n\n{\"type\":\"step_start\",\"timestamp\":1793486523632,\"sessionID\":\"ses_e6bdfb736ffeorDCyMjNFjLPkc\",\"part\":{\"id\":\"prt_194208cf0001NxlUme4WXbBOPZ\",\"sessionID\":\"ses_e6bdfb736ffeorDCyMjNFjLPkc\",\"messageID\":\"msg_194208b33001dScGRZT7eAfx7s\",\"type\":\"step-start\"}}\n\n{\"type\":\"text\",\"timestamp\":1793486528506,\"sessionID\":\"ses_e6bdfb736ffeorDCyMjNFjLPkc\",\"part\":{\"id\":\"prt_194208b33001dScGRZT7eAfx7s_text-0\",\"sessionID\":\"ses_e6bdfb736ffeorDCyMjNFjLPkc\",\"messageID\":\"msg_194208b33001dScGRZT7eAfx7s\",\"type\":\"text\",\"text\":\"\\n\\n[goal] Fechamento do 1º semestre: pnl.csv e runway.json a partir do ledger.\\n\\n[action] Script python (em `tmp/tmp_build.py`) parseou `finance/ledger.csv` (86 linhas, todas jan–jun/2026), mapeou contas via `chart_of_accounts.csv`, converteu formato BR, excluiu contas `6.1.*` (resultado financeiro, 12 linhas) e somou reembolsos (3.1.09, negativos) dentro de revenue líquida.\\n\\n[result] `pnl.csv` (custos positivos, 2 casas):\\n\\n```\\nline,2026-01,2026-02,2026-03,2026-04,2026-05,2026-06\\nrevenue,200510.87,216328.06,219066.17,238163.26,243032.89,272391.57\\ncogs,60091.92,64278.71,69096.05,70867.73,73973.13,75162.69\\ngross_profit,140418.95,152049.35,149970.12,167295.53,169059.76,197228.88\\ngross_margin_pct,70.03,70.29,68.46,70.24,69.56,72.41\\nsales_marketing,143475.23,138161.28,135519.34,139688.11,138680.10,151896.54\\nrnd,163396.33,182271.02,171742.87,179804.44,185905.30,189990.01\\nga,43826.35,43917.13,47233.36,44753.63,46420.18,48310.55\\nebitda,-210278.96,-212300.08,-204525.45,-196950.65,-201945.82,-192968.22\\n```\\n\\n`runway.json`: `burn_avg_3m` = média de -ebitda abr–jun = **197288.23**; saldo mais recente em `cash_balance.txt` (30/06/2026) = 1.847.350,40 → `runway_months` = **9.4**.\\n\\n[next] Nada pendente; arquivos gravados na raiz do workspace, script auxiliar movido para `tmp/`.\",\"time\":{\"start\":1793486523205,\"end\":1793486528506}}}\n\n",
+ "checks": [
+  [
+   "pnl.csv lines in order",
+   true
+  ],
+  [
+   "revenue per month",
+   true
+  ],
+  [
+   "cogs per month",
+   true
+  ],
+  [
+   "gross_profit per month",
+   true
+  ],
+  [
+   "gross_margin_pct per month",
+   true
+  ],
+  [
+   "sales_marketing per month",
+   true
+  ],
+  [
+   "rnd per month",
+   true
+  ],
+  [
+   "ga per month",
+   true
+  ],
+  [
+   "ebitda per month",
+   true
+  ],
+  [
+   "3-month average burn",
+   true
+  ],
+  [
+   "runway in months",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 5,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1878,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1072
+ },
+ "deliverables": [],
+ "render": null
+}
