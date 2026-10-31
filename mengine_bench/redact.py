@@ -77,11 +77,15 @@ def redact_secrets(text: str) -> str:
 _EMAIL = re.compile(r"(?<![\w.%+\-])[A-Za-z0-9._%+\-]+@(?!(?:users\.noreply\.github\.com|example\.(?:com|org|net))\b)"
                     r"[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}\b")
 
+# Claude Code lists the account's connectors when a session starts (#57).
+_CONNECTOR = re.compile(r"mcp__claude_ai_\w+|claude\.ai [A-Z][\w ]*\w(?=\\*\")")
+
 
 def redact_text(text: str) -> str:
     # Images first: a long base64 run could otherwise be read as a token.
     # Emails are text-only: a workspace file keeping one is not dropped (re-grading needs it).
-    return _EMAIL.sub(REDACTED.format(kind="email"), redact_secrets(redact_images(text)))
+    text = _CONNECTOR.sub(REDACTED.format(kind="connector"), redact_secrets(redact_images(text)))
+    return _EMAIL.sub(REDACTED.format(kind="email"), text)
 
 
 def find_secrets(text: str) -> list[str]:
@@ -221,9 +225,10 @@ def redact_paths(text: str, scope: PathScope) -> str:
 
 def find_leaks(text: str, names: LocalNames | None = None) -> dict[str, int]:
     """Count per kind of what redaction should have removed: secret patterns,
-    e-mail addresses, home paths, local names and secret env values (empty when clean)."""
+    e-mail addresses, connector names, home paths, local names and secret env values (empty when clean)."""
     counts = {kind: len(pattern.findall(text)) for kind, pattern in SECRET_PATTERNS}
     counts["email"] = len(_EMAIL.findall(text))
+    counts["connector"] = len(_CONNECTOR.findall(text))
     counts["home path"] = sum(len(pattern.findall(text)) for pattern in (_WINDOWS_HOME, _UNIX_HOME, _SLUG_HOME))
     for kind, _, pattern in (names or LocalNames()).patterns():
         counts[kind] = counts.get(kind, 0) + len(pattern.findall(text))

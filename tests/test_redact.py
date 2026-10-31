@@ -92,3 +92,19 @@ def test_git_author_name_is_redacted_as_a_whole_token() -> None:
     names = LocalNames(person="Dana Quill")
     text = "Author: Dana Quill <x@y.z>; Dana Quillfeather stays"
     assert redact_paths(text, PathScope(names=names)) == "Author: <NAME> <x@y.z>; Dana Quillfeather stays"
+
+
+def test_connector_names_of_the_account_are_redacted() -> None:
+    # Claude Code lists them when a session starts: they tell which services the submitter connected.
+    line = ('{"tools":["Read","mcp__claude_ai_Gmail__create_draft","mcp__mengine-cu__browser"],'
+            '"mcp_servers":[{"name":"claude.ai Google Drive","status":"connected"},{"name":"mengine-cu"}]}')
+    assert find_leaks(line) == {"connector": 2}
+    cleaned = redact_text(line)
+    assert find_leaks(cleaned) == {}
+    for private in ("Gmail", "Google Drive"):
+        assert private not in cleaned
+    assert "mcp__mengine-cu__browser" in cleaned and '"Read"' in cleaned
+
+
+def test_a_mention_of_the_site_is_not_a_connector() -> None:
+    assert find_leaks("See claude.ai for details, or Claude Docs.") == {}
