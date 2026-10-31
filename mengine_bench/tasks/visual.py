@@ -12,6 +12,7 @@ art-history topic that keeps the Mondrian visual brief.
 
 from __future__ import annotations
 
+import colorsys
 import html as html_lib
 import re
 import unicodedata
@@ -38,6 +39,13 @@ def _hex_colors(html: str) -> list[tuple[int, int, int]]:
         if len(h) == 3:
             h = "".join(c * 2 for c in h)
         colors.append((int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)))
+    # #59: rgb() and hsl() are colors too.
+    for match in re.finditer(r"rgba?\(\s*(\d{1,3})[\s,]+(\d{1,3})[\s,]+(\d{1,3})", html, flags=re.I):
+        colors.append((int(match.group(1)), int(match.group(2)), int(match.group(3))))
+    for match in re.finditer(r"hsla?\(\s*([\d.]+)(?:deg)?[\s,]+([\d.]+)%[\s,]+([\d.]+)%", html, flags=re.I):
+        hue, saturation, lightness = (float(part) for part in match.groups())
+        red, green, blue = colorsys.hls_to_rgb(hue / 360, lightness / 100, saturation / 100)
+        colors.append((round(red * 255), round(green * 255), round(blue * 255)))
     return colors
 
 
@@ -45,7 +53,9 @@ def _style_text(html: str) -> str:
     # #28: color words count only where they style something, not in prose like the painting's title.
     blocks = re.findall(r"<style\b[^>]*>(.*?)</style>", html, flags=re.S | re.I)
     attributes = re.findall(r"\bstyle\s*=\s*(?:\"([^\"]*)\"|'([^']*)')", html, flags=re.I)
-    return " ".join([*blocks, *(double or single for double, single in attributes)]).lower()
+    styles = " ".join([*blocks, *(double or single for double, single in attributes)]).lower()
+    # #59: "Red Hat" and "Black Ops" are fonts.
+    return re.sub(r"font(-family)?\s*:[^;}]*", "", styles)
 
 
 def _mondrian_palette(html: str) -> bool:
@@ -169,13 +179,14 @@ def _scene_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result.add("creates a WebGLRenderer", "WebGLRenderer" in html)
     result.add("animation loop", has(html, r"requestAnimationFrame|setAnimationLoop"))
     result.add("low poly or voxel geometry in the code",
-               has(html, r"(Box|Cone|Cylinder|Icosahedron|Dodecahedron|Tetrahedron)Geometry|InstancedMesh|flatShading"))
+               has(html, r"(Box|Cone|Cylinder|Icosahedron|Dodecahedron|Tetrahedron|Lathe|Plane|Sphere|Torus|Extrude|Buffer)Geometry"
+                         r"|InstancedMesh|flatShading"))
     result.add("no external models or textures", not _loaded_external_assets(html))
     return result
 
 
 # #28: a resource the page loads, not any string that ends in .png (a "fuji.png" download link is fine).
-LOADED_RESOURCE = r"(?:\.load(?:Async)?\s*\(\s*|\bsrc\s*=\s*|\burl\(\s*)[\"'`]?([^\"'`)\s>]+)"
+LOADED_RESOURCE = r"(?:\.load(?:Async)?\s*\(\s*|\bfetch\s*\(\s*|\bsrc\s*=\s*|\burl\(\s*)[\"'`]?([^\"'`)\s>]+)"
 ASSET_FILE = r"\.(glb|gltf|obj|fbx|jpe?g|png|webp|hdr|exr|ktx2)([?#].*)?$"
 
 

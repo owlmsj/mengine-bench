@@ -282,4 +282,4 @@ def test_the_agent_is_told_the_limit_and_how_it_is_graded(tmp_path: Path, monkey
     run_task(task, OpencodeAgent("m", None), tmp_path / "run")
     [prompt] = (tmp_path / "run").rglob("step-0.md")
     text = prompt.read_text(encoding="utf-8")
-    assert text.startswith("go") and "2 min" in text and "as it stands" in text
+    assert text.startswith("go") and "2 min" in text and "as they stand" in text

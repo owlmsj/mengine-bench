@@ -45,8 +45,11 @@ uv run mengine-bench tasks-doc --readme   # README task table
 uv run pytest -q
 ```
 
+Consulting the reference, the hidden tests or a published answer, from this repo or the web, gets a run
+rejected on transcript review.
+
 Adding, removing or changing a task, prompt or check is a new bench minor
-version (1.3.0): runs of different minor versions are never ranked together.
+version (1.4.0): runs of different minor versions are never ranked together.
 
 **Content rules.** No personal data, company names, secrets, tokens or absolute
 local paths in tasks or fixtures. Use neutral fictional names and public topics.

@@ -77,7 +77,7 @@ def test_judging_the_bundle_sets_one_vote_per_task(fake_agent: FakeAgent, tmp_pa
     [task] = result["tasks"]
     assert (task["judge"], task["judge_rationale"]) == (80, "solid")
     assert task["checks"] == before["tasks"][0]["checks"], "the judge never changes the checks"
-    assert result["judge"] == {"agent": "cmd", "model": "judge-x", "effort": "high", "rubric": "2.2"}
+    assert result["judge"] == {"agent": "cmd", "model": "judge-x", "effort": "high", "rubric": "2.3"}
     totals = result["totals"]
     assert totals["judge"] == 80.0
     assert totals["score"] == round(0.6 * totals["correct"] + 0.25 * 80.0 + 0.15 * totals["speed"], 1)

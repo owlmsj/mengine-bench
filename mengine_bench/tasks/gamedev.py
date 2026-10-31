@@ -272,7 +272,7 @@ if __name__ == "__main__":
 ECS_HIDDEN = '''import unittest
 
 from arena_ecs.components import Box, Position, Velocity
-from arena_ecs.systems.collision import collision_system, overlaps
+from arena_ecs.systems.collision import collision_system
 from arena_ecs.systems.movement import movement_system
 from arena_ecs.world import World
 
@@ -288,30 +288,40 @@ class MovementTests(unittest.TestCase):
         self.assertEqual((pos.x, pos.y), (6.0, 0.0))
 
 
+def pairs(world):
+    return {frozenset(pair) for pair in collision_system(world)}
+
+
+def collide(first, second):
+    world = World()
+    for (x, y), (w, h) in (first, second):
+        world.spawn(pos=Position(x, y), box=Box(w, h))
+    return bool(pairs(world))
+
+
 class CollisionTests(unittest.TestCase):
     def test_overlap_matrix(self):
-        a = (Position(0, 0), Box(2, 2))
+        a = ((0, 0), (2, 2))
         cases = [((1, 1), True), ((2, 0), False), ((0, 2), False), ((-1.5, 1.5), True),
                  ((0, 3), False), ((0, -1.9), True), ((-2, 0), False), ((0, -2), False)]
-        for (x, y), expected in cases:
-            self.assertEqual(overlaps(a[0], a[1], Position(x, y), Box(2, 2)), expected, (x, y))
+        for at, expected in cases:
+            self.assertEqual(collide(a, (at, (2, 2))), expected, at)
 
     def test_different_box_sizes(self):
-        a = (Position(0, 0), Box(2, 2))
+        a = ((0, 0), (2, 2))
         cases = [((-3, 0), (4, 1), True), ((-1.5, 0), (1, 1), False),
                  ((0, -3), (1, 4), True), ((0, -1.5), (1, 1), False)]
-        for (x, y), (w, h), expected in cases:
-            b = (Position(x, y), Box(w, h))
-            self.assertEqual(overlaps(*a, *b), expected, (x, y, w, h))
-            self.assertEqual(overlaps(*b, *a), expected, (x, y, w, h))
+        for at, size, expected in cases:
+            self.assertEqual(collide(a, (at, size)), expected, (at, size))
+            self.assertEqual(collide((at, size), a), expected, (at, size))
 
     def test_collision_pairs(self):
         world = World()
         a = world.spawn(pos=Position(0, 2), box=Box(1, 1))
         b = world.spawn(pos=Position(0, 0), box=Box(1, 1))
-        self.assertEqual(collision_system(world), [])
+        self.assertEqual(pairs(world), set())
         world.entities[a]["pos"].y = 0
-        self.assertEqual(collision_system(world), [(a, b)])
+        self.assertEqual(pairs(world), {frozenset((a, b))})
 
 
 if __name__ == "__main__":

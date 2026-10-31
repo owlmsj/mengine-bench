@@ -28,7 +28,7 @@ from pathlib import Path
 
 from mengine_bench.core import CheckResult, EvalTask
 from mengine_bench.runner import process
-from mengine_bench.runner.agents import Agent, AgentError, Usage, sum_usage
+from mengine_bench.runner.agents import Agent, AgentError, Usage, sum_usage, partial_answer
 from mengine_bench.runner.stats import RunStats, merge_stats, stream_stats
 
 # Browser user-data dirs an agent left in the workspace; their cache files can
@@ -44,8 +44,8 @@ BROWSER_PROFILE_DIRS = frozenset({"_browser-profile", ".browser-profile", "brows
 WORKSPACE_RULES = ("Use any tool you have. Read and write local files only inside this directory.\n"
                    "Do not print credentials, environment variables or personal data: this session is published.\n")
 # #41: without this a model can plan until the limit and leave nothing to grade.
-TIME_LIMIT_NOTE = ("\n\nYou have {minutes} min for this step. The folder is graded as it stands when time runs out, "
-                   "so write a first complete version early.")
+TIME_LIMIT_NOTE = ("\n\nYou have {minutes} min for this step. The folder and your reply so far are graded as they stand "
+                   "when time runs out, so deliver a first complete version early.")
 COPY_IGNORE = shutil.ignore_patterns(".git", "tmp", "__pycache__", "_render")
 
 
@@ -117,7 +117,7 @@ def snapshot(workspace: Path) -> dict[str, bytes]:
     files: dict[str, bytes] = {}
     for path in sorted(workspace.rglob("*")):
         rel = path.relative_to(workspace)
-        if any(part in BROWSER_PROFILE_DIRS for part in rel.parts) or not path.is_file():
+        if any(part in BROWSER_PROFILE_DIRS or part == "__pycache__" for part in rel.parts) or not path.is_file():
             continue
         try:
             files[rel.as_posix()] = path.read_bytes()
@@ -129,10 +129,12 @@ def snapshot(workspace: Path) -> dict[str, bytes]:
 def run_task(task: EvalTask, agent: Agent, root: Path, fresh_root: Path | None = None) -> TaskRunRecord:
     """`fresh_root` hosts fresh-session workspaces (default: system temp)."""
     root.mkdir(parents=True, exist_ok=False)
-    workspace = root / "step-0"
-    workspace.mkdir()
+    # #59: alone in a temp root. Next to prompts and transcripts, in a folder named step-0 under the task id, three
+    # runs delivered to `../` and the document an answer-only task hides stayed one `..` away.
+    workspace = _isolated_workspace(fresh_root)
     task.setup(workspace)
-    record = TaskRunRecord(task_id=task.id, initial_files=snapshot(workspace))
+    initial_files = {**snapshot(workspace), "AGENTS.md": WORKSPACE_RULES.encode("utf-8")}
+    record = TaskRunRecord(task_id=task.id, initial_files=initial_files)
     workspace_index = 0
     for index, step in enumerate(task.steps):
         try:
@@ -142,7 +144,7 @@ def run_task(task: EvalTask, agent: Agent, root: Path, fresh_root: Path | None =
                 workspace, workspace_index = fresh, index
             prompt = render_prompt(task, index, workspace, root / "hidden" / str(index))
             prompt += TIME_LIMIT_NOTE.format(minutes=f"{task.timeout_s / 60:g}")
-            (workspace / "AGENTS.md").write_text(WORKSPACE_RULES, encoding="utf-8")
+            (workspace / "AGENTS.md").write_text(WORKSPACE_RULES, encoding="utf-8", newline="")
             _run_step(agent, task, workspace, root, index, prompt, record)
         except StepFailed as failure:
             record.status, record.error = failure.status, str(failure)
@@ -155,15 +157,19 @@ def run_task(task: EvalTask, agent: Agent, root: Path, fresh_root: Path | None =
     return record
 
 
+def _isolated_workspace(fresh_root: Path | None) -> Path:
+    workspace = Path(tempfile.mkdtemp(prefix="mengine-bench-fresh-", dir=fresh_root)) / "workspace"
+    workspace.mkdir()
+    return workspace
+
+
 def fresh_workspace(previous: Path, carry: tuple[str, ...], fresh_root: Path | None) -> Path:
     """New workspace holding only `carry` from `previous`, under its own temp root.
 
     A carried path the agent never wrote is skipped: the next step then fails
     on its own merits instead of the runner crashing.
     """
-    base = Path(tempfile.mkdtemp(prefix="mengine-bench-fresh-", dir=fresh_root))
-    target = base / "workspace"
-    target.mkdir()
+    target = _isolated_workspace(fresh_root)
     for relative in carry:
         source = previous / relative
         dest = target / relative
@@ -194,7 +200,8 @@ def _run_step(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: 
 def _step_env(workspace: Path, extra: Mapping[str, str] | None) -> dict[str, str]:
     """Caller env plus PWD=<workspace>: opencode 2.0.29 trusts PWD over the process cwd
     (cli/src/run/run.ts:73), and Popen(cwd=...) does not update PWD."""
-    return {**os.environ, "PWD": str(workspace.resolve()), **(extra or {})}
+    # #59: bytecode took 16,463 of the 19,198 characters a judge saw, and the suites the prompts ask for write it.
+    return {**os.environ, "PWD": str(workspace.resolve()), "PYTHONDONTWRITEBYTECODE": "1", **(extra or {})}
 
 
 def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: int, prompt: str,
@@ -220,6 +227,10 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: in
     stats = stream_stats(result.stdout)
     if result.timed_out:
         message = f"step {label} exceeded the {task.timeout_s}s timeout"
+        # #59: a reply already given counts, or an answer-only task would zero at the limit.
+        reply = partial_answer(result.stdout)
+        if reply:
+            record.answers.append(reply)
         record.steps.append(StepRecord(index, result.wall_s, None, "timeout", message, stats=stats))
         raise StepFailed("timeout", message)
     try:

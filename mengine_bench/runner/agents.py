@@ -179,6 +179,29 @@ def _require_exit_zero(exit_code: int) -> None:
         raise AgentError(f"received exit={exit_code}; expected exit=0")
 
 
+def partial_answer(stdout: str) -> str:
+    """The last reply in a stream stopped at its limit; plain output is its own reply."""
+    events = split_jsonl(stdout)
+    replies: list[object] = []
+    known = False
+    for event in events:
+        kind = event.get("type")
+        known = known or kind in ("text", "step_start", "step_finish", "tool_use", "assistant", "user", "turn.started",
+                                  "turn.completed", "item.completed", "thread.started", "system")
+        part, message, item = event.get("part"), event.get("message"), event.get("item")
+        if kind == "text" and isinstance(part, dict):
+            replies.append(part.get("text"))
+        if kind == "assistant" and isinstance(message, dict) and isinstance(message.get("content"), list):
+            replies += [block.get("text") for block in message["content"]
+                        if isinstance(block, dict) and block.get("type") == "text"]
+        if kind == "item.completed" and isinstance(item, dict) and item.get("type") == "agent_message":
+            replies.append(item.get("text"))
+    texts = [reply for reply in replies if isinstance(reply, str) and reply.strip()]
+    if texts:
+        return texts[-1]
+    return "" if known else stdout
+
+
 def parse_claude_stream(stdout: str, exit_code: int) -> Parsed:
     _require_exit_zero(exit_code)
     events = split_jsonl(stdout)

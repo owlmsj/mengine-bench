@@ -5,7 +5,7 @@ judge/<task>.json (prompts, answers, workspace diff, transcript tail, checks,
 all redacted) and each declared deliverable verbatim (redacted) under
 judge/<task>/<file>. The maintainer runs this while reviewing the result pull
 request, so contributors need no judge and every ranked run is judged the
-same way: one rubric 2.2 vote per task. For a task whose deliverable is an
+same way: one rubric 2.3 vote per task. For a task whose deliverable is an
 HTML page, the stored page is rendered headless in a temp dir and the judge
 sees the screenshot, kept as judge/<task>.png for audit; a blank or failed
 render scores that task's judge 0, unless the run was stopped at its limit:

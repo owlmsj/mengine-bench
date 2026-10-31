@@ -21,6 +21,7 @@ from mengine_bench.core import (
     Step,
     close,
     has,
+    only_number,
     read_json,
     write,
 )
@@ -144,25 +145,18 @@ def _wiki_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     got = read_json(ws, "answers.json")
     got = got if isinstance(got, dict) else {}
-    # #28: "Build 0.14.3" and "v0.14.3" name the same build.
-    build = re.sub(r"^\s*(build\s*)?v?", "", str(got.get("build", "")), flags=re.IGNORECASE).strip()
-    result.add("build with the BUG-4471 fix", build == WIKI_GOLD["build"])
-    result.add("who approved that build",
-               has(str(got.get("approver", "")), r"^\s*alice sato\s*(\([^()]*\))?\s*$"))
-    result.add("ranked max on the current Neoplastic", close(_first_number(got.get("neoplastic_ranked_max")), 10, 0))
-    result.add("flag reverted in PM-12", str(got.get("flag")) == WIKI_GOLD["flag"])
-    result.add("restored value", close(_first_number(got.get("restored_value")), 120, 0))
+    # #28, #59: every way of naming the one build, and no other build next to it.
+    builds = re.findall(r"\d+\.\d+\.\d+(?:\.\d+)?(?:-\w+)?", str(got.get("build", "")))
+    result.add("build with the BUG-4471 fix", builds == [WIKI_GOLD["build"]])
+    approver = str(got.get("approver", ""))
+    result.add("who approved that build", has(approver, r"^\s*alice sato\s*(\([^()]*\)|,[^,]*)?\s*$")
+               and not has(approver, r"bruno|carla"))
+    result.add("ranked max on the current Neoplastic", close(only_number(got.get("neoplastic_ranked_max")), 10, 0))
+    result.add("flag reverted in PM-12", str(got.get("flag")).strip(" `'\"") == WIKI_GOLD["flag"])
+    result.add("restored value", close(only_number(got.get("restored_value")), 120, 0))
     cited = _cited_paths(got.get("sources"))
     result.add("sources cited", all(_is_cited(src, cited) for src in WIKI_SOURCES))
     return result
-
-
-def _first_number(value: object) -> object:
-    # #28: "10 players" and "120 ms" carry the number with its unit.
-    if not isinstance(value, str):
-        return value
-    match = re.search(r"-?\d+(\.\d+)?", value)
-    return match.group(0) if match else value
 
 
 def _cited_paths(sources: object) -> list[str]:
@@ -228,7 +222,8 @@ def _log_lines(day: int) -> list[str]:
         lines.append("2026-06-02 03:18:05 FATAL watchdog: server unresponsive for 20s, restarting")
         lines.append("2026-06-02 03:52:10 INFO backup rotation freed 38.2 GB on /data")
         lines.append(f"{OUTAGE_END:%Y-%m-%d %H:%M:%S} INFO server ready, accepting players")
-        lines.sort()
+    # Day 1 too: the planted RCON line went in out of order (#59).
+    lines.sort()
     return lines
 
 
@@ -253,7 +248,7 @@ def _logs_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     got = got if isinstance(got, dict) else {}
     result.add("incident start", str(got.get("start", "")).replace("T", " ") == exp["start"])
     result.add("incident end", str(got.get("end", "")).replace("T", " ") == exp["end"])
-    result.add("minutes down", close(got.get("minutes_down"), float(str(exp["minutes_down"])), 0.05))
+    result.add("minutes down", close(got.get("minutes_down"), float(str(exp["minutes_down"])), 0.011))
     result.add("June availability",
                close(got.get("availability_june_pct"), float(str(exp["availability_june_pct"])), 0.001))
     result.add("SLO 99.9 met", got.get("slo_999_ok") is exp["slo_999_ok"])
@@ -262,9 +257,12 @@ def _logs_check(ws: Path, answers: Sequence[str]) -> CheckResult:
 
 
 # #26, #28: every storage noun and every way of saying "full" name the same cause.
-DISK_FULL_CAUSE = (r"(disk|disco|volume|partition|mount|file\s?system|storage|/data)\b.{0,40}"
-                   r"(full|cheio|fill|capacity|exhaust|100(\.0+)?\s?%|space|espa)"
-                   r"|out of (disk |storage )?space|ran out of (disk|space|storage)|no space left|\benospc\b")
+# #59: "space" alone also fits "the disk had free space", which rules the cause out.
+_STORAGE = r"(disk|disco|volume|partition|mount|file\s?system|storage|/data)"
+_FULL = r"(full|cheio|fill\w*|capacity|exhaust\w*|100(\.0+)?\s?%|sem espa\w*)"
+DISK_FULL_CAUSE = (rf"{_STORAGE}\b.{{0,40}}{_FULL}|\b{_FULL}.{{0,40}}{_STORAGE}"
+                   r"|out of (disk |storage )?space|ran out of (disk|space|storage)|no space left"
+                   r"|(not enough|insufficient|without|no) (free |disk )?space|\benospc\b")
 # #28: "the disk was not full; ...RCON" names the disk only to rule it out. The negation must sit right
 # before "full"/"the cause": "couldn't save because the disk was full" still names the disk.
 DISK_FULL_NEGATION = r"(\bnot|\bnever|n't)\s+(\w+\s+){0,2}?(full|out of|the (root )?cause)"

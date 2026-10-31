@@ -22,6 +22,8 @@ from mengine_bench.core import (
     Step,
     answer_json,
     close,
+    has,
+    only_number,
     write,
 )
 
@@ -73,13 +75,14 @@ def _changelog_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     gold = _changelog()[1]
     got = answer_json(answers)
-    builds = {key: re.sub(r"^(?:build\s*|v\s*)", "", str(got.get(key, "")).strip(), flags=re.IGNORECASE)
-              for key in ("build_change", "build_revert")}
-    result.add("build that changed recoil_multiplier (not _ads)", builds["build_change"] == gold["build_change"])
-    result.add("build that reverted it", builds["build_revert"] == gold["build_revert"])
+    # #59: the format is the judge's to grade; here it counts that the answer names that one build.
+    texts = {key: json.dumps(got.get(key, "")) for key in ("build_change", "build_revert")}
+    builds = {key: [] if has(text, r"\bnot") else re.findall(r"\d+\.\d+\.\d+", text) for key, text in texts.items()}
+    result.add("build that changed recoil_multiplier (not _ads)", builds["build_change"] == [gold["build_change"]])
+    result.add("build that reverted it", builds["build_revert"] == [gold["build_revert"]])
     result.add("revert date", str(got.get("revert_date")) == gold["revert_date"])
     result.add("revert approver", str(got.get("revert_approver", "")).strip().lower() == str(gold["revert_approver"]).lower())
-    result.add("builds between the two (exclusive)", close(got.get("builds_between"), 162, 0))
+    result.add("builds between the two (exclusive)", close(only_number(got.get("builds_between")), 162, 0))
     return result
 
 
@@ -100,16 +103,18 @@ def _copy_assets(ws: Path, *names: str) -> None:
 def _gpu_name(value: object) -> str:
     # #28: the chart labels say "B200"; "NVIDIA B200" or "A100 GPU" name the same bar.
     name = "".join(str(value or "").split()).upper()
-    return re.sub(r"GPU$", "", re.sub(r"^NVIDIA", "", name))
+    return re.sub(r"GPU$", "", re.sub(r"^(NVIDIA)?(TESLA)?", "", name))
 
 
 def _chart_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     got = answer_json(answers)
-    result.add("GPU with the highest TPS", _gpu_name(got.get("top_gpu")) == "B200")
-    result.add("value of the tallest bar", close(got.get("top_tps"), 210, 0))
-    result.add("GPU with the lowest TPS", _gpu_name(got.get("bottom_gpu")) == "A100")
-    result.add("ratio top/bottom (2 decimals)", close(got.get("ratio"), 2.96, 0.005))
+    # #59: read from the axis, so the values take a reading margin of a fifth of a grid step. The 8k bars answer
+    # differently, and the old chart printed sorted values that no run in 16 got wrong.
+    result.add("GPU with the highest TPS at 256k", _gpu_name(got.get("top_gpu")) == "H200")
+    result.add("value of that bar", close(only_number(got.get("top_tps")), 180, 10))
+    result.add("GPU with the lowest TPS at 256k", _gpu_name(got.get("bottom_gpu")) == "4090")
+    result.add("ratio top/bottom", close(only_number(got.get("ratio")), 6.0, 1.2))
     return result
 
 
@@ -132,9 +137,10 @@ TASKS = [
         provenance="ChartQA style bar chart (golden image chart.png)",
         summary="Read a bar chart to identify the fastest and slowest GPUs and compare their speeds.",
         setup=lambda ws: _copy_assets(ws, "chart.png"), check=_chart_check,
-        reference=lambda ws: [json.dumps({"top_gpu": "B200", "top_tps": 210, "bottom_gpu": "A100", "ratio": 2.96})],
+        reference=lambda ws: [json.dumps({"top_gpu": "H200", "top_tps": 180, "bottom_gpu": "4090", "ratio": 6.0})],
         timeout_s=120,
-        steps=(Step("Keys: top_gpu, top_tps, bottom_gpu, ratio (top_tps / bottom_tps, 2 decimals). " + VISION_PROMPT,
+        steps=(Step("Use only the 256k context bars. Keys: top_gpu (highest TPS), top_tps (its value), bottom_gpu "
+                    "(lowest TPS), ratio (top TPS / bottom TPS). " + VISION_PROMPT,
                     attach=("images/chart.png",)),),
     ),
 ]

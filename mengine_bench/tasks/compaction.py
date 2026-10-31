@@ -71,14 +71,21 @@ HANDOFF_KEYS = [
     "[agent] Pending: update the evals README, which still cites check_vision.ps1 (the file no longer exists).",
 ]
 HANDOFF_GOLD = {
-    "file_line": r"\bstart_server\.ps1\D{0,12}165\b",
-    "final_decode": r"(?<![\w.,+-])38(?:[.,]0+)?(?!\w|[.,]\d)",
+    "file_line": r"\bstart_server\.ps1\b.{0,40}?\b165\b",
+    # #59: the value with a unit glued to it counts; the superseded 37.8 next to it does not.
+    "final_decode": r"^(?!.*37[.,]8)(?=.*(?<![\w.,+-])38(?:[.,]0+)?(?!\d|[.,]\d))",
     "final_vram_mib": r"(?<![\w.,+-])7697(?:[.,]0+)?(?!\w|[.,]\d)",
-    "discarded_quant": r"\bQ6(?:_K)?\b",
-    # #28: the README with what is wrong in it (an action, or the stale check_vision reference).
-    "pending": r"(?=.*\bREADME\b)(?=.*\b(?:update|fix|remove|edit|replace|check_vision))",
-    "measure_command": r"(?=.*\bmeasure_decode\.ps1\b)(?=.*\b131072\b)(?=.*\b1024\b)",
+    "discarded_quant": r"\bQ6(?:_?K)?\b",
+    # #28, #59: the README with what is wrong in it, in any wording, and not another README.
+    "pending": r"^(?!.*\broot\b)(?=.*\bREADME\b)"
+               r"(?=.*\b(?:update|fix|remove|edit|replace|check_vision|evals|stale|out of date))",
+    # #59: both numbers, and not swapped between the flags.
+    "measure_command": r"^(?!.*-Ctx[\s:=]+1024\b)(?!.*-NPredict[\s:=]+131072\b)"
+                       r"(?=.*\bmeasure_decode\.ps1\b)(?=.*\b131072\b)(?=.*\b1024\b)",
 }
+
+
+HANDOFF_LIMIT = 1000
 
 
 def _handoff_setup(ws: Path) -> None:
@@ -87,13 +94,16 @@ def _handoff_setup(ws: Path) -> None:
 
 def _handoff_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
-    _summary_check(result, read(ws, "HANDOFF.md"), 1500, ["--no-mmproj-offload", "7697"])
+    _summary_check(result, read(ws, "HANDOFF.md"), HANDOFF_LIMIT, ["--no-mmproj-offload", "-ub 512", "7697"])
     got = answer_json(answers)
-    vram = re.search(r"[-+]?(?:\d+(?:[.,]\d*)?|[.,]\d+)(?:[eE][-+]?\d+)?", str(got.get("final_vram_mib", "")))
-    got["final_vram_mib"] = vram.group() if vram else ""
+    # #59: "7,697 MiB" and "Q5 at 7697 MiB" hold the value. The first MiB-sized number is the answer, so
+    # "7697 (7881 was the spill)" passes and "7881, corrected to 7697" does not.
+    numbers = re.findall(r"\d+(?:\.\d+)?", re.sub(r"(?<=\d),(?=\d{3}\b)", "", str(got.get("final_vram_mib", ""))))
+    vram = next((number for number in numbers if float(number) >= 1000), None)
+    got["final_vram_mib"] = vram or ""
     for key, pattern in HANDOFF_GOLD.items():
         result.add(f"answer {key}", has(str(got.get(key, "")), pattern))
-    result.add("does not repeat the spilled VRAM as final", vram is not None and not close(vram.group(), 7881, 0))
+    result.add("does not repeat the spilled VRAM as final", vram is not None and not close(vram, 7881, 0))
     return result
 
 
@@ -123,7 +133,7 @@ TASKS = [
         provenance="Agent debugging-session handoff on a local LLM server; native retention rules",
         summary="Summarize a debugging session, then answer questions using only that summary.",
         setup=_handoff_setup, check=_handoff_check, reference=_handoff_reference, timeout_s=120,
-        steps=_two_steps("session/transcript.md", "HANDOFF.md", 1500,
+        steps=_two_steps("session/transcript.md", "HANDOFF.md", HANDOFF_LIMIT,
                          "Keys: file_line (where the recipe was applied), final_decode, final_vram_mib, "
                          "discarded_quant, pending, measure_command."),
     ),

@@ -1,4 +1,4 @@
-# Scoring (bench 1.2)
+# Scoring (bench 1.3)
 
 A run of an agent (harness + model + configuration) gets three numbers folded into
 the Score, and a Cost kept apart.
@@ -13,7 +13,7 @@ the Score, and a Cost kept apart.
 | **Cost** | USD estimate of inference, with its basis. A separate column: no points per dollar. |
 
 The formulas live in `mengine_bench/scoring.py`. Runs compare when they ran the
-same bench major.minor (1.2.x); a patch release changes no task, prompt or score. A run is one sample:
+same bench major.minor (1.3.x); a patch release changes no task, prompt or score. A run is one sample:
 runs within 1 point of each other at the top get a repeat before anyone calls a winner. Rankings of older
 versions stay in LEADERBOARD.md as history, with the Scores of their own formula.
 
@@ -28,9 +28,10 @@ untouched", or the page file exists).
 - A timeout stops the agent and grades the workspace as the limit found it. A gate on
   the page's size does not apply there, so a page cut short earns the checks it passes, up to
   half of the task; a gate that guards the tests still does. The task shows as `timeout`, counts its full time and
-  is never Solved. With nothing written, there is nothing for the checks to credit.
-- Each prompt states the limit, 2 to 8 min per step, and that the folder is graded as it stands
-  when time runs out. Load a local model before the run: a cold load counts against the first task.
+  is never Solved. A reply already given when the limit hits counts as the reply. With nothing written or
+  said, there is nothing for the checks to credit.
+- Each prompt states the limit, 2 to 8 min per step, and that the folder and the reply are graded as they
+  stand when time runs out. Load a local model before the run: a cold load counts against the first task.
 - **Solved** = the agent finished, and every gate and every check passed.
 
 Visual tasks (`web-mondrian-landing`, `3d-voxel-landscape`) are graded the same
@@ -42,7 +43,7 @@ is a declared deliverable that the bundle keeps verbatim for the judge.
 `mengine-bench judge results/<run>` (maintainer only) runs one judge, Claude
 `claude-opus-5-5` at effort `xhigh`, exactly once per task. A call that fails or
 returns invalid JSON is retried; if a task still has no vote, nothing is written.
-Rubric 2.2 grades what the checks cannot see. The check results are shown to
+Rubric 2.3 grades what the checks cannot see. The check results are shown to
 the judge as context with the instruction not to re-score correctness.
 
 | Criterion | Points |

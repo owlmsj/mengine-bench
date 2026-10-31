@@ -95,7 +95,8 @@ def _ab_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result.add("deduplicated session counts", close(got.get("sessions_a"), exp["sessions_a"], 0) and close(got.get("sessions_b"), exp["sessions_b"], 0))
     result.add("completion rates", close(got.get("rate_a"), float(exp["rate_a"]), 1e-3) and close(got.get("rate_b"), float(exp["rate_b"]), 1e-3))
     result.add("absolute and relative lift", close(got.get("abs_lift"), float(exp["abs_lift"]), 1e-3) and close(got.get("rel_lift"), float(exp["rel_lift"]), 2e-3))
-    result.add("two-proportion z-test p-value", close(got.get("p_value"), float(exp["p_value"]), max(1e-3, float(exp["p_value"]) * 0.05)))
+    # Four decimals asked: a one-sided 0.0001 is another method, not rounding (#59).
+    result.add("two-proportion z-test p-value", close(got.get("p_value"), float(exp["p_value"]), 6e-5))
     result.add("ship decision", got.get("ship_b") is exp["ship_b"])
     result.add("mean match minutes", close(got.get("mean_minutes_a"), float(exp["mean_minutes_a"]), 0.02) and close(got.get("mean_minutes_b"), float(exp["mean_minutes_b"]), 0.02))
     return result
@@ -251,7 +252,7 @@ def _recon_check(ws: Path, answers: Sequence[str]) -> CheckResult:
         result.add(label, ids == RECON[key])
     mism = got.get("mismatched")
     valid_mismatches = isinstance(mism, list) and all(isinstance(m, dict) for m in mism)
-    mism = [m for m in mism if m.get("id") not in RECON["duplicated"]] if valid_mismatches else []
+    mism = mism if valid_mismatches else []
     ids = sorted(str(m.get("id")) for m in mism)
     result.add("mismatched amounts", valid_mismatches and ids == RECON["mismatched"])
     invoiced = {i: v for i, _, v in _invoices()}
