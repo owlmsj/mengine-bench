@@ -1,0 +1,53 @@
+{
+ "task_id": "ds-ab-playtest",
+ "prompts": [
+  "Read {WS}/telemetry/README.md and analyze {WS}/telemetry/playtest_ab.csv. Write {WS}/ab_result.json with the keys sessions_a, sessions_b, rate_a, rate_b (tutorial completion), abs_lift (B-A), rel_lift ((B-A)/A), p_value (two-sided two-proportion z-test with pooled variance), ship_b (true if p<0.05 and B>A), mean_minutes_a, mean_minutes_b. Counts are integers; ship_b is a JSON boolean. Rates, lifts and p_value are fractions (0-1) with 4 decimals; mean minutes use 2 decimals. Write your files inside {WS}. Do not ask for confirmation."
+ ],
+ "answers": [
+  "\n\n[goal] A/B analysis of tutorial completion, write `ab_result.json`.\n\n[action] Read `telemetry/README.md`; per its ETL notes, deduped by `session_id` (70 resend rows dropped, 0 field conflicts) and normalized `variant` (strip + lowercase) in `tmp/analyze_ab.py`; ran pooled two-proportion z-test, then re-verified the arithmetic in an independent one-liner.\n\n[result] `ab_result.json` (in the step-0 dir):\n```json\n{\n  \"sessions_a\": 900, \"sessions_b\": 900,\n  \"rate_a\": 0.38, \"rate_b\": 0.4667,\n  \"abs_lift\": 0.0867, \"rel_lift\": 0.2281,\n  \"p_value\": 0.0002, \"ship_b\": true,\n  \"mean_minutes_a\": 13.85, \"mean_minutes_b\": 15.54\n}\n```\nEvidence: 1870 raw rows → 1800 unique sessions (342/900 vs 420/900 completions); independent check gives pooled p=0.423333, z=3.721, p=0.000198 → 0.0002. B wins on completion (+8.7pp, +22.8% relative) and session length (15.54 vs 13.85 min), so `ship_b` = true.\n\n[next] None; ready to ship B if the product call is yours to make."
+ ],
+ "diff": "A AGENTS.md\nA ab_result.json\nA tmp/analyze_ab.py\n\n--- AGENTS.md ---\nUse any tool you have. Read and write local files only inside this directory.\r\nDo not print credentials, environment variables or personal data: this session is published.\r\n\n\n--- ab_result.json ---\n{\r\n  \"sessions_a\": 900,\r\n  \"sessions_b\": 900,\r\n  \"rate_a\": 0.38,\r\n  \"rate_b\": 0.4667,\r\n  \"abs_lift\": 0.0867,\r\n  \"rel_lift\": 0.2281,\r\n  \"p_value\": 0.0002,\r\n  \"ship_b\": true,\r\n  \"mean_minutes_a\": 13.85,\r\n  \"mean_minutes_b\": 15.54\r\n}\r\n\n\n--- tmp/analyze_ab.py ---\n# A/B analysis for Pixel Arena tutorial (telemetry/playtest_ab.csv)\n# Per README: dedupe by session_id (ETL resends), normalize variant (strip/lower).\nimport csv, json, math\nfrom collections import OrderedDict\n\npath = \"telemetry/playtest_ab.csv\"\nsessions = OrderedDict()\ndup_conflicts = 0\nwith open(path, newline=\"\", encoding=\"utf-8\") as f:\n    for row in csv.DictReader(f):\n        sid = row[\"session_id\"].strip()\n        rec = (row[\"variant\"].strip().lower(),\n               int(row[\"completed_tutorial\"]),\n               float(row[\"match_minutes\"]))\n        if sid in sessions:\n            if sessions[sid] != rec:\n                dup_conflicts += 1\n            continue\n        sessions[sid] = rec\n\nif any(v not in (\"a\", \"b\") for v, _, _ in sessions.values()):\n    raise SystemExit(\"unexpected variant values: \" +\n                     str(sorted({v for v, _, _ in sessions.values()})))\n\ndef arm(arm_name):\n    rows = [(c, m) for v, c, m in sessions.values() if v == arm_name]\n    n = len(rows)\n    k = sum(c for c, _ in rows)\n    rate = k / n\n    mean_min = sum(m for _, m in rows) / n\n    return n, k, rate, mean_min\n\nna, ka, rate_a, mean_a = arm(\"a\")\nnb, kb, rate_b, mean_b = arm(\"b\")\n\n# two-sided two-proportion z-test, pooled variance\np_pool = (ka + kb) / (na + nb)\nse = math.sqrt(p_pool * (1 - p_pool) * (1 / na + 1 / nb))\nz = (rate_b - rate_a) / se\np_value = math.erfc(abs(z) / math.sqrt(2))  # 2*(1-Phi(|z|))\n\nabs_lift = rate_b - rate_a\nrel_lift = abs_lift / rate_a\nship_b = bool(p_value < 0.05 and rate_b > rate_a)\n\nresult = {\n    \"sessions_a\": na,\n    \"sessions_b\": nb,\n    \"rate_a\": round(rate_a, 4),\n    \"rate_b\": round(rate_b, 4),\n    \"abs_lift\": round(abs_lift, 4),\n    \"rel_lift\": round(rel_lift, 4),\n    \"p_value\": round(p_value, 4),\n    \"ship_b\": ship_b,\n    \"mean_minutes_a\": round(mean_a, 2),\n    \"mean_minutes_b\": round(mean_b, 2),\n}\nwith open(\"ab_result.json\", \"w\", encoding=\"utf-8\") as f:\n    json.dump(result, f, indent=2)\n    f.write(\"\\n\")\n\nprint(\"raw rows:\", na + nb + dup_conflicts and sum(1 for _ in open(path, encoding='utf-8')) - 1)\nprint(\"duplicate rows dropped:\", sum(1 for _ in open(path, encoding='utf-8')) - 1 - (na + nb))\nprint(\"duplicate-row field conflicts:\", dup_conflicts)\nprint(\"z =\", round(z, 4))\nprint(json.dumps(result, indent=2))",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ python tmp\\analyze_ab.py\n$ python -c \"import math; ka,kb,na,nb=342,420,900,900; p=(ka+kb)/(na+nb); se=math.sqrt(p*(1-p)*(1/na+1/nb)); z=(kb/nb-ka/na)/se; print('k_a',ka,'k_b',kb,'p_pool',round(p,6),'z',round(z,4),'p',round(math.erfc(abs(z)/math.sqrt(2)),6))\"\n\nStream tail:\n: 900,\\r\\n3:   \\\"sessions_b\\\": 900,\\r\\n4:   \\\"rate_a\\\": 0.38,\\r\\n5:   \\\"rate_b\\\": 0.4667,\\r\\n6:   \\\"abs_lift\\\": 0.0867,\\r\\n7:   \\\"rel_lift\\\": 0.2281,\\r\\n8:   \\\"p_value\\\": 0.0002,\\r\\n9:   \\\"ship_b\\\": true,\\r\\n10:   \\\"mean_minutes_a\\\": 13.85,\\r\\n11:   \\\"mean_minutes_b\\\": 15.54\\r\\n12: }\\r\"}],\"providerCall\":{\"executed\":false},\"providerResult\":{\"executed\":false},\"rawInput\":\"{\\\"path\\\": \\\"<WORKSPACE>\\\\\\\\ab_result.json\\\"}\"},\"time\":{\"start\":1793462438522,\"end\":1793462438552}}}}\n\n{\"type\":\"tool_use\",\"timestamp\":1793462438810,\"sessionID\":\"ses_e6d4f3495ffevLk7bdxlNmU0O2\",\"part\":{\"partID\":\"prt_192b10a7d0014KcaZf2BAnu5Aj\",\"sessionID\":\"ses_e6d4f3495ffevLk7bdxlNmU0O2\",\"messageID\":\"msg_192b0fba3001J5GjMYd502Ch7a\",\"type\":\"tool\",\"id\":\"call_00636b01c10d4f1c8e1ee667\",\"tool\":\"shell\",\"state\":{\"status\":\"completed\",\"input\":{\"command\":\"python -c \\\"import math; ka,kb,na,nb=342,420,900,900; p=(ka+kb)/(na+nb); se=math.sqrt(p*(1-p)*(1/na+1/nb)); z=(kb/nb-ka/na)/se; print('k_a',ka,'k_b',kb,'p_pool',round(p,6),'z',round(z,4),'p',round(math.erfc(abs(z)/math.sqrt(2)),6))\\\"\",\"workdir\":\"<WORKSPACE>\"},\"output\":\"k_a 342 k_b 420 p_pool 0.423333 z 3.721 p 0.000198\\r\\n\",\"title\":\"shell\",\"metadata\":{\"metadata\":{\"status\":\"completed\",\"truncated\":false,\"exit\":0},\"content\":[{\"type\":\"text\",\"text\":\"k_a 342 k_b 420 p_pool 0.423333 z 3.721 p 0.000198\\r\\n\"}],\"providerCall\":{\"executed\":false},\"providerResult\":{\"executed\":false},\"rawInput\":\"{\\\"command\\\": \\\"python -c \\\\\\\"import math; ka,kb,na,nb=342,420,900,900; p=(ka+kb)/(na+nb); se=math.sqrt(p*(1-p)*(1/na+1/nb)); z=(kb/nb-ka/na)/se; print('k_a',ka,'k_b',kb,'p_pool',round(p,6),'z',round(z,4),'p',round(math.erfc(abs(z)/math.sqrt(2)),6))\\\\\\\"\\\", \\\"workdir\\\": \\\"<WORKSPACE>\\\"}\"},\"time\":{\"start\":1793462438525,\"end\":1793462438810}}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793462438812,\"sessionID\":\"ses_e6d4f3495ffevLk7bdxlNmU0O2\",\"part\":{\"id\":\"prt_192b10b9c001H6OZB6EQxi13c7\",\"sessionID\":\"ses_e6d4f3495ffevLk7bdxlNmU0O2\",\"messageID\":\"msg_192b0fba3001J5GjMYd502Ch7a\",\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"cost\":0,\"tokens\":{\"input\":353,\"output\":612,\"reasoning\":0,\"cache\":{\"read\":10752,\"write\":0}}}}\n\n{\"type\":\"step_start\",\"timestamp\":1793462439338,\"sessionID\":\"ses_e6d4f3495ffevLk7bdxlNmU0O2\",\"part\":{\"id\":\"prt_192b10daa001HTEg86Lw7o82JI\",\"sessionID\":\"ses_e6d4f3495ffevLk7bdxlNmU0O2\",\"messageID\":\"msg_192b10ba1001biOUzyNn5Z184V\",\"type\":\"step-start\"}}\n\n{\"type\":\"text\",\"timestamp\":1793462442612,\"sessionID\":\"ses_e6d4f3495ffevLk7bdxlNmU0O2\",\"part\":{\"id\":\"prt_192b10ba1001biOUzyNn5Z184V_text-0\",\"sessionID\":\"ses_e6d4f3495ffevLk7bdxlNmU0O2\",\"messageID\":\"msg_192b10ba1001biOUzyNn5Z184V\",\"type\":\"text\",\"text\":\"\\n\\n[goal] A/B analysis of tutorial completion, write `ab_result.json`.\\n\\n[action] Read `telemetry/README.md`; per its ETL notes, deduped by `session_id` (70 resend rows dropped, 0 field conflicts) and normalized `variant` (strip + lowercase) in `tmp/analyze_ab.py`; ran pooled two-proportion z-test, then re-verified the arithmetic in an independent one-liner.\\n\\n[result] `ab_result.json` (in the step-0 dir):\\n```json\\n{\\n  \\\"sessions_a\\\": 900, \\\"sessions_b\\\": 900,\\n  \\\"rate_a\\\": 0.38, \\\"rate_b\\\": 0.4667,\\n  \\\"abs_lift\\\": 0.0867, \\\"rel_lift\\\": 0.2281,\\n  \\\"p_value\\\": 0.0002, \\\"ship_b\\\": true,\\n  \\\"mean_minutes_a\\\": 13.85, \\\"mean_minutes_b\\\": 15.54\\n}\\n```\\nEvidence: 1870 raw rows → 1800 unique sessions (342/900 vs 420/900 completions); independent check gives pooled p=0.423333, z=3.721, p=0.000198 → 0.0002. B wins on completion (+8.7pp, +22.8% relative) and session length (15.54 vs 13.85 min), so `ship_b` = true.\\n\\n[next] None; ready to ship B if the product call is yours to make.\",\"time\":{\"start\":1793462438835,\"end\":1793462442612}}}\n\n",
+ "checks": [
+  [
+   "deduplicated session counts",
+   true
+  ],
+  [
+   "completion rates",
+   true
+  ],
+  [
+   "absolute and relative lift",
+   true
+  ],
+  [
+   "two-proportion z-test p-value",
+   true
+  ],
+  [
+   "ship decision",
+   true
+  ],
+  [
+   "mean match minutes",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 6,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1992,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1057
+ },
+ "deliverables": [],
+ "render": null
+}
