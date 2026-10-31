@@ -67,7 +67,7 @@ def run_tasks(tasks: Sequence[EvalTask], agent: Agent, settings: RunSettings, wo
             evidence.packets[task.id] = _crash_packet(task, record)
         details[task.id] = detail
         outcomes.append(_outcome(task, record))
-        correct = record.check.score if record.check is not None and record.status == "ok" else 0.0
+        correct = 0.0 if record.status == "crash" else _correctness(record)
         print(f"[{task.id}] {record.status} c={correct:.2f} t={record.agent_s:.1f}s", flush=True)
     run = score_run(outcomes, settings.price)
     meta = RunMeta(date=datetime.now().strftime("%Y-%m-%d"), agent=agent.name, model=settings.model,

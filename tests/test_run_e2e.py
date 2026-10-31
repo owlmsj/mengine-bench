@@ -253,7 +253,13 @@ def test_a_thin_page_at_the_limit_gets_partial_credit(tmp_path: Path) -> None:
     assert empty.partial_score == 0.0
     write(tmp_path, visual.SCENE, '<script src="https://cdn.jsdelivr.net/npm/three@0.170.0/x.js"></script>WebGLRenderer')
     thin = visual._scene_check(tmp_path, [""])
-    assert thin.score == 0.0 and 0.0 < thin.partial_score < 1.0
+    # This stub passes 2 of 5 checks and the live one passed 4; either way it earns at most half.
+    assert thin.score == 0.0 and 0.0 < thin.partial_score <= 0.5
+    stub = CheckResult(mandatory=[("page", False)], checks=[("a", True), ("b", True), ("c", True), ("d", False)],
+                       waived_at_limit=("page",))
+    assert stub.partial_score == 0.5
+    whole = CheckResult(mandatory=[("page", True)], checks=[("a", True), ("b", True), ("c", True), ("d", False)])
+    assert whole.partial_score == 0.75
     task = next(item for item in catalog.all_tasks() if item.id == "3d-voxel-landscape")
     stopped = TaskRunRecord(task_id=task.id, status="timeout", check=thin)
     finished = TaskRunRecord(task_id=task.id, status="ok", check=thin)

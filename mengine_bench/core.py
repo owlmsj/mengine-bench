@@ -40,6 +40,9 @@ class Step:
     carry: tuple[str, ...] = ()
 
 
+WAIVED_GATE_CAP = 0.5
+
+
 @dataclass
 class CheckResult:
     checks: list[tuple[str, bool]] = field(default_factory=list)
@@ -70,10 +73,15 @@ class CheckResult:
 
     @property
     def partial_score(self) -> float:
-        """Correctness of a run stopped at its limit: the same share, without the waived gates."""
-        if not self.checks or not all(ok or name in self.waived_at_limit for name, ok in self.mandatory):
+        """Correctness of a run stopped at its limit: the same share, at most half when a waived gate failed.
+
+        A live one-line stub passed 4 of 5 checks, and stopping there must not pay like a finished page (#41).
+        """
+        failed = [name for name, ok in self.mandatory if not ok]
+        if not self.checks or any(name not in self.waived_at_limit for name in failed):
             return 0.0
-        return sum(ok for _, ok in self.checks) / len(self.checks)
+        share = sum(ok for _, ok in self.checks) / len(self.checks)
+        return min(share, WAIVED_GATE_CAP) if failed else share
 
     def failed(self) -> list[str]:
         return [name for name, ok in [*self.mandatory, *self.checks] if not ok]

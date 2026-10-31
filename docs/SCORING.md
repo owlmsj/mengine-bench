@@ -25,8 +25,8 @@ untouched", or the page file exists).
 - `c_i` = share of the task's scored checks that passed.
 - Any failed gate gives `c_i = 0`. A crash gives `c_i = 0`.
 - A timeout stops the agent and grades the workspace as the limit found it. A gate on
-  the page's size does not apply there, so a page cut short earns the checks it passes; a
-  gate that guards the tests still does. The task shows as `timeout`, counts its full time and
+  the page's size does not apply there, so a page cut short earns the checks it passes, up to
+  half of the task; a gate that guards the tests still does. The task shows as `timeout`, counts its full time and
   is never Solved. With nothing written, there is nothing for the checks to credit.
 - Each prompt states the limit, 2 to 8 min per step, and that the folder is graded as it stands
   when time runs out. Load a local model before the run: a cold load counts against the first task.
