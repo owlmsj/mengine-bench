@@ -8,7 +8,8 @@ judged runs of the current bench version are ranked.
 
 | # | Score | Correct % | Solved | Judge | Time | Timeouts | Cost | Tokens | Generated | Turns | Agent | Model | Effort | Hardware | Config | Submitter | Date | Run |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | **87.3** | 93.6 | 11/14 | 72.7 | 29 min 35 s | 0 | n/a | 48.51M | 163.2k | 508 | opencode opencode v2.2.2 | deepseek/deepseek-flash | none | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=deepseek-api, model=DeepSeek V4.1 Flash, quant=f... | owlmsj | 2026-10-31 | [run](results/2026-10-31_opencode_deepseek-deepseek-flash_none_0fe71678/summary.md) |
+| 1 | **87.8** | 95.2 | 13/14 | 70.4 | 7 min 28 s | 0 | n/a | 0.94M | 19.0k | 84 | opencode opencode v2.2.2 | zai/glm-5.3 | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=zai-api, model=GLM 5.3, quant=full-weights-api, ... | owlmsj | 2026-10-31 | [run](results/2026-10-31_opencode_zai-glm-5.3_low_7194f168/summary.md) |
+| 2 | **87.3** | 93.6 | 11/14 | 72.7 | 29 min 35 s | 0 | n/a | 48.51M | 163.2k | 508 | opencode opencode v2.2.2 | deepseek/deepseek-flash | none | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=deepseek-api, model=DeepSeek V4.1 Flash, quant=f... | owlmsj | 2026-10-31 | [run](results/2026-10-31_opencode_deepseek-deepseek-flash_none_0fe71678/summary.md) |
 
 ## Not ranked
 
