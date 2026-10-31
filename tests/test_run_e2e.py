@@ -206,3 +206,36 @@ def test_judge_evidence_lists_the_shell_commands_of_every_harness() -> None:
         {"type": "text", "part": {"text": "no command here"}},
     ])
     assert agent_commands("banner\n" + stream) == ["python -m unittest", "pytest -q", "ls"]
+
+
+def test_a_step_stopped_at_its_limit_still_grades_and_measures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """#39: the deliverable counts as the limit found it, and the partial stream still gives statistics."""
+    from mengine_bench.runner import process
+    from mengine_bench.runner.agents import OpencodeAgent
+    from mengine_bench.run_command import _outcome
+    from mengine_bench.scoring import score_run
+
+    def setup(ws: Path) -> None:
+        (ws / "page.html").write_text("delivered", encoding="utf-8")
+
+    def check(ws: Path, answers: list[str]) -> CheckResult:
+        result = CheckResult()
+        result.add("page delivered", read(ws, "page.html") == "delivered")
+        return result
+
+    task = EvalTask(id="limit", category="test", provenance="test", summary="test", setup=setup, check=check,
+                    reference=lambda ws: [""], steps=(Step("go"),))
+    stream = "\n".join(json.dumps(event) for event in (
+        {"type": "step_start", "timestamp": 1000},
+        {"type": "tool_use", "timestamp": 2000, "part": {"tool": "write", "state": {"status": "completed",
+                                                                                     "input": {"path": "page.html"}}}},
+        {"type": "step_finish", "timestamp": 3000, "part": {"tokens": {"input": 5, "output": 7, "reasoning": 3}}},
+    ))
+    result = process.ProcessResult(stream, "", None, True, 900.0)
+    monkeypatch.setattr(process, "run_process", lambda *args, **kwargs: result)
+    record = run_task(task, OpencodeAgent("m", None), tmp_path / "run")
+    assert record.status == "timeout" and record.usage is None
+    assert (record.stats.tool_calls, record.stats.file_writes, record.stats.generated_tokens) == (1, 1, 10)
+    assert record.stats.first_write_s == 1.0
+    run = score_run([_outcome(task, record)])
+    assert (run.correct, run.solved, run.time_s) == (100.0, 0, 900.0)

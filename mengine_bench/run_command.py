@@ -17,8 +17,9 @@ from mengine_bench.bundle import bench_commit
 from mengine_bench.core import EvalTask
 from mengine_bench.judge import JudgeContext, workspace_diff
 from mengine_bench.environment import collect_environment
-from mengine_bench.report import RunMeta, TaskDetail, build_results, usage_record
+from mengine_bench.report import RunMeta, TaskDetail, build_results, stats_summary, usage_record
 from mengine_bench.runner.agents import Agent, split_jsonl
+from mengine_bench.runner.stats import stats_record
 from mengine_bench.runner.task_run import TaskRunRecord, run_task, snapshot
 from mengine_bench.scoring import Price, TaskOutcome, score_run
 
@@ -106,7 +107,8 @@ def _judge_context(task: EvalTask, record: TaskRunRecord, root: Path) -> JudgeCo
     checks = () if record.check is None else (*record.check.mandatory, *record.check.checks)
     return JudgeContext(task_id=task.id, prompts=tuple(step.prompt for step in task.steps),
                         answers=tuple(record.answers), diff=workspace_diff(record.initial_files, after),
-                        transcript_tail=tail, checks=tuple(checks))
+                        transcript_tail=tail, checks=tuple(checks), status=record.status,
+                        stats=stats_summary(stats_record(record.stats)))
 
 
 def _judge_packet(task: EvalTask, record: TaskRunRecord, root: Path) -> dict[str, object]:
@@ -165,7 +167,7 @@ def _detail(task: EvalTask, record: TaskRunRecord) -> TaskDetail:
                 "usage": usage_record(s.usage)} for s in record.steps],
         grading_s=record.grading_s, checks=checks,
         flags=[] if record.status == "ok" else [record.status], error=_public_error(record.error, record),
-        answers=list(record.answers), usage=usage_record(record.usage),
+        answers=list(record.answers), usage=usage_record(record.usage), stats=record.stats,
     )
 
 

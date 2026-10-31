@@ -85,7 +85,7 @@ class EvalTask:
     check: Check
     reference: Reference
     needs: frozenset[str] = frozenset()
-    timeout_s: int = 300
+    timeout_s: int = 900
     # Workspace files stored verbatim in the bundle for the maintainer's judge
     # (visual tasks: the page it renders).
     deliverables: tuple[str, ...] = ()

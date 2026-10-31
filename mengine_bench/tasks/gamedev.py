@@ -354,7 +354,7 @@ TASKS = [
         id="gd-astar-doors", category="gamedev",
         provenance="Terminal-Bench style: implement + hidden tests; A* with weighted doors on a Pixel Arena tile map",
         summary="Implement the cheapest route across a game map where doors cost more to cross.",
-        setup=_astar_setup, check=_astar_check, reference=_astar_reference, timeout_s=300,
+        setup=_astar_setup, check=_astar_check, reference=_astar_reference, timeout_s=900,
         steps=(Step("In {WS}/pathfind.py implement find_path as the docstring says (minimum cost, not just fewest steps). "
                     "Run `python -m unittest test_pathfind` in {WS}. " + RULES),),
     ),
@@ -362,7 +362,7 @@ TASKS = [
         id="gd-ecs-collision-bug", category="gamedev",
         provenance="SWE-bench style debug: two planted bugs across an ECS package; visible tests must stay untouched",
         summary="Fix movement and box collision bugs in a small game codebase without changing its tests.",
-        setup=_ecs_setup, check=_ecs_check, reference=_ecs_reference, timeout_s=300,
+        setup=_ecs_setup, check=_ecs_check, reference=_ecs_reference, timeout_s=900,
         steps=(Step("The package {WS}/arena_ecs has failing tests in {WS}/tests. Find the root cause and fix the code "
                     "(do not change the tests). Run `python -m unittest discover -s tests` with cwd {WS}. " + RULES),),
     ),

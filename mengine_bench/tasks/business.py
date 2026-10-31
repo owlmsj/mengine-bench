@@ -273,7 +273,7 @@ TASKS = [
         id="ds-ab-playtest", category="data-science",
         provenance="Pixel Arena playtest A/B (arena-panel telemetry); two-proportion z-test on a dirty export",
         summary="Compare two game tutorials using player data and decide which one to release.",
-        setup=_ab_setup, check=_ab_check, reference=_ab_reference, timeout_s=300,
+        setup=_ab_setup, check=_ab_check, reference=_ab_reference, timeout_s=900,
         steps=(Step("Read {WS}/telemetry/README.md and analyze {WS}/telemetry/playtest_ab.csv. Write {WS}/ab_result.json with "
                     "the keys sessions_a, sessions_b, rate_a, rate_b (tutorial completion), abs_lift (B-A), rel_lift "
                     "((B-A)/A), p_value (two-sided two-proportion z-test with pooled variance), ship_b (true if p<0.05 and "
@@ -284,7 +284,7 @@ TASKS = [
         id="bo-pnl-runway", category="backoffice",
         provenance="Startup monthly close: P&L from a Brazilian-format ledger (`;`, 1.234,56) + chart of accounts, burn and runway",
         summary="Calculate monthly profit, cash burn and how long the business can keep running from its ledger.",
-        setup=_pnl_setup, check=_pnl_check, reference=_pnl_reference, timeout_s=360,
+        setup=_pnl_setup, check=_pnl_check, reference=_pnl_reference, timeout_s=900,
         steps=(Step("Close the startup's half-year using {WS}/finance/ledger.csv (separator ;, Brazilian number format "
                     "1.234,56, dates dd/mm/yyyy, costs negative) and {WS}/finance/chart_of_accounts.csv. Write {WS}/pnl.csv "
                     "with header line,2026-01,...,2026-06 and these lines in this order: revenue (net of refunds), cogs, "
@@ -297,7 +297,7 @@ TASKS = [
         id="bo-reconcile", category="backoffice",
         provenance="Accounts receivable reconciliation: invoices vs bank statement with PIX/TED memo variants and noise",
         summary="Match invoices to bank payments and report missing, duplicate or incorrect payments.",
-        setup=_recon_setup, check=_recon_check, reference=_recon_reference, timeout_s=300,
+        setup=_recon_setup, check=_recon_check, reference=_recon_reference, timeout_s=900,
         steps=(Step("Reconcile {WS}/backoffice/invoices.csv with {WS}/backoffice/bank_statement_june.csv (the memo cites "
                     "the invoice in different formats; ignore fees, interest and PIX transfers without an identifiable "
                     "invoice). Write {WS}/reconciliation.json with unpaid (ids without payment), duplicated (ids paid more "

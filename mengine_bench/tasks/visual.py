@@ -249,7 +249,7 @@ TASKS = [
         summary="Build a Mondrian-style landing page about one painting from a local fact sheet, in one request.",
         setup=_landing_setup, check=_landing_check,
         reference=lambda ws: _ship(ws, LANDING, LANDING_REFERENCE),
-        timeout_s=900, deliverables=(LANDING,),
+        timeout_s=1800, deliverables=(LANDING,),
         steps=(Step("Read {WS}/FACTSHEET.md: the facts about Piet Mondrian's painting \"Composition with Red, Blue "
                     "and Yellow\" (1930) and the De Stijl movement. Create {WS}/landing/index.html: a single-file "
                     "landing page (HTML + inline CSS; Google Fonts allowed; no frameworks) telling its story, with "
@@ -264,7 +264,7 @@ TASKS = [
         summary="Build a three.js low poly or voxel scene of Mount Fuji with a pagoda and cherry trees, in one request.",
         setup=lambda ws: None, check=_scene_check,
         reference=lambda ws: _ship(ws, SCENE, SCENE_REFERENCE),
-        timeout_s=900, deliverables=(SCENE,),
+        timeout_s=1800, deliverables=(SCENE,),
         steps=(Step("Create {WS}/scene/index.html: a single-file 3D scene with three.js 0.170.0 loaded from "
                     f"{THREE_URL} (an import map is fine), in low poly or voxel style, showing the classic view of "
                     "Mount Fuji with the Chureito pagoda (red, five tiers) and cherry trees in bloom in the "

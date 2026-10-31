@@ -1,4 +1,4 @@
-# Scoring (bench 1.0)
+# Scoring (bench 1.1)
 
 A run of an agent (harness + model + configuration) gets two grades, kept apart,
 and two measurements that are never folded into the score.
@@ -12,7 +12,7 @@ and two measurements that are never folded into the score.
 | **Cost** | USD estimate of inference, with its basis. A separate column: no points per dollar. |
 
 The formulas live in `mengine_bench/scoring.py`. Runs compare when they ran the
-same bench major.minor (1.0.x); a patch release changes no task, prompt or score.
+same bench major.minor (1.1.x); a patch release changes no task, prompt or score.
 
 ## Checks: c_i
 
@@ -21,8 +21,10 @@ state, regex) and may have mandatory gates (for example "existing tests
 untouched", or the page file exists).
 
 - `c_i` = share of the task's scored checks that passed.
-- Any failed gate gives `c_i = 0`. A crash or a timeout gives `c_i = 0`.
-- **Solved** = every gate and every check passed.
+- Any failed gate gives `c_i = 0`. A crash gives `c_i = 0`.
+- A timeout stops the agent and grades the workspace as the limit found it. The task
+  shows as `timeout`, counts its full time and is never Solved.
+- **Solved** = the agent finished, and every gate and every check passed.
 
 Visual tasks (`web-mondrian-landing`, `3d-voxel-landscape`) are graded the same
 way at run time: content gates only, no browser and no vision model. The page
@@ -33,7 +35,7 @@ is a declared deliverable that the bundle keeps verbatim for the judge.
 `mengine-bench judge results/<run>` (maintainer only) runs one judge, Claude
 `claude-opus-5-5` at effort `xhigh`, exactly once per task. A call that fails or
 returns invalid JSON is retried; if a task still has no vote, nothing is written.
-Rubric 2.0 grades what the checks cannot see. The check results are shown to
+Rubric 2.1 grades what the checks cannot see. The check results are shown to
 the judge as context with the instruction not to re-score correctness.
 
 | Criterion | Points |
@@ -46,6 +48,32 @@ For a visual task the maintainer's machine renders the stored page with headless
 Chromium (Edge, Chrome or Chromium; `MENGINE_BENCH_BROWSER` overrides it) and the
 judge sees the screenshot. A blank or failed render gives that task a judge of 0.
 The judge never changes the checks.
+
+The judge also sees the task's status and its run statistics (see below), except
+time and speed: they depend on the hardware, and the judge grades without knowing
+the model or the machine.
+
+## Run statistics
+
+Read from the harness's event stream, per task and in total, including a task
+stopped at its limit. They are never folded into Score; they are kept so the
+formula can be refined later from many runs.
+
+| Field | What it is |
+| --- | --- |
+| `model_turns`, `tool_calls`, `tool_errors` | Turns of the model, tool calls, tool calls that failed |
+| `shell_commands`, `shell_failures` | Shell tool calls, and those with a non-zero exit |
+| `file_writes` | Write and edit tool calls |
+| `repeated_tool_calls` | Calls identical to an earlier one in the same step |
+| `outside_path_uses` | Tool inputs that hold `../` or `..\\` |
+| `input_tokens`, `cached_input_tokens` | Prompt tokens, and the part read from cache |
+| `generated_tokens`, `reasoning_tokens` | Everything generated, reasoning included, and the reasoning part |
+| `largest_turn_tokens` | The largest single turn |
+| `first_tool_s`, `first_write_s`, `last_event_s` | Seconds from the first event; opencode only |
+| `tool_s`, `wait_s` | Time in tools, and between turns (prefill, queue); opencode only |
+| `turn_tps_median` | Median generated tokens per second, turns of 500 tokens or more; opencode only |
+
+A value a harness does not report is `null`, never 0.
 
 Isolation: each call is a new judge process in a new empty temp directory
 (holding only `screenshot.png` for visual tasks) with tools off where the CLI

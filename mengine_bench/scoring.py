@@ -1,7 +1,8 @@
 """Run totals; the formulas are docs/SCORING.md verbatim (#23).
 
 - Correct % = 100 * mean(c_i) over the tasks, c_i = share of scored checks
-  passed (0 on a failed gate, a crash or a timeout).
+  passed (0 on a failed gate or a crash). A timeout keeps what was delivered, is
+  never Solved and counts its full time.
 - Judge = mean of the one rubric vote per task, 0-100 (set by `mengine-bench judge`).
 - Score = 0.7 * Correct + 0.3 * Judge, from the published one-decimal values.
 - Time = total agent wall seconds; Cost = USD with its basis. Neither is folded
@@ -195,10 +196,11 @@ def _task_cost(usages: Sequence[Usage], basis: str, price: Price | None) -> floa
 
 
 def _task_score(outcome: TaskOutcome, basis: str, price: Price | None) -> TaskScore:
-    ok = outcome.status == "ok"
     usages = _measured([outcome])
-    return TaskScore(task_id=outcome.task_id, status=outcome.status, correctness=outcome.correctness if ok else 0.0,
-                     solved=ok and outcome.solved, agent_s=outcome.agent_s, judge=outcome.judge,
+    # #39: the checks run on the workspace as the limit found it; Time already shows the cost.
+    correctness = 0.0 if outcome.status == "crash" else outcome.correctness
+    return TaskScore(task_id=outcome.task_id, status=outcome.status, correctness=correctness,
+                     solved=outcome.status == "ok" and outcome.solved, agent_s=outcome.agent_s, judge=outcome.judge,
                      cost_usd=_task_cost(usages, basis, price),
                      tokens=_tokens(usages))
 

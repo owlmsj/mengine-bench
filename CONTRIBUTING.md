@@ -46,7 +46,7 @@ uv run pytest -q
 ```
 
 Adding, removing or changing a task, prompt or check is a new bench minor
-version (1.1.0): runs of different minor versions are never ranked together.
+version (1.2.0): runs of different minor versions are never ranked together.
 
 **Content rules.** No personal data, company names, secrets, tokens or absolute
 local paths in tasks or fixtures. Use neutral fictional names and public topics.

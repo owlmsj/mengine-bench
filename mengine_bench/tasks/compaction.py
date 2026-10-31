@@ -122,7 +122,7 @@ TASKS = [
         id="cmp-handoff", category="compaction",
         provenance="Agent debugging-session handoff on a local LLM server; native retention rules",
         summary="Summarize a debugging session, then answer questions using only that summary.",
-        setup=_handoff_setup, check=_handoff_check, reference=_handoff_reference, timeout_s=360,
+        setup=_handoff_setup, check=_handoff_check, reference=_handoff_reference, timeout_s=900,
         steps=_two_steps("session/transcript.md", "HANDOFF.md", 1500,
                          "Keys: file_line (where the recipe was applied), final_decode, final_vram_mib, "
                          "discarded_quant, pending, measure_command."),

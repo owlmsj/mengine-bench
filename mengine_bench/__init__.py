@@ -1,3 +1,3 @@
 """mengine-bench: coding-agent benchmark with deterministic gold checks."""
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
