@@ -202,6 +202,8 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: in
     except OSError as error:
         record.steps.append(StepRecord(index, 0.0, None, "crash", str(error)))
         raise StepFailed("crash", f"could not start agent {call.argv[0]!r}: {error}") from error
+    if result.reaped:
+        print(f"[{task.id}] step {label}: killed {result.reaped} process(es) the agent left running", flush=True)
     (transcripts / f"step-{label}.stdout.txt").write_text(result.stdout, encoding="utf-8")
     (transcripts / f"step-{label}.stderr.txt").write_text(result.stderr, encoding="utf-8")
     if result.timed_out:

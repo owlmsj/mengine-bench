@@ -1,8 +1,8 @@
-"""Run one agent process with a hard timeout that takes its whole tree down.
+"""Run one agent process with a hard timeout, and leave nothing of it behind.
 
-Agent CLIs spawn shells, language servers and test runners; killing only the
-direct child leaves those running (and holding files in the workspace), so the
-timeout walks the tree with psutil while the parent is still alive.
+Agent CLIs spawn shells, language servers, test runners and browsers; any of
+them can outlive the agent (and hold files in the workspace), so every exit path
+kills all that the run started: see `containment`.
 Output goes to temp files, not pipes: a surviving grandchild holding an
 inherited pipe would otherwise block the read forever.
 """
@@ -18,6 +18,8 @@ from pathlib import Path
 
 import psutil
 
+from mengine_bench.runner.containment import new_scope, stop_session_group, sweep_workspace
+
 KILL_WAIT_S = 10
 
 
@@ -28,6 +30,8 @@ class ProcessResult:
     exit_code: int | None
     timed_out: bool
     wall_s: float
+    # Processes the agent left behind and the runner killed.
+    reaped: int = 0
 
 
 def kill_tree(pid: int) -> None:
@@ -49,22 +53,31 @@ def run_process(argv: Sequence[str], cwd: Path, timeout_s: float, stdin_text: st
     if not argv:
         raise ValueError(f"received argv={list(argv)!r}; expected a non-empty argument list")
     payload = stdin_text.encode("utf-8") if stdin_text is not None else None
+    scope = new_scope()
+    reaped = 0
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
         started = time.monotonic()
-        proc = subprocess.Popen(list(argv), cwd=cwd, env=dict(env) if env is not None else None,
-                                stdin=subprocess.PIPE if payload is not None else subprocess.DEVNULL,
-                                stdout=out, stderr=err)
-        timed_out = False
         try:
-            proc.communicate(input=payload, timeout=timeout_s)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            kill_tree(proc.pid)
-            proc.wait()
-        wall_s = time.monotonic() - started
+            proc = subprocess.Popen(list(argv), cwd=cwd, env=dict(env) if env is not None else None,
+                                    stdin=subprocess.PIPE if payload is not None else subprocess.DEVNULL,
+                                    stdout=out, stderr=err, **scope.popen_kwargs)
+            scope.adopt(proc)
+            timed_out = False
+            try:
+                proc.communicate(input=payload, timeout=timeout_s)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                kill_tree(proc.pid)
+                proc.wait()
+            wall_s = time.monotonic() - started
+            stop_session_group(proc.pid)
+            reaped += scope.kill_all(proc.pid)
+        finally:
+            scope.close()
+        reaped += sweep_workspace(cwd)
         out.seek(0)
         err.seek(0)
         stdout = out.read().decode("utf-8", errors="replace")
         stderr = err.read().decode("utf-8", errors="replace")
     return ProcessResult(stdout=stdout, stderr=stderr, exit_code=None if timed_out else proc.returncode,
-                         timed_out=timed_out, wall_s=wall_s)
+                         timed_out=timed_out, wall_s=wall_s, reaped=reaped)
