@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mount Fuji - Chureito Pagoda at Dusk</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1e2a52; }
+  canvas { display: block; }
+  #fallback { color: #ffd9b0; font: 14px system-ui, sans-serif; position: absolute; top: 12px; left: 12px; display: none; }
+</style>
+<script>
+  window.__errs = [];
+  window.addEventListener('error', function (e) { window.__errs.push(String(e.message || e)); });
+</script>
+<script type="importmap">
+  { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="fallback">WebGL could not start.</div>
+<script type="module">
+import * as THREE from 'three';
+
+/* ---------------- helpers: deterministic noise + rng ---------------- */
+function hash2(x, y) { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); }
+function noise2(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  return hash2(xi, yi) * (1 - u) * (1 - v) + hash2(xi + 1, yi) * u * (1 - v) +
+         hash2(xi, yi + 1) * (1 - u) * v + hash2(xi + 1, yi + 1) * u * v;
+}
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const rng = mulberry32(20261031);
+const lerp = THREE.MathUtils.lerp;
+
+/* ---------------- renderer / scene / camera ---------------- */
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0xeba77e, 0.0016);
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
+const CAM_POS = new THREE.Vector3(0, 15, 72);
+const CAM_TARGET = new THREE.Vector3(0, 26, -60);
+camera.position.copy(CAM_POS);
+camera.lookAt(CAM_TARGET);
+
+/* ---------------- dusk sky dome with sun glow ---------------- */
+const sky = new THREE.Mesh(
+  new THREE.SphereGeometry(800, 32, 16),
+  new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    depthWrite: false,
+    uniforms: {
+      topColor: { value: new THREE.Color(0x1e2a52) },
+      midColor: { value: new THREE.Color(0xb06a86) },
+      botColor: { value: new THREE.Color(0xf2a56b) },
+      sunDir:   { value: new THREE.Vector3(0.642, 0.05, -0.766).normalize() },
+      sunColor: { value: new THREE.Color(0xffb36b) }
+    },
+    vertexShader: `
+      varying vec3 vWorldPos;
+      void main() {
+        vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: `
+      varying vec3 vWorldPos;
+      uniform vec3 topColor, midColor, botColor, sunDir, sunColor;
+      void main() {
+        vec3 dir = normalize(vWorldPos);
+        float h = clamp(dir.y, 0.0, 1.0);
+        vec3 col = mix(botColor, midColor, smoothstep(0.0, 0.16, h));
+        col = mix(col, topColor, smoothstep(0.12, 0.62, h));
+        float sunAmt = max(dot(dir, sunDir), 0.0);
+        col += sunColor * (pow(sunAmt, 90.0) * 1.1 + pow(sunAmt, 7.0) * 0.30);
+        gl_FragColor = vec4(col, 1.0);
+      }`
+  })
+);
+scene.add(sky);
+
+/* sun disc near the horizon */
+const sunDisc = new THREE.Mesh(
+  new THREE.CircleGeometry(24, 28),
+  new THREE.MeshBasicMaterial({ color: 0xffd9a0, fog: false })
+);
+sunDisc.position.set(519, 40, -713);
+sunDisc.lookAt(camera.position);
+scene.add(sunDisc);
+
+/* ---------------- lights ---------------- */
+scene.add(new THREE.AmbientLight(0x55405e, 0.55));
+const hemi = new THREE.HemisphereLight(0xf0b090, 0x35406b, 0.6);
+scene.add(hemi);
+const sunLight = new THREE.DirectionalLight(0xffb27a, 2.4);
+sunLight.position.set(140, 60, 40);
+sunLight.target.position.set(0, 0, -20);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(2048, 2048);
+sunLight.shadow.camera.left = -100;
+sunLight.shadow.camera.right = 100;
+sunLight.shadow.camera.top = 100;
+sunLight.shadow.camera.bottom = -100;
+sunLight.shadow.camera.near = 10;
+sunLight.shadow.camera.far = 420;
+sunLight.shadow.bias = -0.0006;
+scene.add(sunLight, sunLight.target);
+
+/* ---------------- generic flat-shaded vertex-color painter ---------------- */
+function paintFaces(geo, colorFn) {
+  const pos = geo.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const mid = new THREE.Vector3(), col = new THREE.Color();
+  for (let i = 0; i < pos.count; i += 3) {
+    a.fromBufferAttribute(pos, i);
+    b.fromBufferAttribute(pos, i + 1);
+    c.fromBufferAttribute(pos, i + 2);
+    mid.copy(a).add(b).add(c).multiplyScalar(1 / 3);
+    colorFn(mid, col);
+    for (let k = 0; k < 3; k++) {
+      colors[(i + k) * 3] = col.r; colors[(i + k) * 3 + 1] = col.g; colors[(i + k) * 3 + 2] = col.b;
+    }
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+}
+
+/* ---------------- Mount Fuji (low poly, snow cap) ---------------- */
+const FUJI_H = 175, FUJI_R = 300;
+const fujiGeo = new THREE.ConeGeometry(FUJI_R, FUJI_H, 26, 14);
+{
+  const pos = fujiGeo.attributes.position, v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    const hn = THREE.MathUtils.clamp((v.y + FUJI_H / 2) / FUJI_H, 0, 1); // 0 base, 1 apex
+    const ang = Math.atan2(v.z, v.x);
+    const conc = Math.pow(1 - hn, 0.35);                                 // concave slopes
+    v.x *= conc; v.z *= conc;
+    const r = Math.hypot(v.x, v.z);
+    if (r > 0.001 && hn < 0.985) {
+      const n1 = noise2(Math.cos(ang) * 2.5 + 9, hn * 7 + 2);
+      const n2 = noise2(Math.sin(ang) * 2.5 + 9, hn * 6 + 11);
+      const dr = (n1 - 0.5) * 16 * (0.35 + 0.65 * hn);
+      v.x += (v.x / r) * dr; v.z += (v.z / r) * dr;
+      v.y += (n2 - 0.5) * 7 * (1 - hn * 0.7);
+    }
+    pos.setXYZ(i, v.x, v.y, v.z);
+  }
+  fujiGeo.translate(0, FUJI_H / 2, 0);
+}
+const fujiNonIdx = fujiGeo.toNonIndexed();
+paintFaces(fujiNonIdx, (m, col) => {
+  const hn = m.y / FUJI_H;
+  const jit = (noise2(m.x * 0.05 + 31, m.z * 0.05 + 17) - 0.5) * 0.09;
+  const snowLine = 0.66 + (noise2(m.x * 0.02 + 5, m.z * 0.02 + 5) - 0.5) * 0.12;
+  if (hn > snowLine) col.setRGB(0.93 + jit, 0.94 + jit, 0.99);
+  else {
+    const t = THREE.MathUtils.clamp((hn - 0.02) / 0.6, 0, 1);
+    col.setRGB(lerp(0.14, 0.28, t) + jit, lerp(0.17, 0.31, t) + jit, lerp(0.28, 0.42, t) + jit);
+  }
+});
+const fuji = new THREE.Mesh(fujiNonIdx, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }));
+fuji.position.set(0, 0, -420);
+scene.add(fuji);
+
+/* ---------------- ground ---------------- */
+function groundHeight(x, z) {
+  return noise2(x * 0.004 + 3, z * 0.004 + 8) * 9 + noise2(x * 0.02 + 1, z * 0.02 + 2) * 1.6;
+}
+const groundGeo = new THREE.PlaneGeometry(2000, 2000, 48, 48).rotateX(-Math.PI / 2);
+{
+  const pos = groundGeo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    pos.setY(i, groundHeight(pos.getX(i), pos.getZ(i)));
+  }
+}
+const groundNonIdx = groundGeo.toNonIndexed();
+paintFaces(groundNonIdx, (m, col) => {
+  const n = noise2(m.x * 0.008 + 3, m.z * 0.008 + 8);
+  const g = noise2(m.x * 0.03 + 1, m.z * 0.03 + 2);
+  col.setRGB(0.09 + n * 0.07 + g * 0.015, 0.16 + n * 0.09 + g * 0.04, 0.12 + n * 0.055);
+});
+const ground = new THREE.Mesh(groundNonIdx, new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 }));
+ground.receiveShadow = true;
+scene.add(ground);
+
+/* distant silhouette hills */
+const hillMat = new THREE.MeshStandardMaterial({ color: 0x2b3352, flatShading: true, roughness: 1 });
+for (let i = 0; i < 7; i++) {
+  const r = 80 + rng() * 90;
+  const hill = new THREE.Mesh(new THREE.ConeGeometry(r, 22 + rng() * 22, 7), hillMat);
+  hill.scale.y = 0.5;
+  hill.position.set(-520 + i * 170 + rng() * 60, 2, -250 - rng() * 90);
+  scene.add(hill);
+}
+
+/* ---------------- Chureito pagoda: red, five tiers ---------------- */
+const PAGODA_X = -26, PAGODA_Z = -30;
+const hill = new THREE.Mesh(new THREE.ConeGeometry(26, 10, 9), new THREE.MeshStandardMaterial({ color: 0x2f5138, flatShading: true, roughness: 1 }));
+hill.scale.set(1.1, 0.55, 1.1);
+hill.position.set(PAGODA_X, 2.4 + groundHeight(PAGODA_X, PAGODA_Z), PAGODA_Z);
+hill.receiveShadow = true;
+scene.add(hill);
+
+const pagoda = new THREE.Group();
+const redMat = new THREE.MeshStandardMaterial({ color: 0xb23226, flatShading: true, roughness: 0.85 });
+const roofMat = new THREE.MeshStandardMaterial({ color: 0x352f3a, flatShading: true, roughness: 0.9 });
+const darkMat = new THREE.MeshStandardMaterial({ color: 0x241b1a, flatShading: true, roughness: 0.9 });
+const goldMat = new THREE.MeshStandardMaterial({ color: 0xd9a441, flatShading: true, roughness: 0.5, metalness: 0.3 });
+{
+  let y = 7.2; // top of the hill mound
+  const base = new THREE.Mesh(new THREE.BoxGeometry(13, 1.6, 13), new THREE.MeshStandardMaterial({ color: 0x6f6a66, flatShading: true, roughness: 1 }));
+  base.position.y = y - 0.8; base.castShadow = base.receiveShadow = true;
+  pagoda.add(base);
+  for (let i = 0; i < 5; i++) {
+    const bodyW = 9.6 - i * 1.15;
+    const bodyH = 4.1 - i * 0.3;
+    const roofW = bodyW * 1.65;
+    const roofH = 3.1 - i * 0.25;
+    const body = new THREE.Mesh(new THREE.BoxGeometry(bodyW, bodyH, bodyW), redMat);
+    body.position.y = y + bodyH / 2;
+    body.castShadow = true;
+    pagoda.add(body);
+    // dark window on the camera-facing side
+    const win = new THREE.Mesh(new THREE.BoxGeometry(bodyW * 0.34, bodyH * 0.5, 0.4), darkMat);
+    win.position.set(0, y + bodyH * 0.55, bodyW / 2 + 0.02);
+    pagoda.add(win);
+    y += bodyH;
+    // balcony
+    const balc = new THREE.Mesh(new THREE.BoxGeometry(roofW * 0.92, 0.35, roofW * 0.92), darkMat);
+    balc.position.y = y + 0.18;
+    balc.castShadow = true;
+    pagoda.add(balc);
+    // hipped roof (4-sided pyramid), rotated to align corners with the box
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(roofW * 0.78, roofH, 4, 1), roofMat);
+    roof.rotation.y = Math.PI / 4;
+    roof.position.y = y + roofH / 2 + 0.2;
+    roof.scale.z = 0.92;
+    roof.castShadow = true;
+    pagoda.add(roof);
+    y += roofH + 0.15;
+  }
+  // spire
+  const spire = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.3, 4.4, 6), goldMat);
+  spire.position.y = y + 2.2;
+  pagoda.add(spire);
+  for (let k = 0; k < 3; k++) {
+    const ring = new THREE.Mesh(new THREE.SphereGeometry(0.28 - k * 0.05, 6, 5), goldMat);
+    ring.position.y = y + 1.2 + k * 0.9;
+    pagoda.add(ring);
+  }
+}
+pagoda.position.set(PAGODA_X, groundHeight(PAGODA_X, PAGODA_Z), PAGODA_Z);
+pagoda.rotation.y = 0.16;
+scene.add(pagoda);
+
+/* ---------------- cherry trees ---------------- */
+const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a352b, flatShading: true, roughness: 1 });
+const trunkGeo = new THREE.CylinderGeometry(0.28, 0.5, 3.2, 5);
+const puffGeo = new THREE.IcosahedronGeometry(1, 1);
+const blossomMats = [0xf6b8cc, 0xf9cdd9, 0xf2a3bd, 0xffd9e4].map(c =>
+  new THREE.MeshStandardMaterial({ color: c, flatShading: true, roughness: 1 })
+);
+const swaying = [];
+function makeCherry(x, z, s) {
+  const tree = new THREE.Group();
+  const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+  trunk.position.y = 1.6 * s;
+  trunk.scale.setScalar(s);
+  trunk.castShadow = true;
+  tree.add(trunk);
+  const canopy = new THREE.Group();
+  const puffs = 3 + Math.floor(rng() * 2);
+  for (let i = 0; i < puffs; i++) {
+    const puff = new THREE.Mesh(puffGeo, blossomMats[Math.floor(rng() * blossomMats.length)]);
+    const pr = (1.7 + rng() * 1.3) * s;
+    puff.scale.set(pr, pr * 0.8, pr);
+    puff.position.set((rng() - 0.5) * 2.2 * s, 3.6 * s + (rng() - 0.3) * 1.5 * s, (rng() - 0.5) * 2.2 * s);
+    puff.rotation.set(rng() * Math.PI, rng() * Math.PI, rng() * Math.PI);
+    puff.castShadow = true;
+    canopy.add(puff);
+  }
+  tree.add(canopy);
+  tree.position.set(x, groundHeight(x, z) - 0.15, z);
+  tree.rotation.y = rng() * Math.PI * 2;
+  scene.add(tree);
+  swaying.push({ node: canopy, phase: rng() * Math.PI * 2, amp: 0.02 + rng() * 0.025 });
+}
+for (let i = 0; i < 30; i++) {
+  const x = -85 + rng() * 170;
+  const z = -28 + rng() * 72;
+  const nearPagoda = Math.abs(x - PAGODA_X) < 14 && Math.abs(z - PAGODA_Z) < 14;
+  if (!nearPagoda) makeCherry(x, z, 0.8 + rng() * 0.9);
+}
+// a few small trees dotting the mid-ground near the pagoda hill
+for (let i = 0; i < 6; i++) {
+  makeCherry(PAGODA_X + (rng() - 0.5) * 70, PAGODA_Z - 25 - rng() * 40, 0.5 + rng() * 0.4);
+}
+
+/* ---------------- drifting dusk clouds ---------------- */
+const cloudMat = new THREE.MeshLambertMaterial({ color: 0xf6e3da, emissive: 0xd98a6a, emissiveIntensity: 0.25, flatShading: true });
+const clouds = [];
+for (let i = 0; i < 6; i++) {
+  const cl = new THREE.Group();
+  const n = 3 + Math.floor(rng() * 3);
+  for (let k = 0; k < n; k++) {
+    const puff = new THREE.Mesh(puffGeo, cloudMat);
+    const r = 16 + rng() * 20;
+    puff.scale.set(r, r * 0.32, r * 0.65);
+    puff.position.set(k * 16 - n * 8 + rng() * 8, rng() * 4, rng() * 10);
+    cl.add(puff);
+  }
+  const side = i % 2 === 0 ? 1 : -1;
+  cl.position.set(side * (140 + rng() * 320), 120 + rng() * 70, -260 - rng() * 260);
+  scene.add(cl);
+  clouds.push(cl);
+}
+
+/* ---------------- falling cherry petals ---------------- */
+const PETALS = 220;
+const petalPos = new Float32Array(PETALS * 3);
+const petalPhase = new Float32Array(PETALS);
+for (let i = 0; i < PETALS; i++) {
+  petalPos[i * 3] = -70 + rng() * 140;
+  petalPos[i * 3 + 1] = rng() * 26;
+  petalPos[i * 3 + 2] = -45 + rng() * 100;
+  petalPhase[i] = rng() * Math.PI * 2;
+}
+const petalGeo = new THREE.BufferGeometry();
+petalGeo.setAttribute('position', new THREE.BufferAttribute(petalPos, 3));
+const petals = new THREE.Points(petalGeo, new THREE.PointsMaterial({ color: 0xd98aa6, size: 0.26, transparent: true, opacity: 0.6, depthWrite: false }));
+scene.add(petals);
+
+/* ---------------- animation loop ---------------- */
+const clock = new THREE.Clock();
+function tick() {
+  const t = clock.getElapsedTime();
+  // subtle camera drift around the framed pose
+  camera.position.x = CAM_POS.x + Math.sin(t * 0.09) * 2.2;
+  camera.position.y = CAM_POS.y + Math.sin(t * 0.055) * 0.7;
+  camera.lookAt(CAM_TARGET);
+  // swaying blossom canopies
+  for (const s of swaying) {
+    s.node.rotation.z = Math.sin(t * 1.1 + s.phase) * s.amp;
+    s.node.rotation.x = Math.cos(t * 0.9 + s.phase) * s.amp * 0.7;
+  }
+  // drifting clouds
+  for (const cl of clouds) {
+    cl.position.x += 0.6 * (1 / 60);
+    if (cl.position.x > 480) cl.position.x = -480;
+  }
+  // falling petals
+  const pp = petalGeo.attributes.position;
+  for (let i = 0; i < PETALS; i++) {
+    let y = pp.getY(i) - 0.022;
+    if (y < 0.2) y = 26;
+    pp.setY(i, y);
+    pp.setX(i, pp.getX(i) + Math.sin(t * 0.8 + petalPhase[i]) * 0.02);
+  }
+  pp.needsUpdate = true;
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+tick();
+
+/* ---------------- resize ---------------- */
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
