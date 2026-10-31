@@ -1,0 +1,41 @@
+{
+ "task_id": "ds-sql-funnel",
+ "prompts": [
+  "In {WS}/analytics.db (SQLite: users, events) compute the funnel install -> tutorial_complete -> first_match -> purchase per platform. Rules: ignore users with is_test=1 and events whose user_id is not in users; a step only counts at or after the same user's previous step, with no time limit; use the first valid occurrence of each step. Write {WS}/funnel.csv with platform,step,users,conv_from_prev (4 decimals; 1.0 on install), platform pc first then steamdeck, steps in funnel order. Write your files inside {WS}. Do not ask for confirmation; finish and summarize in 2 lines."
+ ],
+ "answers": [
+  "Created `./funnel.csv`: pc 470 → 389 → 326 → 269; steamdeck 192 → 128 → 87 → 61.\nVerified: “PASS: SQL counts match independent per-user chronological scan; CSV readback matches all 8 rows.”"
+ ],
+ "diff": "A AGENTS.md\nA funnel.csv\n\n--- AGENTS.md ---\nUse any tool you have. Read and write local files only inside this directory.\r\nDo not print credentials, environment variables or personal data: this session is published.\r\n\n\n--- funnel.csv ---\nplatform,step,users,conv_from_prev\r\npc,install,470,1.0\r\npc,tutorial_complete,389,0.8277\r\npc,first_match,326,0.8380\r\npc,purchase,269,0.8252\r\nsteamdeck,install,192,1.0\r\nsteamdeck,tutorial_complete,128,0.6667\r\nsteamdeck,first_match,87,0.6797\r\nsteamdeck,purchase,61,0.7011\r\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command 'Get-ChildItem -Name'\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"python -c \\\"import sqlite3; c=sqlite3.connect('analytics.db'); print(c.execute('SELECT name, sql FROM sqlite_master WHERE type=\\\\'table\\\\'').fetchall())\\\"\"\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"python -c \\\"import sqlite3; c=sqlite3.connect('analytics.db'); print('timestamp_shapes', c.execute('SELECT length(ts), count(*) FROM events GROUP BY length(ts)').fetchall()); print\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"@'\nimport csv\nimport sqlite3\nfrom collections import Counter\n\nsteps = ('install', 'tutorial_complete', 'first_match', 'purchase')\nconnection = sqlite3.connect('file:analytics.db?mo\n\nStream tail:\nl_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport csv\\nimport sqlite3\\nfrom collections import Counter\\n\\nsteps = ('install', 'tutorial_complete', 'first_match', 'purchase')\\nconnection = sqlite3.connect('file:analytics.db?mode=ro', uri=True)\\nquery = '''\\nWITH installs AS (\\n SELECT u.user_id, u.platform, MIN(e.ts) AS ts\\n FROM users u JOIN events e ON e.user_id = u.user_id AND e.name = 'install'\\n WHERE COALESCE(u.is_test, 0) \\\"'!= 1\\n GROUP BY u.user_id, u.platform\\n), tutorials AS (\\n SELECT p.user_id, p.platform, MIN(e.ts) AS ts\\n FROM installs p JOIN events e ON e.user_id = p.user_id\\n AND e.name = '\\\"'tutorial_complete' AND e.ts >= p.ts\\n GROUP BY p.user_id, p.platform\\n), matches AS (\\n SELECT p.user_id, p.platform, MIN(e.ts) AS ts\\n FROM tutorials p JOIN events e ON e.user_id = p.user_id\\n AND e.name = 'first_match' AND e.ts >= p.ts\\n GROUP BY p.user_id, p.platform\\n), purchases AS (\\n SELECT p.user_id, p.platform, MIN(e.ts) AS ts\\n FROM matches p JOIN events e ON e.user_id = p.user_id\\n AND e.name = 'purchase' AND e.ts >= p.ts\\n GROUP BY p.user_id, p.platform\\n)\\nSELECT platform, 0, COUNT(*) FROM installs GROUP BY platform\\nUNION ALL SELECT platform, 1, COUNT(*) FROM tutorials GROUP BY platform\\nUNION ALL SELECT platform, 2, COUNT(*) FROM matches GROUP BY platform\\nUNION ALL SELECT platform, 3, COUNT(*) FROM purchases GROUP BY platform\\n'''\\ncounts = {(platform, index): count for platform, index, count in connection.execute(query)}\\n# Independently verify the SQL using chronological per-user event scans.\\nverified = Counter()\\nfor user_id, platform in connection.execute('SELECT user_id, platform FROM users WHERE COALESCE(is_test,0) \\\"'!= 1'\\\"'):\\n    occurrences = connection.execute('SELECT name, ts FROM events WHERE user_id = ? ORDER BY ts', (user_id,)).fetchall()\\n    previous = None\\n    for index, step in enumerate(steps):\\n        valid = [ts for name, ts in occurrences if name == step and ts is not None and (previous is None or ts >= previous)]\\n        if not valid:\\n            break\\n        previous = min(valid)\\n        verified[platform, index] += 1\\nassert counts == dict(verified), 'SQL and independent event scan disagree'\\nrows = []\\nfor platform in ('pc', 'steamdeck'):\\n    for index, step in enumerate(steps):\\n        count = counts.get((platform, index), 0)\\n        previous_count = counts.get((platform, index - 1), 0)\\n        conversion = '1.0' if index == 0 else (f'{count / previous_count:.4f}' if previous_count else '0.0000')\\n        rows.append([platform, step, str(count), conversion])\\nwith open('funnel.csv', 'w', newline='', encoding='utf-8') as output:\\n    writer = csv.writer(output)\\n    writer.writerow(['platform', 'step', 'users', 'conv_from_prev'])\\n    writer.writerows(rows)\\nwith open('funnel.csv', newline='', encoding='utf-8') as output:\\n    assert list(csv.reader(output)) == [['platform', 'step', 'users', 'conv_from_prev']] + rows\\nprint('PASS: SQL counts match independent per-user chronological scan; CSV readback matches all 8 rows.')\\nprint(open('funnel.csv', encoding='utf-8').read(), end='')\\n'@ | python -\\\"\",\"aggregated_output\":\"PASS: SQL counts match independent per-user chronological scan; CSV readback matches all 8 rows.\\r\\nplatform,step,users,conv_from_prev\\r\\npc,install,470,1.0\\r\\npc,tutorial_complete,389,0.8277\\r\\npc,first_match,326,0.8380\\r\\npc,purchase,269,0.8252\\r\\nsteamdeck,install,192,1.0\\r\\nsteamdeck,tutorial_complete,128,0.6667\\r\\nsteamdeck,first_match,87,0.6797\\r\\nsteamdeck,purchase,61,0.7011\\r\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_5\",\"type\":\"agent_message\",\"text\":\"Created `./funnel.csv`: pc 470 → 389 → 326 → 269; steamdeck 192 → 128 → 87 → 61.\\nVerified: “PASS: SQL counts match independent per-user chronological scan; CSV readback matches all 8 rows.”\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":86987,\"cached_input_tokens\":78208,\"cache_write_input_tokens\":0,\"output_tokens\":1175,\"reasoning_output_tokens\":12}}\n",
+ "checks": [
+  [
+   "platform x step rows in funnel order",
+   true
+  ],
+  [
+   "users per step",
+   true
+  ],
+  [
+   "conversion from previous step",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 4,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1175,
+  "reasoning_tokens": 12,
+  "largest_turn_tokens": 1175
+ },
+ "deliverables": [],
+ "render": null
+}
