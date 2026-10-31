@@ -299,3 +299,15 @@ def test_procedural_geometry_counts_and_a_fetched_model_does_not(tmp_path: Path)
     assert visual._scene_check(tmp_path, [""]).passed
     write(tmp_path, visual.SCENE, page + ' fetch("https://example.com/fuji.glb")')
     assert not visual._scene_check(tmp_path, [""]).passed
+
+
+def test_redacting_a_long_line_stays_linear() -> None:
+    # A live 1.3 run spent about 7 min writing its bundle: the path pattern backtracked over base64 screenshots.
+    import time
+
+    path = r"C:\\Users\\someone\\AppData\\Local\\Temp\\mengine-bench-fresh-abc123\\workspace\\a.py"
+    line = "A" * 100_000 + f' "{path}" ' + "B" * 100_000
+    started = time.perf_counter()
+    cleaned = redact_paths(line, PathScope())
+    assert time.perf_counter() - started < 2.0
+    assert "mengine-bench-fresh" not in cleaned and "someone" not in cleaned and "a.py" in cleaned
