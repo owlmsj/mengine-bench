@@ -213,11 +213,25 @@ def _dir_patterns(paths: tuple[Path, ...]) -> list[re.Pattern[str]]:
 
 
 # Every step runs in a temp workspace of its own (#59), named the same way on every machine.
-_TEMP_WORKSPACE = re.compile(r"[^\s\"'`<>|,;=()]*mengine-bench-fresh-[\w-]+" + _SEP + r"workspace", re.IGNORECASE)
+_TEMP_WORKSPACE = re.compile(r"mengine-bench-fresh-[\w-]+" + _SEP + r"workspace", re.IGNORECASE)
+_PATH_ENDS = frozenset(" \t\r\n\"'`<>|,;=()")
+
+
+def _redact_temp_workspaces(text: str) -> str:
+    """Each match walks back to where its path starts; a pattern for that prefix took minutes on base64 lines."""
+    parts: list[str] = []
+    done = 0
+    for match in _TEMP_WORKSPACE.finditer(text):
+        start = match.start()
+        while start > done and text[start - 1] not in _PATH_ENDS:
+            start -= 1
+        parts += [text[done:start], WORKSPACE]
+        done = match.end()
+    return "".join(parts) + text[done:]
 
 
 def redact_paths(text: str, scope: PathScope) -> str:
-    text = _TEMP_WORKSPACE.sub(WORKSPACE, text)
+    text = _redact_temp_workspaces(text)
     for label, paths in ((WORKSPACE, scope.workspaces), (WORKDIR, scope.workdirs)):
         for pattern in _dir_patterns(paths):
             text = pattern.sub(label, text)
