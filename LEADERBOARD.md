@@ -7,7 +7,9 @@ by the maintainer on review; the transcripts are in each bundle. Only complete,
 judged runs of the current bench version are ranked. Older rankings stay below as history:
 their Scores use that version's formula and do not compare with the table above.
 
-No results yet.
+| # | Score | Correct % | Solved | Judge | Speed | Time | Timeouts | Cost | Tokens | Generated | Turns | Agent | Model | Effort | Hardware | Config | Submitter | Date | Run |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | **85.2** | 100.0 | 14/14 | 81.1 | 33.0 | 21 min 44 s | 0 | n/a | 1.20M | 55.7k | 83 | opencode opencode v2.2.2 | zai/glm-5.3-flash | max | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=zai-api, model=GLM 5.3 Flash, quant=full-weights... | owlmsj | 2026-10-31 | [run](results/2026-10-31_opencode_zai-glm-5.3-flash_max_90249450/summary.md) |
 
 ## Bench 1.1 (history)
 
