@@ -60,6 +60,18 @@ def test_opencode_turn_without_step_finish_still_counts() -> None:
     assert record["model_turns"] == 1 and record["generated_tokens"] is None
 
 
+def test_a_relative_import_in_a_file_body_is_not_an_outside_path() -> None:
+    # A published web run counted its iframe page; the judge is told these count against the work.
+    stdout = _jsonl([
+        {"type": "step_start", "timestamp": 1000},
+        _tool(2000, "write", {"path": "src/a.js", "content": "import b from '../b.js'"}),
+        _tool(3000, "edit", {"path": "src/a.js", "oldString": "'../b.js'", "newString": "'../c.js'"}),
+        _tool(4000, "write", {"path": "../incident.json", "content": "{}"}),
+        _tool(5000, "shell", {"command": "Get-ChildItem ..\prompts"}),
+    ])
+    assert stats_record(stream_stats(stdout))["outside_path_uses"] == 2
+
+
 def test_codex_stream_counts_tools_and_leaves_times_unmeasured() -> None:
     stdout = _jsonl([
         {"type": "turn.started"},

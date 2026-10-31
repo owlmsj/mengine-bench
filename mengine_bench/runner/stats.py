@@ -19,6 +19,8 @@ WRITE_TOOLS = frozenset({"write", "edit", "multiedit", "notebookedit", "apply_pa
 # Below this a turn's rate says more about fixed latency than about generation.
 TURN_RATE_MIN_TOKENS = 500
 OUTSIDE_PATH_MARKS = ("../", "..\\")
+# Only where a tool is told where to act: a file body can hold relative imports.
+OUTSIDE_PATH_FIELDS = ("path", "file_path", "notebook_path", "workdir", "command")
 
 
 @dataclass
@@ -85,6 +87,12 @@ def _count(value: object) -> int:
     return value if type(value) is int and value >= 0 else 0
 
 
+def _names_parent_path(payload: object) -> bool:
+    fields = [payload.get(key) for key in OUTSIDE_PATH_FIELDS] if isinstance(payload, dict) else [payload]
+    text = json.dumps(fields, ensure_ascii=False).replace("\\\\", "\\")
+    return any(mark in text for mark in OUTSIDE_PATH_MARKS)
+
+
 def _note_tool(stats: RunStats, seen: set[str], name: str, payload: object, *, failed: bool = False,
                exit_code: object = None, at_s: float | None = None) -> None:
     tool = name.lower()
@@ -93,7 +101,7 @@ def _note_tool(stats: RunStats, seen: set[str], name: str, payload: object, *, f
     stats.tool_errors += failed
     stats.repeated_tool_calls += f"{tool}:{text}" in seen
     seen.add(f"{tool}:{text}")
-    stats.outside_path_uses += any(mark in text for mark in OUTSIDE_PATH_MARKS)
+    stats.outside_path_uses += _names_parent_path(payload)
     if stats.first_tool_s is None:
         stats.first_tool_s = at_s
     if tool in SHELL_TOOLS:

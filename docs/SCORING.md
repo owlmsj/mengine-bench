@@ -65,7 +65,7 @@ formula can be refined later from many runs.
 | `shell_commands`, `shell_failures` | Shell tool calls, and those with a non-zero exit |
 | `file_writes` | Write and edit tool calls |
 | `repeated_tool_calls` | Calls identical to an earlier one in the same step |
-| `outside_path_uses` | Tool inputs that hold `../` or `..\\` |
+| `outside_path_uses` | Tool paths and shell commands that hold `../` or `..\\`; a hint, since a subfolder can name its parent |
 | `input_tokens`, `cached_input_tokens` | Prompt tokens, and the part read from cache |
 | `generated_tokens`, `reasoning_tokens` | Everything generated, reasoning included, and the reasoning part |
 | `largest_turn_tokens` | The largest single turn |
