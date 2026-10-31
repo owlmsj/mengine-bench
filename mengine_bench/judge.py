@@ -1,4 +1,4 @@
-"""The maintainer's LLM judge: rubric 2.1, one vote per task, run through any agent adapter.
+"""The maintainer's LLM judge: rubric 2.2, one vote per task, run through any agent adapter.
 
 The judge grades the complement of the deterministic checks (#23): the checks
 already measure correctness, so the prompt shows them as context and the
@@ -34,7 +34,7 @@ from mengine_bench.runner.agents import Agent, AgentError
 OFFICIAL_JUDGE_MODEL = "claude-opus-5-5"
 OFFICIAL_JUDGE_EFFORT = "xhigh"
 
-RUBRIC_VERSION = "2.1"
+RUBRIC_VERSION = "2.2"
 DEFAULT_RETRIES = 2
 JUDGE_TIMEOUT_S = 600
 PROMPT_CHARS = 6_000
@@ -61,8 +61,8 @@ block."""
 MEASUREMENTS_RULES = """Trusted context, read from the run by the benchmark. Use it for approach and self-verification:
 wasted turns, repeated tool calls and failed commands count against the work; checking that ends in a finished result
 counts for it. outside_path_uses is a hint, since a path inside a subfolder can name its parent: count it against the
-work only when the transcript shows the agent left the task folder. Status timeout means the run was stopped at the time limit, so the agent
-did not finish by itself: grade what it delivered. Time and speed are left out on purpose, because hardware differs
+work only when the transcript shows the agent left the task folder. Status timeout means the run was stopped at the time limit, which the
+Score already charges: grade the approach and whatever exists, taking points only for what is missing. Time and speed are left out on purpose, because hardware differs
 between runs; do not guess at them."""
 
 REPLY_FORMAT = 'Reply with ONLY a JSON object: {"score": <integer 0-100>, "rationale": "<one short paragraph>"}'

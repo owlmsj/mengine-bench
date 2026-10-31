@@ -4,10 +4,11 @@
   passed (0 on a failed gate or a crash). A timeout keeps what was delivered, is
   never Solved and counts its full time.
 - Judge = mean of the one rubric vote per task, 0-100 (set by `mengine-bench judge`).
-- Score = 0.7 * Correct + 0.3 * Judge, from the published one-decimal values.
-- Time = total agent wall seconds; Cost = USD with its basis. Neither is folded
-  into Score. Comparability is the bench major.minor version, so there is no
-  separate scoring version, no weights and no par times.
+- Speed = 100 at 5 min of Time or less, 0 at 30 min or more, linear in between.
+- Score = 0.6 * Correct + 0.25 * Judge + 0.15 * Speed, from the published one-decimal values.
+- Time = total agent wall seconds; Cost = USD with its basis, not folded into
+  Score. Comparability is the bench major.minor version, so there is no separate
+  scoring version and no per-task weights.
 """
 
 from __future__ import annotations
@@ -19,8 +20,12 @@ from dataclasses import dataclass
 from mengine_bench.runner.agents import Usage
 
 STATUSES = ("ok", "timeout", "crash")
-CORRECT_SHARE = 0.7
-JUDGE_SHARE = 0.3
+CORRECT_SHARE = 0.6
+JUDGE_SHARE = 0.25
+SPEED_SHARE = 0.15
+# #41: a good run takes about 10 min, and 40 to 50 min is too long.
+SPEED_FULL_S = 300.0
+SPEED_ZERO_S = 1800.0
 COST_BASES = ("harness", "price", "n/a")
 PRICE_KEYS = ("input", "cached", "output")
 PRICE_FORMAT = "input=X,cached=Y,output=Z in USD per million tokens, or 0 for free/local inference"
@@ -118,6 +123,7 @@ class RunScore:
     solved: int
     total: int
     judge: float | None
+    speed: float
     score: float | None
     time_s: float
     cost: Cost
@@ -125,11 +131,17 @@ class RunScore:
     tasks: tuple[TaskScore, ...]
 
 
-def combined_score(correct: float, judge: float | None) -> float | None:
-    """Score from the published Correct % and Judge, so anyone recomputes it from the table."""
+def speed_points(time_s: float) -> float:
+    """0-100 from the run's total agent time."""
+    share = (SPEED_ZERO_S - time_s) / (SPEED_ZERO_S - SPEED_FULL_S)
+    return round(100.0 * max(0.0, min(1.0, share)), 1)
+
+
+def combined_score(correct: float, judge: float | None, speed: float) -> float | None:
+    """Score from the published Correct %, Judge and Speed, so anyone recomputes it from the table."""
     if judge is None:
         return None
-    return round(CORRECT_SHARE * correct + JUDGE_SHARE * judge, 1)
+    return round(CORRECT_SHARE * correct + JUDGE_SHARE * judge + SPEED_SHARE * speed, 1)
 
 
 def judge_mean(votes: Sequence[int | None]) -> float | None:
@@ -218,9 +230,11 @@ def score_run(outcomes: Sequence[TaskOutcome], price: Price | None = None) -> Ru
     partial = any(usage.cost_source == "partial" for usage in measured)
     correct = round(100.0 * sum(task.correctness for task in tasks) / len(tasks), 1)
     judge = judge_mean([task.judge for task in tasks])
+    time_s = round(sum(task.agent_s or 0.0 for task in tasks), 1)
+    speed = speed_points(time_s)
     return RunScore(
-        correct=correct, solved=sum(task.solved for task in tasks), total=len(tasks), judge=judge,
-        score=combined_score(correct, judge), time_s=round(sum(task.agent_s or 0.0 for task in tasks), 1),
+        correct=correct, solved=sum(task.solved for task in tasks), total=len(tasks), judge=judge, speed=speed,
+        score=combined_score(correct, judge, speed), time_s=time_s,
         cost=Cost(usd=0.0 if free else _round_usd(_usd(measured, basis, price)), basis=basis, lower_bound=unmeasured or partial),
         tokens=_tokens(measured), tasks=tasks,
     )

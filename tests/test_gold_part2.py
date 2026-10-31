@@ -209,6 +209,7 @@ def test_logs_root_cause_accepts_every_out_of_space_wording(tmp_path: Path, root
                 "postmortems/PM-12.md", True),
     # Wrong answers stay wrong.
     ("build", "0.14.2.1", False),
+    ("build", "0.14.3-rc1", False),
     ("build", "Build 0.14.2", False),
     ("approver", "Bruno Costa", False),
     ("approver", "Alice Sato and Bruno Costa", False),
@@ -224,3 +225,10 @@ def test_wiki_accepts_answer_forms_but_not_wrong_answers(tmp_path: Path, field: 
     got[field] = value
     (tmp_path / "answers.json").write_text(json.dumps(got), encoding="utf-8")
     assert ir._wiki_check(tmp_path, answers).passed is ok
+
+
+def test_wiki_approver_is_not_the_rc_decoy(tmp_path: Path) -> None:
+    # #41: the release candidate sits above the build in the table, under another name.
+    ir._wiki_setup(tmp_path)
+    table = (tmp_path / "wiki" / "releases" / "approvals.md").read_text(encoding="utf-8")
+    assert table.index("0.14.3-rc1 | Bruno Costa") < table.index("0.14.3 | Alice Sato")

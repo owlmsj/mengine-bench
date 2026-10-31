@@ -120,12 +120,12 @@ def _write_result(results: Path, name: str, score: float | None, *, model: str =
     result = {
         "date": "2026-10-19", "bench_version": bench_version, "submitter": "dquill",
         "agent": {"name": "codex", "model": model, "effort": "high", "version": "codex-cli 0.162.1"},
-        "judge": {"agent": "claude", "model": "claude-opus-5-5", "effort": "xhigh", "rubric": "2.1"} if judged else None,
+        "judge": {"agent": "claude", "model": "claude-opus-5-5", "effort": "xhigh", "rubric": "2.2"} if judged else None,
         "config": {"personal_instructions": [], "provider": "openai", "mcp": "none"},
         "environment": {"os": "Linux 6", "cpu": "AMD Ryzen 9 7950X", "cpu_count": 32, "ram_gb": 62.6,
                         "gpu": "NVIDIA GeForce RTX 4090 (24 GB)"},
         "totals": {"score": score, "correct": 80.0, "solved": 10, "total": len(ids), "judge": 70.0 if judged else None,
-                   "time_s": 1830.0, "cost_usd": 2.5, "cost_basis": "price", "cost_lower_bound": True,
+                   "speed": 0.0, "time_s": 1830.0, "cost_usd": 2.5, "cost_basis": "price", "cost_lower_bound": True,
                    "tokens": {"input": 1_500_000, "cached_input": 0, "output": 250_000, "reasoning": 0},
                    "timeouts": 1, "stats": {"generated_tokens": 3400, "model_turns": 12}},
         "tasks": [{"id": task_id} for task_id in ids],
@@ -144,11 +144,11 @@ def test_leaderboard_is_one_table_sorted_by_score_with_the_spec_columns(tmp_path
     assert board.ranked == 2 and board.unranked == []
     table = board.markdown[board.markdown.index("| # |"):]
     header = table.splitlines()[0]
-    assert header == ("| # | Score | Correct % | Solved | Judge | Time | Timeouts | Cost | Tokens | Generated | Turns | Agent | Model | Effort | "
+    assert header == ("| # | Score | Correct % | Solved | Judge | Speed | Time | Timeouts | Cost | Tokens | Generated | Turns | Agent | Model | Effort | "
                       "Hardware | Config | Submitter | Date | Run |")
     assert table.index("high-model") < table.index("low-model")
     row = table.splitlines()[2]
-    for cell in ("| 1 | **90.0** | 80.0 | 10/", "| 70.0 | 30 min 30 s | 1 | >= $2.50 (price) | 1.75M | 3.4k | 12 |",
+    for cell in ("| 1 | **90.0** | 80.0 | 10/", "| 70.0 | 0.0 | 30 min 30 s | 1 | >= $2.50 (price) | 1.75M | 3.4k | 12 |",
                  "| codex codex-cli 0.162.1 | high-model | high |", "AMD Ryzen 9 7950X, NVIDIA GeForce RTX 4090 (24 GB)",
                  "provider=openai, mcp=none", "| dquill | 2026-10-19 | [run](results/high/summary.md) |"):
         assert cell in row, (cell, row)
@@ -182,14 +182,30 @@ def test_leaderboard_ranks_the_current_major_minor_only(tmp_path: Path) -> None:
     _write_result(results, "patch", 60.0, bench_version=f"{major}.{minor}.99")
     _write_result(results, "current", 50.0)
     board = leaderboard.build_leaderboard(results, tmp_path)
-    assert board.ranked == 2
-    assert board.unranked == [("results/old", f"older bench 0.2.0; only bench {major}.{minor}.x runs are ranked")]
+    assert board.ranked == 2 and board.history == 1 and board.unranked == []
 
 
-def test_bench_is_version_1_1_x() -> None:
+def test_an_older_ranking_stays_on_the_board_as_history(tmp_path: Path) -> None:
+    # #41: the owner keeps the previous version's ranking; its Scores use that version's formula.
+    results = tmp_path / "results"
+    _write_result(results, "old-low", 40.0, model="old-low-model", bench_version="0.2.0")
+    _write_result(results, "old-high", 99.0, model="old-high-model", bench_version="0.2.1")
+    _write_result(results, "older", 70.0, model="older-model", bench_version="0.1.0")
+    _write_result(results, "old-pending", None, judged=False, bench_version="0.2.0")
+    _write_result(results, "current", 50.0, model="current-model")
+    board = leaderboard.build_leaderboard(results, tmp_path)
+    assert (board.ranked, board.history) == (1, 3)
+    text = board.markdown
+    order = [text.index(mark) for mark in ("current-model", "## Bench 0.2 (history)", "old-high-model", "old-low-model",
+                                           "## Bench 0.1 (history)", "older-model", "## Not ranked")]
+    assert order == sorted(order)
+    assert [name for name, _ in board.unranked] == ["results/old-pending"]
+
+
+def test_bench_is_version_1_2_x() -> None:
     import tomllib
     pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
-    assert __version__ == pyproject["project"]["version"] and __version__.startswith("1.1.")
+    assert __version__ == pyproject["project"]["version"] and __version__.startswith("1.2.")
 
 
 def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:
@@ -203,7 +219,7 @@ def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 0
     assert board.unranked == [("results/cheap-judge",
-                               "judged by claude claude-haiku-5-5@xhigh rubric 2.1; only claude claude-opus-5-5@xhigh rubric 2.1 judges are ranked")]
+                               "judged by claude claude-haiku-5-5@xhigh rubric 2.2; only claude claude-opus-5-5@xhigh rubric 2.2 judges are ranked")]
 
 
 @pytest.mark.parametrize("field,value", [("agent", "cmd"), ("rubric", "1.0")])

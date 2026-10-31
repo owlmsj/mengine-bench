@@ -100,6 +100,14 @@ def _visible_chars(html: str) -> int:
     return len("".join(html.split()))
 
 
+PAGE_GATE = "index.html exists with content"
+
+
+def _cut_short_page(html: str) -> tuple[str, ...]:
+    # With no page at all, a check like "no external assets" would pass on nothing (#41).
+    return (PAGE_GATE,) if html.strip() else ()
+
+
 def _landing_setup(ws: Path) -> None:
     write(ws, FACTSHEET, FACTSHEET_TEXT)
 
@@ -107,8 +115,8 @@ def _landing_setup(ws: Path) -> None:
 def _landing_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     html = _rendered_source(ws, LANDING)
     plain = _plain(html)
-    result = CheckResult(mandatory=[("index.html exists with content",
-                                     _visible_chars(html) > LANDING_MIN_VISIBLE_CHARS)])
+    result = CheckResult(mandatory=[(PAGE_GATE, _visible_chars(html) > LANDING_MIN_VISIBLE_CHARS)],
+                         waived_at_limit=_cut_short_page(html))
     result.add("has a page title and an h1", has(html, r"<title>[^<]{3,}</title>") and has(html, r"<h1\b"))
     result.add("names the painting (Composition with Red, Blue and Yellow)",
                has(plain, r"composition\s+(ii\s+)?(with|in)\s+red,?\s+blue,?\s+and\s+yellow"))
@@ -155,7 +163,7 @@ THREE_URL = THREE_PACKAGE_URL + "build/three.module.js"
 
 def _scene_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     html = _rendered_source(ws, SCENE)
-    result = CheckResult(mandatory=[("index.html exists with content", _visible_chars(html) > 2000)])
+    result = CheckResult(mandatory=[(PAGE_GATE, _visible_chars(html) > 2000)], waived_at_limit=_cut_short_page(html))
     # #28: only jsDelivr; the judge render resolves no other CDN, so unpkg would check but render blank.
     result.add("imports three.js 0.170.0 from the CDN", has(html, r"cdn\.jsdelivr\.net/npm/three@0\.170\.0/"))
     result.add("creates a WebGLRenderer", "WebGLRenderer" in html)
@@ -249,7 +257,7 @@ TASKS = [
         summary="Build a Mondrian-style landing page about one painting from a local fact sheet, in one request.",
         setup=_landing_setup, check=_landing_check,
         reference=lambda ws: _ship(ws, LANDING, LANDING_REFERENCE),
-        timeout_s=1800, deliverables=(LANDING,),
+        timeout_s=300, deliverables=(LANDING,),
         steps=(Step("Read {WS}/FACTSHEET.md: the facts about Piet Mondrian's painting \"Composition with Red, Blue "
                     "and Yellow\" (1930) and the De Stijl movement. Create {WS}/landing/index.html: a single-file "
                     "landing page (HTML + inline CSS; Google Fonts allowed; no frameworks) telling its story, with "
@@ -264,7 +272,7 @@ TASKS = [
         summary="Build a three.js low poly or voxel scene of Mount Fuji with a pagoda and cherry trees, in one request.",
         setup=lambda ws: None, check=_scene_check,
         reference=lambda ws: _ship(ws, SCENE, SCENE_REFERENCE),
-        timeout_s=1800, deliverables=(SCENE,),
+        timeout_s=480, deliverables=(SCENE,),
         steps=(Step("Create {WS}/scene/index.html: a single-file 3D scene with three.js 0.170.0 loaded from "
                     f"{THREE_URL} (an import map is fine), in low poly or voxel style, showing the classic view of "
                     "Mount Fuji with the Chureito pagoda (red, five tiers) and cherry trees in bloom in the "

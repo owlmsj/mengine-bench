@@ -45,9 +45,9 @@ def test_duplicate_ids_are_rejected() -> None:
         catalog.collect([one, two])
 
 
-def test_every_task_has_room_to_finish() -> None:
-    """#39: GLM 5.3 lost a task at 300 s and took 306 s on another; DeepSeek stopped at 900 s with all checks passing."""
+def test_limits_keep_a_slow_run_under_40_minutes() -> None:
+    """#41: a good run takes about 10 min and 40 to 50 is too long; the six runs at Correct 100 fit these limits."""
     limits = {task.id: task.timeout_s for task in catalog.all_tasks()}
-    assert min(limits.values()) >= 600, limits
-    assert {task for task, limit in limits.items() if limit == 1800} == {
-        "gd-integration-repo", "web-mondrian-landing", "3d-voxel-landscape"}
+    assert sum(limits.values()) == 2400, limits
+    assert {task: limit for task, limit in limits.items() if limit != 120} == {
+        "gd-integration-repo": 300, "web-mondrian-landing": 300, "3d-voxel-landscape": 480}

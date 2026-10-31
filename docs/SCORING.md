@@ -1,18 +1,21 @@
-# Scoring (bench 1.1)
+# Scoring (bench 1.2)
 
-A run of an agent (harness + model + configuration) gets two grades, kept apart,
-and two measurements that are never folded into the score.
+A run of an agent (harness + model + configuration) gets three numbers folded into
+the Score, and a Cost kept apart.
 
 | Total | What it is |
 | --- | --- |
 | **Correct %** | `100 x mean(c_i)` over every task. Deterministic: anyone reproduces it with `run` and `selftest`. |
 | **Judge** | Mean of one rubric vote per task, 0-100. Set by the maintainer with `mengine-bench judge`. |
-| **Score** | `0.7 x Correct % + 0.3 x Judge`, one decimal, from the published Correct % and Judge. Only once judged. |
+| **Speed** | 100 at 5 min of Time or less, 0 at 30 min or more, linear in between: `100 x (1800 - Time) / 1500`. |
+| **Score** | `0.6 x Correct % + 0.25 x Judge + 0.15 x Speed`, one decimal, from the published values. Only once judged. |
 | **Time** | Total agent wall seconds. Grading and judging are excluded; a timeout counts its full time. |
 | **Cost** | USD estimate of inference, with its basis. A separate column: no points per dollar. |
 
 The formulas live in `mengine_bench/scoring.py`. Runs compare when they ran the
-same bench major.minor (1.1.x); a patch release changes no task, prompt or score.
+same bench major.minor (1.2.x); a patch release changes no task, prompt or score. A run is one sample:
+runs within 1 point of each other at the top get a repeat before anyone calls a winner. Rankings of older
+versions stay in LEADERBOARD.md as history, with the Scores of their own formula.
 
 ## Checks: c_i
 
@@ -22,8 +25,12 @@ untouched", or the page file exists).
 
 - `c_i` = share of the task's scored checks that passed.
 - Any failed gate gives `c_i = 0`. A crash gives `c_i = 0`.
-- A timeout stops the agent and grades the workspace as the limit found it. The task
-  shows as `timeout`, counts its full time and is never Solved.
+- A timeout stops the agent and grades the workspace as the limit found it. A gate on
+  the page's size does not apply there, so a page cut short earns the checks it passes, up to
+  half of the task; a gate that guards the tests still does. The task shows as `timeout`, counts its full time and
+  is never Solved. With nothing written, there is nothing for the checks to credit.
+- Each prompt states the limit, 2 to 8 min per step, and that the folder is graded as it stands
+  when time runs out. Load a local model before the run: a cold load counts against the first task.
 - **Solved** = the agent finished, and every gate and every check passed.
 
 Visual tasks (`web-mondrian-landing`, `3d-voxel-landscape`) are graded the same
@@ -35,7 +42,7 @@ is a declared deliverable that the bundle keeps verbatim for the judge.
 `mengine-bench judge results/<run>` (maintainer only) runs one judge, Claude
 `claude-opus-5-5` at effort `xhigh`, exactly once per task. A call that fails or
 returns invalid JSON is retried; if a task still has no vote, nothing is written.
-Rubric 2.1 grades what the checks cannot see. The check results are shown to
+Rubric 2.2 grades what the checks cannot see. The check results are shown to
 the judge as context with the instruction not to re-score correctness.
 
 | Criterion | Points |
@@ -46,11 +53,12 @@ the judge as context with the instruction not to re-score correctness.
 
 For a visual task the maintainer's machine renders the stored page with headless
 Chromium (Edge, Chrome or Chromium; `MENGINE_BENCH_BROWSER` overrides it) and the
-judge sees the screenshot. A blank or failed render gives that task a judge of 0.
+judge sees the screenshot. A blank or failed render gives that task a judge of 0, unless the
+run was stopped at its limit: then the judge votes on what exists, with no screenshot.
 The judge never changes the checks.
 
 The judge also sees the task's status and its run statistics (see below), except
-time and speed: they depend on the hardware, and the judge grades without knowing
+time and speed, which only the Score counts: they depend on the hardware, and the judge grades without knowing
 the model or the machine.
 
 ## Run statistics
@@ -111,8 +119,9 @@ Three tasks, Claude Code (harness USD):
 
 - Correct % = 100 x (1.00 + 0.60 + 0.00) / 3 = 53.3; Solved 1/3
 - Judge = (80 + 60 + 30) / 3 = 56.7
-- Score = 0.7 x 53.3 + 0.3 x 56.7 = 54.3
 - Time = 120 + 300 + 900 = 1320 s (22 min 00 s)
+- Speed = 100 x (1800 - 1320) / 1500 = 32.0
+- Score = 0.6 x 53.3 + 0.25 x 56.7 + 0.15 x 32.0 = 51.0
 - Cost = 0.40 + 0.90 = >= $1.30 (harness), a lower bound because C has no usage
 
 With `--price input=1.25,cached=0.125,output=10`, a Codex step of 2,000,000
