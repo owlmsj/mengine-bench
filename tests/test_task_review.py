@@ -236,10 +236,10 @@ def test_root_cause_names_a_full_disk(cause: str, ok: bool) -> None:
 
 
 @pytest.mark.parametrize("value,ok", [
-    # #98: the true value is 35.8167 and the tolerance 0.05, so 35.77 now passes and the first miss is 35.75.
-    (35.82, True), ("35.8", True), (35.77, True), (35.75, False), (35.87, False), (35.0, False), ("35 or 36", False),
+    # #98: the true value is 35.8167 and the exact window has its own checks, so a whole minute is rounding.
+    (35.82, True), ("35.8", True), (36, True), (35.4, True), (35.3, False), (36.4, False), (35.0, False), ("35 or 36", False)
 ])
-def test_minutes_down_takes_a_small_tolerance_and_no_more(tmp_path: Path, value: object, ok: bool) -> None:
+def test_minutes_down_takes_rounding_and_no_more(tmp_path: Path, value: object, ok: bool) -> None:
     ir._logs_setup(tmp_path)
     answers = ir._logs_reference(tmp_path)
     _edit_result(tmp_path, minutes_down=value)

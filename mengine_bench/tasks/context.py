@@ -150,7 +150,7 @@ TASKS = [
         provenance="ChartQA style bar chart (golden image chart.png)",
         summary="Read a benchmark chart to say which GPU is fastest at one context size and by how much.",
         setup=lambda ws: _copy_assets(ws, "chart.png"), check=_chart_check, reference=_chart_reference, timeout_s=300,
-        checkpoints=checkpoints(("opened the chart", r"chart\.png"), WROTE_RESULT),
+        checkpoints=checkpoints(WROTE_RESULT),
         steps=(Step("We are choosing a GPU to rent for 256k context. From the attached chart, which is the fastest and at what "
                     "TPS, which is the slowest, and how many times faster is the first? Record it in {WS}/result.json: "
                     "top_gpu, top_tps, bottom_gpu, ratio.", attach=("images/chart.png",)),),

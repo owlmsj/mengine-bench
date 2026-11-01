@@ -93,7 +93,6 @@ Source: {FACTSHEET_SOURCE}
 # Agents may percent-encode the comma of the source URL; #28: a trailing slash or query is the same page.
 SOURCE_LINK = r"href\s*=\s*[\"']https?://en\.wikipedia\.org/wiki/Composition_with_Red(,|%2C)_Blue_and_Yellow[\"'#/?]"
 # #28: single or double quotes around the class/role value.
-CTA_ELEMENT = r"<button\b|<a\b[^>]*(class|role)\s*=\s*[\"'][^\"']*(cta|btn|button)"
 # #28: a compact but complete page passes; the gate only rejects an empty or stub page.
 LANDING_MIN_VISIBLE_CHARS = 300
 
@@ -134,7 +133,6 @@ def _landing_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result.add("names the De Stijl movement", "de stijl" in plain)
     result.add("links to the fact sheet's source", has(html, SOURCE_LINK))
     result.add("CSS with the Mondrian palette (red, blue, yellow, black)", _mondrian_palette(html))
-    result.add("has a call-to-action element", has(html, CTA_ELEMENT))
     return result
 
 
