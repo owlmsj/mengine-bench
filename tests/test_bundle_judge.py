@@ -354,9 +354,10 @@ def test_again_rewrites_a_published_bundle_that_has_only_the_final_frame(
 
 def test_every_rendered_task_has_its_three_references() -> None:
     pages = [task.id for task in catalog.all_tasks() if task.render_target is not None]
-    assert sorted(pages) == ["3d-voxel-landscape", "web-mondrian-landing"]
+    assert sorted(pages) == ["3d-voxel-landscape", "web-mondrian-landing", "web-word-universe"]
     for task_id in pages:
-        assert all(path.stat().st_size > 10_000 for path in bundle_judge._reference_images(task_id).values())
+        references = bundle_judge._reference_images(task_id).values()
+        assert len(references) == 3 and all(path.stat().st_size > 10_000 for path in references)
 
 
 def test_the_vote_gets_the_frames_and_the_references_in_the_order_it_names(

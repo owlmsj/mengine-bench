@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from mengine_bench import __version__, catalog
+from mengine_bench.leaderboard import is_complete_run
 import json
 import re
 import sys
@@ -355,3 +357,10 @@ def test_a_valid_view_passes_the_query_check(render) -> None:
         "panel with one relation", "canvas and panel with one relation", "canvas that ignores the query", "relations only in a script"])
 def test_a_broken_view_fails_the_query_check(render, reason: str) -> None:
     assert reason in words._query_problem(_views(render), GOLD)
+
+
+def test_a_new_eval_keeps_older_complete_runs_in_the_history() -> None:
+    older = [task.id for task in catalog.all_tasks() if task.id != "web-word-universe"]
+    assert is_complete_run({"bench_version": "1.5.0", "tasks": [{"id": task} for task in older]})
+    assert not is_complete_run({"bench_version": "1.5.0", "tasks": [{"id": task} for task in older[1:]]})
+    assert not is_complete_run({"bench_version": __version__, "tasks": [{"id": task} for task in older]})

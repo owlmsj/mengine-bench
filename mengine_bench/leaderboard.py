@@ -24,6 +24,8 @@ from mengine_bench.prices import price_text
 from mengine_bench.report import count_text, cost_text, hardware_short_text, time_text, tokens_text
 
 CONFIG_CELL_CHARS = 60
+# #99: an older run never had these tasks, so it stays complete and its ranking stays in the history.
+TASKS_ADDED_IN_1_6 = frozenset({"web-word-universe"})
 COLUMNS = ("#", "Score", "Correct %", "Solved", "Judge", "Speed", "Time", "Timeouts", "Cost", "Est. price", "Tokens", "Generated",
            "Turns",
            "Agent", "Model", "Effort",
@@ -73,11 +75,13 @@ def major_minor(version: object) -> str:
 
 
 def is_complete_run(result: dict[str, object]) -> bool:
-    """True when the run holds every catalog task exactly once."""
+    """True when the run holds every catalog task of its own bench version exactly once."""
     tasks = result["tasks"]
     assert isinstance(tasks, list)
     ids = [str(task["id"]) for task in tasks]
     expected = {task.id for task in catalog.all_tasks()}
+    if major_minor(result.get("bench_version")) != major_minor(__version__):
+        expected -= TASKS_ADDED_IN_1_6
     return len(ids) == len(set(ids)) and set(ids) == expected
 
 
