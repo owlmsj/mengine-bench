@@ -22,7 +22,7 @@ Results: [LEADERBOARD.md](LEADERBOARD.md).
 
 Example, from the leaderboard: Correct 100, Judge 84.1 and 21 min 44 s (Speed 33.0)
 give 0.6 x 100 + 0.25 x 84.1 + 0.15 x 33.0 x 100 / 100 = **86.0**. It solved all 14 tasks, and
-thinking time cost it about 10 points. Cost is shown too, but never counts.
+thinking time cost it about 10 points. Cost and an estimated price at API list prices are shown too, but never count.
 
 Formulas and edge cases: [docs/SCORING.md](docs/SCORING.md).
 

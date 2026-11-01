@@ -144,11 +144,11 @@ def test_leaderboard_is_one_table_sorted_by_score_with_the_spec_columns(tmp_path
     assert board.ranked == 2 and board.unranked == []
     table = board.markdown[board.markdown.index("| # |"):]
     header = table.splitlines()[0]
-    assert header == ("| # | Score | Correct % | Solved | Judge | Speed | Time | Timeouts | Cost | Tokens | Generated | Turns | Agent | Model | Effort | "
+    assert header == ("| # | Score | Correct % | Solved | Judge | Speed | Time | Timeouts | Cost | Est. price | Tokens | Generated | Turns | Agent | Model | Effort | "
                       "Hardware | Config | Submitter | Date | Run |")
     assert table.index("high-model") < table.index("low-model")
     row = table.splitlines()[2]
-    for cell in ("| 1 | **90.0** | 80.0 | 10/", "| 70.0 | 0.0 | 30 min 30 s | 1 | >= $2.50 (price) | 1.75M | 3.4k | 12 |",
+    for cell in ("| 1 | **90.0** | 80.0 | 10/", "| 70.0 | 0.0 | 30 min 30 s | 1 | >= $2.50 (price) | n/a | 1.75M | 3.4k | 12 |",
                  "| codex codex-cli 0.162.1 | high-model | high |", "AMD Ryzen 9 7950X, NVIDIA GeForce RTX 4090 (24 GB)",
                  "provider=openai, mcp=none", "| dquill | 2026-10-19 | [run](results/high/summary.md) |"):
         assert cell in row, (cell, row)
