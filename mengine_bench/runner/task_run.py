@@ -213,7 +213,16 @@ def _step_env(workspace: Path, extra: Mapping[str, str] | None) -> dict[str, str
     """Caller env plus PWD=<workspace>: opencode 2.0.29 trusts PWD over the process cwd
     (cli/src/run/run.ts:73), and Popen(cwd=...) does not update PWD."""
     # #59: bytecode took 16,463 of the 19,198 characters a judge saw, and the suites the prompts ask for write it.
-    return {**os.environ, "PWD": str(workspace.resolve()), "PYTHONDONTWRITEBYTECODE": "1", **(extra or {})}
+    env = {**os.environ, "PWD": str(workspace.resolve()), "PYTHONDONTWRITEBYTECODE": "1", **(extra or {})}
+    # #95: a benchmark step must not inherit the launching Claude session.
+    for key in (
+        "CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID", "CLAUDE_PID",
+        "CLAUDE_EFFORT", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_BRIDGE_SESSION_ID",
+        "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH",
+        "CLAUDE_CODE_MESSAGING_TOKEN",
+    ):
+        env.pop(key, None)
+    return env
 
 
 def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: int, prompt: str,

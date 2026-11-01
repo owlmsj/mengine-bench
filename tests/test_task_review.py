@@ -389,3 +389,22 @@ def test_every_step_prompt_offers_every_skill_tool_and_mcp_server(monkeypatch: p
     for prompt in prompts:
         assert "any skill, tool or MCP server available to you" in prompt
         assert "smarter, more correct or faster" in prompt
+
+
+def test_step_env_drops_parent_session_and_keeps_credentials(monkeypatch, tmp_path: Path) -> None:
+    session_keys = (
+        "CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID", "CLAUDE_PID",
+        "CLAUDE_EFFORT", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_BRIDGE_SESSION_ID",
+        "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH",
+        "CLAUDE_CODE_MESSAGING_TOKEN",
+    )
+    for key in session_keys:
+        monkeypatch.setenv(key, "parent-session")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "fake-test-credential")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "test-config")
+    env = _step_env(tmp_path, {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"})
+    assert not set(session_keys) & env.keys()
+    assert env["ANTHROPIC_API_KEY"] == "fake-test-credential"
+    assert env["CLAUDE_CONFIG_DIR"] == "test-config"
+    assert env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
+    assert env["PWD"] == str(tmp_path.resolve())
