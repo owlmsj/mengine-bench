@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from mengine_bench import __version__, catalog
-from mengine_bench.leaderboard import is_complete_run
 import json
 import re
 import sys
@@ -12,8 +10,9 @@ from urllib.parse import unquote
 
 import pytest
 
-from mengine_bench import catalog, visual
+from mengine_bench import __version__, catalog, visual
 from mengine_bench.core import CheckResult
+from mengine_bench.leaderboard import is_complete_run
 from mengine_bench.runner import task_run
 from mengine_bench.tasks import words
 

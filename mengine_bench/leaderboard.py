@@ -81,7 +81,7 @@ def is_complete_run(result: dict[str, object]) -> bool:
     ids = [str(task["id"]) for task in tasks]
     expected = {task.id for task in catalog.all_tasks()}
     if major_minor(result.get("bench_version")) != major_minor(__version__):
-        expected -= TASKS_ADDED_IN_1_6
+        return len(ids) == len(set(ids)) and set(ids) - TASKS_ADDED_IN_1_6 == expected - TASKS_ADDED_IN_1_6
     return len(ids) == len(set(ids)) and set(ids) == expected
 
 
