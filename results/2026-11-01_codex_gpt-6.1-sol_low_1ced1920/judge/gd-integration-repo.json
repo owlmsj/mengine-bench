@@ -1,0 +1,61 @@
+{
+ "task_id": "gd-integration-repo",
+ "prompts": [
+  "An integration test of the Pixel Arena backend in {WS} fails while the unit tests pass. Make the backend behave as {WS}/docs says: fix every cause, not just the symptom this test shows. Existing tests stay as they are, and the project takes no new dependencies."
+ ],
+ "answers": [
+  "[goal]\nMatch `docs/`. Assumption: older profiles without credits default to zero.\n\n[action]\nFixed three causes: reversed config precedence, credits discarded during decoding, and floating-point errors at rounding halves. Added regression tests; existing tests unchanged; no new dependencies.\n\n[result]\nRegressions reproduced failures before fixes. Full suite afterward:\n\n```text\nRan 17 tests in 0.010s\n\nOK\n```\n\n[next]\nComplete. The original integration test and new contract regressions pass."
+ ],
+ "diff": "M arena_server/config/loader.py\nM arena_server/economy/payout.py\nM arena_server/persistence/codec.py\nA tests/unit/test_backend_contract.py\n\n--- arena_server/config/loader.py ---\n\"\"\"Runtime config. Precedence, lowest to highest: DEFAULTS < JSON file < env (docs/CONFIG.md).\"\"\"\n\nimport json\nimport os\n\nfrom arena_server.config.defaults import DEFAULTS\n\n\ndef _coerce(raw, like):\n    return type(like)(raw)\n\n\ndef load_config(file_path=None, env=None):\n    cfg = dict(DEFAULTS)\n    if file_path:\n        with open(file_path, encoding=\"utf-8\") as fh:\n            cfg.update(json.load(fh))\n    env = os.environ if env is None else env\n    for key, default in DEFAULTS.items():\n        value = env.get(f\"ARENA_{key.upper()}\")\n        if value is not None:\n            cfg[key] = _coerce(value, default)\n    return cfg\n\n\n--- arena_server/economy/payout.py ---\n\"\"\"Match payout. Rules live in docs/ECONOMY.md.\"\"\"\n\nfrom decimal import Decimal, ROUND_HALF_UP\n\n\ndef match_payout(won, kills, cfg):\n    base = cfg[\"win_base\"] if won else cfg[\"loss_base\"]\n    raw = (Decimal(str(base)) + kills * Decimal(str(cfg[\"kill_bonus\"]))) * Decimal(str(cfg[\"event_multiplier\"]))\n    return int(raw.quantize(Decimal(\"1E1\"), rounding=ROUND_HALF_UP))\n\n\n--- arena_server/persistence/codec.py ---\nimport json\n\nfrom arena_server.models.profile import Profile\n\n\ndef encode(profile):\n    return json.dumps({\"name\": profile.name, \"level\": profile.level,\n                       \"credits\": profile.credits, \"cosmetics\": profile.cosmetics})\n\n\ndef decode(blob):\n    data = json.loads(blob)\n    return Profile(name=data[\"name\"], level=data.get(\"level\", 1),\n                   credits=data.get(\"credits\", 0), cosmetics=data.get(\"cosmetics\", []))\n\n\n--- tests/unit/test_backend_contract.py ---\nimport json\nimport tempfile\nimport unittest\nfrom pathlib import Path\n\nfrom arena_server.config.defaults import DEFAULTS\nfrom arena_server.config.loader import load_config\nfrom arena_server.economy.payout import match_payout\nfrom arena_server.models.profile import Profile\nfrom arena_server.persistence.codec import decode, encode\n\n\nclass BackendContract(unittest.TestCase):\n    def test_environment_overrides_file_for_every_setting(self):\n        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as scratch:\n            config_path = Path(scratch) / \"config.json\"\n            config_path.write_text(json.dumps(dict.fromkeys(DEFAULTS, 2)), encoding=\"utf-8\")\n            environment = {f\"ARENA_{key.upper()}\": \"3\" for key in DEFAULTS}\n            self.assertEqual(load_config(config_path, environment), dict.fromkeys(DEFAULTS, 3))\n        self.assertEqual(load_config(env={}), DEFAULTS)\n\n    def test_profile_round_trip_preserves_all_fields(self):\n        profile = Profile(\"player\", level=12, credits=1690, cosmetics=[\"skin\"])\n        self.assertEqual(decode(encode(profile)), profile)\n\n    def test_old_profile_without_credits_defaults_to_zero(self):\n        self.assertEqual(decode('{\"name\": \"player\"}').credits, 0)\n\n    def test_half_tens_round_up_for_wins_and_losses(self):\n        for won, base in ((True, 900), (False, 600)):\n            for expected, multiplier in ((1430, 1.5), (1590, 1.25), (1010, 1.005)):\n                subtotal = {1430: 950, 1590: 1268, 1010: 1000}[expected]\n                config = dict(DEFAULTS, win_base=base, loss_base=base,\n                              kill_bonus=subtotal - base, event_multiplier=multiplier)\n                with self.subTest(won=won, multiplier=multiplier):\n                    self.assertEqual(match_payout(won, 1, config), expected)\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"Get-Location; rg --files -g '\"'!node_modules'\"' -g '\"'!package-lock.json'\"' -g '\"'!vendor'\"'\"\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"Get-Content AGENTS.md,README.md,docs\\\\CONFIG.md,docs\\\\ECONOMY.md; git status --short; Get-Content arena_server\\\\config\\\\*.py,arena_server\\\\economy\\\\*.py,arena_server\\\\persistence\\\\\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"Get-Content tests\\\\integration\\\\test_match_flow.py,tests\\\\unit\\\\test_core_units.py; Get-Content tests\\\\unit\\\\test_store.py; Get-CimInstance Win32_Processor | Select-Object LoadPerc\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"rg -n 'match_payout|round|credits|load_config|legacy_payout' arena_server tests docs; Get-ChildItem -Force -Name\"\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command 'python -m unittest tests.unit.test_backend_contract'\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command 'python -m unittest tests.unit.test_backend_contract tests.integration.test_match_flow'\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"python -m unittest discover -s tests -t .; Get-Content arena_server\\\\config\\\\loader.py,arena_server\\\\economy\\\\payout.py,arena_server\\\\persistence\\\\codec.py,tests\\\\unit\\\\test_backen\n\nStream tail:\n    if file_path:\\r\\n        with open(file_path, encoding=\\\"utf-8\\\") as fh:\\r\\n            cfg.update(json.load(fh))\\r\\n    env = os.environ if env is None else env\\r\\n    for key, default in DEFAULTS.items():\\r\\n        value = env.get(f\\\"ARENA_{key.upper()}\\\")\\r\\n        if value is not None:\\r\\n            cfg[key] = _coerce(value, default)\\r\\n    return cfg\\r\\n\\\"\\\"\\\"Match payout. Rules live in docs/ECONOMY.md.\\\"\\\"\\\"\\r\\n\\r\\nfrom decimal import Decimal, ROUND_HALF_UP\\r\\n\\r\\n\\r\\ndef match_payout(won, kills, cfg):\\r\\n    base = cfg[\\\"win_base\\\"] if won else cfg[\\\"loss_base\\\"]\\r\\n    raw = (Decimal(str(base)) + kills * Decimal(str(cfg[\\\"kill_bonus\\\"]))) * Decimal(str(cfg[\\\"event_multiplier\\\"]))\\r\\n    return int(raw.quantize(Decimal(\\\"1E1\\\"), rounding=ROUND_HALF_UP))\\r\\nimport json\\r\\n\\r\\nfrom arena_server.models.profile import Profile\\r\\n\\r\\n\\r\\ndef encode(profile):\\r\\n    return json.dumps({\\\"name\\\": profile.name, \\\"level\\\": profile.level,\\r\\n                       \\\"credits\\\": profile.credits, \\\"cosmetics\\\": profile.cosmetics})\\r\\n\\r\\n\\r\\ndef decode(blob):\\r\\n    data = json.loads(blob)\\r\\n    return Profile(name=data[\\\"name\\\"], level=data.get(\\\"level\\\", 1),\\r\\n                   credits=data.get(\\\"credits\\\", 0), cosmetics=data.get(\\\"cosmetics\\\", []))\\r\\nimport json\\r\\nimport tempfile\\r\\nimport unittest\\r\\nfrom pathlib import Path\\r\\n\\r\\nfrom arena_server.config.defaults import DEFAULTS\\r\\nfrom arena_server.config.loader import load_config\\r\\nfrom arena_server.economy.payout import match_payout\\r\\nfrom arena_server.models.profile import Profile\\r\\nfrom arena_server.persistence.codec import decode, encode\\r\\n\\r\\n\\r\\nclass BackendContract(unittest.TestCase):\\r\\n    def test_environment_overrides_file_for_every_setting(self):\\r\\n        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as scratch:\\r\\n            config_path = Path(scratch) / \\\"config.json\\\"\\r\\n            config_path.write_text(json.dumps(dict.fromkeys(DEFAULTS, 2)), encoding=\\\"utf-8\\\")\\r\\n            environment = {f\\\"ARENA_{key.upper()}\\\": \\\"3\\\" for key in DEFAULTS}\\r\\n            self.assertEqual(load_config(config_path, environment), dict.fromkeys(DEFAULTS, 3))\\r\\n        self.assertEqual(load_config(env={}), DEFAULTS)\\r\\n\\r\\n    def test_profile_round_trip_preserves_all_fields(self):\\r\\n        profile = Profile(\\\"player\\\", level=12, credits=1690, cosmetics=[\\\"skin\\\"])\\r\\n        self.assertEqual(decode(encode(profile)), profile)\\r\\n\\r\\n    def test_old_profile_without_credits_defaults_to_zero(self):\\r\\n        self.assertEqual(decode('{\\\"name\\\": \\\"player\\\"}').credits, 0)\\r\\n\\r\\n    def test_half_tens_round_up_for_wins_and_losses(self):\\r\\n        for won, base in ((True, 900), (False, 600)):\\r\\n            for expected, multiplier in ((1430, 1.5), (1590, 1.25), (1010, 1.005)):\\r\\n                subtotal = {1430: 950, 1590: 1268, 1010: 1000}[expected]\\r\\n                config = dict(DEFAULTS, win_base=base, loss_base=base,\\r\\n                              kill_bonus=subtotal - base, event_multiplier=multiplier)\\r\\n                with self.subTest(won=won, multiplier=multiplier):\\r\\n                    self.assertEqual(match_payout(won, 1, config), expected)\\r\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_12\",\"type\":\"agent_message\",\"text\":\"[goal]\\nMatch `docs/`. Assumption: older profiles without credits default to zero.\\n\\n[action]\\nFixed three causes: reversed config precedence, credits discarded during decoding, and floating-point errors at rounding halves. Added regression tests; existing tests unchanged; no new dependencies.\\n\\n[result]\\nRegressions reproduced failures before fixes. Full suite afterward:\\n\\n```text\\nRan 17 tests in 0.010s\\n\\nOK\\n```\\n\\n[next]\\nComplete. The original integration test and new contract regressions pass.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":165925,\"cached_input_tokens\":152832,\"cache_write_input_tokens\":0,\"output_tokens\":2013,\"reasoning_output_tokens\":127}}\n",
+ "checks": [
+  [
+   "existing tests untouched",
+   true
+  ],
+  [
+   "hidden config override and persistence",
+   true
+  ],
+  [
+   "hidden env float wins over file",
+   true
+  ],
+  [
+   "hidden round trip keeps everything",
+   true
+  ],
+  [
+   "hidden half up tie rounds up",
+   true
+  ],
+  [
+   "hidden persisted name survives",
+   true
+  ],
+  [
+   "hidden real environment when env is none",
+   true
+  ],
+  [
+   "existing test suite passes",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 9,
+  "tool_errors": 2,
+  "shell_commands": 7,
+  "shell_failures": 2,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2013,
+  "reasoning_tokens": 127,
+  "largest_turn_tokens": 2013
+ },
+ "deliverables": [],
+ "render": null
+}
