@@ -1,0 +1,61 @@
+{
+ "task_id": "gd-integration-repo",
+ "prompts": [
+  "An integration test of the Pixel Arena backend in {WS} fails while the unit tests pass. Make the backend behave as {WS}/docs says: fix every cause, not just the symptom this test shows. Existing tests stay as they are, and the project takes no new dependencies."
+ ],
+ "answers": [
+  "Fixed three causes:\n\n- JSON settings incorrectly overrode environment variables.\n- Loading profiles discarded saved credits.\n- Floating-point arithmetic rounded some decimal ties down: `1250 × 1.14` paid 1420 instead of 1430.\n\nAssumptions: configuration numbers represent decimal values; older profiles without credits start at zero.\n\nAll 17 tests pass, including the original integration test and new regression coverage for precedence, rounding, persistence, and accumulated payouts. Existing tests are unchanged; no dependencies were added."
+ ],
+ "diff": "M arena_server/config/loader.py\nM arena_server/economy/payout.py\nM arena_server/persistence/codec.py\nA tests/unit/test_economy_contract.py\n\n--- arena_server/config/loader.py ---\n\"\"\"Runtime config. Precedence, lowest to highest: DEFAULTS < JSON file < env (docs/CONFIG.md).\"\"\"\n\nimport json\nimport os\n\nfrom arena_server.config.defaults import DEFAULTS\n\n\ndef _coerce(raw, like):\n    return type(like)(raw)\n\n\ndef load_config(file_path=None, env=None):\n    cfg = dict(DEFAULTS)\n    env = os.environ if env is None else env\n    if file_path:\n        with open(file_path, encoding=\"utf-8\") as fh:\n            cfg.update(json.load(fh))\n    for key, default in DEFAULTS.items():\n        value = env.get(f\"ARENA_{key.upper()}\")\n        if value is not None:\n            cfg[key] = _coerce(value, default)\n    return cfg\n\n\n--- arena_server/economy/payout.py ---\n\"\"\"Match payout. Rules live in docs/ECONOMY.md.\"\"\"\n\nfrom decimal import Decimal, ROUND_HALF_UP\n\n\ndef match_payout(won, kills, cfg):\n    base = Decimal(str(cfg[\"win_base\"] if won else cfg[\"loss_base\"]))\n    # Convert before arithmetic so binary floats cannot move a decimal tie down.\n    raw = (base + Decimal(str(kills)) * Decimal(str(cfg[\"kill_bonus\"]))) * Decimal(str(cfg[\"event_multiplier\"]))\n    return int(raw.quantize(Decimal(\"1E1\"), rounding=ROUND_HALF_UP))\n\n\n--- arena_server/persistence/codec.py ---\nimport json\n\nfrom arena_server.models.profile import Profile\n\n\ndef encode(profile):\n    return json.dumps({\"name\": profile.name, \"level\": profile.level,\n                       \"credits\": profile.credits, \"cosmetics\": profile.cosmetics})\n\n\ndef decode(blob):\n    data = json.loads(blob)\n    return Profile(name=data[\"name\"], level=data.get(\"level\", 1),\n                   credits=data.get(\"credits\", 0), cosmetics=data.get(\"cosmetics\", []))\n\n\n--- tests/unit/test_economy_contract.py ---\nimport json\nimport tempfile\nimport unittest\nfrom pathlib import Path\n\nfrom arena_server.config.defaults import DEFAULTS\nfrom arena_server.config.loader import load_config\nfrom arena_server.economy.payout import match_payout\nfrom arena_server.models.profile import Profile\nfrom arena_server.persistence.codec import decode, encode\nfrom arena_server.persistence.store import load, save\nfrom arena_server.services.match_service import finish_match\n\n\nclass EconomyContract(unittest.TestCase):\n    def test_config_precedence_and_types(self):\n        original = dict(DEFAULTS)\n        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:\n            path = Path(tmp) / \"config.json\"\n            path.write_text(json.dumps({\"kill_bonus\": 60, \"event_multiplier\": 1.25}), encoding=\"utf-8\")\n            cfg = load_config(path, env={\"ARENA_KILL_BONUS\": \"75\", \"ARENA_EVENT_MULTIPLIER\": \"1.5\"})\n            self.assertEqual(cfg, {\"win_base\": 900, \"loss_base\": 600,\n                                   \"kill_bonus\": 75, \"event_multiplier\": 1.5})\n            self.assertIsInstance(cfg[\"kill_bonus\"], int)\n            self.assertIsInstance(cfg[\"event_multiplier\"], float)\n            self.assertEqual(load_config(path, env={})[\"kill_bonus\"], 60)\n        self.assertEqual(DEFAULTS, original)\n\n    def test_rounding_to_tens(self):\n        for base, multiplier, expected in [(1425, 1, 1430), (1585, 1, 1590),\n                                            (1424, 1, 1420), (1426, 1, 1430),\n                                            (1250, 1.14, 1430), (1000, 1.005, 1010)]:\n            for won in (True, False):\n                with self.subTest(base=base, multiplier=multiplier, won=won):\n                    cfg = dict(DEFAULTS, win_base=base, loss_base=base,\n                               event_multiplier=multiplier)\n                    self.assertEqual(match_payout(won, 0, cfg), expected)\n\n    def test_profile_round_trip_and_older_profiles(self):\n        profile = Profile(\"test-player\", level=12, credits=1690, cosmetics=[\"test-skin\"])\n        self.assertEqual(decode(encode(profile)), profile)\n        self.assertEqual(decode('{\"name\": \"test-player\"}'), Profile(\"test-player\"))\n        self.assertEqual(decode('{\"name\": \"test-player\", \"credits\": 0}').credits, 0)\n\n    def test_credits_accumulate_across_saved_matches(self):\n        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as tmp:\n            path = Path(tmp) / \"profile.json\"\n            profile = Profile(\"test-player\", credits=100)\n            cfg = load_config(env={})\n            finish_match(profile, True, 5, cfg)\n            save(profile, path)\n            profile = load(path)\n            finish_match(profile, False, 2, cfg)\n            save(profile, path)\n            self.assertEqual(load(path).credits, 100 + 1150 + 700)\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"Get-ChildItem -Name; rg --files -g '\"'!node_modules'\"' -g '\"'!package-lock.json'\"' -g '\"'!yarn.lock'\"'\"\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command 'Get-Content AGENTS.md,README.md,docs/CONFIG.md,docs/ECONOMY.md; Get-Content arena_server/config/*.py,arena_server/economy/*.py,arena_server/models/*.py,arena_server/persistence/*.p\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"rg -n 'payout|round|credits|load_config|legacy|math|multiplier' arena_server tests; python -m unittest discover -s tests -t .\"\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"python -c \\\"from arena_server.economy.payout import match_payout; c={'win_base':1250,'loss_base':600,'kill_bonus':50,'event_multiplier':1.14}; print('decimal boundary payout:', mat\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command 'python -m unittest discover -s tests -t .'\n\nStream tail:\nevent_multiplier':1.14}; print('decimal boundary payout:', match_payout(True,0,c), 'expected:',1430)\\\\\\\"; git status --short\\\"\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_5\",\"type\":\"command_execution\",\"command\":\"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"python -c \\\\\\\"from arena_server.economy.payout import match_payout; c={'win_base':1250,'loss_base':600,'kill_bonus':50,'event_multiplier':1.14}; print('decimal boundary payout:', match_payout(True,0,c), 'expected:',1430)\\\\\\\"; git status --short\\\"\",\"aggregated_output\":\"decimal boundary payout: 1420 expected: 1430\\r\\nfatal: not a git repository (or any of the parent directories): .git\\n\",\"exit_code\":1,\"status\":\"failed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_6\",\"type\":\"file_change\",\"changes\":[{\"path\":\"<WORKSPACE>\\\\arena_server\\\\config\\\\loader.py\",\"kind\":\"update\"},{\"path\":\"<WORKSPACE>\\\\arena_server\\\\economy\\\\payout.py\",\"kind\":\"update\"},{\"path\":\"<WORKSPACE>\\\\arena_server\\\\persistence\\\\codec.py\",\"kind\":\"update\"}],\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_6\",\"type\":\"file_change\",\"changes\":[{\"path\":\"<WORKSPACE>\\\\arena_server\\\\config\\\\loader.py\",\"kind\":\"update\"},{\"path\":\"<WORKSPACE>\\\\arena_server\\\\economy\\\\payout.py\",\"kind\":\"update\"},{\"path\":\"<WORKSPACE>\\\\arena_server\\\\persistence\\\\codec.py\",\"kind\":\"update\"}],\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_7\",\"type\":\"file_change\",\"changes\":[{\"path\":\"<WORKSPACE>\\\\tests\\\\unit\\\\test_economy_contract.py\",\"kind\":\"add\"}],\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_7\",\"type\":\"file_change\",\"changes\":[{\"path\":\"<WORKSPACE>\\\\tests\\\\unit\\\\test_economy_contract.py\",\"kind\":\"add\"}],\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_8\",\"type\":\"command_execution\",\"command\":\"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'python -m unittest discover -s tests -t .'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_8\",\"type\":\"command_execution\",\"command\":\"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'python -m unittest discover -s tests -t .'\",\"aggregated_output\":\".................\\r\\n----------------------------------------------------------------------\\r\\nRan 17 tests in 0.023s\\r\\n\\r\\nOK\\r\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_9\",\"type\":\"agent_message\",\"text\":\"Fixed three causes:\\n\\n- JSON settings incorrectly overrode environment variables.\\n- Loading profiles discarded saved credits.\\n- Floating-point arithmetic rounded some decimal ties down: `1250 × 1.14` paid 1420 instead of 1430.\\n\\nAssumptions: configuration numbers represent decimal values; older profiles without credits start at zero.\\n\\nAll 17 tests pass, including the original integration test and new regression coverage for precedence, rounding, persistence, and accumulated payouts. Existing tests are unchanged; no dependencies were added.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":135758,\"cached_input_tokens\":129920,\"cache_write_input_tokens\":0,\"output_tokens\":2151,\"reasoning_output_tokens\":198}}\n",
+ "checks": [
+  [
+   "existing tests untouched",
+   true
+  ],
+  [
+   "hidden config override and persistence",
+   true
+  ],
+  [
+   "hidden env float wins over file",
+   true
+  ],
+  [
+   "hidden round trip keeps everything",
+   true
+  ],
+  [
+   "hidden half up tie rounds up",
+   true
+  ],
+  [
+   "hidden persisted name survives",
+   true
+  ],
+  [
+   "hidden real environment when env is none",
+   true
+  ],
+  [
+   "existing test suite passes",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 7,
+  "tool_errors": 2,
+  "shell_commands": 5,
+  "shell_failures": 2,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2151,
+  "reasoning_tokens": 198,
+  "largest_turn_tokens": 2151
+ },
+ "deliverables": [],
+ "render": null
+}
