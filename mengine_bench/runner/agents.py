@@ -371,7 +371,8 @@ class ClaudeAgent:
     def invocation(self, prompt: str, prompt_file: Path, workspace: Path,
                    attachments: Sequence[str]) -> Invocation:
         # Attachments are named in the prompt; Claude Code reads images with its Read tool.
-        argv = [_executable("claude"), "-p", "--output-format", "stream-json", "--verbose", "--model", self.model]
+        # `claude -p` loads Claude in Chrome only with --chrome, and it is the harness's own browser (mengine#806).
+        argv = [_executable("claude"), "-p", "--chrome", "--output-format", "stream-json", "--verbose", "--model", self.model]
         if self.effort:
             argv += ["--effort", self.effort]
         argv += ["--permission-mode", "bypassPermissions"]
