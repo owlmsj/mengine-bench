@@ -48,6 +48,8 @@ class Invocation:
     stdin_text: str | None
     # Extra environment on top of the caller's; None keeps it unchanged.
     env: Mapping[str, str] | None = None
+    # How the line that ends a successful session starts, when the harness has one and may not exit after it (#85).
+    final_event: str | None = None
 
 
 @dataclass(frozen=True)
@@ -411,6 +413,9 @@ OPENCODE_JUDGE_CONFIG = {"permission": {"edit": "deny", "bash": "deny", "webfetc
                                         "external_directory": "deny", "task": "deny"}}
 
 
+CODEX_FINAL_EVENT = '{"type":"turn.completed"'
+
+
 @dataclass
 class CodexAgent:
     """`codex exec --json`, one fresh session per step."""
@@ -425,12 +430,15 @@ class CodexAgent:
         argv += ["--json", "--skip-git-repo-check", "-m", self.model]
         if self.effort:
             argv += ["-c", f'model_reasoning_effort="{self.effort}"']
+        # #85: memory carries earlier sessions, and with them earlier runs, into this one: the same leak the
+        # preflight blocks for earlier workspaces. Tier 0 got a summary naming Mondrian, the subject of one task.
+        argv += ["--disable", "memories"]
         # Parity with Claude's bypassPermissions: the task workspace is the sandbox.
         argv.append("--dangerously-bypass-approvals-and-sandbox")
         for attachment in attachments:
             argv += ["-i", attachment]
         argv.append("-")
-        return Invocation(argv=argv, stdin_text=prompt)
+        return Invocation(argv=argv, stdin_text=prompt, final_event=CODEX_FINAL_EVENT)
 
     def judge_invocation(self, prompt: str, workdir: Path, attachments: Sequence[str],
                          prompt_file: Path | None = None, system_prompt: str | None = None) -> Invocation:

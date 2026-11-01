@@ -106,8 +106,9 @@ Report only values copied from command output. Never print credentials.
 
 ## The rules
 
-- **Everything its harness gives it** is allowed: shell, web, browsers, MCP servers, skills, subagents. Reading the reference, the hidden tests or a published answer is not: the run gets rejected.
+- **Everything its harness gives it** is allowed: shell, web, browsers, MCP servers, skills, subagents. Every step's prompt says so. Reading the reference, the hidden tests or a published answer is not: the run gets rejected.
 - **Personal instructions count as configuration.** `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.config/opencode/AGENTS.md`, `~/.gemini/GEMINI.md` and any `CLAUDE.md` or `AGENTS.md` above the temp dir are recorded by name and shown on the leaderboard. Move them aside for a plain run.
+- **Memory across sessions is off for Codex** (`--disable memories`). It carries earlier runs into this one, the same leak as an earlier workspace left on disk.
 - **Rankings compare the same bench version.** Older rankings stay on the leaderboard as history, with the Scores of their own formula.
 
 ## Privacy

@@ -48,8 +48,11 @@ def test_codex_new_session() -> None:
     first = agent.invocation("p", PROMPT_FILE, WS, attachments=("images/a.png",))
     assert tail(first.argv) == ["exec", "--json", "--skip-git-repo-check", "-m", "gpt-6",
                                 "-c", 'model_reasoning_effort="high"',
+                                "--disable", "memories",
                                 "--dangerously-bypass-approvals-and-sandbox", "-i", "images/a.png", "-"]
     assert first.stdin_text == "p"
+    # #85: `codex exec` can stay alive after this event; it ends the step.
+    assert first.final_event == '{"type":"turn.completed"'
 
 
 def test_opencode_short_prompt_in_argv_long_prompt_on_stdin() -> None:
@@ -246,7 +249,7 @@ def test_agent_step_runs_with_pwd_set_to_the_workspace(tmp_path: Path, monkeypat
 
     seen: dict[str, object] = {}
 
-    def fake_run(argv, cwd, timeout_s, stdin_text=None, env=None):
+    def fake_run(argv, cwd, timeout_s, stdin_text=None, env=None, final_event=None):
         seen.update(cwd=cwd, env=env)
         raise OSError("stop after capture")
 
