@@ -70,6 +70,7 @@ def _parser() -> argparse.ArgumentParser:
     judge.add_argument("--judge-model", default=DEFAULT_JUDGE_MODEL)
     judge.add_argument("--judge-effort", default=DEFAULT_JUDGE_EFFORT)
     judge.add_argument("--judge-cmd", help="argv template for --judge cmd")
+    judge.add_argument("--again", action="store_true", help="replace the votes of a bundle that is already judged")
     selftest = sub.add_parser("selftest", help="run every task's gold self-test without an agent")
     selftest.add_argument("--tasks", default="")
     doc = sub.add_parser("tasks-doc", help="print (or --write) the docs/TASKS.md table; --readme rewrites the "
@@ -114,14 +115,14 @@ def _judge(args: argparse.Namespace) -> int:
         raise SystemExit("error: received --judge cmd without --judge-cmd; expected an argv template")
     judge_agent = make_agent(args.judge, args.judge_model, args.judge_effort, args.judge_cmd)
     try:
-        result = judge_bundle(args.bundle, judge_agent)
+        result = judge_bundle(args.bundle, judge_agent, again=args.again)
     except ValueError as error:
         print(f"judge: FAILED: {error}")
         return 1
     totals = result["totals"]
     assert isinstance(totals, dict)
     print(f"judged {args.bundle.name}: Score {totals['score']} = 0.6 x correct {totals['correct']} "
-          f"+ 0.25 x judge {totals['judge']} + 0.15 x speed {totals['speed']}")
+          f"+ 0.25 x judge {totals['judge']} + 0.15 x speed {totals['speed']} x correct / 100")
     print("updated result.json and summary.md; commit them with LEADERBOARD.md")
     return 0
 

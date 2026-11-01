@@ -13,7 +13,7 @@ from test_bundle_leaderboard import REFERENCE_AGENT
 
 JUDGE = r"""
 import json
-print(json.dumps({"score": 80, "rationale": "solid"}))
+print(json.dumps({"score": 80, "approach": 30, "deliverable": 25, "verification": 25, "answer_discipline": 25, "rendered": 25, "rationale": "solid"}))
 """
 
 # Records what sat in the isolated judge cwd, so a test sees whether the screenshot arrived.
@@ -23,7 +23,7 @@ from pathlib import Path
 seen = Path(__file__).with_suffix(".seen")
 seen.write_text(seen.read_text() + json.dumps(sorted(os.listdir("."))) + "\n" if seen.exists()
                 else json.dumps(sorted(os.listdir("."))) + "\n")
-print(json.dumps({"score": 80, "rationale": "solid"}))
+print(json.dumps({"score": 80, "approach": 30, "deliverable": 25, "verification": 25, "answer_discipline": 25, "rendered": 25, "rationale": "solid"}))
 """
 
 VISUAL_AGENT = """
@@ -77,13 +77,19 @@ def test_judging_the_bundle_sets_one_vote_per_task(fake_agent: FakeAgent, tmp_pa
     [task] = result["tasks"]
     assert (task["judge"], task["judge_rationale"]) == (80, "solid")
     assert task["checks"] == before["tasks"][0]["checks"], "the judge never changes the checks"
-    assert result["judge"] == {"agent": "cmd", "model": "judge-x", "effort": "high", "rubric": "2.3"}
+    judge = result["judge"]
+    assert {key: judge[key] for key in ("agent", "model", "effort", "rubric")} == {
+        "agent": "cmd", "model": "judge-x", "effort": "high", "rubric": "2.4"}
+    assert judge["bench"] and len(judge["system_prompt_sha256"]) == 64
+    assert task["judge_parts"] == {"approach": 30, "deliverable": 25, "verification": 25}
     totals = result["totals"]
     assert totals["judge"] == 80.0
-    assert totals["score"] == round(0.6 * totals["correct"] + 0.25 * 80.0 + 0.15 * totals["speed"], 1)
+    assert totals["score"] == round(0.6 * totals["correct"] + 0.25 * 80.0 + 0.15 * totals["speed"] * totals["correct"] / 100, 1)
     assert {key: totals[key] for key in ("correct", "time_s", "cost_usd")} == \
         {key: before["totals"][key] for key in ("correct", "time_s", "cost_usd")}
-    assert _judge(fake_agent, bundle) == 1, "a judged bundle is not judged twice"
+    assert _judge(fake_agent, bundle) == 1, "a judged bundle is not judged twice by accident"
+    assert cli.main(["judge", str(bundle), "--again", "--judge", "cmd", "--judge-cmd", _template(fake_agent, "judge", JUDGE),
+                     "--judge-model", "judge-x", "--judge-effort", "high"]) == 0, "--again replaces the votes"
 
 
 def test_visual_deliverable_is_rendered_from_the_bundle_for_the_judge(
@@ -112,25 +118,15 @@ def test_visual_deliverable_is_rendered_from_the_bundle_for_the_judge(
     assert (bundle / "judge" / "web-mondrian-landing.png").read_bytes() == b"P" * 50_000
 
 
-def test_failed_render_scores_the_judge_zero_without_asking(fake_agent: FakeAgent, tmp_path: Path,
-                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+def test_no_browser_judges_nothing(fake_agent: FakeAgent, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                   capsys: pytest.CaptureFixture[str]) -> None:
     bundle = _run(fake_agent, tmp_path / "results", "web-mondrian-landing", VISUAL_AGENT)
+    before = (bundle / "result.json").read_bytes()
     monkeypatch.setattr(bundle_judge, "render_headless", lambda html, png: visual.NO_BROWSER)
-    assert _judge(fake_agent, bundle, JUDGE_SEEING) == 0
-    assert not (tmp_path / "fakes" / "judge.seen").exists(), "no judge call for a failed render"
-    [task] = json.loads((bundle / "result.json").read_text(encoding="utf-8"))["tasks"]
-    assert task["judge"] == 0 and "no browser" in task["judge_rationale"]
-
-
-def test_a_timed_out_visual_task_still_gets_a_vote_without_a_render(fake_agent: FakeAgent, tmp_path: Path,
-                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
-    # #41: stopping at the limit is graded, never zeroed because no page could be rendered yet.
-    bundle = _run(fake_agent, tmp_path / "results", "web-mondrian-landing", VISUAL_AGENT)
-    _edit_packet(bundle, "web-mondrian-landing", status="timeout")
-    monkeypatch.setattr(bundle_judge, "render_headless", lambda html, png: visual.NO_BROWSER)
-    assert _judge(fake_agent, bundle) == 0
-    [task] = json.loads((bundle / "result.json").read_text(encoding="utf-8"))["tasks"]
-    assert (task["judge"], task["judge_rationale"]) == (80, "solid")
+    assert _judge(fake_agent, bundle, JUDGE_SEEING) == 1
+    assert "no browser" in capsys.readouterr().out
+    assert not (tmp_path / "fakes" / "judge.seen").exists(), "no judge call without a browser"
+    assert (bundle / "result.json").read_bytes() == before
 
 
 def test_judge_refuses_to_write_when_a_task_has_no_vote(fake_agent: FakeAgent, tmp_path: Path,
@@ -216,10 +212,15 @@ def test_judge_still_renders_a_visual_task_whose_packet_drops_the_render(
         fake_agent: FakeAgent, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     bundle = _run(fake_agent, tmp_path / "results", "web-mondrian-landing", VISUAL_AGENT)
     _edit_packet(bundle, "web-mondrian-landing", render=None)
-    monkeypatch.setattr(bundle_judge, "render_headless", lambda html, png: visual.NO_BROWSER)
+    calls: list[Path] = []
+
+    def render(html: Path, png: Path) -> str:
+        calls.append(html)
+        return f"{visual.RENDER_FAILED}: timeout after 120s"
+
+    monkeypatch.setattr(bundle_judge, "render_headless", render)
     assert _judge(fake_agent, bundle) == 0
-    [task] = json.loads((bundle / "result.json").read_text(encoding="utf-8"))["tasks"]
-    assert task["judge"] == 0, "no screenshot, no visual vote"
+    assert calls, "the catalog says it is a page, whatever the packet says"
 
 
 def test_judge_refuses_a_packet_for_an_unknown_task(fake_agent: FakeAgent, tmp_path: Path) -> None:
@@ -230,7 +231,7 @@ def test_judge_refuses_a_packet_for_an_unknown_task(fake_agent: FakeAgent, tmp_p
 
 def test_judge_redacts_what_it_writes_to_result_json(fake_agent: FakeAgent, tmp_path: Path) -> None:
     bundle = _run(fake_agent, tmp_path / "results", "ds-ab-playtest", REFERENCE_AGENT)
-    leaky = 'import json\nprint(json.dumps({"score": 70, "rationale": "mail " + "dana" + "@" + "corp-mail.net"}))\n'
+    leaky = 'import json\nprint(json.dumps({"score": 70, "approach": 30, "deliverable": 20, "verification": 20, "rationale": "mail " + "dana" + "@" + "corp-mail.net"}))\n'
     assert _judge(fake_agent, bundle, leaky) == 0
     text = (bundle / "result.json").read_text(encoding="utf-8")
     assert "corp-mail.net" not in text and '"judge": 70' in text
@@ -273,8 +274,9 @@ def test_a_render_that_fails_is_tried_again_before_a_zero(fake_agent: FakeAgent,
     assert len(calls) == 3 and task["judge"] == 80
 
 
-def test_a_render_that_keeps_failing_still_scores_zero(fake_agent: FakeAgent, tmp_path: Path,
-                                                       monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_render_that_keeps_failing_gets_a_vote_without_a_screenshot(fake_agent: FakeAgent, tmp_path: Path,
+                                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    # #70: a flaky browser is no grade.
     bundle = _run(fake_agent, tmp_path / "results", "web-mondrian-landing", VISUAL_AGENT)
     calls: list[Path] = []
 
@@ -283,6 +285,23 @@ def test_a_render_that_keeps_failing_still_scores_zero(fake_agent: FakeAgent, tm
         return f"{visual.RENDER_FAILED}: timeout after 120s"
 
     monkeypatch.setattr(bundle_judge, "render_headless", broken_render)
-    assert _judge(fake_agent, bundle) == 0
+    assert _judge(fake_agent, bundle, JUDGE_SEEING) == 0
+    assert (tmp_path / "fakes" / "judge.seen").read_text(encoding="utf-8").splitlines() == ["[]"]
     [task] = json.loads((bundle / "result.json").read_text(encoding="utf-8"))["tasks"]
-    assert len(calls) == 3 and task["judge"] == 0
+    assert len(calls) == 3 and task["judge"] == 80
+    assert any("timeout after 120s" in error for error in task["judge_errors"])
+    assert "verification" in task["judge_parts"]
+
+
+def test_a_blank_page_is_shown_to_the_judge_instead_of_zeroed(fake_agent: FakeAgent, tmp_path: Path,
+                                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    bundle = _run(fake_agent, tmp_path / "results", "web-mondrian-landing", VISUAL_AGENT)
+
+    def blank_render(html: Path, png: Path) -> str:
+        png.parent.mkdir(parents=True, exist_ok=True)
+        png.write_bytes(b"x" * 50)
+        return visual.RENDERED
+
+    monkeypatch.setattr(bundle_judge, "render_headless", blank_render)
+    assert _judge(fake_agent, bundle, JUDGE_SEEING) == 0
+    assert (tmp_path / "fakes" / "judge.seen").read_text(encoding="utf-8").splitlines() == ['["screenshot.png"]']

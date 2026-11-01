@@ -162,9 +162,8 @@ def _context(**overrides: object) -> JudgeContext:
 def test_the_judge_sees_status_and_measurements_as_trusted_context() -> None:
     prompt = build_judge_prompt(_context(), screenshot=False)
     section = prompt.split("## Run measurements", 1)[1].split("## Agent final answer", 1)[0]
-    assert "status: timeout" in section
-    assert "model_turns: 12" in section and "generated_tokens: 3400" in section
-    assert "hardware" in section
+    assert "status: timeout" in section and "tool_errors: 2" in section
+    assert "model_turns" not in section and "generated_tokens" not in section
 
 
 def test_the_judge_gets_no_time_or_speed_because_they_reveal_the_hardware() -> None:

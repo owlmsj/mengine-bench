@@ -67,7 +67,7 @@ def run_tasks(tasks: Sequence[EvalTask], agent: Agent, settings: RunSettings, wo
             evidence.packets[task.id] = _crash_packet(task, record)
         details[task.id] = detail
         outcomes.append(_outcome(task, record))
-        correct = 0.0 if record.status == "crash" else _correctness(record)
+        correct = _correctness(record)
         print(f"[{task.id}] {record.status} c={correct:.2f} t={record.agent_s:.1f}s", flush=True)
     run = score_run(outcomes, settings.price)
     meta = RunMeta(date=datetime.now().strftime("%Y-%m-%d"), agent=agent.name, model=settings.model,
@@ -123,7 +123,7 @@ def _crash_packet(task: EvalTask, record: TaskRunRecord) -> dict[str, object]:
     checks = () if record.check is None else (*record.check.mandatory, *record.check.checks)
     context = JudgeContext(task_id=task.id, prompts=tuple(step.prompt for step in task.steps),
                            answers=tuple(record.answers), diff="", transcript_tail=record.error or "",
-                           checks=tuple(checks))
+                           checks=tuple(checks), status=record.status)
     packet = context.record()
     packet.update(deliverables=[], render=None)
     return packet
@@ -136,10 +136,7 @@ def _deliverables(task: EvalTask, record: TaskRunRecord) -> dict[str, Path]:
 
 
 def _crashed_task(task: EvalTask, record: TaskRunRecord | None, error: Exception) -> tuple[TaskRunRecord, TaskDetail]:
-    """Record a task whose run or post-processing raised as `crash`, keeping what was graded.
-
-    Scoring gives a crash c = 0.
-    """
+    """Record a task whose run or post-processing raised as `crash`, keeping what was graded."""
     message = f"post-processing failed: {type(error).__name__}: {error}"
     if record is None:
         record = TaskRunRecord(task_id=task.id)
@@ -182,7 +179,7 @@ def _public_error(error: str | None, record: TaskRunRecord) -> str | None:
 def _correctness(record: TaskRunRecord) -> float:
     if record.check is None:
         return 0.0
-    return record.check.partial_score if record.status == "timeout" else record.check.score
+    return record.check.partial_score if record.status in ("timeout", "crash") else record.check.score
 
 
 def _outcome(task: EvalTask, record: TaskRunRecord) -> TaskOutcome:

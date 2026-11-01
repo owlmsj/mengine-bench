@@ -190,8 +190,3 @@ def _remove_profile(profile: Path) -> None:
         if not profile.exists():
             return
         time.sleep(PROFILE_REMOVE_DELAY_S)
-
-
-def screenshot_has_content(png: Path, min_bytes: int) -> bool:
-    # A blank or black page compresses to a tiny PNG; a real layout does not.
-    return png.is_file() and png.stat().st_size >= min_bytes

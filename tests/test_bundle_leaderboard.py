@@ -120,7 +120,7 @@ def _write_result(results: Path, name: str, score: float | None, *, model: str =
     result = {
         "date": "2026-10-19", "bench_version": bench_version, "submitter": "dquill",
         "agent": {"name": "codex", "model": model, "effort": "high", "version": "codex-cli 0.162.1"},
-        "judge": {"agent": "claude", "model": "claude-opus-5-5", "effort": "xhigh", "rubric": "2.3"} if judged else None,
+        "judge": {"agent": "claude", "model": "claude-opus-5-5", "effort": "xhigh", "rubric": "2.4"} if judged else None,
         "config": {"personal_instructions": [], "provider": "openai", "mcp": "none"},
         "environment": {"os": "Linux 6", "cpu": "AMD Ryzen 9 7950X", "cpu_count": 32, "ram_gb": 62.6,
                         "gpu": "NVIDIA GeForce RTX 4090 (24 GB)"},
@@ -219,7 +219,7 @@ def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 0
     assert board.unranked == [("results/cheap-judge",
-                               "judged by claude claude-haiku-5-5@xhigh rubric 2.3; only claude claude-opus-5-5@xhigh rubric 2.3 judges are ranked")]
+                               "judged by claude claude-haiku-5-5@xhigh rubric 2.4; only claude claude-opus-5-5@xhigh rubric 2.4 judges are ranked")]
 
 
 @pytest.mark.parametrize("field,value", [("agent", "cmd"), ("rubric", "1.0")])

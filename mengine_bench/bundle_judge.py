@@ -5,36 +5,39 @@ judge/<task>.json (prompts, answers, workspace diff, transcript tail, checks,
 all redacted) and each declared deliverable verbatim (redacted) under
 judge/<task>/<file>. The maintainer runs this while reviewing the result pull
 request, so contributors need no judge and every ranked run is judged the
-same way: one rubric 2.3 vote per task. For a task whose deliverable is an
+same way: one rubric 2.4 vote per task. For a task whose deliverable is an
 HTML page, the stored page is rendered headless in a temp dir and the judge
-sees the screenshot, kept as judge/<task>.png for audit; a blank or failed
-render scores that task's judge 0, unless the run was stopped at its limit:
-then the judge votes on what exists. Nothing is written unless every task ends
-with a vote.
+sees the screenshot, kept as judge/<task>.png for audit. A render that keeps
+failing is noted and the judge votes without an image: a flaky browser is no
+grade. Nothing is written unless every task ends with a vote, and with no browser
+at all nothing is judged. `--again` replaces the votes of a judged bundle, which is
+how a change to the judging reaches the ranked runs without running them again.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import shutil
 import tempfile
 from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from mengine_bench import catalog
+from mengine_bench import __version__, catalog
 from mengine_bench.bundle import JUDGE_DIR, RESULT_NAME, SUMMARY_NAME, public_json, public_text
-from mengine_bench.judge import RUBRIC_VERSION, JudgeContext, RubricJudge, TaskVerdict
+from mengine_bench.core import EvalTask
+from mengine_bench.judge import JUDGE_SYSTEM_PROMPT, RUBRIC_VERSION, JudgeContext, RubricJudge, TaskVerdict
+from mengine_bench.judge_view import NO_CALLS, tool_log, transcript_streams
 from mengine_bench.redact import PathScope, local_names
 from mengine_bench.report import render_summary
 from mengine_bench.runner.agents import Agent
 from mengine_bench.scoring import combined_score, judge_mean, speed_points
-from mengine_bench.visual import RENDERED, is_render_failure, render_headless, screenshot_has_content
+from mengine_bench.visual import NO_BROWSER, RENDERED, is_render_failure, render_headless
 
 TaskEntry = MutableMapping[str, object]
 Renderer = Callable[[Path, Path], str]
-# A blank or black 1440x900 page compresses far below this; a real layout does not.
-BLANK_PNG_BYTES = 10_000
 RENDER_ATTEMPTS = 3
 
 
@@ -56,14 +59,36 @@ def read_packet(bundle: Path, task_id: str) -> JudgePacket:
         raise ValueError(f"received {bundle.name} without {JUDGE_DIR}/{task_id}.json; expected judge evidence "
                          f"for every task (a bundle written by bench 1.0 or later)")
     record = json.loads(packet_file.read_text(encoding="utf-8"))
-    context = replace(JudgeContext.from_record(record), task_id=task.id,
-                      prompts=tuple(step.prompt for step in task.steps))
+    context = JudgeContext.from_record(record)
+    log = tool_log(transcript_streams(bundle / "transcripts" / f"{task_id}.jsonl.gz"))
+    if log == NO_CALLS and context.stats.get("tool_calls"):
+        raise ValueError(f"received {context.stats['tool_calls']} tool_calls in {task_id} and none in its log; "
+                         f"expected the judge's tool log to show them")
+    context = replace(context, task_id=task.id, prompts=tuple(step.prompt for step in task.steps),
+                      diff=_agent_diff(context.diff, task), tool_log=log, deliverables=_stored_deliverables(bundle, task))
     return JudgePacket(context=context, render=task.render_target)
+
+
+def _stored_deliverables(bundle: Path, task: EvalTask) -> tuple[tuple[str, str], ...]:
+    """Each declared file whole; a link a PR committed never reaches the prompt (#23 review)."""
+    stored = [(rel, bundle / JUDGE_DIR / task.id / rel) for rel in task.deliverables]
+    return tuple((rel, path.read_text(encoding="utf-8", errors="replace")) for rel, path in stored
+                 if path.is_file() and not path.is_symlink())
+
+
+def _agent_diff(diff: str, task: EvalTask) -> str:
+    """The agent's own changes: not what the bench moved away, not a file already shown whole (#70)."""
+    moved = [rel for step in task.steps for rel in (*step.hide, *step.inline)]
+    head, _, bodies = diff.partition("\n\n--- ")
+    lines = [line for line in head.split("\n") if not (line.startswith("D ") and any(
+        line[2:] == rel or line[2:].startswith(f"{rel}/") for rel in moved))]
+    kept = [body for body in re.split(r"\n\n--- ", bodies) if body and body.split(" ---", 1)[0] not in task.deliverables]
+    return "\n\n--- ".join(["\n".join(lines), *kept]).strip("\n")
 
 
 def _render_verdict(bundle: Path, task_id: str, packet: JudgePacket, judge: RubricJudge, workdir: Path,
                     render: Renderer) -> TaskVerdict:
-    """Render the stored page outside the bundle; the judge sees the screenshot, a failed render scores 0."""
+    """Render the stored page outside the bundle; the judge sees the screenshot, or a note when it keeps failing."""
     stored = bundle / JUDGE_DIR / task_id
     site = workdir / "site"
     page = str(packet.render)
@@ -80,20 +105,20 @@ def _render_verdict(bundle: Path, task_id: str, packet: JudgePacket, judge: Rubr
         status = render(site / page, png)
         if not is_render_failure(status):
             break
-    if status != RENDERED or not screenshot_has_content(png, BLANK_PNG_BYTES):
-        if packet.context.status == "timeout":
-            # #41: a run stopped at its limit is graded on what exists, never zeroed for a missing page.
-            return judge.grade(packet.context, workdir / "judge")
-        reason = status if status != RENDERED else f"blank screenshot (< {BLANK_PNG_BYTES} bytes)"
-        return TaskVerdict(score=0, rationale=f"render of {page} failed: {reason}; judge 0 for this task")
-    return judge.grade(packet.context, workdir / "judge", png)
+    if status == NO_BROWSER:
+        raise ValueError(f"received {status!r} rendering {page}; expected a browser: nothing was judged")
+    if status == RENDERED:
+        return judge.grade(packet.context, workdir / "judge", png)
+    # #70: the same page rendered in 4 of 5 more tries after a timeout that had scored it 0.
+    verdict = judge.grade(packet.context, workdir / "judge", note=f"No screenshot: the render failed ({status}).")
+    return replace(verdict, errors=(*verdict.errors, f"{status}; voted without a screenshot"))
 
 
-def judge_bundle(bundle: Path, judge_agent: Agent, render: Renderer | None = None) -> dict[str, object]:
+def judge_bundle(bundle: Path, judge_agent: Agent, render: Renderer | None = None, again: bool = False) -> dict[str, object]:
     """Judge every task, rescore, and rewrite result.json and summary.md; raises ValueError, writing nothing,
-    when the bundle is already judged, lacks evidence, or a task ends without a vote."""
+    when the bundle is already judged (unless `again`), lacks evidence, or a task ends without a vote."""
     result = json.loads((bundle / RESULT_NAME).read_text(encoding="utf-8"))
-    if isinstance(result.get("judge"), dict):
+    if isinstance(result.get("judge"), dict) and not again:
         raise ValueError(f"received {bundle.name} already judged by {result['judge'].get('model')}; expected a "
                          f"bundle without a judge")
     tasks = result["tasks"]
@@ -121,14 +146,16 @@ def judge_bundle(bundle: Path, judge_agent: Agent, render: Renderer | None = Non
         (bundle / JUDGE_DIR / f"{task_id}.png").write_bytes(png)
     for task in tasks:
         verdict = verdicts[str(task["id"])]
-        task.update(judge=verdict.score, judge_rationale=verdict.rationale, judge_errors=list(verdict.errors))
+        task.update(judge=verdict.score, judge_rationale=verdict.rationale, judge_errors=list(verdict.errors),
+                    judge_parts=dict(verdict.parts))
     # The judge changes Judge and Score only: checks, Correct %, Time and Cost stay as the run published them.
     totals = result["totals"]
     totals["judge"] = judge_mean([verdicts[str(task["id"])].score for task in tasks])
     totals["speed"] = speed_points(float(totals["time_s"]))
     totals["score"] = combined_score(float(totals["correct"]), totals["judge"], totals["speed"])
     result["judge"] = {"agent": judge_agent.name, "model": judge_agent.model, "effort": judge_agent.effort,
-                       "rubric": RUBRIC_VERSION}
+                       "rubric": RUBRIC_VERSION, "bench": __version__,
+                       "system_prompt_sha256": hashlib.sha256(JUDGE_SYSTEM_PROMPT.encode("utf-8")).hexdigest()}
     # Rationales and errors come from the maintainer's machine: redact them like the run's own text.
     scope = PathScope(names=local_names().allowing(result.get("submitter")))
     public = public_json(result, scope)

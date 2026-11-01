@@ -150,11 +150,16 @@ class Agent(Protocol):
                    attachments: Sequence[str]) -> Invocation: ...
 
     def judge_invocation(self, prompt: str, workdir: Path, attachments: Sequence[str],
-                         prompt_file: Path | None = None) -> Invocation: ...
+                         prompt_file: Path | None = None, system_prompt: str | None = None) -> Invocation: ...
 
     def parse(self, stdout: str, exit_code: int) -> Parsed: ...
 
     def version(self) -> str | None: ...
+
+
+def _with_rules(prompt: str, system_prompt: str | None) -> str:
+    """For a judge CLI with no system prompt flag."""
+    return f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
 
 
 def split_jsonl(stdout: str) -> list[dict[str, object]]:
@@ -324,7 +329,7 @@ class ClaudeAgent:
         return Invocation(argv=argv, stdin_text=prompt)
 
     def judge_invocation(self, prompt: str, workdir: Path, attachments: Sequence[str],
-                         prompt_file: Path | None = None) -> Invocation:
+                         prompt_file: Path | None = None, system_prompt: str | None = None) -> Invocation:
         # --tools "" removes every built-in tool; --restricted also drops user,
         # project and local settings (hooks) and --strict-mcp-config every MCP
         # server. Without a Read tool, images travel inline as stream-json
@@ -334,6 +339,9 @@ class ClaudeAgent:
             argv += ["--effort", self.effort]
         argv += ["--tools", "", "--restricted", "--strict-mcp-config", "--permission-mode", "dontAsk",
                  "--no-session-persistence"]
+        if system_prompt:
+            # Replaces Claude Code's own prompt, which describes tools a judge does not have (#70).
+            argv += ["--system-prompt", system_prompt]
         if not attachments:
             return Invocation(argv=argv, stdin_text=prompt)
         blocks: list[dict[str, object]] = [{"type": "text", "text": prompt}]
@@ -378,7 +386,7 @@ class CodexAgent:
         return Invocation(argv=argv, stdin_text=prompt)
 
     def judge_invocation(self, prompt: str, workdir: Path, attachments: Sequence[str],
-                         prompt_file: Path | None = None) -> Invocation:
+                         prompt_file: Path | None = None, system_prompt: str | None = None) -> Invocation:
         # Codex cannot drop every tool: read-only sandbox (no writes, no
         # network), no user config/MCP/rules, no session files, and the
         # command, app and browser features off.
@@ -392,7 +400,7 @@ class CodexAgent:
         for attachment in attachments:
             argv += ["-i", attachment]
         argv.append("-")
-        return Invocation(argv=argv, stdin_text=prompt)
+        return Invocation(argv=argv, stdin_text=_with_rules(prompt, system_prompt))
 
     def parse(self, stdout: str, exit_code: int) -> Parsed:
         return parse_codex_jsonl(stdout, exit_code)
@@ -423,7 +431,8 @@ class OpencodeAgent:
         return Invocation(argv=[*argv, prompt], stdin_text=None)
 
     def judge_invocation(self, prompt: str, workdir: Path, attachments: Sequence[str],
-                         prompt_file: Path | None = None) -> Invocation:
+                         prompt_file: Path | None = None, system_prompt: str | None = None) -> Invocation:
+        prompt = _with_rules(prompt, system_prompt)
         model = f"{self.model}#{self.effort}" if self.effort else self.model
         argv = [_executable("opencode"), "run", "--standalone", "--format", "json", "-m", model]
         for attachment in attachments:
@@ -481,7 +490,7 @@ class CmdAgent:
         return Invocation(argv=argv, stdin_text=None)
 
     def judge_invocation(self, prompt: str, workdir: Path, attachments: Sequence[str],
-                         prompt_file: Path | None = None) -> Invocation:
+                         prompt_file: Path | None = None, system_prompt: str | None = None) -> Invocation:
         # A user command's tool policy is the user's own; judge.py still runs
         # it in an empty cwd with the prompt file outside that cwd.
         if prompt_file is None:
