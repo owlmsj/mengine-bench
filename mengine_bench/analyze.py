@@ -1,6 +1,6 @@
 """`mengine-bench analyze`: what separates runs, read from published results (#82). No agent runs.
 
-Runs are not repeated, so the order is tested another way: draw the 14 tasks again with replacement, many
+Runs are not repeated, so the order is tested another way: draw the tasks again with replacement, many
 times, and count how often one run keeps its lead. That shows how much the order rests on this set of tasks.
 It says nothing about the noise between two runs of the same agent.
 """

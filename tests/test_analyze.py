@@ -120,7 +120,7 @@ def test_changes_warn_about_regressions_and_name_only_affected_tasks() -> None:
     changes = _changes([latest, previous])
     assert changes.count("codex repeat/low") == 1
     assert "2026-10-30 -> 2026-10-31" in changes
-    assert "Time: 420 -> 600" in changes
+    assert f"Time: {30 * len(IDS)} -> 600" in changes
     assert "Judge: 80 -> 73" in changes
     assert "Input tokens: 1000 -> 1260" in changes
     assert f"{IDS[0]}: check failed: output matches; Time: 30 -> 40; Judge: 80 -> 73; Input tokens: 100 -> 126" in changes
@@ -130,7 +130,7 @@ def test_changes_warn_about_regressions_and_name_only_affected_tasks() -> None:
 
 def test_changes_do_not_warn_at_thresholds_or_for_improvements() -> None:
     previous, latest = _dated_run("2026-10-30"), _dated_run("2026-10-31")
-    latest["totals"].update(time_s=525.0, judge=74, tokens={"input": 1250})
+    latest["totals"].update(time_s=30.0 * len(IDS) * 1.25, judge=74, tokens={"input": 1250})
     latest["tasks"][0].update(agent_s=37.5, judge=74, tokens={"input": 125})
     latest["tasks"][1].update(agent_s=1.0, judge=100, tokens={"input": 1})
     assert _changes([previous, latest]).strip() == "No warnings."
