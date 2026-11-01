@@ -15,7 +15,7 @@ from mengine_bench.run_command import _outcome
 from mengine_bench.runner import process
 from mengine_bench.runner.agents import CodexAgent, OpencodeAgent, partial_answer
 from mengine_bench.runner.task_run import _step_env, run_task, snapshot
-from mengine_bench.tasks import business, compaction, context, gamedev, ir, longrepo, visual
+from mengine_bench.tasks import business, compaction, context, ir, longrepo, visual
 
 
 def _by_id(task_id: str) -> EvalTask:
@@ -141,7 +141,7 @@ def test_a_right_result_file_passes_whatever_the_reply_says(tmp_path: Path, task
 # ---------------------------------------------------------------- hidden tests --
 
 
-@pytest.mark.parametrize("task_id", ["gd-astar-doors", "gd-ecs-collision-bug", "gd-integration-repo"])
+@pytest.mark.parametrize("task_id", ["gd-integration-repo"])
 def test_a_fake_unittest_module_earns_nothing(tmp_path: Path, task_id: str) -> None:
     # A workspace unittest.py replaced the standard module and exited 0, so the untouched code scored 1.0.
     task = _by_id(task_id)
@@ -152,23 +152,6 @@ def test_a_fake_unittest_module_earns_nothing(tmp_path: Path, task_id: str) -> N
     write(tmp_path / "faked", "unittest.py", "import sys\nsys.exit(0)\n")
     faked = task.check(tmp_path / "faked", [""]).score
     assert faked == task.check(tmp_path / "clean", [""]).score and faked < 1.0
-
-
-def test_a_correct_refactor_of_the_collision_helper_passes(tmp_path: Path) -> None:
-    # The hidden test imported `overlaps` by name: renaming it zeroed a correct fix with the visible suite green.
-    gamedev._ecs_setup(tmp_path)
-    gamedev._ecs_reference(tmp_path)
-    path = tmp_path / "arena_ecs/systems/collision.py"
-    path.write_text(path.read_text(encoding="utf-8").replace("overlaps", "_boxes_overlap"), encoding="utf-8")
-    assert gamedev._ecs_check(tmp_path, [""]).passed
-
-
-def test_collision_pairs_compare_in_any_order(tmp_path: Path) -> None:
-    gamedev._ecs_setup(tmp_path)
-    gamedev._ecs_reference(tmp_path)
-    path = tmp_path / "arena_ecs/systems/collision.py"
-    path.write_text(path.read_text(encoding="utf-8").replace("hits.append((ea, eb))", "hits.append((eb, ea))"), encoding="utf-8")
-    assert gamedev._ecs_check(tmp_path, [""]).passed
 
 
 def test_a_broken_suite_does_not_pass_the_integration_task(tmp_path: Path) -> None:

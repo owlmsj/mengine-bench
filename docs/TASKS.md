@@ -36,11 +36,11 @@ embedded images.
 | `lc-changelog` | long-context | Trace in a long changelog when a setting changed, when it came back and who approved that. |
 | `vis-chart` | vision | Read a benchmark chart to say which GPU is fastest at one context size and by how much. |
 | `ds-sql-funnel` | data-science | Find where players drop off on each platform from a product analytics database. |
-| `gd-astar-doors` | gamedev | Make units find the cheapest route across a game map where doors cost more to cross. |
-| `gd-ecs-collision-bug` | gamedev | Find out why units move and collide wrong in a small game codebase, and fix it. |
+| `ue-packaged-bug` | gamedev | Find out why an Unreal game loses its colors and crashes only in the packaged build, and fix it. |
 | `ir-studio-wiki` | retrieval | Answer a support lead's questions from a studio wiki, citing the pages behind each answer. |
 | `ir-server-logs` | retrieval | Investigate a game server outage from its logs and report what happened. |
 | `gd-integration-repo` | gamedev | Find every cause behind a failing integration test in a game backend, and fix them. |
+| `rs-lock-bug` | engineering | Find out why a Rust game server hangs under load and loses points, and fix it. |
 | `web-mondrian-landing` | web-design | Build a landing page that tells the story of one Mondrian painting from a fact sheet. |
 | `3d-voxel-landscape` | 3d | Build a procedural 3D scene of Mount Fuji with a pagoda and cherry trees, good enough for a wallpaper. |
 | `web-word-universe` | data-viz | Collect a saved Portuguese dictionary site and build one view that shows how its words relate. |

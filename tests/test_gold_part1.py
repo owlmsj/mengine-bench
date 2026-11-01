@@ -20,8 +20,7 @@ PART1_MODULES = ("gamedev", "business", "funnel", "context", "compaction")
 
 # Source catalog membership (private v1 suite); ids must not drift.
 EXPECTED_IDS = {
-    "gd-astar-doors",
-    "gd-ecs-collision-bug",
+    "ue-packaged-bug",
     "ds-ab-playtest",
     "bo-pnl-runway",
     "bo-reconcile",
@@ -66,47 +65,6 @@ def test_reference_passes_and_untouched_workspace_fails(task_id: str, tmp_path: 
     result = task.check(solved, answers)
     assert result.passed, f"{task.id}: reference fails {result.failed()}"
 
-
-
-def test_ecs_untouched_tests_grant_no_correctness(tmp_path: Path) -> None:
-    task = next(t for t in _part1_tasks() if t.id == "gd-ecs-collision-bug")
-    task.setup(tmp_path)
-    result = task.check(tmp_path, [""])
-    assert not result.passed
-    assert result.score == 0
-    assert result.mandatory == [("visible tests left untouched", True)]
-
-
-@pytest.mark.parametrize("fixed_file,expected_check", [
-    ("arena_ecs/systems/movement.py", "hidden movement"),
-    ("arena_ecs/systems/collision.py", "hidden collision"),
-])
-def test_ecs_scores_movement_and_collision_separately(
-    tmp_path: Path, fixed_file: str, expected_check: str,
-) -> None:
-    from mengine_bench.tasks import gamedev
-
-    gamedev._ecs_setup(tmp_path)
-    gamedev._ecs_reference(tmp_path)
-    for rel in ("arena_ecs/systems/movement.py", "arena_ecs/systems/collision.py"):
-        if rel != fixed_file:
-            (tmp_path / rel).write_text(gamedev.ECS_FILES[rel], encoding="utf-8")
-    result = gamedev._ecs_check(tmp_path, [""])
-    assert result.score == 0.5
-    assert [name for name, ok in result.checks if ok] == [expected_check]
-    assert not result.passed
-
-
-def test_ecs_modified_visible_tests_fail_integrity(tmp_path: Path) -> None:
-    from mengine_bench.tasks import gamedev
-
-    gamedev._ecs_setup(tmp_path)
-    gamedev._ecs_reference(tmp_path)
-    (tmp_path / "tests/test_systems.py").write_text("", encoding="utf-8")
-    result = gamedev._ecs_check(tmp_path, [""])
-    assert result.mandatory == [("visible tests left untouched", False)]
-    assert all(ok for _, ok in result.checks)
-    assert not result.passed
 
 
 @pytest.mark.parametrize("invoice_id", ["INV-1021", "INV-1036"])
@@ -389,63 +347,6 @@ def test_handoff_spill_credit_requires_a_number(tmp_path: Path, answer: str, exp
 
     (tmp_path / "result.json").write_text(answer, encoding="utf-8")
     assert compaction._handoff_check(tmp_path, ["any reply"]).score == expected
-
-
-@pytest.mark.parametrize("original,replacement,expected", [
-    ('"D": 3', '"D": 3', True),
-    ('"D": 3', '"D": 1', False),
-    ("def find_path(grid):", 'def find_path(grid):\n    if grid == ["S..G"]:\n        return None', False),
-])
-def test_astar_hidden_tests_reject_wrong_door_cost_and_visible_regression(
-    tmp_path: Path, original: str, replacement: str, expected: bool,
-) -> None:
-    from mengine_bench.tasks import gamedev
-
-    gamedev._astar_setup(tmp_path)
-    assert original in gamedev.ASTAR_REFERENCE
-    (tmp_path / "pathfind.py").write_text(
-        gamedev.ASTAR_REFERENCE.replace(original, replacement), encoding="utf-8",
-    )
-    assert gamedev._astar_check(tmp_path, [""]).passed is expected
-
-
-@pytest.mark.parametrize("original,replacement,expected", [
-    ("pb.x + bb.w", "pb.x + bb.w", True),
-    ("pb.x + bb.w", "pb.x + ba.w", False),
-    ("pb.y + bb.h", "pb.y + ba.h", False),
-    ("pa.x < pb.x", "pa.x <= pb.x", False),
-    ("pa.y < pb.y", "pa.y <= pb.y", False),
-])
-def test_ecs_hidden_collision_rejects_wrong_sizes_and_negative_edge_contacts(
-    tmp_path: Path, original: str, replacement: str, expected: bool,
-) -> None:
-    from mengine_bench.tasks import gamedev
-
-    gamedev._ecs_setup(tmp_path)
-    gamedev._ecs_reference(tmp_path)
-    collision = tmp_path / "arena_ecs/systems/collision.py"
-    source = collision.read_text(encoding="utf-8")
-    assert original in source
-    collision.write_text(source.replace(original, replacement), encoding="utf-8")
-    result = gamedev._ecs_check(tmp_path, [""])
-    assert result.mandatory_ok
-    assert dict(result.checks)["hidden movement"]
-    assert dict(result.checks)["hidden collision"] is expected
-
-
-@pytest.mark.parametrize("task_id", ["gd-astar-doors", "gd-ecs-collision-bug"])
-@pytest.mark.parametrize("solved", [True, False])
-def test_gamedev_prompts_keep_no_new_dependencies_and_accept_reject_contract(
-    tmp_path: Path, task_id: str, solved: bool,
-) -> None:
-    from mengine_bench.tasks import gamedev
-
-    task = next(task for task in gamedev.TASKS if task.id == task_id)
-    # #98: the requirement stays; how to meet it and how to run the tests are the agent's call.
-    assert all("no new dependencies" in step.prompt for step in task.steps)
-    task.setup(tmp_path)
-    answers = task.reference(tmp_path) if solved else [""]
-    assert task.check(tmp_path, answers).passed is solved
 
 
 def test_runway_uses_the_june_balance_not_the_older_line(tmp_path: Path) -> None:

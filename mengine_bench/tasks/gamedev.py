@@ -1,396 +1,220 @@
-"""Gamedev tasks: Pixel Arena flavored, Terminal-Bench style gold.
+"""Unreal C++: the bug that shows only in a packaged build, the kind that costs the most in real game work (#103).
 
-The agent edits real code and runs tests; the gold runs hidden unittest code
-it never saw, so a change that only satisfies the visible test still fails.
+No engine and no compile: the agent reads sources, config and a crash log, and fixes them. The checks accept
+every valid fix found so far, and refuse the ones Unreal itself would refuse.
 """
 
 from __future__ import annotations
 
-import hashlib
+import re
 from collections.abc import Sequence
 from pathlib import Path
 
-from mengine_bench.core import (
-    CheckResult,
-    EvalTask,
-    Step,
-    read,
-    checkpoints,
-    run_hidden_tests,
-    write,
-)
+from mengine_bench.core import WROTE_RESULT, CheckResult, EvalTask, Step, checkpoints, read, result_json, write
 
-# ---------------------------------------------------------- gd-astar-doors --
+HEADER = "Source/PixelArena/ArenaGameMode.h"
+SOURCE = "Source/PixelArena/ArenaGameMode.cpp"
+GAME_INI = "Config/DefaultGame.ini"
+ASSET = "/Game/Data/Palettes/DA_Primary"
 
-ASTAR_STUB = '''"""Pixel Arena level pathing: bots walk a tile map painted in primary colors."""
+UE_FILES = {
+    "README.md": """# Pixel Arena
 
-Cell = tuple[int, int]  # (row, col)
+A match game painted in primary colors, on Unreal Engine 5.
 
+- `Source/PixelArena`: the game module.
+- `Config`: project settings.
+- `Saved/Logs/PixelArena-shipping.log`: log of the packaged run that crashed.
+""",
+    HEADER: """#pragma once
 
-def find_path(grid: list[str]) -> list[Cell] | None:
-    """Cheapest 4-neighbour path from 'S' to 'G', both inclusive.
+#include "CoreMinimal.h"
+#include "GameFramework/GameModeBase.h"
+#include "ArenaGameMode.generated.h"
 
-    '.' floor costs 1 to enter, 'D' door costs 3, '#' is a wall, 'S'/'G' cost 1.
-    Return None when G is unreachable.
-    """
-    raise NotImplementedError
-'''
+class UArenaHud;
+class UArenaPalette;
+class UArenaScoreTracker;
+struct FArenaStats;
 
-ASTAR_VISIBLE = '''import unittest
+UCLASS()
+class PIXELARENA_API AArenaGameMode : public AGameModeBase
+{
+	GENERATED_BODY()
 
-from pathfind import find_path
+public:
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 
+	void OnGoalScored(int32 TeamIndex);
 
-class VisibleTest(unittest.TestCase):
-    def test_straight_corridor(self):
-        self.assertEqual(find_path(["S..G"]), [(0, 0), (0, 1), (0, 2), (0, 3)])
+private:
+	UPROPERTY()
+	TObjectPtr<UArenaHud> Hud;
 
+	UPROPERTY()
+	TObjectPtr<UArenaPalette> Palette;
 
-if __name__ == "__main__":
-    unittest.main()
-'''
+	UArenaScoreTracker* ScoreTracker = nullptr;
 
-ASTAR_HIDDEN = '''import heapq
-import unittest
+	// Plain C++ data owned by this class, freed in EndPlay.
+	FArenaStats* Stats = nullptr;
+};
+""",
+    SOURCE: """#include "ArenaGameMode.h"
 
-from pathfind import find_path
+#include "ArenaHud.h"
+#include "ArenaPalette.h"
+#include "ArenaScoreTracker.h"
+#include "ArenaStats.h"
 
-COST = {".": 1, "S": 1, "G": 1, "D": 3}
+DEFINE_LOG_CATEGORY_STATIC(LogArena, Log, All);
 
+void AArenaGameMode::BeginPlay()
+{
+	Super::BeginPlay();
 
-def locate(grid, ch):
-    for r, row in enumerate(grid):
-        c = row.find(ch)
-        if c >= 0:
-            return (r, c)
+	Hud = NewObject<UArenaHud>(this);
+	ScoreTracker = NewObject<UArenaScoreTracker>(this);
+	Stats = new FArenaStats();
 
-
-def optimal(grid):
-    s, g = locate(grid, "S"), locate(grid, "G")
-    best = {s: 0}
-    heap = [(0, s)]
-    while heap:
-        d, (r, c) = heapq.heappop(heap)
-        if (r, c) == g:
-            return d
-        for nr, nc in ((r + 1, c), (r - 1, c), (r, c + 1), (r, c - 1)):
-            if 0 <= nr < len(grid) and 0 <= nc < len(grid[nr]) and grid[nr][nc] != "#":
-                nd = d + COST[grid[nr][nc]]
-                if nd < best.get((nr, nc), 1e9):
-                    best[(nr, nc)] = nd
-                    heapq.heappush(heap, (nd, (nr, nc)))
-    return None
-
-
-def cost_of(grid, path):
-    total = 0
-    for (r0, c0), (r1, c1) in zip(path, path[1:]):
-        assert abs(r0 - r1) + abs(c0 - c1) == 1, "non-adjacent step"
-        assert grid[r1][c1] != "#", "walks through a wall"
-        total += COST[grid[r1][c1]]
-    return total
-
-
-class HiddenTest(unittest.TestCase):
-    def assert_cheapest(self, *grids):
-        for grid in grids:
-            best = optimal(grid)
-            path = find_path(list(grid))
-            if best is None:
-                self.assertIsNone(path, grid)
-                continue
-            self.assertIsNotNone(path, grid)
-            self.assertEqual(path[0], locate(grid, "S"))
-            self.assertEqual(path[-1], locate(grid, "G"))
-            self.assertEqual(cost_of(grid, path), best, grid)
-
-    def test_plain_floor(self):
-        self.assert_cheapest(["S..G"])
-
-    def test_walks_around_door(self):
-        self.assert_cheapest(["SDDDG", "....."])
-
-    def test_takes_door(self):
-        self.assert_cheapest(["S..D..G"], ["S.......", "#######D", "G.......", "........"])
-
-    def test_dead_ends(self):
-        self.assert_cheapest(["S.#.....", "..#.###.", "..D...#G", "####..#."],
-                             ["S#......", ".#.####.", ".#.#..#.", ".D.#G.#.", "...####.", "........"])
-
-    def test_unreachable(self):
-        self.assert_cheapest(["S.#", "###", "..G"])
-
-
-if __name__ == "__main__":
-    unittest.main()
-'''
-
-ASTAR_REFERENCE = '''import heapq
-
-Cell = tuple[int, int]
-COST = {".": 1, "S": 1, "G": 1, "D": 3}
-
-
-def find_path(grid):
-    start = goal = None
-    for r, row in enumerate(grid):
-        for c, ch in enumerate(row):
-            if ch == "S":
-                start = (r, c)
-            elif ch == "G":
-                goal = (r, c)
-    dist = {start: 0}
-    prev = {}
-    heap = [(0, start)]
-    while heap:
-        d, cell = heapq.heappop(heap)
-        if cell == goal:
-            path = [cell]
-            while path[-1] != start:
-                path.append(prev[path[-1]])
-            return path[::-1]
-        if d > dist[cell]:
-            continue
-        r, c = cell
-        for nxt in ((r + 1, c), (r - 1, c), (r, c + 1), (r, c - 1)):
-            nr, nc = nxt
-            if 0 <= nr < len(grid) and 0 <= nc < len(grid[nr]) and grid[nr][nc] != "#":
-                nd = d + COST[grid[nr][nc]]
-                if nd < dist.get(nxt, 1 << 30):
-                    dist[nxt] = nd
-                    prev[nxt] = cell
-                    heapq.heappush(heap, (nd, nxt))
-    return None
-'''
-
-
-def _astar_setup(ws: Path) -> None:
-    write(ws, "pathfind.py", ASTAR_STUB)
-    write(ws, "test_pathfind.py", ASTAR_VISIBLE)
-
-
-ASTAR_CASES = (("plain floor", "test_plain_floor"), ("walks around a door when that is cheaper", "test_walks_around_door"),
-               ("takes a door when it is the way", "test_takes_door"), ("finds the way past dead ends", "test_dead_ends"),
-               ("returns None when G is unreachable", "test_unreachable"))
-
-
-def _astar_check(ws: Path, answers: Sequence[str]) -> CheckResult:
-    result = CheckResult()
-    # #82: one case per check, so a failure names what went wrong and earns the rest.
-    for case, method in ASTAR_CASES:
-        selection = f"\n\ndef load_tests(loader, tests, pattern):\n    return unittest.TestSuite([HiddenTest('{method}')])\n"
-        ok, why = run_hidden_tests(ws, ASTAR_HIDDEN + selection)
-        result.add(f"hidden {case}", ok, why)
-    return result
-
-
-def _astar_reference(ws: Path) -> list[str]:
-    write(ws, "pathfind.py", ASTAR_REFERENCE)
-    return ["done"]
-
-
-# ------------------------------------------------------ gd-ecs-collision --
-
-ECS_FILES = {
-    "arena_ecs/__init__.py": "",
-    "arena_ecs/components.py": '''from dataclasses import dataclass
-
-
-@dataclass
-class Position:
-    x: float
-    y: float
-
-
-@dataclass
-class Velocity:
-    x: float
-    y: float
-
-
-@dataclass
-class Box:
-    w: float
-    h: float
-''',
-    "arena_ecs/world.py": '''class World:
-    def __init__(self):
-        self.entities = {}
-        self._next = 1
-
-    def spawn(self, **components):
-        eid = self._next
-        self._next += 1
-        self.entities[eid] = dict(components)
-        return eid
-
-    def query(self, *names):
-        for eid, comps in self.entities.items():
-            if all(name in comps for name in names):
-                yield eid, comps
-''',
-    "arena_ecs/systems/__init__.py": "",
-    "arena_ecs/systems/movement.py": '''def movement_system(world, dt):
-    for _, comps in world.query("pos", "vel"):
-        pos, vel = comps["pos"], comps["vel"]
-        pos.x += vel.x * dt
-        pos.y += vel.x * dt
-''',
-    "arena_ecs/systems/collision.py": '''def overlaps(pa, ba, pb, bb):
-    """Axis-aligned boxes anchored at their top-left corner; touching edges do not collide."""
-    return (
-        pa.x < pb.x + bb.w
-        and pa.x + ba.w > pb.x
-        and pa.y < pb.y + bb.h
-        and pa.y + ba.h > pa.y
-    )
-
-
-def collision_system(world):
-    hits = []
-    bodies = list(world.query("pos", "box"))
-    for i, (ea, ca) in enumerate(bodies):
-        for eb, cb in bodies[i + 1:]:
-            if overlaps(ca["pos"], ca["box"], cb["pos"], cb["box"]):
-                hits.append((ea, eb))
-    return hits
-''',
-    "tests/test_systems.py": '''import unittest
-
-from arena_ecs.components import Box, Position, Velocity
-from arena_ecs.systems.collision import collision_system
-from arena_ecs.systems.movement import movement_system
-from arena_ecs.world import World
-
-
-class SystemsTest(unittest.TestCase):
-    def test_movement_uses_each_axis(self):
-        world = World()
-        eid = world.spawn(pos=Position(0, 0), vel=Velocity(2, -1))
-        movement_system(world, 0.5)
-        pos = world.entities[eid]["pos"]
-        self.assertEqual((pos.x, pos.y), (1.0, -0.5))
-
-    def test_vertical_gap_is_not_a_hit(self):
-        world = World()
-        world.spawn(pos=Position(0, 0), box=Box(1, 1))
-        world.spawn(pos=Position(0, 5), box=Box(1, 1))
-        self.assertEqual(collision_system(world), [])
-
-
-if __name__ == "__main__":
-    unittest.main()
-''',
+	Palette = LoadObject<UArenaPalette>(nullptr, TEXT("/Game/Data/Palettes/DA_Primary.DA_Primary"));
+	if (!Palette)
+	{
+		UE_LOG(LogArena, Warning, TEXT("Palette is null, using fallback gray"));
+	}
+	Hud->ApplyPalette(Palette);
 }
 
-ECS_HIDDEN = '''import unittest
+void AArenaGameMode::EndPlay(const EEndPlayReason::Type Reason)
+{
+	delete Stats;
+	Stats = nullptr;
+	Super::EndPlay(Reason);
+}
 
-from arena_ecs.components import Box, Position, Velocity
-from arena_ecs.systems.collision import collision_system
-from arena_ecs.systems.movement import movement_system
-from arena_ecs.world import World
+void AArenaGameMode::OnGoalScored(int32 TeamIndex)
+{
+	Stats->Goals++;
+	ScoreTracker->AddPoints(TeamIndex, 1);
+	Hud->ShowScore(TeamIndex, ScoreTracker->GetPoints(TeamIndex));
+}
+""",
+    GAME_INI: """[/Script/EngineSettings.GeneralProjectSettings]
+ProjectName=Pixel Arena
+ProjectVersion=0.9.2
 
+[/Script/UnrealEd.ProjectPackagingSettings]
+Build=IfProjectHasCode
+BuildConfiguration=PPBC_Shipping
+UsePakFile=True
+bCookAll=False
++MapsToCook=(FilePath="/Game/Maps/Arena")
++DirectoriesToAlwaysCook=(Path="/Game/Data/Effects")
++DirectoriesToNeverCook=(Path="/Game/Dev")
+""",
+    "Saved/Logs/PixelArena-shipping.log": f"""[2026.10.28-21.04.11:102][  0]LogInit: Build: Shipping, Version: 0.9.2
+[2026.10.28-21.04.11:380][  0]LogAudio: Warning: Audio device has no surround layout, falling back to stereo
+[2026.10.28-21.04.12:015][  0]LogLoad: Game class is 'ArenaGameMode'
+[2026.10.28-21.04.12:244][  0]LogStreaming: Error: Couldn't find file for package {ASSET} requested by async loading code. NameToLoad: {ASSET}
+[2026.10.28-21.04.12:245][  0]LogUObjectGlobals: Warning: Failed to find object 'ArenaPalette {ASSET}.DA_Primary'
+[2026.10.28-21.04.12:246][  0]LogArena: Warning: Palette is null, using fallback gray
+[2026.10.28-21.04.31:610][1120]LogNet: Warning: Ping spike of 212 ms on the local client
+[2026.10.28-21.05.13:071][3684]LogGarbage: Collecting garbage: 412 objects purged
+[2026.10.28-21.05.27:903][4570]LogArena: Display: Goal for team 1
+[2026.10.28-21.05.27:904][4570]LogWindows: Error: === Critical error: ===
+[2026.10.28-21.05.27:904][4570]LogWindows: Error: Fatal error!
+[2026.10.28-21.05.27:904][4570]LogWindows: Error: Unhandled Exception: EXCEPTION_ACCESS_VIOLATION reading address 0xffffffffffffffff
+[2026.10.28-21.05.27:904][4570]LogWindows: Error: PixelArena-Win64-Shipping.exe!UArenaScoreTracker::AddPoints() [Source/PixelArena/ArenaScoreTracker.cpp:18]
+[2026.10.28-21.05.27:904][4570]LogWindows: Error: PixelArena-Win64-Shipping.exe!AArenaGameMode::OnGoalScored() [Source/PixelArena/ArenaGameMode.cpp:38]
+""",
+}
 
-class MovementTests(unittest.TestCase):
-    def test_each_axis_and_multiple_steps(self):
-        world = World()
-        eid = world.spawn(pos=Position(1, 10), vel=Velocity(2, -4))
-        movement_system(world, 2.0)
-        pos = world.entities[eid]["pos"]
-        self.assertEqual((pos.x, pos.y), (5.0, 2.0))
-        movement_system(world, 0.5)
-        self.assertEqual((pos.x, pos.y), (6.0, 0.0))
-
-
-def pairs(world):
-    return {frozenset(pair) for pair in collision_system(world)}
-
-
-def collide(first, second):
-    world = World()
-    for (x, y), (w, h) in (first, second):
-        world.spawn(pos=Position(x, y), box=Box(w, h))
-    return bool(pairs(world))
-
-
-class CollisionTests(unittest.TestCase):
-    def test_overlap_matrix(self):
-        a = ((0, 0), (2, 2))
-        cases = [((1, 1), True), ((2, 0), False), ((0, 2), False), ((-1.5, 1.5), True),
-                 ((0, 3), False), ((0, -1.9), True), ((-2, 0), False), ((0, -2), False)]
-        for at, expected in cases:
-            self.assertEqual(collide(a, (at, (2, 2))), expected, at)
-
-    def test_different_box_sizes(self):
-        a = ((0, 0), (2, 2))
-        cases = [((-3, 0), (4, 1), True), ((-1.5, 0), (1, 1), False),
-                 ((0, -3), (1, 4), True), ((0, -1.5), (1, 1), False)]
-        for at, size, expected in cases:
-            self.assertEqual(collide(a, (at, size)), expected, (at, size))
-            self.assertEqual(collide((at, size), a), expected, (at, size))
-
-    def test_collision_pairs(self):
-        world = World()
-        a = world.spawn(pos=Position(0, 2), box=Box(1, 1))
-        b = world.spawn(pos=Position(0, 0), box=Box(1, 1))
-        self.assertEqual(pairs(world), set())
-        world.entities[a]["pos"].y = 0
-        self.assertEqual(pairs(world), {frozenset((a, b))})
-
-
-if __name__ == "__main__":
-    unittest.main()
-'''
+TRACKER_TYPE = r"(?:class\s+)?UArenaScoreTracker"
+# Only what keeps the object alive: a reflected member, a strong pointer, the root set or a reported reference.
+KEPT_ALIVE = (
+    rf"UPROPERTY\s*\([^)]*\)\s*(?:TObjectPtr\s*<\s*{TRACKER_TYPE}\s*>|{TRACKER_TYPE}\s*\*)\s*ScoreTracker\b",
+    rf"TStrongObjectPtr\s*<\s*{TRACKER_TYPE}\s*>\s*ScoreTracker\b",
+    r"ScoreTracker\s*->\s*AddToRoot\s*\(",
+    r"AddReferencedObject\s*\(\s*\w*\s*->\s*ScoreTracker|AddReferencedObject\s*\(\s*ScoreTracker",
+)
+# UHT stops the build on a reflected pointer to a type it does not know.
+STRUCT_REFLECTED = r"UPROPERTY\s*\([^)]*\)\s*(?:TObjectPtr\s*<\s*)?(?:struct\s+)?FArenaStats\b"
+PACKAGING_SECTION = "/script/unrealed.projectpackagingsettings"
+COOKED_PATHS = frozenset({"/game/data/palettes", "data/palettes", "/game/data", "data", "/game"})
 
 
-def _sha(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+def _code(text: str | None) -> str:
+    """Source without comments: a fix left in a comment fixes nothing."""
+    return re.sub(r"//[^\n]*|/\*.*?\*/", "", text or "", flags=re.DOTALL)
 
 
-def _ecs_setup(ws: Path) -> None:
-    for rel, text in ECS_FILES.items():
+def _ini_sections(text: str | None) -> dict[str, list[str]]:
+    sections: dict[str, list[str]] = {}
+    current = ""
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            current = stripped[1:-1].strip().lower()
+        elif stripped and not stripped.startswith(";"):
+            sections.setdefault(current, []).append(stripped)
+    return sections
+
+
+def _palette_reaches_the_cook(ws: Path) -> bool:
+    sections = _ini_sections(read(ws, GAME_INI))
+    for line in sections.get(PACKAGING_SECTION, []):
+        found = re.match(r'[+]?DirectoriesToAlwaysCook\s*=\s*\(\s*Path\s*=\s*"?([^")]+)"?\s*\)', line, re.IGNORECASE)
+        if found and found.group(1).strip().rstrip("/").lower() in COOKED_PATHS:
+            return True
+    # Other routes that also cook it: the asset manager, or a hard reference from the class.
+    scan = any("primaryassettypestoscan" in line.lower() and "palettes" in line.lower()
+               for lines in sections.values() for line in lines)
+    hard = re.search(r"ConstructorHelpers\s*::\s*FObjectFinder[^;]*DA_Primary", _code(read(ws, HEADER)) + _code(read(ws, SOURCE)))
+    return scan or hard is not None
+
+
+def _ue_setup(ws: Path) -> None:
+    for rel, text in UE_FILES.items():
         write(ws, rel, text)
 
 
-def _ecs_check(ws: Path, answers: Sequence[str]) -> CheckResult:
+def _ue_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
-    untouched = _sha(read(ws, "tests/test_systems.py") or "") == _sha(ECS_FILES["tests/test_systems.py"])
-    result.mandatory.append(("visible tests left untouched", untouched))
-    for name, case in (("movement", "MovementTests"), ("collision", "CollisionTests")):
-        selection = f"\n\ndef load_tests(loader, tests, pattern):\n    return loader.loadTestsFromTestCase({case})\n"
-        ok, why = run_hidden_tests(ws, ECS_HIDDEN + selection)
-        result.add(f"hidden {name}", ok, why)
+    code = _code(read(ws, HEADER)) + "\n" + _code(read(ws, SOURCE))
+    result.add("crash fixed: the score tracker survives garbage collection", any(re.search(way, code) for way in KEPT_ALIVE),
+               "ScoreTracker is not kept alive by UPROPERTY, TStrongObjectPtr, AddToRoot or a reported reference")
+    result.add("colors fixed: the palette reaches the cook", _palette_reaches_the_cook(ws),
+               f"{ASSET} is not always cooked from the packaging settings, the asset manager or a hard reference")
+    result.add("the plain C++ pointer stays out of reflection", re.search(STRUCT_REFLECTED, code) is None,
+               "UPROPERTY on FArenaStats stops the build: it is not a reflected type")
+    got = result_json(ws)
+    crash, colors = str(got.get("crash_cause", "")), str(got.get("no_colors_cause", ""))
+    result.add("the report names the crash cause", re.search(r"scoretracker|score tracker|garbage|\bgc\b|uproperty", crash, re.IGNORECASE) is not None,
+               f"crash_cause: {crash!r}")
+    result.add("the report names the color cause", re.search(r"cook|palettes|da_primary|packag", colors, re.IGNORECASE) is not None,
+               f"no_colors_cause: {colors!r}")
     return result
 
 
-def _ecs_reference(ws: Path) -> list[str]:
-    move = ECS_FILES["arena_ecs/systems/movement.py"].replace("pos.y += vel.x * dt", "pos.y += vel.y * dt")
-    coll = ECS_FILES["arena_ecs/systems/collision.py"].replace("pa.y + ba.h > pa.y", "pa.y + ba.h > pb.y")
-    write(ws, "arena_ecs/systems/movement.py", move)
-    write(ws, "arena_ecs/systems/collision.py", coll)
-    return ["fixed movement.py:5 and collision.py:8"]
+def _ue_reference(ws: Path) -> list[str]:
+    write(ws, HEADER, UE_FILES[HEADER].replace("	UArenaScoreTracker* ScoreTracker", "	UPROPERTY()\n	TObjectPtr<UArenaScoreTracker> ScoreTracker"))
+    write(ws, GAME_INI, UE_FILES[GAME_INI].replace('+DirectoriesToNeverCook', '+DirectoriesToAlwaysCook=(Path="/Game/Data/Palettes")\n+DirectoriesToNeverCook'))
+    write(ws, "result.json", '{"crash_cause": "ScoreTracker has no UPROPERTY, so garbage collection frees it", '
+                             '"no_colors_cause": "DA_Primary is loaded by path only, so it is never cooked"}')
+    return ["fixed the header and the packaging settings"]
 
-
-TESTS_RUN = ("ran the tests", r"unittest|pytest")
 
 TASKS = [
     EvalTask(
-        id="gd-astar-doors", category="gamedev",
-        provenance="Terminal-Bench style: implement + hidden tests; weighted doors on a Pixel Arena tile map",
-        summary="Make units find the cheapest route across a game map where doors cost more to cross.",
-        setup=_astar_setup, check=_astar_check, reference=_astar_reference, timeout_s=180,
-        checkpoints=checkpoints(("read the module", r"pathfind"), TESTS_RUN),
-        steps=(Step("Units in our tile game cannot find their way yet: find_path in {WS}/pathfind.py is still empty. Make it "
-                    "work as its docstring says. The project takes no new dependencies."),),
-    ),
-    EvalTask(
-        id="gd-ecs-collision-bug", category="gamedev",
-        provenance="SWE-bench style debug: two planted bugs across an ECS package; visible tests must stay untouched",
-        summary="Find out why units move and collide wrong in a small game codebase, and fix it.",
-        setup=_ecs_setup, check=_ecs_check, reference=_ecs_reference, timeout_s=180,
-        checkpoints=checkpoints(TESTS_RUN, ("read movement", r"movement"), ("read collision", r"collision")),
-        steps=(Step("Playtesters say units in {WS}/arena_ecs drift and collide wrong, and the tests in {WS}/tests fail. Find out "
-                    "why and fix it. The tests describe the behavior we want, so they stay as they are, and the project takes "
-                    "no new dependencies."),),
+        id="ue-packaged-bug", category="gamedev",
+        provenance="Real Unreal work: garbage collection and the cook list, two bugs an editor session hides; synthetic project",
+        summary="Find out why an Unreal game loses its colors and crashes only in the packaged build, and fix it.",
+        setup=_ue_setup, check=_ue_check, reference=_ue_reference, timeout_s=180,
+        checkpoints=checkpoints(("read the crash log", r"shipping\.log"), ("read the game mode", r"ArenaGameMode"), WROTE_RESULT),
+        steps=(Step("Pixel Arena, our Unreal game in {WS}, runs fine in the editor. In the packaged build, players say the arena "
+                    "has no colors, and the game crashes after a minute or so of play. The log of one packaged run is in "
+                    "{WS}/Saved/Logs. There is no engine on this machine, so you cannot build or run it. Find out why and fix the "
+                    "sources and the config. Record the causes in {WS}/result.json: crash_cause, no_colors_cause."),),
     ),
 ]

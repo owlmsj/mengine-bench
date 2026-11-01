@@ -19,8 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
     ("cmp-handoff", "session/transcript.md", "profiles/local/local-9b.json"),
     ("cmp-handoff", "session/transcript.md", "check_vision.ps1"),
     ("lc-changelog", "_inline/changelog.md", "Pixel Arena"),
-    ("gd-astar-doors", "pathfind.py", "Pixel Arena"),
-    ("gd-ecs-collision-bug", "arena_ecs/components.py", "class Position"),
+    ("ue-packaged-bug", "README.md", "Pixel Arena"),
+    ("rs-lock-bug", "src/lib.rs", "Pixel Arena"),
     ("gd-integration-repo", "README.md", "arena-server"),
     ("gd-integration-repo", "docs/CONFIG.md", "ARENA_<KEY>"),
 ])

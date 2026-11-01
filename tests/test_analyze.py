@@ -49,7 +49,7 @@ def test_the_report_names_the_tasks_that_separate_runs_and_the_points_of_each_pa
                                       _run("slow", seconds=60.0, judge=70, correct={"ds-sql-funnel": 0.33})], "1.4")
     assert "2 judged runs" in report
     assert "| ds-sql-funnel | 0.33 | 0.67 | yes |" in report
-    assert "| gd-astar-doors | 1.00 | 1.00 | no |" in report
+    assert "| ue-packaged-bug | 1.00 | 1.00 | no |" in report
     assert "| fast/low | slow/low |" in report
 
 
