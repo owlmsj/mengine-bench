@@ -2,7 +2,7 @@
 
 Grading runs the page once (#82): text checks alone gave c=1 to a page that throws on load. A contributor
 without a browser or the CDN loses nothing: the page checks are left out and the run says so. The judge sees
-the screenshot for the rendered-look part of its rubric; a blank or failed render scores 0 there.
+screenshots for the rendered-look part of its rubric; a blank page scores low there.
 """
 
 from __future__ import annotations

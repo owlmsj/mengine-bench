@@ -84,8 +84,10 @@ The plan is judged from the actions: a written plan earns nothing by itself.
 
 For a visual task the maintainer's machine renders the stored page with headless
 Chromium (Edge, Chrome or Chromium; `MENGINE_BENCH_BROWSER` overrides it) and the
-judge sees the screenshot. A render that fails is tried up to 3 times; if it keeps failing, the judge votes without a
-screenshot and the bundle records it. With no browser at all, nothing is judged.
+judge sees three frames, each from a fresh load after about 1, 4 and 8 seconds of page time, next to three fixed
+reference images (strong, medium, weak) taken from bench 1.5 results and labelled by level only. A frame that fails is
+tried up to 3 times; if it keeps failing, the judge votes on the other frames, or without images when none rendered, and
+the bundle records it. With no browser at all, nothing is judged.
 
 The judge reads the task prompt, the check results, the final answers, each page whole, the agent's other changes
 and one tool log with the same shape for every harness. It does not read the raw stream, which carries the model id.
@@ -123,7 +125,7 @@ formula can be refined later from many runs.
 A value a harness does not report is `null`, never 0.
 
 Isolation: each call is a new judge process in a new empty temp directory
-(holding only `screenshot.png` for visual tasks) with tools off where the CLI
+(holding only the frames and references for visual tasks) with tools off where the CLI
 allows it. Agent-written evidence sits in `<<<EVIDENCE <marker> <name>>>>`
 blocks; the marker is a hash of the evidence, so the agent cannot forge the
 closing line.
