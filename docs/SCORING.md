@@ -87,8 +87,8 @@ formula can be refined later from many runs.
 | `generated_tokens`, `reasoning_tokens` | Everything generated, reasoning included, and the reasoning part; on Claude, a run stopped before its result gives a lower bound |
 | `largest_turn_tokens` | The largest single turn; Claude does not report it |
 | `first_tool_s`, `first_write_s`, `last_event_s` | Seconds from the first event; opencode only |
-| `tool_s`, `wait_s` | Time in tools, and between turns (prefill, queue); opencode only |
-| `turn_tps_median` | Median generated tokens per second, turns of 500 tokens or more; opencode only |
+| `tool_s`, `wait_s` | Time in tools, and between turns (prefill, queue); opencode only, plus `tool_s` on AGY |
+| `turn_tps_median` | Median generated tokens per second, turns of 500 tokens or more; opencode and AGY |
 
 A value a harness does not report is `null`, never 0.
 

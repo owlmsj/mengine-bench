@@ -1,4 +1,4 @@
-"""Agent adapters: one interface over Claude Code, Codex CLI, opencode and any command.
+"""Agent adapters: one interface over Claude Code, Codex CLI, opencode, AGY and any command.
 
 Flags were read from each CLI's `--help` (claude 2.1, codex-cli 0.162,
 opencode 2.0). Adapters only build argv lists (never shell strings) and parse
@@ -7,7 +7,7 @@ because inlined long-context documents exceed the Windows command-line limit.
 
 A step succeeds only with exit 0 AND the adapter's terminal completion event
 (claude `result` success, codex `turn.completed`, opencode `step_finish`
-reason `stop`); a success-looking prefix of a truncated stream is a crash
+reason `stop`, agy `result` SUCCESS); a success-looking prefix of a truncated stream is a crash
 (release review R16).
 
 `judge_invocation` is the judge's argv (release review R17): judges read
@@ -22,6 +22,7 @@ import base64
 import json
 import mimetypes
 import math
+import re
 import shlex
 import shutil
 import subprocess
@@ -30,10 +31,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
 
-AGENT_NAMES = ("claude", "codex", "opencode", "cmd")
+AGENT_NAMES = ("claude", "codex", "opencode", "agy", "cmd")
 # Stay well under the 32767-char Windows command line with flags and paths.
 ARGV_PROMPT_LIMIT = 24_000
 VERSION_TIMEOUT_S = 20
+_AGY_COMMAND_RESULT = re.compile(r"Command exited with code (-?\d+)\.\s*(?:Command output:\s*)?")
 
 
 class AgentError(RuntimeError):
@@ -134,6 +136,24 @@ def _opencode_usage(part: object) -> Usage:
     )
 
 
+def _agy_usage(usage: object) -> Usage:
+    tokens = _usage_mapping(usage)
+    # AGY's input_tokens leaves the cache reads out.
+    return Usage(_known_sum([_token_count(tokens.get("input_tokens")), _token_count(tokens.get("cache_read_tokens"))]),
+                 _token_count(tokens.get("cache_read_tokens")), _token_count(tokens.get("output_tokens")),
+                 _token_count(tokens.get("thinking_tokens")), None, "none")
+
+
+def agy_tool_result(info: Mapping[str, object]) -> tuple[int | None, str]:
+    """A finished call's exit code, if it ran a command, and its output without AGY's wrapping."""
+    output = info.get("output")
+    if not isinstance(output, str):
+        message = _usage_mapping(info.get("error")).get("message")
+        return None, message if isinstance(message, str) else ""
+    wrapped = _AGY_COMMAND_RESULT.match(output)
+    return (int(wrapped.group(1)), output[wrapped.end():]) if wrapped else (None, output)
+
+
 @dataclass(frozen=True)
 class Parsed:
     answer: str
@@ -184,6 +204,17 @@ def _require_exit_zero(exit_code: int) -> None:
         raise AgentError(f"received exit={exit_code}; expected exit=0")
 
 
+def _agy_replies(events: list[dict[str, object]]) -> list[object]:
+    """Each model turn's text, then the final reply when the stream got that far."""
+    turns: dict[object, str] = {}
+    for event in events:
+        step = _usage_mapping(event.get("step_update"))
+        if step.get("step_type") == "agent_response" and isinstance(step.get("text_delta"), str):
+            turns[step.get("step_index")] = turns.get(step.get("step_index"), "") + step["text_delta"]
+    finals = [_usage_mapping(event.get("result")).get("response") for event in events if event.get("event") == "result"]
+    return [*turns.values(), *finals]
+
+
 def partial_answer(stdout: str) -> str:
     """The last reply in a stream stopped at its limit; plain output is its own reply."""
     events = split_jsonl(stdout)
@@ -192,7 +223,7 @@ def partial_answer(stdout: str) -> str:
     for event in events:
         kind = event.get("type")
         known = known or kind in ("text", "step_start", "step_finish", "tool_use", "assistant", "user", "turn.started",
-                                  "turn.completed", "item.completed", "thread.started", "system")
+                                  "turn.completed", "item.completed", "thread.started", "system") or "event" in event
         part, message, item = event.get("part"), event.get("message"), event.get("item")
         if kind == "text" and isinstance(part, dict):
             replies.append(part.get("text"))
@@ -201,7 +232,7 @@ def partial_answer(stdout: str) -> str:
                         if isinstance(block, dict) and block.get("type") == "text"]
         if kind == "item.completed" and isinstance(item, dict) and item.get("type") == "agent_message":
             replies.append(item.get("text"))
-    texts = [reply for reply in replies if isinstance(reply, str) and reply.strip()]
+    texts = [reply for reply in [*replies, *_agy_replies(events)] if isinstance(reply, str) and reply.strip()]
     if texts:
         return texts[-1]
     return "" if known else stdout
@@ -272,6 +303,22 @@ def parse_opencode_jsonl(stdout: str, exit_code: int) -> Parsed:
         usage = Usage(previous.input_tokens, previous.cached_input_tokens, previous.output_tokens,
                       previous.reasoning_tokens, previous.cost_usd, "partial")
     return Parsed(answer=answer, session_id=session, usage=usage)
+
+
+def parse_agy_stream(stdout: str, exit_code: int) -> Parsed:
+    _require_exit_zero(exit_code)
+    events = split_jsonl(stdout)
+    results = [_usage_mapping(event.get("result")) for event in events if event.get("event") == "result"]
+    if not results:
+        raise AgentError(f"received no result in {len(events)} events; expected a terminal result event")
+    final = results[-1]
+    if final.get("status") != "SUCCESS":
+        raise AgentError(f"received result status={final.get('status')!r}; expected SUCCESS")
+    answer = final.get("response")
+    if not isinstance(answer, str) or not answer.strip():
+        raise AgentError(f"received no text in result {json.dumps(final)[:200]}; expected a non-empty answer")
+    session = final.get("conversation_id")
+    return Parsed(answer=answer, session_id=session if isinstance(session, str) else None, usage=_agy_usage(final.get("usage")))
 
 
 def _final_step_answered(events: list[dict[str, object]]) -> bool:
@@ -449,6 +496,38 @@ class OpencodeAgent:
         return _cli_version("opencode")
 
 
+@dataclass
+class AgyAgent:
+    """`agy --print` with stream-json events; effort is part of AGY's model id (`model-effort`).
+
+    Flags read from agy 1.4.12 `--help`, the stdin message shape from its binary and a live probe:
+    --print needs a value, even when the prompt comes from stdin. Images need no flag: the prompt
+    names the file and AGY's image reader opens it.
+    """
+
+    model: str
+    effort: str | None
+    name: str = "agy"
+
+    def invocation(self, prompt: str, prompt_file: Path, workspace: Path,
+                   attachments: Sequence[str]) -> Invocation:
+        model = f"{self.model}-{self.effort}" if self.effort else self.model
+        message = {"event": "user", "message": {"role": "user", "content": prompt}}
+        return Invocation(argv=[_executable("agy"), "--model", model, "--output-format", "stream-json", "--input-format",
+                                "stream-json", "--dangerously-skip-permissions", "--print", ""],
+                          stdin_text=json.dumps(message) + "\n")
+
+    def judge_invocation(self, prompt: str, workdir: Path, attachments: Sequence[str],
+                         prompt_file: Path | None = None, system_prompt: str | None = None) -> Invocation:
+        raise ValueError("received agy as the judge; expected claude, codex or opencode: agy cannot drop its tools")
+
+    def parse(self, stdout: str, exit_code: int) -> Parsed:
+        return parse_agy_stream(stdout, exit_code)
+
+    def version(self) -> str | None:
+        return _cli_version("agy")
+
+
 CMD_PLACEHOLDERS = ("{prompt_file}", "{workspace}", "{model}", "{effort}")
 
 
@@ -513,6 +592,8 @@ def make_agent(name: str, model: str, effort: str | None, cmd_template: str | No
         return CodexAgent(model=model, effort=effort)
     if name == "opencode":
         return OpencodeAgent(model=model, effort=effort)
+    if name == "agy":
+        return AgyAgent(model=model, effort=effort)
     if name == "cmd":
         if not cmd_template:
             raise ValueError("received agent 'cmd' without a template; expected --cmd TEMPLATE")

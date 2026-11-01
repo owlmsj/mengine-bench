@@ -3,7 +3,7 @@
 **How well does your coding agent do real work, and how fast?** 14 everyday jobs,
 one Score, about 10 minutes for a good setup. Every result is public and auditable.
 
-It grades the whole **agent**: the harness (Claude Code, Codex CLI, opencode or your
+It grades the whole **agent**: the harness (Claude Code, Codex CLI, opencode, AGY or your
 own command) + the model + its effort + your hardware + your configuration. Change
 any of them and you have a different agent. It is an educational benchmark, not an
 official one: use it to learn how your setup behaves and to compare it with others.
@@ -75,6 +75,7 @@ worst, with every limit hit, and ends with `privacy check: clean`. Read
 | Claude Code | `claude` | `claude-sonnet-5-5` | reported by the harness |
 | Codex CLI | `codex` | `gpt-6.1-sol` | `--price input=X,cached=Y,output=Z` (USD per 1M tokens) |
 | opencode | `opencode` | `provider/model` | reported by the harness |
+| AGY | `agy` | `gemini-4-argon`, with `--effort high` | not reported |
 | anything else | `cmd` | any label | `--cmd "my-agent --prompt-file {prompt_file}"` |
 
 Two tips for a fair run:
@@ -88,7 +89,7 @@ Paste this into a new session of the agent you want to measure:
 
 ````text
 Benchmark yourself with mengine-bench (https://github.com/owlmsj/mengine-bench).
-1. Find your harness (claude, codex or opencode), the exact model id that CLI
+1. Find your harness (claude, codex, opencode or agy), the exact model id that CLI
    accepts and your effort.
 2. Clone the repo if needed, cd into it, run `uv sync`.
 3. Run `uv run mengine-bench run --agent <harness> --model <model> [--effort
@@ -104,7 +105,7 @@ Report only values copied from command output. Never print credentials.
 ## The rules
 
 - **Everything its harness gives it** is allowed: shell, web, browsers, MCP servers, skills, subagents. Reading the reference, the hidden tests or a published answer is not: the run gets rejected.
-- **Personal instructions count as configuration.** `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.config/opencode/AGENTS.md` and any `CLAUDE.md` or `AGENTS.md` above the temp dir are recorded by name and shown on the leaderboard. Move them aside for a plain run.
+- **Personal instructions count as configuration.** `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.config/opencode/AGENTS.md`, `~/.gemini/GEMINI.md` and any `CLAUDE.md` or `AGENTS.md` above the temp dir are recorded by name and shown on the leaderboard. Move them aside for a plain run.
 - **Rankings compare the same bench version.** Older rankings stay on the leaderboard as history, with the Scores of their own formula.
 
 ## Privacy

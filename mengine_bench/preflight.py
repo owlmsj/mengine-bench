@@ -30,6 +30,7 @@ def global_instruction_files(agent: str, home: Path, env: Mapping[str, str]) -> 
         "claude": [claude_home / "CLAUDE.md"],
         "codex": [codex_home / "AGENTS.md", codex_home / "AGENTS.override.md"],
         "opencode": [config_home / "opencode" / "AGENTS.md", claude_home / "CLAUDE.md"],
+        "agy": [home / ".gemini" / "GEMINI.md"],
     }.get(agent, [])
     return [path for path in candidates if path.is_file()]
 

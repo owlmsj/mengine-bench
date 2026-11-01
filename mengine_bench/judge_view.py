@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import gzip
 import json
+import re
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 
-from mengine_bench.runner.agents import split_jsonl
+from mengine_bench.runner.agents import agy_tool_result, split_jsonl
 
 # A harness may write its scripts inside shell commands; most of those fit here (#70).
 INPUT_CHARS = 1_500
@@ -20,9 +21,15 @@ OUTPUT_CHARS = 400
 FIRST_CALLS = 20
 LAST_CALLS = 40
 NO_CALLS = "(no tool calls)"
-_KINDS = {"bash": "shell", "shell": "shell", "powershell": "shell", "read": "read", "write": "write", "edit": "edit",
-          "multiedit": "edit", "notebookedit": "edit", "apply_patch": "edit", "patch": "edit", "grep": "search",
-          "glob": "search"}
+HARNESS_FILE_MARK = "<harness file>"
+# A hidden folder in the home names its harness: .gemini/antigravity-cli, .local/share/opencode (#72).
+_HARNESS_FILE = re.compile(r"(?:file:///)?<HOME>[\\/]+\.[^\s\"'`]+")
+_KINDS = {"bash": "shell", "shell": "shell", "powershell": "shell", "run_command": "shell", "read": "read",
+          "read_file": "read", "view_file": "read", "write": "write", "write_file": "write", "write_to_file": "write",
+          "edit": "edit", "edit_file": "edit", "replace_file_content": "edit", "multi_replace_file_content": "edit",
+          "sed_file": "edit", "notebook_edit": "edit", "multiedit": "edit", "notebookedit": "edit", "apply_patch": "edit",
+          "patch": "edit", "grep": "search", "glob": "search", "grep_search": "search", "find_by_name": "search",
+          "list_dir": "search"}
 _OPENCODE = {"step_start", "step_finish", "tool_use"}
 _CODEX = {"turn.started", "turn.completed", "item.completed"}
 _CLAUDE = {"assistant", "user"}
@@ -46,10 +53,10 @@ def _kind(name: str) -> str:
 def _input_text(kind: str, payload: object) -> str:
     """The command or the path: a written file's body is shown once, among the deliverables or the changes."""
     fields = _mapping(payload)
-    if kind == "shell" and fields.get("command"):
-        return str(fields["command"])
+    if kind == "shell" and (fields.get("command") or fields.get("CommandLine")):
+        return str(fields.get("command") or fields["CommandLine"])
     if kind in ("read", "write", "edit"):
-        path = fields.get("path") or fields.get("file_path") or fields.get("notebook_path")
+        path = fields.get("path") or fields.get("file_path") or fields.get("notebook_path") or fields.get("Path")
         if path:
             return str(path)
     return payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, sort_keys=True)
@@ -57,9 +64,10 @@ def _input_text(kind: str, payload: object) -> str:
 
 def _line(step: int, kind: str, payload: object, ok: bool, output: object) -> str:
     text = output if isinstance(output, str) else "" if output is None else json.dumps(output, ensure_ascii=False)
-    shown = _clip(_input_text(kind, payload), INPUT_CHARS)
+    shown = _clip(_HARNESS_FILE.sub(HARNESS_FILE_MARK, _input_text(kind, payload)), INPUT_CHARS)
+    result = _clip(_HARNESS_FILE.sub(HARNESS_FILE_MARK, text).strip(), OUTPUT_CHARS)
     return (f"[step {step}] {kind} {json.dumps(shown, ensure_ascii=False)} {'ok' if ok else 'failed'} -> "
-            f"{json.dumps(_clip(text.strip(), OUTPUT_CHARS), ensure_ascii=False)}")
+            f"{json.dumps(result, ensure_ascii=False)}")
 
 
 def _opencode_calls(step: int, events: list[dict[str, object]]) -> Iterator[str]:
@@ -119,10 +127,23 @@ def _claude_calls(step: int, events: list[dict[str, object]]) -> Iterator[str]:
                         _blocks_text(result.get("content")))
 
 
+def _agy_calls(step: int, events: list[dict[str, object]]) -> Iterator[str]:
+    for event in events:
+        update = _mapping(event.get("step_update"))
+        if update.get("step_type") != "tool" or update.get("state") == "ACTIVE":
+            continue
+        info = _mapping(update.get("tool_info"))
+        exit_code, output = agy_tool_result(info)
+        ok = update.get("state") == "DONE" and exit_code in (None, 0)
+        yield _line(step, _kind(str(update.get("tool_name") or "")), info.get("parameters"), ok, output)
+
+
 def stream_calls(step: int, stdout: str) -> list[str] | None:
     """One line per tool call, or None when the stream is no known harness's."""
     events = split_jsonl(stdout)
     kinds = {event.get("type") for event in events}
+    if any(event.get("event") == "step_update" for event in events):
+        return list(_agy_calls(step, events))
     if kinds & _OPENCODE:
         return list(_opencode_calls(step, events))
     if kinds & _CODEX:
