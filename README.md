@@ -110,7 +110,7 @@ Report only values copied from command output. Never print credentials.
 - **Evals are open briefs.** Each states the context, the problem and the outcome wanted. How to get there is the agent's call; the result in `result.json` and the files it delivers are what get checked, never the chat.
 - **Everything its harness gives it** is allowed: shell, web, browsers, MCP servers, skills, subagents. Every step's prompt says so. Reading the reference, the hidden tests or a published answer is not: the run gets rejected.
 - **Personal instructions count as configuration.** `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.config/opencode/AGENTS.md`, `~/.gemini/GEMINI.md` and any `CLAUDE.md` or `AGENTS.md` above the temp dir are recorded by name and shown on the leaderboard. Move them aside for a plain run.
-- **Memory across sessions is off for Codex** (`--disable memories`). It carries earlier runs into this one, the same leak as an earlier workspace left on disk.
+- **Memory across sessions is off inside the bench, on Codex and Claude** (`--disable memories`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY`). Daily use keeps it on. It carries earlier runs into this one, the same leak as an earlier workspace left on disk.
 - **Rankings compare the same bench version.** Older rankings stay on the leaderboard as history, with the Scores of their own formula.
 
 ## Privacy
