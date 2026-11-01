@@ -13,7 +13,7 @@ from mengine_bench.judge import TaskVerdict
 from mengine_bench.report import render_summary
 from mengine_bench.run_command import _detail
 from mengine_bench.runner.task_run import TaskRunRecord
-from mengine_bench.tasks import business, gamedev
+from mengine_bench.tasks import business
 
 
 def _by_id(task_id: str):
@@ -145,28 +145,6 @@ def find_path(grid):
 '''
 
 
-def test_astar_splits_into_cases_a_person_can_read(tmp_path: Path) -> None:
-    write(tmp_path, "pathfind.py", gamedev.ASTAR_REFERENCE)
-    result = gamedev._astar_check(tmp_path, ["done"])
-    assert [name for name, _ in result.checks] == [f"hidden {case}" for case, _ in gamedev.ASTAR_CASES]
-    assert len(result.checks) >= 3 and result.passed
-
-
-def test_fewest_steps_fails_only_the_door_cases(tmp_path: Path) -> None:
-    write(tmp_path, "pathfind.py", BFS)
-    result = gamedev._astar_check(tmp_path, ["done"])
-    failed = result.failed()
-    assert "hidden walks around a door when that is cheaper" in failed
-    assert "hidden returns None when G is unreachable" not in failed and "hidden plain floor" not in failed
-    assert 0.0 < result.score < 1.0
-    assert "!=" in result.details["hidden walks around a door when that is cheaper"]
-
-
-def test_a_stub_earns_nothing_on_astar(tmp_path: Path) -> None:
-    write(tmp_path, "pathfind.py", gamedev.ASTAR_STUB)
-    assert gamedev._astar_check(tmp_path, ["done"]).score == 0.0
-
-
 def test_reconcile_keeps_its_rules_in_a_file_the_agent_must_read(tmp_path: Path) -> None:
     task = _by_id("bo-reconcile")
     task.setup(tmp_path)
@@ -189,7 +167,7 @@ def test_reconcile_catches_a_duplicate_also_listed_as_mismatched(tmp_path: Path)
 
 
 @pytest.mark.parametrize(("task_id", "hint"), [
-    ("gd-astar-doors", "not just fewest steps"),
+    ("rs-lock-bug", "deadlock"),
     ("lc-changelog", "beware"),
 ])
 def test_prompts_do_not_hand_over_the_trap(task_id: str, hint: str) -> None:
@@ -233,4 +211,4 @@ def test_the_anchor_command_reports_and_exits_by_the_result(monkeypatch: pytest.
     monkeypatch.setattr(cli, "RubricJudge", lambda agent: _Votes(solved=60, stub=50))
     assert cli.main(["judge-anchors"]) == 1
     out = capsys.readouterr().out
-    assert "FAILED" in out and "gd-astar-doors" in out
+    assert "FAILED" in out and "rs-lock-bug" in out

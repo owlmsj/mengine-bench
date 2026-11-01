@@ -51,9 +51,9 @@ def test_run_and_list_take_no_suite() -> None:
 
 
 def test_selftest_runs_gold_without_agent(capsys: pytest.CaptureFixture[str]) -> None:
-    assert cli.main(["selftest", "--tasks", "gd-astar-doors,vis-chart"]) == 0
+    assert cli.main(["selftest", "--tasks", "ue-packaged-bug,vis-chart"]) == 0
     out = capsys.readouterr().out
-    assert "PASS gd-astar-doors" in out and "PASS vis-chart" in out
+    assert "PASS ue-packaged-bug" in out and "PASS vis-chart" in out
 
 
 def test_tasks_doc_matches_catalog() -> None:

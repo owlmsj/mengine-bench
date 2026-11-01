@@ -18,7 +18,7 @@ from mengine_bench.judge import JudgeContext, TaskVerdict, workspace_diff
 from mengine_bench.runner.task_run import snapshot
 
 # One task with code and one with data, neither needing a browser.
-ANCHOR_TASKS = ("gd-astar-doors", "bo-reconcile")
+ANCHOR_TASKS = ("rs-lock-bug", "bo-reconcile")
 # A reference has no tool log, so it earns little on self-verification. Measured on rubric 2.4: references 55 and 53,
 # untouched workspaces 0 and 0.
 MIN_GAP = 30

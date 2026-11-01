@@ -126,11 +126,11 @@ def render_prompt(task: EvalTask, index: int, workspace: Path, hidden: Path) -> 
 
 
 def snapshot(workspace: Path) -> dict[str, bytes]:
-    """Readable workspace files; unreadable (locked) ones and browser profiles are skipped."""
+    """Readable workspace files; unreadable (locked) ones, browser profiles and cargo output are skipped."""
     files: dict[str, bytes] = {}
     for path in sorted(workspace.rglob("*")):
         rel = path.relative_to(workspace)
-        if any(part in BROWSER_PROFILE_DIRS or part == "__pycache__" for part in rel.parts) or not path.is_file():
+        if any(part in BROWSER_PROFILE_DIRS or part in ("__pycache__", "target") for part in rel.parts) or not path.is_file():
             continue
         try:
             files[rel.as_posix()] = path.read_bytes()
