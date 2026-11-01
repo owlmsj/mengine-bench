@@ -267,7 +267,7 @@ TASKS = [
         summary="Build a landing page that tells the story of one Mondrian painting from a fact sheet.",
         setup=_landing_setup, check=_landing_check,
         reference=lambda ws: _ship(ws, LANDING, LANDING_REFERENCE),
-        timeout_s=600, deliverables=(LANDING,),
+        timeout_s=300, deliverables=(LANDING,),
         checkpoints=checkpoints(("read the fact sheet", r"FACTSHEET"), ("wrote the page", r"landing.{1,4}index\.html"), OPENED),
         steps=(Step("We need a landing page, {WS}/landing/index.html in a single file, for the story of Piet Mondrian's "
                     "\"Composition with Red, Blue and Yellow\" (1930). The facts are in {WS}/FACTSHEET.md, and nothing beyond "
@@ -281,7 +281,7 @@ TASKS = [
         summary="Build a procedural 3D scene of Mount Fuji with a pagoda and cherry trees, good enough for a wallpaper.",
         setup=lambda ws: None, check=_scene_check,
         reference=lambda ws: _ship(ws, SCENE, SCENE_REFERENCE),
-        timeout_s=900, deliverables=(SCENE,),
+        timeout_s=420, deliverables=(SCENE,),
         checkpoints=checkpoints(("wrote the scene", r"scene.{1,4}index\.html"), OPENED),
         steps=(Step("We want a 3D scene someone would keep as a wallpaper: the classic view of Mount Fuji at dusk, with the "
                     "red five-tier Chureito pagoda and cherry trees in bloom, in a low poly look with some gentle motion. "

@@ -57,8 +57,9 @@ prompt keeps the question and a small `result.json` contract, because a person h
 Correct reads delivered files, never the chat. It accepts rounding, percent or fraction and common number formats, and
 rejects a wrong answer, not a different route. Two experts should reach the same verdict on any result.
 
-Limits are 5 min per eval, 10 min for `gd-integration-repo`, `web-mondrian-landing` and `web-word-universe`, and 15 min for
-`3d-voxel-landscape`. The limit is a safety net: the Speed formula still decides what time is worth.
+Limits are 3 min per eval, 5 min for `gd-integration-repo` and `web-mondrian-landing`, 6 min for `web-word-universe`
+and 7 min for `3d-voxel-landscape`, from measured times: the slowest short eval took 50 s. Each prompt states its limit and
+asks the agent to finish once the work is right, with at most 2 rounds of revision. At the limit the agent stops, and what it delivered is graded.
 
 Each eval also declares checkpoints, key actions matched against the tool calls, published per task in the bundle and
 `summary.md`. They exist to diagnose a run. They change no grade and the judge never sees them, because scoring them
@@ -85,7 +86,7 @@ The plan is judged from the actions: a written plan earns nothing by itself.
 For a visual task the maintainer's machine renders the stored page with headless
 Chromium (Edge, Chrome or Chromium; `MENGINE_BENCH_BROWSER` overrides it) and the
 judge sees three frames, each from a fresh load after about 1, 4 and 8 seconds of page time, next to three fixed
-reference images (strong, medium, weak) taken from bench 1.5 results and labelled by level only. A frame that fails is
+a reference page, made by Opus 5.5 xhigh for the same brief, which sets the bar and stays fixed so a grade does not move when a new run comes out. A frame that fails is
 tried up to 3 times; if it keeps failing, the judge votes on the other frames, or without images when none rendered, and
 the bundle records it. With no browser at all, nothing is judged.
 

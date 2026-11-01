@@ -43,9 +43,8 @@ RENDER_ATTEMPTS = 3
 # (virtual time, suffix of the file kept in the bundle, name attached to the vote). Each frame is its own page load:
 # the Chromium command line cannot capture a running page twice, and a new dependency is out (#93).
 JUDGE_FRAMES = ((1000, "-1s", "frame-1s.png"), (4000, "-4s", "frame-4s.png"), (8000, "", SCREENSHOT_NAME))
-# Fixed pages from published runs (#93), so a run's grade does not move when a new run comes out.
+# One fixed page per task, made by Opus 5.5 xhigh to set the bar (#93), so a grade does not move when a new run comes out.
 REFERENCES_DIR = Path(__file__).resolve().parent / "assets" / "references"
-REFERENCE_LEVELS = ("strong", "medium", "weak")
 
 
 @dataclass(frozen=True)
@@ -125,7 +124,7 @@ def _render_verdict(bundle: Path, task_id: str, packet: JudgePacket, judge: Rubr
 
 
 def _reference_images(task_id: str) -> dict[str, Path]:
-    return {f"reference-{level}.png": REFERENCES_DIR / f"{task_id}-{level}.png" for level in REFERENCE_LEVELS}
+    return {"reference.png": REFERENCES_DIR / f"{task_id}.png"}
 
 
 def _frame_path(workdir: Path, suffix: str) -> Path:

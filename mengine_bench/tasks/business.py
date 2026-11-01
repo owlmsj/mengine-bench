@@ -304,7 +304,7 @@ TASKS = [
         id="ds-ab-playtest", category="data-science",
         provenance="Pixel Arena playtest A/B (arena-panel telemetry); a release decision from a dirty export",
         summary="Decide from player data whether a new game tutorial should replace the current one.",
-        setup=_ab_setup, check=_ab_check, reference=_ab_reference, timeout_s=300,
+        setup=_ab_setup, check=_ab_check, reference=_ab_reference, timeout_s=180,
         checkpoints=checkpoints(("read the notes", r"telemetry.{1,4}README"), ("read the data", r"playtest_ab"),
                                 ("removed duplicate sessions", r"session_id.{0,300}(seen|dedup|drop_duplicates|distinct|unique|set\(|setdefault)|(seen|dedup|drop_duplicates|distinct|unique|setdefault).{0,300}session_id"),
                                 ("tested significance", r"erfc|ztest|z_test|chi2|chisq|norm\.|fisher|p_value"), WROTE_RESULT),
@@ -317,7 +317,7 @@ TASKS = [
         id="bo-pnl-runway", category="backoffice",
         provenance="Startup half-year close from a Brazilian-format ledger and a chart of accounts, for an investor meeting",
         summary="Close a startup's half-year from its ledger and say how long the cash lasts.",
-        setup=_pnl_setup, check=_pnl_check, reference=_pnl_reference, timeout_s=300,
+        setup=_pnl_setup, check=_pnl_check, reference=_pnl_reference, timeout_s=180,
         checkpoints=checkpoints(("read the notes", r"finance.{1,4}README"), ("read the ledger", r"ledger"), ("used the chart of accounts", r"chart_of_accounts"),
                                 ("used the cash balance", r"cash_balance"), WROTE_RESULT),
         steps=(Step("The investors meet tomorrow and want the first half of 2026 closed. The books and the board's notes "
@@ -329,7 +329,7 @@ TASKS = [
         id="bo-reconcile", category="backoffice",
         provenance="Accounts receivable reconciliation: invoices vs bank statement with PIX/TED memo variants and noise",
         summary="Find what finance still has to collect or fix after comparing invoices with bank payments.",
-        setup=_recon_setup, check=_recon_check, reference=_recon_reference, timeout_s=300,
+        setup=_recon_setup, check=_recon_check, reference=_recon_reference, timeout_s=180,
         checkpoints=checkpoints(("read the notes", r"backoffice.{1,4}README"), ("read the invoices", r"invoices"), ("read the statement", r"bank_statement"), WROTE_RESULT),
         steps=(Step("Finance has to chase June's receivables. The invoices, the bank statement and our reconciliation notes "
                     "are in {WS}/backoffice. What do we still have to collect or fix? Record it in {WS}/result.json: unpaid "

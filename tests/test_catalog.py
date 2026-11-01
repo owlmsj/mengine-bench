@@ -45,9 +45,10 @@ def test_duplicate_ids_are_rejected() -> None:
         catalog.collect([one, two])
 
 
-def test_limits_give_open_briefs_their_time_and_cap_the_worst_case_at_100_minutes() -> None:
-    # #98, owner's decision: open briefs get more time. The 100 min apply only when an agent hits every limit.
+def test_limits_fit_the_measured_times_and_cap_the_worst_case_at_56_minutes() -> None:
+    # #98: from 7 to 10 runs. The slowest short eval took 50 s, Mondrian 194 s and 3D 288 s. The 56 min apply only when an
+    # agent hits every limit; the prompt also asks it to stop polishing once the work is right.
     limits = {task.id: task.timeout_s for task in catalog.all_tasks()}
-    assert sum(limits.values()) == 6000, limits
-    assert {task: limit for task, limit in limits.items() if limit != 300} == {
-        "gd-integration-repo": 600, "web-mondrian-landing": 600, "3d-voxel-landscape": 900, "web-word-universe": 600}
+    assert sum(limits.values()) == 3360, limits
+    assert {task: limit for task, limit in limits.items() if limit != 180} == {
+        "gd-integration-repo": 300, "web-mondrian-landing": 300, "3d-voxel-landscape": 420, "web-word-universe": 360}

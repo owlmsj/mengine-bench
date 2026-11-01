@@ -422,7 +422,7 @@ TASKS = [
                    "searchable view, from a saved Portuguese creative dictionary",
         summary="Collect a saved Portuguese dictionary site and build one view that shows how its words relate.",
         setup=_word_setup, check=_universe_check, reference=_word_reference,
-        timeout_s=600, deliverables=(PAGE,),
+        timeout_s=360, deliverables=(PAGE,),
         checkpoints=checkpoints(("walked the site", r"\bsite[/\\]|[/\\]site\b"), ("wrote words.json", r"words\.json"),
                                 ("wrote the page", r"universe.{1,4}index\.html"), OPENED, WROTE_RESULT),
         steps=(Step("Words are tied to each other, and nobody here can see how. {WS}/site is a saved copy of a Portuguese "

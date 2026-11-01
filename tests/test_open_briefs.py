@@ -13,6 +13,7 @@ from mengine_bench.checkpoints import reached_checkpoints
 from mengine_bench.core import Checkpoint, is_no, is_yes, near, near_share, number
 from mengine_bench.judge import JUDGE_SYSTEM_PROMPT
 from mengine_bench.report import _checkpoint_lines
+from mengine_bench.runner.task_run import TIME_LIMIT_NOTE
 from mengine_bench.tasks import business, context, funnel, ir
 
 
@@ -164,3 +165,7 @@ def test_the_changelog_takes_a_full_timestamp_and_a_titled_approver(tmp_path: Pa
     context_ws = tmp_path
     _deliver(context_ws, {**gold, "builds_between": 162, "revert_date": f"{gold['revert_date']}T00:00:00", "revert_approver": f"{gold['revert_approver']} (producer)"})
     assert context._changelog_check(context_ws, [""]).passed
+
+
+def test_every_prompt_caps_the_revisions_and_says_time_counts() -> None:
+    assert "at most 2 rounds of revision" in TIME_LIMIT_NOTE and "Time counts" in TIME_LIMIT_NOTE

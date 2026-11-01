@@ -137,7 +137,7 @@ TASKS = [
         id="lc-changelog", category="long-context",
         provenance="AA-LCR style multi-hop over a long build changelog with near-duplicate distractor keys",
         summary="Trace in a long changelog when a setting changed, when it came back and who approved that.",
-        setup=_changelog_setup, check=_changelog_check, reference=_changelog_reference, timeout_s=300,
+        setup=_changelog_setup, check=_changelog_check, reference=_changelog_reference, timeout_s=180,
         checkpoints=checkpoints(WROTE_RESULT),
         steps=(Step("Players say recoil felt off for a long stretch this year. Going by the changelog below, which is not on "
                     "disk: in which build did recoil_multiplier go from 1.0 to 0.85, in which was it set back to 1.0, on what "
@@ -149,7 +149,7 @@ TASKS = [
         id="vis-chart", category="vision", needs=frozenset({"vision"}),
         provenance="ChartQA style bar chart (golden image chart.png)",
         summary="Read a benchmark chart to say which GPU is fastest at one context size and by how much.",
-        setup=lambda ws: _copy_assets(ws, "chart.png"), check=_chart_check, reference=_chart_reference, timeout_s=300,
+        setup=lambda ws: _copy_assets(ws, "chart.png"), check=_chart_check, reference=_chart_reference, timeout_s=180,
         checkpoints=checkpoints(WROTE_RESULT),
         steps=(Step("We are choosing a GPU to rent for 256k context. From the attached chart, which is the fastest and at what "
                     "TPS, which is the slowest, and how many times faster is the first? Record it in {WS}/result.json: "

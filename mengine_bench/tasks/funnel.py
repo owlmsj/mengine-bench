@@ -147,7 +147,7 @@ TASKS = [
         id="ds-sql-funnel", category="data-science",
         provenance="Product funnel in SQLite: ordered steps, test accounts, dupes, out-of-order events",
         summary="Find where players drop off on each platform from a product analytics database.",
-        setup=_funnel_setup, check=_funnel_check, reference=_funnel_reference, timeout_s=300,
+        setup=_funnel_setup, check=_funnel_check, reference=_funnel_reference, timeout_s=180,
         checkpoints=checkpoints(("read the rules", r"METRICS"), ("looked at the schema", r"sqlite_master|\.schema|PRAGMA"), ("excluded test accounts", r"is_test"), WROTE_RESULT),
         steps=(Step("Product wants to know where players drop off on each platform. The data is in {WS}/analytics.db and our "
                     "reporting rules are in {WS}/METRICS.md. Where do we lose the most players? Record it in "

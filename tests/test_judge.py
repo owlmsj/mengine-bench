@@ -79,7 +79,7 @@ def test_visual_rubric_scores_the_rendered_look_from_the_screenshot() -> None:
     assert "Third criterion: rendered" in prompt and "screenshot.png" in prompt
     assert "rendered (0-30)" in JUDGE_SYSTEM_PROMPT and "screenshot.png" in JUDGE_SYSTEM_PROMPT
     # #93: the rubric names what the frames and the references are for.
-    for needle in ("frame-1s.png", "frame-4s.png", "reference-strong.png", "reference-medium.png", "reference-weak.png",
+    for needle in ("frame-1s.png", "frame-4s.png", "reference.png",
                    "composition", "aesthetics", "occlusion", "clipping", "z-fighting", "flicker", "noise", "broken camera",
                    "goes blank after loading", "fresh load"):
         assert needle in JUDGE_SYSTEM_PROMPT, needle

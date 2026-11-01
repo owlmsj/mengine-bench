@@ -123,7 +123,7 @@ def test_visual_deliverable_is_rendered_from_the_bundle_for_the_judge(
     assert page == stored.read_text(encoding="utf-8")
     assert not html.resolve().is_relative_to(bundle.resolve()), "the render runs in a temp dir"
     seen = (tmp_path / "fakes" / "judge.seen").read_text(encoding="utf-8").splitlines()
-    assert seen == ['["frame-1s.png", "frame-4s.png", "reference-medium.png", "reference-strong.png", "reference-weak.png", "screenshot.png"]']
+    assert seen == ['["frame-1s.png", "frame-4s.png", "reference.png", "screenshot.png"]']
     [task] = json.loads((bundle / "result.json").read_text(encoding="utf-8"))["tasks"]
     assert task["judge"] == 80
     # The screenshot the judge saw stays in the bundle for audit (#23 QA).
@@ -315,7 +315,7 @@ def test_a_blank_page_is_shown_to_the_judge_instead_of_zeroed(fake_agent: FakeAg
 
     monkeypatch.setattr(bundle_judge, "render_headless", blank_render)
     assert _judge(fake_agent, bundle, JUDGE_SEEING) == 0
-    assert (tmp_path / "fakes" / "judge.seen").read_text(encoding="utf-8").splitlines() == ['["frame-1s.png", "frame-4s.png", "reference-medium.png", "reference-strong.png", "reference-weak.png", "screenshot.png"]']
+    assert (tmp_path / "fakes" / "judge.seen").read_text(encoding="utf-8").splitlines() == ['["frame-1s.png", "frame-4s.png", "reference.png", "screenshot.png"]']
 
 
 def _render_except(missing_ms: int | None, budgets: list[int]) -> Callable[[Path, Path, int], str]:
@@ -352,12 +352,12 @@ def test_again_rewrites_a_published_bundle_that_has_only_the_final_frame(
     assert sorted(path.read_bytes() for path in (bundle / "transcripts").iterdir()) == transcripts
 
 
-def test_every_rendered_task_has_its_three_references() -> None:
+def test_every_rendered_task_has_its_reference() -> None:
     pages = [task.id for task in catalog.all_tasks() if task.render_target is not None]
     assert sorted(pages) == ["3d-voxel-landscape", "web-mondrian-landing", "web-word-universe"]
     for task_id in pages:
         references = bundle_judge._reference_images(task_id).values()
-        assert len(references) == 3 and all(path.stat().st_size > 10_000 for path in references)
+        assert len(references) == 1 and all(path.stat().st_size > 10_000 for path in references)
 
 
 def test_the_vote_gets_the_frames_and_the_references_in_the_order_it_names(
@@ -369,7 +369,7 @@ def test_the_vote_gets_the_frames_and_the_references_in_the_order_it_names(
     seen = json.loads((tmp_path / "fakes" / "judge.images").read_text(encoding="utf-8"))
     references = bundle_judge._reference_images("web-mondrian-landing")
     assert seen["attached"] == ("Attached images, in this order: frame-1s.png, frame-4s.png, screenshot.png, "
-                                "reference-strong.png, reference-medium.png, reference-weak.png.")
+                                "reference.png.")
     assert seen["sizes"]["frame-4s.png"] == len(b"frame 4000")
     assert {name: seen["sizes"][name] for name in references} == {
         name: path.stat().st_size for name, path in references.items()}
@@ -393,7 +393,7 @@ def test_the_vote_sees_a_frame_per_moment_and_the_bundle_keeps_them(
     assert _judge(fake_agent, bundle, JUDGE_SEEING) == 0
     assert budgets == [1000, 4000, 8000]
     seen = (tmp_path / "fakes" / "judge.seen").read_text(encoding="utf-8").splitlines()
-    assert seen == ['["frame-1s.png", "frame-4s.png", "reference-medium.png", "reference-strong.png", "reference-weak.png", "screenshot.png"]']
+    assert seen == ['["frame-1s.png", "frame-4s.png", "reference.png", "screenshot.png"]']
     stored = bundle / "judge"
     assert (stored / "web-mondrian-landing-1s.png").read_bytes() == b"frame 1000"
     assert (stored / "web-mondrian-landing-4s.png").read_bytes() == b"frame 4000"
@@ -401,8 +401,8 @@ def test_the_vote_sees_a_frame_per_moment_and_the_bundle_keeps_them(
 
 
 @pytest.mark.parametrize("missing_ms,kept", [
-    (4000, '["frame-1s.png", "reference-medium.png", "reference-strong.png", "reference-weak.png", "screenshot.png"]'),
-    (8000, '["frame-1s.png", "frame-4s.png", "reference-medium.png", "reference-strong.png", "reference-weak.png"]'),
+    (4000, '["frame-1s.png", "reference.png", "screenshot.png"]'),
+    (8000, '["frame-1s.png", "frame-4s.png", "reference.png"]'),
 ])
 def test_a_missing_frame_keeps_the_other_frames_in_the_vote(
         fake_agent: FakeAgent, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing_ms: int, kept: str) -> None:

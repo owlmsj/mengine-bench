@@ -28,7 +28,7 @@ Formulas and edge cases: [docs/SCORING.md](docs/SCORING.md).
 
 ## The 15 tasks
 
-Each runs in a fresh folder, needs no web and has a limit of 5 to 15 minutes. If time
+Each runs in a fresh folder, needs no web and has a limit of 3 to 7 minutes. If time
 runs out, what is in the folder and the reply so far still get graded, and the prompt
 says so. Each task has a reference solution that the test suite proves passes.
 
@@ -67,7 +67,7 @@ uv run mengine-bench run --agent claude --model claude-sonnet-5-5 --effort high 
 uv run mengine-bench run --agent claude --model claude-sonnet-5-5 --effort high
 ```
 
-The dry run prints the plan and runs nothing. The real run takes about 100 minutes at
+The dry run prints the plan and runs nothing. The real run takes about 56 minutes at
 worst, with every limit hit, and ends with `privacy check: clean`. Read
 `results/<run>/summary.md`, whose "Failed checks" say what each check expected and received, then publish it with
 `uv run mengine-bench submit results/<run>`. Grading the three pages needs a Chromium-family browser (Edge, Chrome or

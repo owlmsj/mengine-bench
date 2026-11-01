@@ -329,7 +329,7 @@ TASKS = [
         provenance="Long-horizon SWE: ~100-file game backend, 2 layered bugs only visible end to end; spec in docs/",
         summary="Find every cause behind a failing integration test in a game backend, and fix them.",
         setup=_setup, check=_check, reference=_reference,
-        timeout_s=600,
+        timeout_s=300,
         checkpoints=checkpoints(("read the docs", r"docs"), ("ran the integration test", r"tests.{1,4}integration|unittest"), ("ran the whole suite", r"discover")),
         steps=(Step("An integration test of the Pixel Arena backend in {WS} fails while the unit tests pass. Make the backend "
                     "behave as {WS}/docs says: fix every cause, not just the symptom this test shows. Existing tests stay as "

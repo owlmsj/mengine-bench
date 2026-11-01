@@ -46,7 +46,8 @@ WORKSPACE_RULES = ("Use any skill, tool or MCP server you have. Read and write l
                    "Do not print credentials, environment variables or personal data: this session is published.\n")
 # #41: without this a model can plan until the limit and leave nothing to grade.
 TIME_LIMIT_NOTE = ("\n\nYou have {minutes} min for this step. The folder and your reply so far are graded as they stand "
-                   "when time runs out, so deliver a first complete version early.")
+                   "when time runs out, so deliver a first complete version early. Time counts in your grade: finish as soon as the work "
+                   "is right, with at most 2 rounds of revision after that first version.")
 # #85: in every prompt too, for an agent that does not load AGENTS.md (AGY --print).
 ANY_TOOL_NOTE = ("\n\nYou may use any skill, tool or MCP server available to you whenever it makes your work smarter, "
                  "more correct or faster.")

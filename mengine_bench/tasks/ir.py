@@ -303,7 +303,7 @@ TASKS = [
         id="ir-studio-wiki", category="retrieval",
         provenance="Internal-wiki QA with multi-hop (bug -> changelog -> approvals) and planted distractors",
         summary="Answer a support lead's questions from a studio wiki, citing the pages behind each answer.",
-        setup=_wiki_setup, check=_wiki_check, reference=_wiki_reference, timeout_s=300,
+        setup=_wiki_setup, check=_wiki_check, reference=_wiki_reference, timeout_s=180,
         checkpoints=checkpoints(("followed the bug", r"BUG-4471"), ("checked the approvals", r"approvals"), ("read the postmortem", r"PM-12|postmortem"), WROTE_RESULT),
         steps=(Step("A support lead needs answers from the studio wiki in {WS}/wiki: in which build the fix for BUG-4471 first "
                     "shipped, who approved that build, the ranked player limit on the current Neoplastic map, and which flag "
@@ -314,7 +314,7 @@ TASKS = [
         id="ir-server-logs", category="retrieval",
         provenance="Game server ops: incident window, root cause and monthly SLO from 3 days of logs",
         summary="Investigate a game server outage from its logs and report what happened.",
-        setup=_logs_setup, check=_logs_check, reference=_logs_reference, timeout_s=300,
+        setup=_logs_setup, check=_logs_check, reference=_logs_reference, timeout_s=180,
         checkpoints=checkpoints(("read the notes", r"logs.{1,4}README"), ("read the logs", r"gameserver|logs"), WROTE_RESULT),
         steps=(Step("The game went down in June and we owe the team an incident report. The logs and their notes are in "
                     "{WS}/logs. When did it start and end, how long was it, did we keep our monthly availability target, and "

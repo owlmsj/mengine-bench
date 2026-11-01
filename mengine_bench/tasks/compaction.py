@@ -136,7 +136,7 @@ TASKS = [
         id="cmp-handoff", category="compaction",
         provenance="Agent debugging-session handoff on a local LLM server; native retention rules",
         summary="Hand over a debugging session in a short note, then continue from that note alone.",
-        setup=_handoff_setup, check=_handoff_check, reference=_handoff_reference, timeout_s=300,
+        setup=_handoff_setup, check=_handoff_check, reference=_handoff_reference, timeout_s=180,
         checkpoints=checkpoints(("read the session", r"transcript"), ("wrote the handoff", r"HANDOFF"), WROTE_RESULT),
         steps=_two_steps("session/transcript.md", "HANDOFF.md", HANDOFF_LIMIT,
                          "Where was the recipe applied, what are the final decode speed and VRAM, which quantization was "
