@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import gzip
+import json
 import sys
 import time
 from pathlib import Path
 
 import psutil
+import pytest
 
 from conftest import FakeAgent
-from mengine_bench.runner.agents import CmdAgent
+from mengine_bench.runner.agents import AgyAgent, ClaudeAgent, CmdAgent
 from mengine_bench.runner.process import run_process
 
 SPAWNER = """
@@ -96,3 +99,21 @@ def _alive(pid: int) -> bool:
         return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
     except psutil.NoSuchProcess:
         return False
+
+
+@pytest.mark.parametrize("agent", [ClaudeAgent("m", None), AgyAgent("m", None)])
+def test_adapter_clock_stops_at_recorded_result(agent: ClaudeAgent | AgyAgent, tmp_path: Path) -> None:
+    run = ("2026-10-31_claude_claude-opus-5-5_low_3b43a44b" if agent.name == "claude"
+           else "2026-10-31_agy_gemini-4-argon_high_cd4f5698")
+    task = "3d-voxel-landscape" if agent.name == "claude" else "bo-pnl-runway"
+    transcript = Path(__file__).parents[1] / "results" / run / "transcripts" / f"{task}.jsonl.gz"
+    with gzip.open(transcript, "rt", encoding="utf-8") as source:
+        lines = [line for wrapper in map(json.loads, source) if wrapper["stream"] == "stdout"
+                 for line in wrapper["text"].split("\n") if line.startswith("{")]
+    final = next(line for line in lines
+                 if json.loads(line).get("type", json.loads(line).get("event")) == "result")
+    call = agent.invocation("prompt", tmp_path / "prompt.md", tmp_path, ())
+    result = run_process(_speaker(final, then="time.sleep(2)"), tmp_path, timeout_s=10,
+                         final_event=call.final_event)
+    assert result.exit_code == 0
+    assert result.wall_s < 1.5
