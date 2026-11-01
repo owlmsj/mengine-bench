@@ -11,6 +11,7 @@ the Score, and a Cost kept apart.
 | **Score** | `0.6 x Correct % + 0.25 x Judge + 0.15 x Speed x Correct % / 100`, one decimal, from the published values. Speed pays only for work that is right. Only once judged. |
 | **Time** | Total agent wall seconds. Grading and judging are excluded; a timeout counts its full time. |
 | **Cost** | USD estimate of inference, with its basis. A separate column: no points per dollar. |
+| **Est. price** | The run's tokens at public API list prices, so subscription and API runs compare. No points either. |
 
 The formulas live in `mengine_bench/scoring.py`. Runs compare when they ran the
 same bench major.minor (1.3.x). A patch release changes no task or prompt. When it changes how a run is judged or
@@ -115,6 +116,33 @@ Cost uses one basis per run, recorded next to the number:
 A step without usage (crash, timeout) makes the total a lower bound, shown as
 `>= $x`. Tokens are always recorded, per step, per task and in total; the
 leaderboard's Tokens column is input (cache reads and writes included) plus output.
+
+## Est. price
+
+Cost is `n/a` for most subscription runs, so the leaderboard also prices every run the same way:
+`((input - cached) x X + cached x Y + generated x Z) / 1,000,000`. It is an estimate, shown as `~$x`, and a
+subscription does not bill this amount. `generated` holds reasoning on every harness. A model with no price below
+shows `n/a`, and local inference declared free shows `$0.00 (local)`.
+
+USD per million tokens, read on 2026-10-31:
+
+| Model | Input | Cached | Output | Source |
+| --- | --- | --- | --- | --- |
+| `claude-opus-5-5` | 8.00 | 0.20 | 20.00 | [Anthropic](https://platform.claude.com/docs/en/about-claude/pricing) |
+| `claude-sonnet-5-5` | 4.00 | 0.10 | 10.00 | Anthropic |
+| `gpt-6-astra` | 10.00 | 1.00 | 50.00 | [OpenAI](https://developers.openai.com/api/docs/pricing) |
+| `gpt-6-astra`, fast | 20.00 | 2.00 | 100.00 | OpenAI |
+| `gpt-6.1-sol` | 2.00 | 0.10 | 10.00 | OpenAI |
+| `gpt-6.1-sol`, fast | 4.00 | 0.20 | 20.00 | OpenAI |
+| `zai/glm-5.3-flash` | 0.15 | 0.03 | 0.50 | [Z.ai](https://docs.z.ai/guides/overview/pricing) |
+| `deepseek/deepseek-flash` | 0.15 | 0.003 | 0.60 | [DeepSeek](https://api-docs.deepseek.com/quick_start/pricing) |
+| `gemini-4-argon` | 2.00 | 0.10 | 10.00 | [Google](https://ai.google.dev/gemini-api/docs/pricing) |
+
+- Claude's input is its 1 h cache write price (base input is 4.00 and 2.00), because Claude Code caches nearly all its
+  uncached input. On the published Opus low and Sonnet medium runs the estimate lands within 1 cent of `total_cost_usd`.
+- The fast rows apply when the run's config says `service_tier=fast`.
+- DeepSeek's is the off-peak rate, and peak hours cost twice that.
+- Gemini's rise to 4.00, 0.20 and 20.00 on 2026-12-01 is not applied.
 
 ## Worked example
 
