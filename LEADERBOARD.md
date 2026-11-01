@@ -7,7 +7,9 @@ by the maintainer on review; the transcripts are in each bundle. Only complete,
 judged runs of the current bench version are ranked. Older rankings stay below as history:
 their Scores use that version's formula and do not compare with the table above.
 
-No results yet.
+| # | Score | Correct % | Solved | Judge | Speed | Time | Timeouts | Cost | Est. price | Tokens | Generated | Turns | Agent | Model | Effort | Hardware | Config | Submitter | Date | Run |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | **97.2** | 100.0 | 14/14 | 88.9 | 100.0 | 4 min 46 s | 0 | n/a | ~$1.48 | 1.37M | 19.3k | 15 | codex codex-cli 0.165.0 | gpt-6.1-sol | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=codex, tier=0, role=default, service_tier=fast, i... | owlmsj | 2026-11-01 | [run](results/2026-11-01_codex_gpt-6.1-sol_low_f89e0d05/summary.md) |
 
 ## Bench 1.4 (history)
 
