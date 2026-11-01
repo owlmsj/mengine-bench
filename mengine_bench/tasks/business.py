@@ -14,7 +14,7 @@ import json
 import math
 import random
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import date
 from pathlib import Path
 
@@ -25,6 +25,7 @@ from mengine_bench.core import (
     close,
     read,
     read_json,
+    saw,
     write,
 )
 
@@ -87,18 +88,27 @@ def _ab_setup(ws: Path) -> None:
           "or with a leading space. `completed_tutorial` is 0/1.\n")
 
 
+def _seen(got: Mapping[str, object], exp: Mapping[str, object], *keys: str) -> str:
+    return saw({key: got.get(key) for key in keys}, {key: exp.get(key) for key in keys})
+
+
 def _ab_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     exp = _ab_expected()
     got = read_json(ws, "ab_result.json")
     got = got if isinstance(got, dict) else {}
-    result.add("deduplicated session counts", close(got.get("sessions_a"), exp["sessions_a"], 0) and close(got.get("sessions_b"), exp["sessions_b"], 0))
-    result.add("completion rates", close(got.get("rate_a"), float(exp["rate_a"]), 1e-3) and close(got.get("rate_b"), float(exp["rate_b"]), 1e-3))
-    result.add("absolute and relative lift", close(got.get("abs_lift"), float(exp["abs_lift"]), 1e-3) and close(got.get("rel_lift"), float(exp["rel_lift"]), 2e-3))
+    result.add("deduplicated session counts", close(got.get("sessions_a"), exp["sessions_a"], 0) and close(got.get("sessions_b"), exp["sessions_b"], 0),
+               _seen(got, exp, "sessions_a", "sessions_b"))
+    result.add("completion rates", close(got.get("rate_a"), float(exp["rate_a"]), 1e-3) and close(got.get("rate_b"), float(exp["rate_b"]), 1e-3),
+               _seen(got, exp, "rate_a", "rate_b"))
+    result.add("absolute and relative lift", close(got.get("abs_lift"), float(exp["abs_lift"]), 1e-3) and close(got.get("rel_lift"), float(exp["rel_lift"]), 2e-3),
+               _seen(got, exp, "abs_lift", "rel_lift"))
     # Four decimals asked: a one-sided 0.0001 is another method, not rounding (#59).
-    result.add("two-proportion z-test p-value", close(got.get("p_value"), float(exp["p_value"]), 6e-5))
-    result.add("ship decision", got.get("ship_b") is exp["ship_b"])
-    result.add("mean match minutes", close(got.get("mean_minutes_a"), float(exp["mean_minutes_a"]), 0.02) and close(got.get("mean_minutes_b"), float(exp["mean_minutes_b"]), 0.02))
+    result.add("two-proportion z-test p-value", close(got.get("p_value"), float(exp["p_value"]), 6e-5),
+               saw(got.get("p_value"), exp["p_value"]))
+    result.add("ship decision", got.get("ship_b") is exp["ship_b"], saw(got.get("ship_b"), exp["ship_b"]))
+    result.add("mean match minutes", close(got.get("mean_minutes_a"), float(exp["mean_minutes_a"]), 0.02) and close(got.get("mean_minutes_b"), float(exp["mean_minutes_b"]), 0.02),
+               _seen(got, exp, "mean_minutes_a", "mean_minutes_b"))
     return result
 
 
@@ -185,14 +195,19 @@ def _pnl_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     table, runway = _pnl_expected()
     rows = list(csv.DictReader(io.StringIO(read(ws, "pnl.csv") or "")))
     got = {row.get("line"): row for row in rows}
-    result.add("pnl.csv lines in order", [row.get("line") for row in rows] == PNL_LINES)
+    lines = [row.get("line") for row in rows]
+    result.add("pnl.csv lines in order", lines == PNL_LINES, saw(lines, PNL_LINES))
     for line in PNL_LINES:
         tol = 0.02 if line == "gross_margin_pct" else 1.0
-        result.add(f"{line} per month", line in got and all(close(got[line].get(ym), table[line][ym], tol) for ym in MONTHS))
+        wrong = next((ym for ym in MONTHS if line not in got or not close(got[line].get(ym), table[line][ym], tol)), None)
+        result.add(f"{line} per month", wrong is None,
+                   f"{wrong}: {saw(got.get(line, {}).get(wrong), table[line].get(wrong))}")
     rj = read_json(ws, "runway.json")
     rj = rj if isinstance(rj, dict) else {}
-    result.add("3-month average burn", close(rj.get("burn_avg_3m"), runway["burn_avg_3m"], 1.0))
-    result.add("runway in months", close(rj.get("runway_months"), runway["runway_months"], 0.051))
+    result.add("3-month average burn", close(rj.get("burn_avg_3m"), runway["burn_avg_3m"], 1.0),
+               saw(rj.get("burn_avg_3m"), runway["burn_avg_3m"]))
+    result.add("runway in months", close(rj.get("runway_months"), runway["runway_months"], 0.051),
+               saw(rj.get("runway_months"), runway["runway_months"]))
     return result
 
 
@@ -234,7 +249,18 @@ def _bank_rows() -> list[tuple[str, str, float]]:
     return rows
 
 
+RECON_RULES = """# How we reconcile receivables
+
+- The bank memo cites the invoice in different formats.
+- Ignore fees, interest and PIX transfers without an identifiable invoice.
+- unpaid: invoices with no payment. duplicated: invoices paid more than once.
+- mismatched: a single payment whose amount differs from its invoice.
+- The three categories are exclusive: a duplicated invoice is never also mismatched.
+"""
+
+
 def _recon_setup(ws: Path) -> None:
+    write(ws, "backoffice/README.md", RECON_RULES)
     write(ws, "backoffice/invoices.csv", "id,customer,amount,due_date\n" + "".join(
         f"{i},{c},{v:.2f},2026-06-20\n" for i, c, v in _invoices()))
     write(ws, "backoffice/bank_statement_june.csv", "date,memo,amount\n" + "".join(
@@ -249,17 +275,18 @@ def _recon_check(ws: Path, answers: Sequence[str]) -> CheckResult:
         entries = got.get(key)
         ids = sorted(str(entry.get("id") if isinstance(entry, dict) else entry)
                      for entry in entries) if isinstance(entries, list) else []
-        result.add(label, ids == RECON[key])
+        result.add(label, ids == RECON[key], saw(ids, RECON[key]))
     mism = got.get("mismatched")
     valid_mismatches = isinstance(mism, list) and all(isinstance(m, dict) for m in mism)
     mism = mism if valid_mismatches else []
     ids = sorted(str(m.get("id")) for m in mism)
-    result.add("mismatched amounts", valid_mismatches and ids == RECON["mismatched"])
+    result.add("mismatched amounts", valid_mismatches and ids == RECON["mismatched"], saw(ids, RECON["mismatched"]))
     invoiced = {i: v for i, _, v in _invoices()}
     paid = {"INV-1021": round(invoiced["INV-1021"] - 250.0, 2), "INV-1036": round(invoiced["INV-1036"] * 0.9, 2)}
     result.add("invoiced vs paid on mismatches", valid_mismatches and ids == RECON["mismatched"] and all(
         close(m.get("invoiced"), invoiced[str(m.get("id"))], 0.01)
-        and close(m.get("paid"), paid[str(m.get("id"))], 0.01) for m in mism))
+        and close(m.get("paid"), paid[str(m.get("id"))], 0.01) for m in mism),
+        saw(mism, [{"id": i, "invoiced": invoiced[i], "paid": paid[i]} for i in RECON["mismatched"]]))
     return result
 
 
@@ -302,11 +329,8 @@ TASKS = [
         provenance="Accounts receivable reconciliation: invoices vs bank statement with PIX/TED memo variants and noise",
         summary="Match invoices to bank payments and report missing, duplicate or incorrect payments.",
         setup=_recon_setup, check=_recon_check, reference=_recon_reference, timeout_s=120,
-        steps=(Step("Reconcile {WS}/backoffice/invoices.csv with {WS}/backoffice/bank_statement_june.csv (the memo cites "
-                    "the invoice in different formats; ignore fees, interest and PIX transfers without an identifiable "
-                    "invoice). Write {WS}/reconciliation.json with unpaid (ids without payment), duplicated (ids paid more "
-                    "than once) and mismatched (list of objects id, invoiced, paid when the paid amount differs). "
-                    "Categories are exclusive: a duplicated invoice is NOT also mismatched. For mismatched, compare "
-                    "a single payment with its invoice. " + RULES),),
+        steps=(Step("Read {WS}/backoffice/README.md and reconcile {WS}/backoffice/invoices.csv with "
+                    "{WS}/backoffice/bank_statement_june.csv. Write {WS}/reconciliation.json with unpaid (ids), "
+                    "duplicated (ids) and mismatched (list of objects id, invoiced, paid). " + RULES),),
     ),
 ]

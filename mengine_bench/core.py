@@ -41,6 +41,12 @@ class Step:
 
 
 WAIVED_GATE_CAP = 0.5
+DETAIL_CHARS = 300
+
+
+def saw(got: object, want: object) -> str:
+    """Why a check failed, in words a person reads without opening the transcript (#82)."""
+    return f"expected {want!r}, received {got!r}"[:DETAIL_CHARS]
 
 
 @dataclass
@@ -52,9 +58,15 @@ class CheckResult:
     # Gates a run stopped at its limit may still miss: a page cut short earns what it holds (#41).
     # A gate that guards the tests is never here, so tampering earns nothing.
     waived_at_limit: tuple[str, ...] = ()
+    # Check name -> why it failed (#82). The judge never sees these: they could name the answer.
+    details: dict[str, str] = field(default_factory=dict)
+    # What the machine could not do, for the record: never a grade (#82).
+    notes: list[str] = field(default_factory=list)
 
-    def add(self, name: str, ok: bool) -> None:
+    def add(self, name: str, ok: bool, detail: str = "") -> None:
         self.checks.append((name, bool(ok)))
+        if detail and not ok:
+            self.details[name] = detail[:DETAIL_CHARS]
 
     @property
     def mandatory_ok(self) -> bool:
@@ -179,8 +191,10 @@ def _run_unittest(cwd: Path, paths: Sequence[Path], names: Sequence[str], timeou
         proc = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout_s, check=False)
     except subprocess.TimeoutExpired:
         return False, f"tests exceeded {timeout_s}s"
-    tail = (proc.stdout + proc.stderr).strip().splitlines()[-3:]
-    return proc.returncode == 0, " | ".join(tail)
+    lines = (proc.stdout + proc.stderr).strip().splitlines()
+    # #82: which test and which assertion; the last lines only say how many failed.
+    failures = [line for line in lines if re.match(r"(FAIL|ERROR): |\w*(Error|Exception)\b", line)]
+    return proc.returncode == 0, " | ".join(failures[:4] or lines[-3:])
 
 
 def run_hidden_tests(ws: Path, test_source: str, timeout_s: int = 60) -> tuple[bool, str]:

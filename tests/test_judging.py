@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from mengine_bench import catalog, leaderboard
+from mengine_bench import catalog
 from mengine_bench.bundle_judge import _agent_diff, read_packet
 from mengine_bench.judge import (
     JUDGE_SYSTEM_PROMPT,
@@ -213,24 +213,6 @@ def test_a_reply_before_a_crash_is_kept(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.setattr(process, "run_process", lambda *args, **kwargs: process.ProcessResult(stream, "", 1, False, 5.0))
     record = run_task(task, OpencodeAgent("m", None), tmp_path / "run")
     assert record.status == "crash" and record.answers == [answer] and _correctness(record) == 1.0
-
-
-def _ranked(results: Path, name: str, score: float) -> None:
-    from test_bundle_leaderboard import _write_result
-    _write_result(results, name, score)
-
-
-def test_the_board_says_when_the_top_is_too_close_to_call(tmp_path: Path) -> None:
-    results = tmp_path / "results"
-    _ranked(results, "a", 95.7)
-    _ranked(results, "b", 95.1)
-    _ranked(results, "c", 85.2)
-    board = leaderboard.build_leaderboard(results, tmp_path).markdown
-    assert "The top 2 runs are within 1 point: read them as a tie." in board and "repeat" not in board
-    far = tmp_path / "far"
-    _ranked(far, "a", 95.7)
-    _ranked(far, "c", 85.2)
-    assert "within 1 point" not in leaderboard.build_leaderboard(far, tmp_path).markdown
 
 
 def test_a_bundle_without_a_log_for_its_calls_is_refused(tmp_path: Path) -> None:

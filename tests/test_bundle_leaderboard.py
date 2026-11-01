@@ -202,10 +202,10 @@ def test_an_older_ranking_stays_on_the_board_as_history(tmp_path: Path) -> None:
     assert [name for name, _ in board.unranked] == ["results/old-pending"]
 
 
-def test_bench_is_version_1_3_x() -> None:
+def test_bench_is_version_1_4_x() -> None:
     import tomllib
     pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
-    assert __version__ == pyproject["project"]["version"] and __version__.startswith("1.3.")
+    assert __version__ == pyproject["project"]["version"] and __version__.startswith("1.4.")
 
 
 def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:

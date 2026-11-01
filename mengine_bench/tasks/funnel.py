@@ -16,6 +16,7 @@ from mengine_bench.core import (
     Step,
     close,
     read,
+    saw,
     write,
 )
 
@@ -91,14 +92,27 @@ def _funnel_setup(ws: Path) -> None:
     con.close()
 
 
+def _first_wrong_row(got: Sequence[dict[str, str]], exp: Sequence[tuple[str, str, int, float]], field: str, column: int,
+                     tol: float) -> str:
+    if len(got) != len(exp):
+        return f"{field}: {saw(len(got), len(exp))} rows"
+    for row, want in zip(got, exp, strict=True):
+        if not close(row.get(field), want[column], tol):
+            return f"{want[0]} {want[1]}: {saw(row.get(field), want[column])}"
+    return ""
+
+
 def _funnel_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     exp = _funnel_expected()
     got = list(csv.DictReader(io.StringIO(read(ws, "funnel.csv") or "")))
     keys = [(g.get("platform"), g.get("step")) for g in got]
-    result.add("platform x step rows in funnel order", keys == [(e[0], e[1]) for e in exp])
-    result.add("users per step", len(got) == len(exp) and all(close(g.get("users"), e[2], 0) for g, e in zip(got, exp, strict=False)))
-    result.add("conversion from previous step", len(got) == len(exp) and all(close(g.get("conv_from_prev"), e[3], 1e-4) for g, e in zip(got, exp, strict=False)))
+    result.add("platform x step rows in funnel order", keys == [(e[0], e[1]) for e in exp],
+               saw(keys, [(e[0], e[1]) for e in exp]))
+    result.add("users per step", len(got) == len(exp) and all(close(g.get("users"), e[2], 0) for g, e in zip(got, exp, strict=False)),
+               _first_wrong_row(got, exp, "users", 2, 0))
+    result.add("conversion from previous step", len(got) == len(exp) and all(close(g.get("conv_from_prev"), e[3], 1e-4) for g, e in zip(got, exp, strict=False)),
+               _first_wrong_row(got, exp, "conv_from_prev", 3, 1e-4))
     return result
 
 

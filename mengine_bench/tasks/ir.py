@@ -23,6 +23,7 @@ from mengine_bench.core import (
     has,
     only_number,
     read_json,
+    saw,
     write,
 )
 
@@ -147,15 +148,16 @@ def _wiki_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     got = got if isinstance(got, dict) else {}
     # #28, #59: every way of naming the one build, and no other build next to it.
     builds = re.findall(r"\d+\.\d+\.\d+(?:\.\d+)?(?:-\w+)?", str(got.get("build", "")))
-    result.add("build with the BUG-4471 fix", builds == [WIKI_GOLD["build"]])
+    result.add("build with the BUG-4471 fix", builds == [WIKI_GOLD["build"]], saw(got.get("build"), WIKI_GOLD["build"]))
     approver = str(got.get("approver", ""))
     result.add("who approved that build", has(approver, r"^\s*alice sato\s*(\([^()]*\)|,[^,]*)?\s*$")
-               and not has(approver, r"bruno|carla"))
-    result.add("ranked max on the current Neoplastic", close(only_number(got.get("neoplastic_ranked_max")), 10, 0))
-    result.add("flag reverted in PM-12", str(got.get("flag")).strip(" `'\"") == WIKI_GOLD["flag"])
-    result.add("restored value", close(only_number(got.get("restored_value")), 120, 0))
+               and not has(approver, r"bruno|carla"), saw(approver, "Alice Sato"))
+    result.add("ranked max on the current Neoplastic", close(only_number(got.get("neoplastic_ranked_max")), 10, 0),
+               saw(got.get("neoplastic_ranked_max"), 10))
+    result.add("flag reverted in PM-12", str(got.get("flag")).strip(" `'\"") == WIKI_GOLD["flag"], saw(got.get("flag"), WIKI_GOLD["flag"]))
+    result.add("restored value", close(only_number(got.get("restored_value")), 120, 0), saw(got.get("restored_value"), 120))
     cited = _cited_paths(got.get("sources"))
-    result.add("sources cited", all(_is_cited(src, cited) for src in WIKI_SOURCES))
+    result.add("sources cited", all(_is_cited(src, cited) for src in WIKI_SOURCES), saw(got.get("sources"), WIKI_SOURCES))
     return result
 
 
@@ -246,13 +248,16 @@ def _logs_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     exp = _logs_expected()
     got = read_json(ws, "incident.json")
     got = got if isinstance(got, dict) else {}
-    result.add("incident start", str(got.get("start", "")).replace("T", " ") == exp["start"])
-    result.add("incident end", str(got.get("end", "")).replace("T", " ") == exp["end"])
-    result.add("minutes down", close(got.get("minutes_down"), float(str(exp["minutes_down"])), 0.011))
+    result.add("incident start", str(got.get("start", "")).replace("T", " ") == exp["start"], saw(got.get("start"), exp["start"]))
+    result.add("incident end", str(got.get("end", "")).replace("T", " ") == exp["end"], saw(got.get("end"), exp["end"]))
+    result.add("minutes down", close(got.get("minutes_down"), float(str(exp["minutes_down"])), 0.011),
+               saw(got.get("minutes_down"), exp["minutes_down"]))
     result.add("June availability",
-               close(got.get("availability_june_pct"), float(str(exp["availability_june_pct"])), 0.001))
-    result.add("SLO 99.9 met", got.get("slo_999_ok") is exp["slo_999_ok"])
-    result.add("root cause = /data disk full", _names_disk_full(str(got.get("root_cause", ""))))
+               close(got.get("availability_june_pct"), float(str(exp["availability_june_pct"])), 0.001),
+               saw(got.get("availability_june_pct"), exp["availability_june_pct"]))
+    result.add("SLO 99.9 met", got.get("slo_999_ok") is exp["slo_999_ok"], saw(got.get("slo_999_ok"), exp["slo_999_ok"]))
+    result.add("root cause = /data disk full", _names_disk_full(str(got.get("root_cause", ""))),
+               saw(got.get("root_cause"), "the /data disk was full"))
     return result
 
 

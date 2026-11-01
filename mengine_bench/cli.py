@@ -1,4 +1,4 @@
-"""Console entry point: list, selftest, run, submit, judge, leaderboard, tasks-doc."""
+"""Console entry point: list, selftest, run, submit, judge, judge-anchors, analyze, leaderboard, tasks-doc."""
 
 from __future__ import annotations
 
@@ -13,10 +13,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mengine_bench import __version__, catalog
+from mengine_bench.analyze import render_analysis
+from mengine_bench.anchors import MIN_GAP, run_anchors
 from mengine_bench.bundle import bundle_leaks, run_scope, write_bundle
 from mengine_bench.bundle_judge import judge_bundle
 from mengine_bench.core import EvalTask, scratch_root
-from mengine_bench.leaderboard import build_leaderboard
+from mengine_bench.leaderboard import build_leaderboard, judged_runs, major_minor
 from mengine_bench.preflight import blocking_problems, personal_instructions
 from mengine_bench.redact import LocalNames, local_names
 from mengine_bench.report import (
@@ -25,8 +27,9 @@ from mengine_bench.report import (
 )
 from mengine_bench.environment import parse_config
 from mengine_bench.run_command import JudgeEvidence, RunSettings, run_tasks
-from mengine_bench.judge import OFFICIAL_JUDGE_EFFORT, OFFICIAL_JUDGE_MODEL
+from mengine_bench.judge import OFFICIAL_JUDGE_EFFORT, OFFICIAL_JUDGE_MODEL, RubricJudge
 from mengine_bench.runner.agents import AGENT_NAMES, make_agent
+from mengine_bench.visual import add_page_checks
 from mengine_bench.scoring import parse_price
 from mengine_bench.submit import SubmitError, gh_login, submit
 
@@ -71,6 +74,11 @@ def _parser() -> argparse.ArgumentParser:
     judge.add_argument("--judge-effort", default=DEFAULT_JUDGE_EFFORT)
     judge.add_argument("--judge-cmd", help="argv template for --judge cmd")
     judge.add_argument("--again", action="store_true", help="replace the votes of a bundle that is already judged")
+    sub.add_parser("judge-anchors", help="after a rubric or judge model change: vote two reference solutions and "
+                                         "two untouched workspaces (four votes, no agent run, writes nothing)")
+    study = sub.add_parser("analyze", help="what separates the published runs: tasks, score parts, ties (no agent run)")
+    study.add_argument("--results", type=Path, default=Path("results"))
+    study.add_argument("--version", help="bench major.minor (default: the current one)")
     selftest = sub.add_parser("selftest", help="run every task's gold self-test without an agent")
     selftest.add_argument("--tasks", default="")
     doc = sub.add_parser("tasks-doc", help="print (or --write) the docs/TASKS.md table; --readme rewrites the "
@@ -107,7 +115,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _submit(args.bundle)
     if args.command == "judge":
         return _judge(args)
+    if args.command == "judge-anchors":
+        return _judge_anchors()
+    if args.command == "analyze":
+        return _analyze(args.results, args.version or major_minor(__version__))
     return _run(args)
+
+
+def _analyze(results: Path, version: str) -> int:
+    runs = judged_runs(results, version)
+    if not runs:
+        print(f"analyze: received no judged runs of bench {version} in {results}; expected at least one "
+              f"(the current bench is {major_minor(__version__)}, older ones need --version)")
+        return 1
+    sys.stdout.write(render_analysis(runs, version))
+    return 0
+
+
+def _judge_anchors() -> int:
+    judge = RubricJudge(make_agent("claude", DEFAULT_JUDGE_MODEL, DEFAULT_JUDGE_EFFORT, None))
+    report = run_anchors(judge)
+    for row in report.rows:
+        print(f"{row.task_id}: reference {row.reference}, untouched {row.untouched}, gap {row.gap} (at least {MIN_GAP})")
+    print("judge anchors: ok" if report.ok else "judge anchors: FAILED; do not re-judge ranked runs with this judge")
+    return 0 if report.ok else 1
 
 
 def _judge(args: argparse.Namespace) -> int:
@@ -241,6 +272,8 @@ def _gold_problem(task: EvalTask, root: Path) -> str | None:
     solved.mkdir()
     task.setup(solved)
     result = task.check(solved, task.reference(solved))
+    if task.render_target is not None:
+        add_page_checks(result, solved / task.render_target)
     return None if result.passed else f"reference fails {result.failed()}"
 
 

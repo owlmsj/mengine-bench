@@ -7,6 +7,10 @@ by the maintainer on review; the transcripts are in each bundle. Only complete,
 judged runs of the current bench version are ranked. Older rankings stay below as history:
 their Scores use that version's formula and do not compare with the table above.
 
+No results yet.
+
+## Bench 1.3 (history)
+
 | # | Score | Correct % | Solved | Judge | Speed | Time | Timeouts | Cost | Est. price | Tokens | Generated | Turns | Agent | Model | Effort | Hardware | Config | Submitter | Date | Run |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | **97.0** | 100.0 | 14/14 | 89.4 | 97.5 | 5 min 37 s | 0 | n/a | ~$9.06 | 1.70M | 21.4k | 15 | codex codex-cli 0.165.0 | gpt-6-astra | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=codex, role=default, service_tier=fast, instructi... | owlmsj | 2026-10-31 | [run](results/2026-10-31_codex_gpt-6-astra_low_7e5129e3/summary.md) |
@@ -18,8 +22,6 @@ their Scores use that version's formula and do not compare with the table above.
 | 7 | **87.3** | 98.6 | 11/14 | 87.3 | 42.9 | 19 min 17 s | 2 | n/a | ~$0.14 | 1.55M | 173.8k | 149 | opencode opencode v2.2.2 | deepseek/deepseek-flash | max | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=deepseek-api, model=DeepSeek V4.1 Flash, quant=f... | owlmsj | 2026-10-31 | [run](results/2026-10-31_opencode_deepseek-deepseek-flash_max_8ff4b7ab/summary.md) |
 | 8 | **86.0** | 100.0 | 14/14 | 84.1 | 33.0 | 21 min 44 s | 0 | n/a | ~$0.09 | 1.20M | 55.7k | 83 | opencode opencode v2.2.2 | zai/glm-5.3-flash | max | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=zai-api, model=GLM 5.3 Flash, quant=full-weights... | owlmsj | 2026-10-31 | [run](results/2026-10-31_opencode_zai-glm-5.3-flash_max_90249450/summary.md) |
 | 9 | **83.3** | 100.0 | 13/14 | 88.6 | 7.5 | 28 min 08 s | 1 | n/a | ~$2.22 | 1.75M | 118.9k | 93 | agy 1.4.12 | gemini-4-argon | high | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=agy-subscription, model=Gemini 4 Argon, tier=non... | owlmsj | 2026-10-31 | [run](results/2026-10-31_agy_gemini-4-argon_high_cd4f5698/summary.md) |
-
-The top 2 runs are within 1 point: read them as a tie.
 
 ## Bench 1.1 (history)
 

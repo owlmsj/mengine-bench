@@ -30,6 +30,7 @@ from mengine_bench.core import CheckResult, EvalTask
 from mengine_bench.runner import process
 from mengine_bench.runner.agents import Agent, AgentError, Usage, sum_usage, partial_answer
 from mengine_bench.runner.stats import RunStats, merge_stats, stream_stats
+from mengine_bench.visual import add_page_checks
 
 # Browser user-data dirs an agent left in the workspace; their cache files can
 # stay locked by a live browser, and they are never part of the solution.
@@ -252,6 +253,8 @@ def _grade(task: EvalTask, record: TaskRunRecord) -> None:
     answers = record.answers + [""] * (len(task.steps) - len(record.answers))
     try:
         record.check = task.check(record.workspace, answers)
+        if task.render_target is not None:
+            add_page_checks(record.check, record.workspace / task.render_target)
     except (ValueError, RuntimeError, OSError) as error:
         record.error = f"{record.error or ''} grading failed: {error}".strip()
         record.status = "crash"
