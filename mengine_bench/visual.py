@@ -222,6 +222,43 @@ def add_page_checks(result: CheckResult, html: Path, probe: Callable[[Path], Pag
     result.add(DRAWS_CHECK, not blank, f"the screenshot has {page.png_bytes} bytes, a blank page has about 5850")
 
 
+def dump_page_dom(html: Path, query: str, browser_argv: Sequence[str] | None = None) -> tuple[str, str]:
+    """The DOM of `html?query` once the page settled: (RENDERED, dom), or (NO_BROWSER or a failure reason, "")."""
+    if browser_argv is None:
+        browser = find_browser()
+        if browser is None:
+            return NO_BROWSER, ""
+        browser_argv = [browser]
+    try:
+        return _dump_dom(list(browser_argv), f"{html.resolve().as_uri()}?{query}")
+    except (OSError, psutil.Error, subprocess.SubprocessError) as error:
+        return f"{RENDER_FAILED}: {type(error).__name__}", ""
+
+
+def _dump_dom(browser_argv: list[str], url: str) -> tuple[str, str]:
+    profile = Path(tempfile.mkdtemp(prefix="mengine-bench-browser-"))
+    flags = headless_browser_flags(platform.system(), _running_as_root())
+    argv = [*browser_argv, *flags, f"--user-data-dir={profile}", "--dump-dom", url]
+    try:
+        # A file, not a pipe, as in _screenshot: orphaned helpers inherit the handle.
+        with tempfile.TemporaryFile() as out:
+            proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.DEVNULL)
+            try:
+                returncode = proc.wait(timeout=RENDER_TIMEOUT_S)
+            except subprocess.TimeoutExpired:
+                kill_tree(proc.pid)
+                proc.wait()
+                return f"{RENDER_FAILED}: timeout after {RENDER_TIMEOUT_S}s", ""
+            out.seek(0)
+            dom = out.read().decode("utf-8", errors="replace")
+    finally:
+        _stop_profile_processes(profile)
+        _remove_profile(profile)
+    if returncode or not dom.strip():
+        return f"{RENDER_FAILED}: exit code {returncode} with {len(dom)} chars of DOM", ""
+    return RENDERED, dom
+
+
 def _failure_reason(cause: str, stderr_log: IO[bytes], profile: Path, html: Path) -> str:
     stderr_log.seek(0)
     lines = stderr_log.read().decode("utf-8", errors="replace").split("\n")
