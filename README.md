@@ -1,7 +1,7 @@
 # mengine-bench
 
 **How well does your coding agent do real work, and how fast?** 15 everyday jobs,
-one Score, about 10 minutes for a good setup. Every result is public and auditable.
+one Score, about 15 minutes for a good setup. Every result is public and auditable.
 
 It grades the whole **agent**: the harness (Claude Code, Codex CLI, opencode, AGY or your
 own command) + the model + its effort + your hardware + your configuration. Change
