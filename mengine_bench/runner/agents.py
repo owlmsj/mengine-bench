@@ -375,7 +375,7 @@ class ClaudeAgent:
         if self.effort:
             argv += ["--effort", self.effort]
         argv += ["--permission-mode", "bypassPermissions"]
-        return Invocation(argv=argv, stdin_text=prompt)
+        return Invocation(argv=argv, stdin_text=prompt, env={"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"})
 
     def judge_invocation(self, prompt: str, workdir: Path, attachments: Sequence[str],
                          prompt_file: Path | None = None, system_prompt: str | None = None) -> Invocation:
