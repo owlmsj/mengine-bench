@@ -43,6 +43,9 @@ RENDER_ATTEMPTS = 3
 # (virtual time, suffix of the file kept in the bundle, name attached to the vote). Each frame is its own page load:
 # the Chromium command line cannot capture a running page twice, and a new dependency is out (#93).
 JUDGE_FRAMES = ((1000, "-1s", "frame-1s.png"), (4000, "-4s", "frame-4s.png"), (8000, "", SCREENSHOT_NAME))
+# Fixed pages from published runs (#93), so a run's grade does not move when a new run comes out.
+REFERENCES_DIR = Path(__file__).resolve().parent / "assets" / "references"
+REFERENCE_LEVELS = ("strong", "medium", "weak")
 
 
 @dataclass(frozen=True)
@@ -116,8 +119,13 @@ def _render_verdict(bundle: Path, task_id: str, packet: JudgePacket, judge: Rubr
             failures.append(f"{name}: {status}")
     # #70: the same page rendered in 4 of 5 more tries after a timeout that had scored it 0.
     note = f"Not attached, the render failed, no defect of the page: {'; '.join(failures)}." if failures else ""
-    verdict = judge.grade(packet.context, workdir / "judge", images, note)
+    attached = {**images, **_reference_images(task_id)} if images else {}
+    verdict = judge.grade(packet.context, workdir / "judge", attached, note)
     return replace(verdict, errors=(*verdict.errors, *failures))
+
+
+def _reference_images(task_id: str) -> dict[str, Path]:
+    return {f"reference-{level}.png": REFERENCES_DIR / f"{task_id}-{level}.png" for level in REFERENCE_LEVELS}
 
 
 def _frame_path(workdir: Path, suffix: str) -> Path:

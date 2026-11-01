@@ -9,12 +9,22 @@ from pathlib import Path
 import pytest
 
 from conftest import FakeAgent
-from mengine_bench import bundle_judge, cli, visual
+from mengine_bench import bundle_judge, catalog, cli, visual
 from test_bundle_leaderboard import REFERENCE_AGENT
 
 JUDGE = r"""
 import json
 print(json.dumps({"score": 80, "approach": 30, "deliverable": 25, "verification": 25, "answer_discipline": 25, "rendered": 25, "rationale": "solid"}))
+"""
+
+JUDGE_READING_IMAGES = r"""
+import json, os, sys
+from pathlib import Path
+prompt = Path(sys.argv[2]).read_text(encoding="utf-8")
+attached = next(line for line in prompt.split("\n") if line.startswith("Attached images"))
+Path(__file__).with_suffix(".images").write_text(json.dumps(
+    {"attached": attached, "sizes": {name: os.path.getsize(name) for name in os.listdir(".")}}))
+print(json.dumps({"score": 80, "approach": 30, "deliverable": 25, "rendered": 25, "rationale": "solid"}))
 """
 
 # Records what sat in the isolated judge cwd, so a test sees whether the screenshot arrived.
@@ -113,7 +123,7 @@ def test_visual_deliverable_is_rendered_from_the_bundle_for_the_judge(
     assert page == stored.read_text(encoding="utf-8")
     assert not html.resolve().is_relative_to(bundle.resolve()), "the render runs in a temp dir"
     seen = (tmp_path / "fakes" / "judge.seen").read_text(encoding="utf-8").splitlines()
-    assert seen == ['["frame-1s.png", "frame-4s.png", "screenshot.png"]']
+    assert seen == ['["frame-1s.png", "frame-4s.png", "reference-medium.png", "reference-strong.png", "reference-weak.png", "screenshot.png"]']
     [task] = json.loads((bundle / "result.json").read_text(encoding="utf-8"))["tasks"]
     assert task["judge"] == 80
     # The screenshot the judge saw stays in the bundle for audit (#23 QA).
@@ -305,7 +315,7 @@ def test_a_blank_page_is_shown_to_the_judge_instead_of_zeroed(fake_agent: FakeAg
 
     monkeypatch.setattr(bundle_judge, "render_headless", blank_render)
     assert _judge(fake_agent, bundle, JUDGE_SEEING) == 0
-    assert (tmp_path / "fakes" / "judge.seen").read_text(encoding="utf-8").splitlines() == ['["frame-1s.png", "frame-4s.png", "screenshot.png"]']
+    assert (tmp_path / "fakes" / "judge.seen").read_text(encoding="utf-8").splitlines() == ['["frame-1s.png", "frame-4s.png", "reference-medium.png", "reference-strong.png", "reference-weak.png", "screenshot.png"]']
 
 
 def _render_except(missing_ms: int | None, budgets: list[int]) -> Callable[[Path, Path, int], str]:
@@ -320,6 +330,37 @@ def _render_except(missing_ms: int | None, budgets: list[int]) -> Callable[[Path
     return render
 
 
+def test_every_rendered_task_has_its_three_references() -> None:
+    pages = [task.id for task in catalog.all_tasks() if task.render_target is not None]
+    assert sorted(pages) == ["3d-voxel-landscape", "web-mondrian-landing"]
+    for task_id in pages:
+        assert all(path.stat().st_size > 10_000 for path in bundle_judge._reference_images(task_id).values())
+
+
+def test_the_vote_gets_the_frames_and_the_references_in_the_order_it_names(
+        fake_agent: FakeAgent, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # #93: a fixed scale, so a run's grade does not move when a new run is published.
+    bundle = _run(fake_agent, tmp_path / "results", "web-mondrian-landing", VISUAL_AGENT)
+    monkeypatch.setattr(bundle_judge, "render_headless", _render_except(None, []))
+    assert _judge(fake_agent, bundle, JUDGE_READING_IMAGES) == 0
+    seen = json.loads((tmp_path / "fakes" / "judge.images").read_text(encoding="utf-8"))
+    references = bundle_judge._reference_images("web-mondrian-landing")
+    assert seen["attached"] == ("Attached images, in this order: frame-1s.png, frame-4s.png, screenshot.png, "
+                                "reference-strong.png, reference-medium.png, reference-weak.png.")
+    assert seen["sizes"]["frame-4s.png"] == len(b"frame 4000")
+    assert {name: seen["sizes"][name] for name in references} == {
+        name: path.stat().st_size for name, path in references.items()}
+    assert not list((bundle / "judge").glob("*reference*")), "references live in the package, not in the bundle"
+
+
+def test_no_frame_means_no_reference_either(fake_agent: FakeAgent, tmp_path: Path,
+                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    bundle = _run(fake_agent, tmp_path / "results", "web-mondrian-landing", VISUAL_AGENT)
+    monkeypatch.setattr(bundle_judge, "render_headless", lambda html, png, budget_ms: f"{visual.RENDER_FAILED}: boom")
+    assert _judge(fake_agent, bundle, JUDGE_SEEING) == 0
+    assert (tmp_path / "fakes" / "judge.seen").read_text(encoding="utf-8").splitlines() == ["[]"]
+
+
 def test_the_vote_sees_a_frame_per_moment_and_the_bundle_keeps_them(
         fake_agent: FakeAgent, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # #93: one still image hid animation and a page that blanks after loading.
@@ -329,7 +370,7 @@ def test_the_vote_sees_a_frame_per_moment_and_the_bundle_keeps_them(
     assert _judge(fake_agent, bundle, JUDGE_SEEING) == 0
     assert budgets == [1000, 4000, 8000]
     seen = (tmp_path / "fakes" / "judge.seen").read_text(encoding="utf-8").splitlines()
-    assert seen == ['["frame-1s.png", "frame-4s.png", "screenshot.png"]']
+    assert seen == ['["frame-1s.png", "frame-4s.png", "reference-medium.png", "reference-strong.png", "reference-weak.png", "screenshot.png"]']
     stored = bundle / "judge"
     assert (stored / "web-mondrian-landing-1s.png").read_bytes() == b"frame 1000"
     assert (stored / "web-mondrian-landing-4s.png").read_bytes() == b"frame 4000"
@@ -337,8 +378,8 @@ def test_the_vote_sees_a_frame_per_moment_and_the_bundle_keeps_them(
 
 
 @pytest.mark.parametrize("missing_ms,kept", [
-    (4000, '["frame-1s.png", "screenshot.png"]'),
-    (8000, '["frame-1s.png", "frame-4s.png"]'),
+    (4000, '["frame-1s.png", "reference-medium.png", "reference-strong.png", "reference-weak.png", "screenshot.png"]'),
+    (8000, '["frame-1s.png", "frame-4s.png", "reference-medium.png", "reference-strong.png", "reference-weak.png"]'),
 ])
 def test_a_missing_frame_keeps_the_other_frames_in_the_vote(
         fake_agent: FakeAgent, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing_ms: int, kept: str) -> None:
