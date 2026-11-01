@@ -12,16 +12,16 @@ Results: [LEADERBOARD.md](LEADERBOARD.md).
 
 ## How a run is graded
 
-**Score = 0.6 x Correct % + 0.25 x Judge + 0.15 x Speed.**
+**Score = 0.6 x Correct % + 0.25 x Judge + 0.15 x Speed x Correct % / 100.** Speed pays only for work that is right.
 
 | | The question | How it is measured |
 | --- | --- | --- |
 | **Correct** | Did it do the job? | Deterministic checks: hidden tests, exact numbers, file state. Anyone can reproduce them. |
-| **Judge** | Is the work good? | One LLM vote per task (Claude Opus 5.5, xhigh), blind to the model and the speed. |
+| **Judge** | Is the work good? | One LLM vote per task (Claude Opus 5.5, xhigh), with subscores, blind to the model and the speed. |
 | **Speed** | Was it quick? | 100 at 5 min of total agent time or less, 0 at 30 min or more, linear in between. |
 
-Example, from the leaderboard: Correct 100, Judge 81.1 and 21 min 44 s (Speed 33.0)
-give 0.6 x 100 + 0.25 x 81.1 + 0.15 x 33.0 = **85.2**. It solved all 14 tasks, and
+Example, from the leaderboard: Correct 100, Judge 84.1 and 21 min 44 s (Speed 33.0)
+give 0.6 x 100 + 0.25 x 84.1 + 0.15 x 33.0 x 100 / 100 = **86.0**. It solved all 14 tasks, and
 thinking time cost it about 10 points. Cost is shown too, but never counts.
 
 Formulas and edge cases: [docs/SCORING.md](docs/SCORING.md).
@@ -116,10 +116,10 @@ projects, so skim `results/<run>/` before you submit.
 
 ## Limits
 
-- One run is one sample. Close results at the top need a repeat before anyone calls a winner.
+- One run is one sample, and runs are not repeated: a lead under 1 point at the top is a tie.
 - Results are self-reported. The transcripts let anyone check a run, but nothing re-runs it.
 - The task folder is an instruction, not a sandbox: an agent with full permissions can read the rest of your disk.
-- A crash scores 0, and a timeout with nothing written has nothing to grade. There are no retries.
+- A timeout or a crash with nothing written has nothing to grade. There are no retries.
 - Time depends on your machine and network, and Cost is an estimate.
 
 ## Develop

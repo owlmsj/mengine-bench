@@ -9,7 +9,7 @@ import pytest
 
 from mengine_bench import catalog
 from mengine_bench.core import CheckResult, EvalTask, Step, write
-from mengine_bench.judge import build_judge_prompt, JudgeContext, workspace_diff
+from mengine_bench.judge import JUDGE_SYSTEM_PROMPT, build_judge_prompt, JudgeContext, workspace_diff
 from mengine_bench.redact import PathScope, redact_paths
 from mengine_bench.run_command import _outcome
 from mengine_bench.runner import process
@@ -105,8 +105,10 @@ def test_the_temporary_workspace_path_is_redacted() -> None:
 
 
 def test_a_task_that_only_wants_a_reply_is_not_marked_down_for_its_format() -> None:
-    context_ = JudgeContext(task_id="t", prompts=("do it",), answers=("{}",), diff="", transcript_tail="", checks=())
-    assert "fixed format" in build_judge_prompt(context_, screenshot=False)
+    # #70: the rule moved to the system prompt; the message names the criterion that applies it.
+    context_ = JudgeContext(task_id="lc-changelog", prompts=("do it",), answers=("{}",), diff="", transcript_tail="", checks=())
+    assert "unless the prompt fixed a format" in JUDGE_SYSTEM_PROMPT
+    assert "Third criterion: answer_discipline" in build_judge_prompt(context_, screenshot=False)
 
 
 # ---------------------------------------------------------------- hidden tests --

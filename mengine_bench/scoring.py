@@ -1,11 +1,11 @@
 """Run totals; the formulas are docs/SCORING.md verbatim (#23).
 
 - Correct % = 100 * mean(c_i) over the tasks, c_i = share of scored checks
-  passed (0 on a failed gate or a crash). A timeout keeps what was delivered, is
+  passed (0 on a failed gate). A timeout or a crash keeps what was delivered, is
   never Solved and counts its full time.
 - Judge = mean of the one rubric vote per task, 0-100 (set by `mengine-bench judge`).
 - Speed = 100 at 5 min of Time or less, 0 at 30 min or more, linear in between.
-- Score = 0.6 * Correct + 0.25 * Judge + 0.15 * Speed, from the published one-decimal values.
+- Score = 0.6 * Correct + 0.25 * Judge + 0.15 * Speed * Correct / 100, from the published one-decimal values.
 - Time = total agent wall seconds; Cost = USD with its basis, not folded into
   Score. Comparability is the bench major.minor version, so there is no separate
   scoring version and no per-task weights.
@@ -141,7 +141,8 @@ def combined_score(correct: float, judge: float | None, speed: float) -> float |
     """Score from the published Correct %, Judge and Speed, so anyone recomputes it from the table."""
     if judge is None:
         return None
-    return round(CORRECT_SHARE * correct + JUDGE_SHARE * judge + SPEED_SHARE * speed, 1)
+    # #70: speed pays only for work that is right; an empty run that ended at once earned 15 points.
+    return round(CORRECT_SHARE * correct + JUDGE_SHARE * judge + SPEED_SHARE * speed * correct / 100, 1)
 
 
 def judge_mean(votes: Sequence[int | None]) -> float | None:
@@ -209,9 +210,8 @@ def _task_cost(usages: Sequence[Usage], basis: str, price: Price | None) -> floa
 
 def _task_score(outcome: TaskOutcome, basis: str, price: Price | None) -> TaskScore:
     usages = _measured([outcome])
-    # #39: the checks run on the workspace as the limit found it; Time already shows the cost.
-    correctness = 0.0 if outcome.status == "crash" else outcome.correctness
-    return TaskScore(task_id=outcome.task_id, status=outcome.status, correctness=correctness,
+    # #39, #70: the checks run on the workspace as the stop found it; Time already shows the cost.
+    return TaskScore(task_id=outcome.task_id, status=outcome.status, correctness=outcome.correctness,
                      solved=outcome.status == "ok" and outcome.solved, agent_s=outcome.agent_s, judge=outcome.judge,
                      cost_usd=_task_cost(usages, basis, price),
                      tokens=_tokens(usages))

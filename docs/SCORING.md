@@ -8,13 +8,14 @@ the Score, and a Cost kept apart.
 | **Correct %** | `100 x mean(c_i)` over every task. Deterministic: anyone reproduces it with `run` and `selftest`. |
 | **Judge** | Mean of one rubric vote per task, 0-100. Set by the maintainer with `mengine-bench judge`. |
 | **Speed** | 100 at 5 min of Time or less, 0 at 30 min or more, linear in between: `100 x (1800 - Time) / 1500`. |
-| **Score** | `0.6 x Correct % + 0.25 x Judge + 0.15 x Speed`, one decimal, from the published values. Only once judged. |
+| **Score** | `0.6 x Correct % + 0.25 x Judge + 0.15 x Speed x Correct % / 100`, one decimal, from the published values. Speed pays only for work that is right. Only once judged. |
 | **Time** | Total agent wall seconds. Grading and judging are excluded; a timeout counts its full time. |
 | **Cost** | USD estimate of inference, with its basis. A separate column: no points per dollar. |
 
 The formulas live in `mengine_bench/scoring.py`. Runs compare when they ran the
-same bench major.minor (1.3.x); a patch release changes no task, prompt or score. A run is one sample:
-runs within 1 point of each other at the top get a repeat before anyone calls a winner. Rankings of older
+same bench major.minor (1.3.x). A patch release changes no task or prompt. When it changes how a run is judged or
+scored, every ranked run is judged again from its bundle (`mengine-bench judge --again`), so none has to run again. A run is one sample and runs are not repeated:
+runs within 1 point of each other at the top are a tie. Rankings of older
 versions stay in LEADERBOARD.md as history, with the Scores of their own formula.
 
 ## Checks: c_i
@@ -24,10 +25,10 @@ state, regex) and may have mandatory gates (for example "existing tests
 untouched", or the page file exists).
 
 - `c_i` = share of the task's scored checks that passed.
-- Any failed gate gives `c_i = 0`. A crash gives `c_i = 0`.
-- A timeout stops the agent and grades the workspace as the limit found it. A gate on
+- Any failed gate gives `c_i = 0`.
+- A timeout or a crash grades the workspace as the stop found it. A gate on
   the page's size does not apply there, so a page cut short earns the checks it passes, up to
-  half of the task; a gate that guards the tests still does. The task shows as `timeout`, counts its full time and
+  half of the task; a gate that guards the tests still does. The task shows its status, counts its full time and
   is never Solved. A reply already given when the limit hits counts as the reply. With nothing written or
   said, there is nothing for the checks to credit.
 - Each prompt states the limit, 2 to 8 min per step, and that the folder and the reply are graded as they
@@ -43,24 +44,31 @@ is a declared deliverable that the bundle keeps verbatim for the judge.
 `mengine-bench judge results/<run>` (maintainer only) runs one judge, Claude
 `claude-opus-5-5` at effort `xhigh`, exactly once per task. A call that fails or
 returns invalid JSON is retried; if a task still has no vote, nothing is written.
-Rubric 2.3 grades what the checks cannot see. The check results are shown to
-the judge as context with the instruction not to re-score correctness.
+Rubric 2.4 grades what the checks cannot see. The check results are shown to
+the judge as context with the instruction not to re-score correctness. Its rules and
+anchors travel in a system prompt, and every vote comes with its three subscores, which
+must add up to the score.
 
 | Criterion | Points |
 | --- | --- |
 | Approach and code/solution quality | 40 |
 | Deliverable and instruction following | 30 |
-| Self-verification (visual tasks: rendered look) | 30 |
+| Self-verification; on the reply-only `lc-changelog` and `vis-chart`, answer discipline; on pages, the rendered look | 30 |
 
 For a visual task the maintainer's machine renders the stored page with headless
 Chromium (Edge, Chrome or Chromium; `MENGINE_BENCH_BROWSER` overrides it) and the
-judge sees the screenshot. A render that fails is tried up to 3 times. A blank or failed render gives that task a judge of 0, unless the
-run was stopped at its limit: then the judge votes on what exists, with no screenshot.
+judge sees the screenshot. A render that fails is tried up to 3 times; if it keeps failing, the judge votes without a
+screenshot and the bundle records it. With no browser at all, nothing is judged.
+
+The judge reads the task prompt, the check results, the final answers, each page whole, the agent's other changes
+and one tool log with the same shape for every harness. It does not read the raw stream, which carries the model id.
+
+Measured in 1.3.3: two votes on the same message differed by 1.35 points on average and 6 at most (23 pairs), so one
+task's vote is noisy and a run's mean of 14 is much less so.
 The judge never changes the checks.
 
-The judge also sees the task's status and its run statistics (see below), except
-time and speed, which only the Score counts: they depend on the hardware, and the judge grades without knowing
-the model or the machine.
+The judge also sees the task's status and the tool-level run statistics (see below), not tokens, turns,
+time or speed: they depend on the harness or the hardware, and the judge grades without knowing the model or the machine.
 
 ## Run statistics
 
@@ -122,7 +130,7 @@ Three tasks, Claude Code (harness USD):
 - Judge = (80 + 60 + 30) / 3 = 56.7
 - Time = 120 + 300 + 900 = 1320 s (22 min 00 s)
 - Speed = 100 x (1800 - 1320) / 1500 = 32.0
-- Score = 0.6 x 53.3 + 0.25 x 56.7 + 0.15 x 32.0 = 51.0
+- Score = 0.6 x 53.3 + 0.25 x 56.7 + 0.15 x 32.0 x 53.3 / 100 = 48.7
 - Cost = 0.40 + 0.90 = >= $1.30 (harness), a lower bound because C has no usage
 
 With `--price input=1.25,cached=0.125,output=10`, a Codex step of 2,000,000

@@ -236,6 +236,10 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: in
     try:
         parsed = agent.parse(result.stdout, result.exit_code or 0)
     except AgentError as error:
+        # #70: as at a timeout, a reply already given counts.
+        reply = partial_answer(result.stdout)
+        if reply:
+            record.answers.append(reply)
         record.steps.append(StepRecord(index, result.wall_s, result.exit_code, "crash", str(error), stats=stats))
         raise StepFailed("crash", f"step {label}: {error}") from error
     record.steps.append(StepRecord(index, result.wall_s, result.exit_code, "ok", usage=parsed.usage, stats=stats))

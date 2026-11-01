@@ -107,19 +107,12 @@ def test_missing_browser_reports_no_browser(tmp_path: Path, monkeypatch: pytest.
     assert visual.render_headless(html, tmp_path / "shot.png") == visual.NO_BROWSER
 
 
-def test_screenshot_has_content(tmp_path: Path) -> None:
-    png = tmp_path / "a.png"
-    assert not visual.screenshot_has_content(png, 10)
-    png.write_bytes(b"0" * 10)
-    assert visual.screenshot_has_content(png, 10)
-
-
 @pytest.mark.skipif(visual.find_browser() is None, reason="no Chromium-family browser on PATH")
 def test_reference_landing_renders_with_content(tmp_path: Path) -> None:
     html = write(tmp_path, visual_tasks.LANDING, visual_tasks.LANDING_REFERENCE)
     png = tmp_path / "_render" / "shot.png"
     assert visual.render_headless(html, png) == visual.RENDERED
-    assert visual.screenshot_has_content(png, 10_000)
+    assert png.stat().st_size >= 10_000
 
 
 def test_find_browser_env_override_and_standard_locations(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

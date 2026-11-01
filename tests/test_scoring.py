@@ -29,10 +29,10 @@ def test_correct_is_the_mean_share_and_time_is_the_total() -> None:
     assert run.judge is None and run.score is None
 
 
-def test_a_crash_counts_zero_but_keeps_its_time() -> None:
+def test_a_crash_keeps_what_was_delivered_and_its_time() -> None:
     run = score_run([outcome(status="crash", correctness=0.8, agent_s=900.0, step_usages=(None,))])
-    assert (run.correct, run.solved, run.time_s) == (0.0, 0, 900.0)
-    assert run.tasks[0].correctness == 0.0
+    assert (run.correct, run.solved, run.time_s) == (80.0, 0, 900.0)
+    assert run.tasks[0].correctness == 0.8
 
 
 def test_a_timeout_keeps_what_was_delivered_but_is_never_solved() -> None:
@@ -44,7 +44,7 @@ def test_a_timeout_keeps_what_was_delivered_but_is_never_solved() -> None:
 
 def test_score_blends_correct_judge_and_speed() -> None:
     run = score_run([outcome(task_id="a", judge=80), outcome(task_id="b", correctness=0.5, solved=False, judge=50)])
-    assert (run.correct, run.judge, run.speed, run.score) == (75.0, 65.0, 100.0, 76.2)
+    assert (run.correct, run.judge, run.speed, run.score) == (75.0, 65.0, 100.0, 72.5)
 
 
 def test_partial_judging_is_rejected() -> None:
@@ -121,7 +121,7 @@ def test_docs_worked_example() -> None:
                 step_usages=(None,)),
     ]
     run = score_run(rows)
-    assert (run.correct, run.solved, run.judge, run.speed, run.score, run.time_s) == (53.3, 1, 56.7, 32.0, 51.0, 1320.0)
+    assert (run.correct, run.solved, run.judge, run.speed, run.score, run.time_s) == (53.3, 1, 56.7, 32.0, 48.7, 1320.0)
     totals = {"cost_usd": run.cost.usd, "cost_basis": run.cost.basis, "cost_lower_bound": run.cost.lower_bound}
     assert (time_text(run.time_s), cost_text(totals)) == ("22 min 00 s", ">= $1.30 (harness)")
     codex = Usage(2_000_000, 1_500_000, 100_000, None, None, "none")
@@ -129,7 +129,7 @@ def test_docs_worked_example() -> None:
     doc = (Path(__file__).resolve().parents[1] / "docs" / "SCORING.md").read_text(encoding="utf-8")
     for line in ("Correct % = 100 x (1.00 + 0.60 + 0.00) / 3 = 53.3; Solved 1/3",
                  "Judge = (80 + 60 + 30) / 3 = 56.7", "Speed = 100 x (1800 - 1320) / 1500 = 32.0",
-                 "Score = 0.6 x 53.3 + 0.25 x 56.7 + 0.15 x 32.0 = 51.0",
+                 "Score = 0.6 x 53.3 + 0.25 x 56.7 + 0.15 x 32.0 x 53.3 / 100 = 48.7",
                  "Time = 120 + 300 + 900 = 1320 s (22 min 00 s)", "Cost = 0.40 + 0.90 = >= $1.30 (harness)",
                  "(500,000 x 1.25 + 1,500,000 x 0.125 + 100,000 x 10) / 1,000,000 = $1.81"):
         assert line in " ".join(doc.split()), line
