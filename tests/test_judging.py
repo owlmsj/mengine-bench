@@ -179,7 +179,7 @@ def test_the_system_prompt_travels_apart_from_the_evidence(tmp_path: Path) -> No
 
 
 def test_the_system_prompt_fits_a_command_line_and_names_the_rubric() -> None:
-    assert len(JUDGE_SYSTEM_PROMPT) < 8000 and "rubric 2.4" in JUDGE_SYSTEM_PROMPT
+    assert len(JUDGE_SYSTEM_PROMPT) < 8000 and "rubric 2.5" in JUDGE_SYSTEM_PROMPT
     for rule in ("answer_discipline", "do not infer the harness", "cut by the benchmark", "exact sum"):
         assert rule in JUDGE_SYSTEM_PROMPT, rule
 
@@ -200,17 +200,23 @@ def test_a_crash_is_graded_like_a_timeout_but_is_never_solved() -> None:
     assert _correctness(TaskRunRecord(task_id="t", status="crash", check=None)) == 0.0
 
 
-def test_a_reply_before_a_crash_is_kept(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_reply_and_a_result_before_a_crash_are_kept(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from mengine_bench.runner import process
     from mengine_bench.runner.agents import OpencodeAgent
     from mengine_bench.runner.task_run import run_task
 
     task = next(item for item in catalog.all_tasks() if item.id == "lc-changelog")
     from mengine_bench.tasks import context
-    answer = context._changelog_reference(tmp_path)[0]
+    answer = "the build is 0.9.214"
     stream = json.dumps({"type": "text", "part": {"text": answer}})
     assert partial_answer(stream) == answer
-    monkeypatch.setattr(process, "run_process", lambda *args, **kwargs: process.ProcessResult(stream, "", 1, False, 5.0))
+
+    # #98: Correct reads the file, so the agent delivers it before the harness dies.
+    def fake_run(argv: object, cwd: Path, *args: object, **kwargs: object) -> process.ProcessResult:
+        context._changelog_reference(Path(cwd))
+        return process.ProcessResult(stream, "", 1, False, 5.0)
+
+    monkeypatch.setattr(process, "run_process", fake_run)
     record = run_task(task, OpencodeAgent("m", None), tmp_path / "run")
     assert record.status == "crash" and record.answers == [answer] and _correctness(record) == 1.0
 

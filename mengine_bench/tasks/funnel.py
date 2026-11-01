@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import csv
-import io
+import json
 import random
 import sqlite3
 from collections.abc import Sequence
@@ -14,13 +13,21 @@ from mengine_bench.core import (
     CheckResult,
     EvalTask,
     Step,
-    close,
-    read,
+    WROTE_RESULT,
+    checkpoints,
+    near,
+    result_json,
     saw,
     write,
 )
 
-RULES = "Write your files inside {WS}. Do not ask for confirmation; finish and summarize in 2 lines."
+METRICS = """# How we report the funnel
+
+Steps, in order: install, tutorial_complete, first_match, purchase.
+A step counts only at or after the same player's previous step, with no time limit; its time is the first valid occurrence.
+Test accounts and events from unknown players do not count.
+A step's conversion is its players over the previous step's players. The biggest drop is the step with the lowest conversion.
+"""
 
 # ------------------------------------------------------------ ds-sql-funnel --
 
@@ -90,49 +97,60 @@ def _funnel_setup(ws: Path) -> None:
     con.executemany("insert into events values (?, ?, ?)", events)
     con.commit()
     con.close()
+    write(ws, "METRICS.md", METRICS)
 
 
-def _first_wrong_row(got: Sequence[dict[str, str]], exp: Sequence[tuple[str, str, int, float]], field: str, column: int,
-                     tol: float) -> str:
-    if len(got) != len(exp):
-        return f"{field}: {saw(len(got), len(exp))} rows"
-    for row, want in zip(got, exp, strict=True):
-        if not close(row.get(field), want[column], tol):
-            return f"{want[0]} {want[1]}: {saw(row.get(field), want[column])}"
-    return ""
+def _biggest_drops() -> dict[str, str]:
+    rows = _funnel_expected()
+    return {platform: min((row for row in rows if row[0] == platform and row[1] != FUNNEL[0]), key=lambda row: row[3])[1]
+            for platform in ("pc", "steamdeck")}
+
+
+def _players(row: dict[str, object]) -> object:
+    return next((row[key] for key in ("players", "users", "count") if key in row), None)
+
+
+def _funnel_counts(got: object, platform: str) -> dict[str, object]:
+    """Users per step of a platform, from {step: users} or a list of rows: the brief fixes the facts, not the shape."""
+    if isinstance(got, list):
+        got = {platform: [row for row in got if isinstance(row, dict) and row.get("platform") == platform]}
+    entry = got.get(platform) if isinstance(got, dict) else None
+    if isinstance(entry, list):
+        return {str(row.get("step")): _players(row) for row in entry if isinstance(row, dict)}
+    return {step: _players(value) if isinstance(value, dict) else value for step, value in entry.items()} if isinstance(entry, dict) else {}
 
 
 def _funnel_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
-    exp = _funnel_expected()
-    got = list(csv.DictReader(io.StringIO(read(ws, "funnel.csv") or "")))
-    keys = [(g.get("platform"), g.get("step")) for g in got]
-    result.add("platform x step rows in funnel order", keys == [(e[0], e[1]) for e in exp],
-               saw(keys, [(e[0], e[1]) for e in exp]))
-    result.add("users per step", len(got) == len(exp) and all(close(g.get("users"), e[2], 0) for g, e in zip(got, exp, strict=False)),
-               _first_wrong_row(got, exp, "users", 2, 0))
-    result.add("conversion from previous step", len(got) == len(exp) and all(close(g.get("conv_from_prev"), e[3], 1e-4) for g, e in zip(got, exp, strict=False)),
-               _first_wrong_row(got, exp, "conv_from_prev", 3, 1e-4))
+    got = result_json(ws)
+    for platform in ("pc", "steamdeck"):
+        want = {row[1]: row[2] for row in _funnel_expected() if row[0] == platform}
+        counts = _funnel_counts(got.get("funnel"), platform)
+        result.add(f"players per step on {platform}", all(near(counts.get(step), want[step], 0) for step in FUNNEL), saw(counts, want))
+    drops = got.get("biggest_drop")
+    drops = drops if isinstance(drops, dict) else {}
+    gold = _biggest_drops()
+    result.add("biggest drop on each platform", all(str(drops.get(platform)).strip().lower() == gold[platform] for platform in gold), saw(drops, gold))
     return result
 
 
 def _funnel_reference(ws: Path) -> list[str]:
-    lines = ["platform,step,users,conv_from_prev"] + [f"{p},{s},{n},{c:.4f}" for p, s, n, c in _funnel_expected()]
-    write(ws, "funnel.csv", "\n".join(lines) + "\n")
+    funnel: dict[str, dict[str, int]] = {}
+    for platform, step, users, _ in _funnel_expected():
+        funnel.setdefault(platform, {})[step] = users
+    write(ws, "result.json", json.dumps({"funnel": funnel, "biggest_drop": _biggest_drops()}))
     return ["done"]
 
 
 TASKS = [
     EvalTask(
         id="ds-sql-funnel", category="data-science",
-        provenance="Product funnel in SQL: ordered steps, test accounts, dupes, out-of-order events",
-        summary="Count players at each ordered funnel step in SQLite, excluding test accounts and duplicates, by platform.",
-        setup=_funnel_setup, check=_funnel_check, reference=_funnel_reference, timeout_s=120,
-        steps=(Step("In {WS}/analytics.db (SQLite: users, events) compute the funnel install -> tutorial_complete -> "
-                    "first_match -> purchase per platform. Rules: ignore users with is_test=1 and events whose user_id is "
-                    "not in users; a step only counts at or after the same user's previous step, with no time limit; "
-                    "use the first valid occurrence of each step. Write {WS}/funnel.csv "
-                    "with platform,step,users,conv_from_prev (4 decimals; 1.0 on install), platform pc first then "
-                    "steamdeck, steps in funnel order. " + RULES),),
+        provenance="Product funnel in SQLite: ordered steps, test accounts, dupes, out-of-order events",
+        summary="Find where players drop off on each platform from a product analytics database.",
+        setup=_funnel_setup, check=_funnel_check, reference=_funnel_reference, timeout_s=300,
+        checkpoints=checkpoints(("read the rules", r"METRICS"), ("looked at the schema", r"sqlite_master|\.schema|PRAGMA"), ("excluded test accounts", r"is_test"), WROTE_RESULT),
+        steps=(Step("Product wants to know where players drop off on each platform. The data is in {WS}/analytics.db and our "
+                    "reporting rules are in {WS}/METRICS.md. Where do we lose the most players? Record it in "
+                    "{WS}/result.json: funnel (per platform, players at each step) and biggest_drop (per platform, the step)."),),
     ),
 ]

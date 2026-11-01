@@ -31,6 +31,13 @@ EXPECTED_IDS = {
     "cmp-handoff",
 }
 
+
+def _edit_result(ws: Path, **fields: object) -> None:
+    """Change what the reference delivered: every eval hands over its facts in result.json (#98)."""
+    path = ws / "result.json"
+    path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), **fields}), encoding="utf-8")
+
+
 def _modules() -> list[ModuleType]:
     return [importlib.import_module(f"mengine_bench.tasks.{name}") for name in PART1_MODULES]
 
@@ -111,7 +118,7 @@ def test_reconcile_rejects_wrong_paid(
 
     business._recon_setup(tmp_path)
     business._recon_reference(tmp_path)
-    output = tmp_path / "reconciliation.json"
+    output = tmp_path / "result.json"
     reconciliation = json.loads(output.read_text(encoding="utf-8"))
     for mismatch in reconciliation["mismatched"]:
         if mismatch["id"] == invoice_id:
@@ -128,7 +135,7 @@ def test_reconcile_paid_cent_tolerance(tmp_path: Path, delta: float, expected: b
 
     business._recon_setup(tmp_path)
     business._recon_reference(tmp_path)
-    output = tmp_path / "reconciliation.json"
+    output = tmp_path / "result.json"
     reconciliation = json.loads(output.read_text(encoding="utf-8"))
     for mismatch in reconciliation["mismatched"]:
         mismatch["paid"] += delta
@@ -145,7 +152,7 @@ def test_reconcile_id_forms_and_exclusive_categories(tmp_path: Path, case: str, 
     from mengine_bench.tasks import business
 
     business._recon_reference(tmp_path)
-    output = tmp_path / "reconciliation.json"
+    output = tmp_path / "result.json"
     reconciliation = json.loads(output.read_text(encoding="utf-8"))
     if case in ("objects", "mixed"):
         for key in ("unpaid", "duplicated"):
@@ -186,9 +193,7 @@ def test_handoff_rejects_embedded_answer_tokens(tmp_path: Path, key: str, wrong:
 
     compaction._handoff_setup(tmp_path)
     answers = compaction._handoff_reference(tmp_path)
-    payload = json.loads(answers[-1])
-    payload[key] = wrong
-    answers[-1] = json.dumps(payload)
+    _edit_result(tmp_path, **{key: wrong})
     result = compaction._handoff_check(tmp_path, answers)
     assert not result.passed
     assert f"answer {key}" in result.failed()
@@ -207,9 +212,7 @@ def test_handoff_accepts_answer_tokens_in_prose(tmp_path: Path, key: str, valid:
 
     compaction._handoff_setup(tmp_path)
     answers = compaction._handoff_reference(tmp_path)
-    payload = json.loads(answers[-1])
-    payload[key] = valid
-    answers[-1] = json.dumps(payload)
+    _edit_result(tmp_path, **{key: valid})
     assert compaction._handoff_check(tmp_path, answers).passed
 
 
@@ -244,10 +247,11 @@ def test_funnel_counts_ordered_steps_without_expiry(
     funnel._funnel_setup(tmp_path)
     assert not funnel._funnel_check(tmp_path, [""]).passed
     assert funnel._funnel_check(tmp_path, funnel._funnel_reference(tmp_path)).passed
-    csv_text = "platform,step,users,conv_from_prev\n" + "".join(
-        f"{platform},{step},{count},{conversion:.4f}\n" for platform, step, count, conversion in expected
-    )
-    assert (tmp_path / "funnel.csv").read_text(encoding="utf-8") == csv_text
+    assert json.loads((tmp_path / "result.json").read_text(encoding="utf-8")) == {
+        "funnel": {"pc": {"install": 2, "tutorial_complete": 2, "first_match": 1, "purchase": 1},
+                   "steamdeck": {"install": 1, "tutorial_complete": 1, "first_match": 1, "purchase": 1}},
+        "biggest_drop": {"pc": "first_match", "steamdeck": "tutorial_complete"},
+    }
 
 
 @pytest.mark.parametrize("task", _part1_tasks(), ids=lambda task: task.id)
@@ -262,37 +266,40 @@ def test_part1_summaries_are_short_sentences(task: EvalTask) -> None:
     ("sessions_a", "900", True), ("sessions_b", "900.0", True),
     ("sessions_a", 900, True), ("sessions_a", "900.1", False),
     ("sessions_b", 970, False), ("sessions_a", "nan", False),
-    ("ship_b", "true", False), ("ship_b", 1, False),
+    # #98: a yes in any common writing is the same decision; a no or a bare 1 is not.
+    ("ship_b", "true", True), ("ship_b", "yes", True), ("ship_b", 1, False),
+    ("ship_b", False, False), ("ship_b", "no", False),
 ])
-def test_ab_numeric_counts_keep_exact_method(
+def test_ab_counts_stay_exact_and_the_decision_must_be_yes(
     tmp_path: Path, key: str, value: object, expected: bool,
 ) -> None:
     from mengine_bench.tasks import business
 
-    payload = business._ab_expected()
-    payload[key] = value
-    (tmp_path / "ab_result.json").write_text(json.dumps(payload), encoding="utf-8")
+    business._ab_reference(tmp_path)
+    _edit_result(tmp_path, **{key: value})
     assert business._ab_check(tmp_path, [""]).passed is expected
 
 
+@pytest.mark.parametrize("line", ["revenue", "gross_margin_pct", "ebitda"])
 @pytest.mark.parametrize("case,expected", [
-    ("reference", True), ("duplicate", False), ("reordered", False), ("missing", False),
+    # #98: the csv became a month-to-value map, so the order of the months is no longer part of the answer.
+    ("reference", True), ("reordered", True), ("duplicate", False), ("missing", False),
 ])
-def test_pnl_checks_every_line_in_order(tmp_path: Path, case: str, expected: bool) -> None:
+def test_pnl_checks_every_month_of_every_line(tmp_path: Path, line: str, case: str, expected: bool) -> None:
     from mengine_bench.tasks import business
 
     business._pnl_reference(tmp_path)
-    output = tmp_path / "pnl.csv"
-    lines = output.read_text(encoding="utf-8").splitlines()
-    if case == "duplicate":
-        lines.insert(2, lines[1])
+    series = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))[line]
+    months = list(series)
     if case == "reordered":
-        lines[1], lines[2] = lines[2], lines[1]
+        series = dict(reversed(series.items()))
+    if case == "duplicate":
+        series[months[1]] = series[months[0]]
     if case == "missing":
-        lines.pop()
-    output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        del series[months[-1]]
+    _edit_result(tmp_path, **{line: series})
     result = business._pnl_check(tmp_path, [""])
-    assert dict(result.checks)["pnl.csv lines in order"] is expected
+    assert dict(result.checks)[f"{line} per month"] is expected
     assert result.passed is expected
 
 
@@ -303,12 +310,9 @@ def test_funnel_accepts_only_exact_numeric_users(tmp_path: Path, count: str, exp
     from mengine_bench.tasks import funnel
 
     funnel._funnel_reference(tmp_path)
-    output = tmp_path / "funnel.csv"
-    lines = output.read_text(encoding="utf-8").splitlines()
-    fields = lines[1].split(",")
-    fields[2] = count.format(count=fields[2])
-    lines[1] = ",".join(fields)
-    output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    counts = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))["funnel"]
+    counts["pc"]["install"] = count.format(count=counts["pc"]["install"])
+    _edit_result(tmp_path, funnel=counts)
     assert funnel._funnel_check(tmp_path, [""]).passed is expected
 
 
@@ -322,9 +326,10 @@ def test_changelog_normalizes_only_build_prefixes(
 ) -> None:
     from mengine_bench.tasks import context
 
-    payload = json.loads(context._changelog_reference(tmp_path)[0])
-    payload[key] = form.format(payload[key])
-    assert context._changelog_check(tmp_path, [json.dumps(payload)]).passed is expected
+    answers = context._changelog_reference(tmp_path)
+    build = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))[key]
+    _edit_result(tmp_path, **{key: form.format(build)})
+    assert context._changelog_check(tmp_path, answers).passed is expected
 
 
 @pytest.mark.parametrize("key,value,expected", [
@@ -340,9 +345,9 @@ def test_chart_normalizes_names_and_reads_the_ratio_with_a_margin(
 ) -> None:
     from mengine_bench.tasks import context
 
-    payload = {"top_gpu": "H200", "top_tps": 180, "bottom_gpu": "4090", "ratio": 6.0}
-    payload[key] = value
-    assert context._chart_check(tmp_path, [json.dumps(payload)]).passed is expected
+    answers = context._chart_reference(tmp_path)
+    _edit_result(tmp_path, **{key: value})
+    assert context._chart_check(tmp_path, answers).passed is expected
 
 
 @pytest.mark.parametrize("key,value,expected", [
@@ -369,9 +374,7 @@ def test_handoff_retains_final_measurement_command_and_pending_action(
     from mengine_bench.tasks import compaction
 
     answers = compaction._handoff_reference(tmp_path)
-    payload = json.loads(answers[-1])
-    payload[key] = value
-    answers[-1] = json.dumps(payload)
+    _edit_result(tmp_path, **{key: value})
     result = compaction._handoff_check(tmp_path, answers)
     assert dict(result.checks)[f"answer {key}"] is expected
     assert result.passed is expected
@@ -384,7 +387,8 @@ def test_handoff_retains_final_measurement_command_and_pending_action(
 def test_handoff_spill_credit_requires_a_number(tmp_path: Path, answer: str, expected: float) -> None:
     from mengine_bench.tasks import compaction
 
-    assert compaction._handoff_check(tmp_path, [answer]).score == expected
+    (tmp_path / "result.json").write_text(answer, encoding="utf-8")
+    assert compaction._handoff_check(tmp_path, ["any reply"]).score == expected
 
 
 @pytest.mark.parametrize("original,replacement,expected", [
@@ -431,13 +435,14 @@ def test_ecs_hidden_collision_rejects_wrong_sizes_and_negative_edge_contacts(
 
 @pytest.mark.parametrize("task_id", ["gd-astar-doors", "gd-ecs-collision-bug"])
 @pytest.mark.parametrize("solved", [True, False])
-def test_gamedev_stdlib_prompts_keep_accept_reject_contract(
+def test_gamedev_prompts_keep_no_new_dependencies_and_accept_reject_contract(
     tmp_path: Path, task_id: str, solved: bool,
 ) -> None:
     from mengine_bench.tasks import gamedev
 
     task = next(task for task in gamedev.TASKS if task.id == task_id)
-    assert all("Python standard library only" in step.prompt for step in task.steps)
+    # #98: the requirement stays; how to meet it and how to run the tests are the agent's call.
+    assert all("no new dependencies" in step.prompt for step in task.steps)
     task.setup(tmp_path)
     answers = task.reference(tmp_path) if solved else [""]
     assert task.check(tmp_path, answers).passed is solved
@@ -450,7 +455,6 @@ def test_runway_uses_the_june_balance_not_the_older_line(tmp_path: Path) -> None
     answers = business._pnl_reference(tmp_path)
     assert business._pnl_check(tmp_path, answers).passed
     assert "31/05/2026" in (tmp_path / "finance" / "cash_balance.txt").read_text(encoding="utf-8")
-    runway = json.loads((tmp_path / "runway.json").read_text(encoding="utf-8"))
-    runway["runway_months"] = round(business.CASH_MAY / runway["burn_avg_3m"], 1)
-    (tmp_path / "runway.json").write_text(json.dumps(runway), encoding="utf-8")
+    burn = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))["burn"]
+    _edit_result(tmp_path, runway_months=round(business.CASH_MAY / burn, 1))
     assert not business._pnl_check(tmp_path, answers).passed

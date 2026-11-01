@@ -79,7 +79,7 @@ def test_judging_the_bundle_sets_one_vote_per_task(fake_agent: FakeAgent, tmp_pa
     assert task["checks"] == before["tasks"][0]["checks"], "the judge never changes the checks"
     judge = result["judge"]
     assert {key: judge[key] for key in ("agent", "model", "effort", "rubric")} == {
-        "agent": "cmd", "model": "judge-x", "effort": "high", "rubric": "2.4"}
+        "agent": "cmd", "model": "judge-x", "effort": "high", "rubric": "2.5"}
     assert judge["bench"] and len(judge["system_prompt_sha256"]) == 64
     assert task["judge_parts"] == {"approach": 30, "deliverable": 25, "verification": 25}
     totals = result["totals"]

@@ -50,6 +50,10 @@ TIME_LIMIT_NOTE = ("\n\nYou have {minutes} min for this step. The folder and you
 # #85: in every prompt too, for an agent that does not load AGENTS.md (AGY --print).
 ANY_TOOL_NOTE = ("\n\nYou may use any skill, tool or MCP server available to you whenever it makes your work smarter, "
                  "more correct or faster.")
+# #98: the route is open, so nothing here says how. Asking how they know it is right is the brief's last question.
+BRIEF_NOTE = ("\n\nThis is the whole brief: there is no second turn and nobody can answer questions. Choose your own "
+              "approach, decide what the brief leaves open and state your assumptions. End by saying what you found "
+              "and how you know it is right.")
 COPY_IGNORE = shutil.ignore_patterns(".git", "tmp", "__pycache__", "_render")
 
 
@@ -79,6 +83,8 @@ class TaskRunRecord:
     initial_files: dict[str, bytes] = field(default_factory=dict)
     # Published next to the status: what the runner had to do, never a grade.
     notes: list[str] = field(default_factory=list)
+    # Raw stdout of each step, for the checkpoints. Not published from here: the transcripts are, after redaction.
+    streams: list[str] = field(default_factory=list)
 
     @property
     def usage(self) -> Usage | None:
@@ -149,7 +155,7 @@ def run_task(task: EvalTask, agent: Agent, root: Path, fresh_root: Path | None =
                 settle_workspace(workspace, root, workspace_index)
                 workspace, workspace_index = fresh, index
             prompt = render_prompt(task, index, workspace, root / "hidden" / str(index))
-            prompt += ANY_TOOL_NOTE + TIME_LIMIT_NOTE.format(minutes=f"{task.timeout_s / 60:g}")
+            prompt += BRIEF_NOTE + ANY_TOOL_NOTE + TIME_LIMIT_NOTE.format(minutes=f"{task.timeout_s / 60:g}")
             (workspace / "AGENTS.md").write_text(WORKSPACE_RULES, encoding="utf-8", newline="")
             _run_step(agent, task, workspace, root, index, prompt, record)
         except StepFailed as failure:
@@ -234,6 +240,7 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: in
     (transcripts / f"step-{label}.stdout.txt").write_text(result.stdout, encoding="utf-8")
     (transcripts / f"step-{label}.stderr.txt").write_text(result.stderr, encoding="utf-8")
     stats = stream_stats(result.stdout)
+    record.streams.append(result.stdout)
     if result.timed_out:
         message = f"step {label} exceeded the {task.timeout_s}s timeout"
         # #59: a reply already given counts, or an answer-only task would zero at the limit.

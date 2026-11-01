@@ -26,7 +26,8 @@ def _stopped(stdout: str = "") -> process.ProcessResult:
     return process.ProcessResult(stdout, "", None, True, 120.0)
 
 
-def _edit_json(path: Path, **fields: object) -> None:
+def _edit_result(ws: Path, **fields: object) -> None:
+    path = ws / "result.json"
     got = json.loads(path.read_text(encoding="utf-8"))
     got.update(fields)
     path.write_text(json.dumps(got), encoding="utf-8")
@@ -66,15 +67,29 @@ def test_a_stream_with_no_reply_gives_nothing_and_plain_output_gives_itself() ->
     assert partial_answer('{"top_gpu": "H200"}') == '{"top_gpu": "H200"}'
 
 
-def test_a_reply_given_before_the_limit_is_graded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # An answer-only task lost everything at the limit, even with the right reply already in the stream.
+def test_a_result_written_before_the_limit_is_graded_and_the_reply_is_kept(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # An answer-only task lost everything at the limit. #98: the facts live in result.json, so that file is what counts.
     task = _by_id("lc-changelog")
-    answer = context._changelog_reference(tmp_path)[0]
+    stream = json.dumps({"type": "text", "part": {"text": "almost there"}})
+
+    def fake_run(argv: object, cwd: Path, *args: object, **kwargs: object) -> process.ProcessResult:
+        context._changelog_reference(Path(cwd))
+        return _stopped(stream)
+
+    monkeypatch.setattr(process, "run_process", fake_run)
+    record = run_task(task, OpencodeAgent("m", None), tmp_path / "run")
+    assert record.status == "timeout" and record.answers == ["almost there"]
+    assert _outcome(task, record).correctness == 1.0
+
+
+def test_the_right_facts_in_a_reply_alone_earn_nothing_at_the_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    task = _by_id("lc-changelog")
+    answer = json.dumps(context._changelog()[1])
     stream = json.dumps({"type": "text", "part": {"text": answer}})
     monkeypatch.setattr(process, "run_process", lambda *args, **kwargs: _stopped(stream))
     record = run_task(task, OpencodeAgent("m", None), tmp_path / "run")
     assert record.status == "timeout" and record.answers == [answer]
-    assert _outcome(task, record).correctness == 1.0
+    assert _outcome(task, record).correctness == 0.0
 
 
 def test_the_note_names_the_reply_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -104,11 +119,23 @@ def test_the_temporary_workspace_path_is_redacted() -> None:
     assert "mengine-bench-fresh" not in cleaned and "someone" not in cleaned and "a.py" in cleaned
 
 
-def test_a_task_that_only_wants_a_reply_is_not_marked_down_for_its_format() -> None:
+def test_the_format_of_a_reply_is_never_marked_down() -> None:
     # #70: the rule moved to the system prompt; the message names the criterion that applies it.
+    # #98, rubric 2.5: no prompt fixes a format any more, so the exception is gone with it.
     context_ = JudgeContext(task_id="lc-changelog", prompts=("do it",), answers=("{}",), diff="", transcript_tail="", checks=())
-    assert "unless the prompt fixed a format" in JUDGE_SYSTEM_PROMPT
+    assert "code fences, bullet shapes and brevity conventions in a reply are never defects" in JUDGE_SYSTEM_PROMPT
+    assert "unless the prompt fixed a format" not in JUDGE_SYSTEM_PROMPT
     assert "Third criterion: answer_discipline" in build_judge_prompt(context_, screenshot=False)
+
+
+@pytest.mark.parametrize("task_id", ["lc-changelog", "vis-chart", "cmp-handoff"])
+@pytest.mark.parametrize("reply", ["", "not json at all", '{"top_gpu": "wrong", "build_change": "wrong"}'])
+def test_a_right_result_file_passes_whatever_the_reply_says(tmp_path: Path, task_id: str, reply: str) -> None:
+    # #98, #92: the tasks that used to be graded on their reply now deliver the same facts in result.json.
+    task = _by_id(task_id)
+    task.setup(tmp_path)
+    task.reference(tmp_path)
+    assert task.check(tmp_path, [reply] * len(task.steps)).passed
 
 
 # ---------------------------------------------------------------- hidden tests --
@@ -157,12 +184,24 @@ def test_a_broken_suite_does_not_pass_the_integration_task(tmp_path: Path) -> No
 # ------------------------------------------------------------------ data tasks --
 
 
-@pytest.mark.parametrize("value,ok", [(0.0002, True), (0.000198, True), (0.0001, False), (0.0011, False), (0, False)])
-def test_the_p_value_must_be_right_to_the_digits_asked(tmp_path: Path, value: float, ok: bool) -> None:
+@pytest.mark.parametrize("value,ok", [
+    # #98: which valid test is the agent's call, so any p under the 5% in the release rule stands, rounding included.
+    (0.0002, True), (0.000198, True), (0.0001, True), (0.0011, True), (0, True), ("<0.001", True),
+    (0.05, False), (0.2, False), (-0.01, False), ("significant", False), (None, False),
+])
+def test_the_p_value_must_be_a_number_under_the_release_threshold(tmp_path: Path, value: object, ok: bool) -> None:
     business._ab_setup(tmp_path)
     answers = business._ab_reference(tmp_path)
-    _edit_json(tmp_path / "ab_result.json", p_value=value)
-    assert business._ab_check(tmp_path, answers).passed is ok
+    _edit_result(tmp_path, p_value=value)
+    result = business._ab_check(tmp_path, answers)
+    assert dict(result.checks)["the gain is significant"] is ok and result.passed is ok
+
+
+def test_a_right_p_value_does_not_save_a_wrong_ship_decision(tmp_path: Path) -> None:
+    business._ab_setup(tmp_path)
+    answers = business._ab_reference(tmp_path)
+    _edit_result(tmp_path, ship_b=False)
+    assert business._ab_check(tmp_path, answers).failed() == ["ship decision"]
 
 
 # ----------------------------------------------------------- retrieval and logs --
@@ -180,7 +219,7 @@ def test_the_p_value_must_be_right_to_the_digits_asked(tmp_path: Path, value: fl
 def test_wiki_answer_forms(tmp_path: Path, field: str, value: str, ok: bool) -> None:
     ir._wiki_setup(tmp_path)
     answers = ir._wiki_reference(tmp_path)
-    _edit_json(tmp_path / "answers.json", **{field: value})
+    _edit_result(tmp_path, **{field: value})
     assert ir._wiki_check(tmp_path, answers).passed is ok
 
 
@@ -196,11 +235,28 @@ def test_root_cause_names_a_full_disk(cause: str, ok: bool) -> None:
     assert ir._names_disk_full(cause) is ok
 
 
-def test_minutes_down_keeps_the_digits_asked(tmp_path: Path) -> None:
+@pytest.mark.parametrize("value,ok", [
+    # #98: the true value is 35.8167 and the tolerance 0.05, so 35.77 now passes and the first miss is 35.75.
+    (35.82, True), ("35.8", True), (35.77, True), (35.75, False), (35.87, False), (35.0, False), ("35 or 36", False),
+])
+def test_minutes_down_takes_a_small_tolerance_and_no_more(tmp_path: Path, value: object, ok: bool) -> None:
     ir._logs_setup(tmp_path)
     answers = ir._logs_reference(tmp_path)
-    _edit_json(tmp_path / "incident.json", minutes_down=35.77)
-    assert not ir._logs_check(tmp_path, answers).passed
+    _edit_result(tmp_path, minutes_down=value)
+    result = ir._logs_check(tmp_path, answers)
+    assert dict(result.checks)["minutes down"] is ok and result.passed is ok
+
+
+@pytest.mark.parametrize("value,ok", [
+    # The true value is 99.91709 and the tolerance 0.002.
+    (99.917, True), ("99.917%", True), (99.916, True), (99.91, False), (99.93, False), (99.9, False),
+])
+def test_availability_takes_a_small_tolerance_and_no_more(tmp_path: Path, value: object, ok: bool) -> None:
+    ir._logs_setup(tmp_path)
+    answers = ir._logs_reference(tmp_path)
+    _edit_result(tmp_path, availability_june_pct=value)
+    result = ir._logs_check(tmp_path, answers)
+    assert dict(result.checks)["June availability"] is ok and result.passed is ok
 
 
 def test_every_log_day_is_in_time_order(tmp_path: Path) -> None:
@@ -214,21 +270,19 @@ def test_every_log_day_is_in_time_order(tmp_path: Path) -> None:
     ("build_change", {"build": "0.9.214"}), ("build_change", "build v0.9.214"), ("builds_between", "162 builds"),
 ])
 def test_changelog_answer_forms(tmp_path: Path, field: str, value: object) -> None:
-    got = json.loads(context._changelog_reference(tmp_path)[0])
-    got[field] = value
-    assert context._changelog_check(tmp_path, [json.dumps(got)]).passed
+    answers = context._changelog_reference(tmp_path)
+    _edit_result(tmp_path, **{field: value})
+    assert context._changelog_check(tmp_path, answers).passed
 
 
 def test_changelog_wants_one_build(tmp_path: Path) -> None:
-    got = json.loads(context._changelog_reference(tmp_path)[0])
-    got["build_change"] = "0.9.180 or 0.9.214"
-    assert not context._changelog_check(tmp_path, [json.dumps(got)]).passed
+    answers = context._changelog_reference(tmp_path)
+    _edit_result(tmp_path, build_change="0.9.180 or 0.9.214")
+    result = context._changelog_check(tmp_path, answers)
+    assert result.failed() == ["build that changed recoil_multiplier (not _ads)"]
 
 
 # ---------------------------------------------------------------------- vision --
-
-
-CHART_RIGHT = {"top_gpu": "H200", "top_tps": 180, "bottom_gpu": "4090", "ratio": 6.0}
 
 
 @pytest.mark.parametrize("change,ok", [
@@ -241,7 +295,9 @@ CHART_RIGHT = {"top_gpu": "H200", "top_tps": 180, "bottom_gpu": "4090", "ratio":
     ({"bottom_gpu": "A100", "ratio": 3.0}, False),
 ])
 def test_chart_reads_the_asked_series(tmp_path: Path, change: dict[str, object], ok: bool) -> None:
-    assert context._chart_check(tmp_path, [json.dumps({**CHART_RIGHT, **change})]).passed is ok
+    answers = context._chart_reference(tmp_path)
+    _edit_result(tmp_path, **change)
+    assert context._chart_check(tmp_path, answers).passed is ok
 
 
 def test_chart_prompt_names_the_series() -> None:
@@ -264,9 +320,8 @@ def test_chart_prompt_names_the_series() -> None:
 ])
 def test_handoff_answer_forms(tmp_path: Path, field: str, value: str, ok: bool) -> None:
     answers = compaction._handoff_reference(tmp_path)
-    got = json.loads(answers[1])
-    got[field] = value
-    assert compaction._handoff_check(tmp_path, ["ok", json.dumps(got)]).passed is ok
+    _edit_result(tmp_path, **{field: value})
+    assert compaction._handoff_check(tmp_path, answers).passed is ok
 
 
 def test_the_handoff_must_keep_the_second_flag_and_fit_a_tighter_limit(tmp_path: Path) -> None:

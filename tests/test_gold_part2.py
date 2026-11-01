@@ -149,8 +149,9 @@ def test_longrepo_hidden_tests_catch_a_fix_that_breaks_documented_behavior(
     assert dict(result.checks)[check] is False and not result.passed
 
 
-def test_longrepo_prompt_says_standard_library_only() -> None:
-    assert "standard library only" in longrepo.TASKS[0].steps[0].prompt
+def test_longrepo_prompt_keeps_no_new_dependencies() -> None:
+    # #98: the requirement stays; the brief no longer says how to meet it.
+    assert "no new dependencies" in longrepo.TASKS[0].steps[0].prompt
 
 
 @pytest.mark.parametrize("task", (*ir.TASKS, *longrepo.TASKS), ids=lambda task: task.id)
@@ -186,9 +187,9 @@ def test_logs_root_cause_accepts_every_out_of_space_wording(tmp_path: Path, root
 
     ir._logs_setup(tmp_path)
     answers = ir._logs_reference(tmp_path)
-    incident = json.loads((tmp_path / "incident.json").read_text(encoding="utf-8"))
+    incident = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
     incident["root_cause"] = root_cause
-    (tmp_path / "incident.json").write_text(json.dumps(incident), encoding="utf-8")
+    (tmp_path / "result.json").write_text(json.dumps(incident), encoding="utf-8")
     assert ir._logs_check(tmp_path, answers).passed is ok
 
 
@@ -221,9 +222,9 @@ def test_logs_root_cause_accepts_every_out_of_space_wording(tmp_path: Path, root
 def test_wiki_accepts_answer_forms_but_not_wrong_answers(tmp_path: Path, field: str, value: object, ok: bool) -> None:
     ir._wiki_setup(tmp_path)
     answers = ir._wiki_reference(tmp_path)
-    got = json.loads((tmp_path / "answers.json").read_text(encoding="utf-8"))
+    got = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
     got[field] = value
-    (tmp_path / "answers.json").write_text(json.dumps(got), encoding="utf-8")
+    (tmp_path / "result.json").write_text(json.dumps(got), encoding="utf-8")
     assert ir._wiki_check(tmp_path, answers).passed is ok
 
 

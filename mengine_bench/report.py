@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from mengine_bench import __version__
 from mengine_bench.core import EvalTask
@@ -40,6 +40,7 @@ class TaskDetail(TypedDict):
     answers: list[str]
     usage: dict[str, object] | None
     stats: RunStats
+    checkpoints: NotRequired[list[dict[str, object]]]
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,7 @@ def _tokens_record(tokens: TokenTotals) -> dict[str, int]:
 def _task_entry(score: TaskScore, detail: TaskDetail) -> dict[str, object]:
     return {
         "id": score.task_id, "status": score.status, "error": detail["error"], "flags": detail["flags"],
+        "checkpoints": detail.get("checkpoints", []),
         "c": score.correctness, "solved": score.solved, "checks": detail["checks"],
         # Set by `mengine-bench judge` on review (#23): one rubric vote per task.
         "judge": score.judge, "judge_rationale": None, "judge_errors": [],
@@ -240,7 +242,7 @@ def render_summary(results: Mapping[str, object]) -> str:
         lines.append(f"| {task['id']} | {task['status']}{flags} | {100 * task['c']:.0f}% | {passed}/{len(checks)} | "
                      f"{_fmt(task.get('judge'))} | {time_text(task['agent_s'])} | "
                      f"{'-' if cost is None else f'{cost:.4f}'} | {_stats_cells(task.get('stats'))} |")
-    return "\n".join([*lines, *_failed_checks(tasks)]) + "\n"
+    return "\n".join([*lines, *_failed_checks(tasks), *_checkpoint_lines(tasks)]) + "\n"
 
 
 def _failed_checks(tasks: Iterable[Mapping[str, object]]) -> list[str]:
@@ -255,6 +257,19 @@ def _failed_checks(tasks: Iterable[Mapping[str, object]]) -> list[str]:
             detail = " ".join(str(check.get("detail") or "").split())
             lines.append(f"- `{task['id']}` {check['name']}" + (f": {detail}" if detail else ""))
     return ["", "## Failed checks", "", *lines] if lines else []
+
+
+def _checkpoint_lines(tasks: Iterable[Mapping[str, object]]) -> list[str]:
+    """Key actions per task (#98): diagnosis, not a grade."""
+    lines = []
+    for task in tasks:
+        marks = task.get("checkpoints")
+        if not isinstance(marks, list) or not marks:
+            continue
+        cells = [f"{mark['name']} (call {mark['call']})" if mark.get("call") else f"not seen: {mark['name']}" for mark in marks]
+        lines.append(f"- `{task['id']}`: " + "; ".join(cells))
+    note = "Key actions found in the tool calls. Diagnosis only: they change no grade, and \"not seen\" can be a different route."
+    return ["", "## Checkpoints", "", note, "", *lines] if lines else []
 
 
 def render_tasks_table(tasks: Iterable[EvalTask]) -> str:

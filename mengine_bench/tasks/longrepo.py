@@ -18,6 +18,7 @@ from mengine_bench.core import (
     EvalTask,
     Step,
     read,
+    checkpoints,
     run_hidden_tests,
     run_workspace_tests,
     write,
@@ -326,15 +327,12 @@ TASKS = [
     EvalTask(
         id="gd-integration-repo", category="gamedev",
         provenance="Long-horizon SWE: ~100-file game backend, 2 layered bugs only visible end to end; spec in docs/",
-        summary="Fix configuration priority and saved player credits in a game server without changing existing tests.",
+        summary="Find every cause behind a failing integration test in a game backend, and fix them.",
         setup=_setup, check=_check, reference=_reference,
-        timeout_s=300,
-        steps=(Step("The backend in {WS} (Pixel Arena) has the integration test in {WS}/tests/integration failing, "
-                    "while the unit tests pass. Find and fix ALL root causes following the specification in {WS}/docs "
-                    "(not just the symptom of the visible test). Do not change any existing test. Use the Python "
-                    "standard library only. At the end run the "
-                    "whole suite with `python -m unittest discover -s tests -t .` from {WS}. This is your ONLY "
-                    "request: there will be no second turn; deliver everything fixed and summarize the root cause + "
-                    "file:line of each bug."),),
+        timeout_s=600,
+        checkpoints=checkpoints(("read the docs", r"docs"), ("ran the integration test", r"tests.{1,4}integration|unittest"), ("ran the whole suite", r"discover")),
+        steps=(Step("An integration test of the Pixel Arena backend in {WS} fails while the unit tests pass. Make the backend "
+                    "behave as {WS}/docs says: fix every cause, not just the symptom this test shows. Existing tests stay as "
+                    "they are, and the project takes no new dependencies."),),
     ),
 ]

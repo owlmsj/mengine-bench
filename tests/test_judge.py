@@ -1,4 +1,4 @@
-"""Rubric 2.4 judge, driven by a fake judge command: one vote per task, retried only when the call or JSON fails."""
+"""Rubric 2.5 judge, driven by a fake judge command: one vote per task, retried only when the call or JSON fails."""
 
 from __future__ import annotations
 
@@ -64,8 +64,10 @@ def test_parse_rejects_malformed_or_out_of_range(reply: str) -> None:
 
 def test_rubric_grades_the_complement_of_the_checks() -> None:
     prompt = build_judge_prompt(CONTEXT, screenshot=False)
-    assert RUBRIC_VERSION == "2.4" and "rubric 2.4" in JUDGE_SYSTEM_PROMPT
-    for needle in ("approach (0-40)", "deliverable (0-30)", "verification (0-30)", "Never re-score", '"score"'):
+    assert RUBRIC_VERSION == "2.5" and "rubric 2.5" in JUDGE_SYSTEM_PROMPT
+    for needle in ("approach (0-40): the reasoning and the execution", "any valid route can earn full marks",
+                   "deliverable (0-30): the problem in the brief is solved and presented", "Format is free",
+                   "verification (0-30)", "Never re-score", '"score"'):
         assert needle in JUDGE_SYSTEM_PROMPT, needle
     for needle in ("Fix the bug", "fixed", "M a.py", "...done", "[FAIL] no regressions", "Third criterion: verification"):
         assert needle in prompt, needle

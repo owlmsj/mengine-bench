@@ -19,10 +19,9 @@ import unicodedata
 from collections.abc import Sequence
 from pathlib import Path
 
-from mengine_bench.core import CheckResult, EvalTask, Step, has, read, write
+from mengine_bench.core import CheckResult, EvalTask, Step, checkpoints, has, read, write
 
-ONE_SHOT = ("This is your ONLY request: there will be no second turn and no answers to questions. "
-            "Deliver the complete, working final file. Work only inside {WS}.")
+
 
 
 def _plain(text: str) -> str:
@@ -178,9 +177,6 @@ def _scene_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result.add("imports three.js 0.170.0 from the CDN", has(html, r"cdn\.jsdelivr\.net/npm/three@0\.170\.0/"))
     result.add("creates a WebGLRenderer", "WebGLRenderer" in html)
     result.add("animation loop", has(html, r"requestAnimationFrame|setAnimationLoop"))
-    result.add("low poly or voxel geometry in the code",
-               has(html, r"(Box|Cone|Cylinder|Icosahedron|Dodecahedron|Tetrahedron|Lathe|Plane|Sphere|Torus|Extrude|Buffer)Geometry"
-                         r"|InstancedMesh|flatShading"))
     result.add("no external models or textures", not _loaded_external_assets(html))
     return result
 
@@ -260,35 +256,38 @@ def _ship(ws: Path, rel: str, html: str) -> list[str]:
     return ["done"]
 
 
+# The judge's sandbox reaches these and nothing else, so saying it is a fact about the world, not a method (#28, #98).
+LOOK = ("It is reviewed by opening the file, with no build step, in a browser that reaches only Google Fonts and "
+        f"{THREE_URL}.")
+OPENED = ("looked at it in a browser", r"browser|screenshot|headless|playwright|cua\.|chrome|msedge")
+
 TASKS = [
     EvalTask(
         id="web-mondrian-landing", category="web-design",
         provenance="One-shot front-end from a local fact sheet: Piet Mondrian's Composition with Red, Blue and "
                    "Yellow (1930)",
-        summary="Build a Mondrian-style landing page about one painting from a local fact sheet, in one request.",
+        summary="Build a landing page that tells the story of one Mondrian painting from a fact sheet.",
         setup=_landing_setup, check=_landing_check,
         reference=lambda ws: _ship(ws, LANDING, LANDING_REFERENCE),
-        timeout_s=300, deliverables=(LANDING,),
-        steps=(Step("Read {WS}/FACTSHEET.md: the facts about Piet Mondrian's painting \"Composition with Red, Blue "
-                    "and Yellow\" (1930) and the De Stijl movement. Create {WS}/landing/index.html: a single-file "
-                    "landing page (HTML + inline CSS; Google Fonts allowed; no frameworks) telling its story, with "
-                    "art direction inspired by Piet Mondrian (asymmetric grid of rectangles, thick black lines, red, "
-                    "blue, yellow and white). Include a page title, a hero, sections with the key facts (the "
-                    "painter, the year, the movement and its principles, why the work matters), a call-to-action "
-                    "button and a link to the source URL given in the fact sheet. " + ONE_SHOT),),
+        timeout_s=600, deliverables=(LANDING,),
+        checkpoints=checkpoints(("read the fact sheet", r"FACTSHEET"), ("wrote the page", r"landing.{1,4}index\.html"), OPENED),
+        steps=(Step("We need a landing page, {WS}/landing/index.html in a single file, for the story of Piet Mondrian's "
+                    "\"Composition with Red, Blue and Yellow\" (1930). The facts are in {WS}/FACTSHEET.md, and nothing beyond "
+                    "them should be claimed. A visitor should leave knowing the painter, the year, the movement and why the "
+                    "work matters, and be invited to read more at the source the fact sheet gives. The page itself should "
+                    "speak Mondrian's visual language. " + LOOK),),
     ),
     EvalTask(
         id="3d-voxel-landscape", category="3d",
-        provenance="One-shot procedural 3D (Design Arena style): Mt. Fuji + Chureito pagoda + sakura in low poly/voxel",
-        summary="Build a three.js low poly or voxel scene of Mount Fuji with a pagoda and cherry trees, in one request.",
+        provenance="One-shot procedural 3D (Design Arena style): Mt. Fuji + Chureito pagoda + sakura",
+        summary="Build a procedural 3D scene of Mount Fuji with a pagoda and cherry trees, good enough for a wallpaper.",
         setup=lambda ws: None, check=_scene_check,
         reference=lambda ws: _ship(ws, SCENE, SCENE_REFERENCE),
-        timeout_s=480, deliverables=(SCENE,),
-        steps=(Step("Create {WS}/scene/index.html: a single-file 3D scene with three.js 0.170.0 loaded from "
-                    f"{THREE_URL} (an import map is fine), in low poly or voxel style, showing the classic view of "
-                    "Mount Fuji with the Chureito pagoda (red, five tiers) and cherry trees in bloom in the "
-                    "foreground, with an atmospheric sky (dusk or haze). All geometry must be procedural (no "
-                    "external models or textures). The camera must frame the composition on load; include a "
-                    "subtle animation. " + ONE_SHOT),),
+        timeout_s=900, deliverables=(SCENE,),
+        checkpoints=checkpoints(("wrote the scene", r"scene.{1,4}index\.html"), OPENED),
+        steps=(Step("We want a 3D scene someone would keep as a wallpaper: the classic view of Mount Fuji at dusk, with the "
+                    "red five-tier Chureito pagoda and cherry trees in bloom, in a low poly look with some gentle motion. "
+                    "Deliver it as {WS}/scene/index.html, a single file with everything built in code and no external models "
+                    "or textures. " + LOOK),),
     ),
 ]

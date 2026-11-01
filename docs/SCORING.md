@@ -1,4 +1,4 @@
-# Scoring (bench 1.5)
+# Scoring (bench 1.6)
 
 A run of an agent (harness + model + configuration) gets three numbers folded into
 the Score, and a Cost kept apart.
@@ -14,7 +14,7 @@ the Score, and a Cost kept apart.
 | **Est. price** | The run's tokens at public API list prices, so subscription and API runs compare. No points either. |
 
 The formulas live in `mengine_bench/scoring.py`. Runs compare when they ran the
-same bench major.minor (1.5.x). A patch release changes no task or prompt. When it changes how a run is judged or
+same bench major.minor (1.6.x). A patch release changes no task or prompt. When it changes how a run is judged or
 scored, every ranked run is judged again from its bundle (`mengine-bench judge --again`), so none has to run again. Rankings of older versions stay in LEADERBOARD.md as history, with the Scores of their own formula.
 
 A run is one sample and runs are not repeated, so ties come from the published tasks: draw the 14 tasks again with
@@ -48,21 +48,39 @@ about 2 s per page, 54 s at most over 46 published pages, and grading is not in 
 three.js CDN out of reach leaves the two checks out, with a note on the task, and costs no point. The page
 is a declared deliverable that the bundle keeps verbatim for the judge.
 
+## Open briefs
+
+Since 1.6 every eval is an open brief: the context, the problem and the outcome wanted. The method, the tools and the
+traps are left to the agent. Business definitions live in documents in the workspace, as they would at a company. The
+prompt keeps the question and a small `result.json` contract, because a person has to be able to check the answer.
+
+Correct reads delivered files, never the chat. It accepts rounding, percent or fraction and common number formats, and
+rejects a wrong answer, not a different route. Two experts should reach the same verdict on any result.
+
+Limits are 5 min per eval, 10 min for `gd-integration-repo` and `web-mondrian-landing`, and 15 min for
+`3d-voxel-landscape`. The limit is a safety net: the Speed formula still decides what time is worth.
+
+Each eval also declares checkpoints, key actions matched against the tool calls, published per task in the bundle and
+`summary.md`. They exist to diagnose a run. They change no grade and the judge never sees them, because scoring them
+would reward one route over another. "Not seen" can simply be a different route.
+
 ## Judge
 
 `mengine-bench judge results/<run>` (maintainer only) runs one judge, Claude
 `claude-opus-5-5` at effort `xhigh`, exactly once per task. A call that fails or
 returns invalid JSON is retried; if a task still has no vote, nothing is written.
-Rubric 2.4 grades what the checks cannot see. The check results are shown to
+Rubric 2.5 grades what the checks cannot see. The check results are shown to
 the judge as context with the instruction not to re-score correctness. Its rules and
 anchors travel in a system prompt, and every vote comes with its three subscores, which
 must add up to the score.
 
 | Criterion | Points |
 | --- | --- |
-| Approach and code/solution quality | 40 |
-| Deliverable and instruction following | 30 |
-| Self-verification; on the reply-only `lc-changelog` and `vis-chart`, answer discipline; on pages, the rendered look | 30 |
+| Reasoning and execution: understood the problem, chose a sound strategy of its own, carried it out simply and reproducibly. Any valid route can earn full marks. | 40 |
+| Deliverable and presentation: the problem is solved, nothing invented, and the final message says what was found, the assumptions and any limit left open. Format is never a defect. | 30 |
+| Quality assurance: an independent check of its own result; on `lc-changelog` and `vis-chart`, which only ask for a few facts, answer discipline; on pages, the rendered look | 30 |
+
+The plan is judged from the actions: a written plan earns nothing by itself.
 
 For a visual task the maintainer's machine renders the stored page with headless
 Chromium (Edge, Chrome or Chromium; `MENGINE_BENCH_BROWSER` overrides it) and the
