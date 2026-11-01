@@ -330,6 +330,28 @@ def _render_except(missing_ms: int | None, budgets: list[int]) -> Callable[[Path
     return render
 
 
+def test_again_rewrites_a_published_bundle_that_has_only_the_final_frame(
+        fake_agent: FakeAgent, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # #93: bundles published before the frames must take the new judging without a new run.
+    bundle = _run(fake_agent, tmp_path / "results", "web-mondrian-landing", VISUAL_AGENT)
+    monkeypatch.setattr(bundle_judge, "render_headless", _render_except(None, []))
+    assert _judge(fake_agent, bundle) == 0
+    stored = bundle / "judge"
+    (stored / "web-mondrian-landing-1s.png").unlink()
+    (stored / "web-mondrian-landing-4s.png").unlink()
+    (stored / "web-mondrian-landing.png").write_bytes(b"published")
+    transcripts = sorted(path.read_bytes() for path in (bundle / "transcripts").iterdir())
+    assert cli.main(["judge", str(bundle), "--again", "--judge", "cmd",
+                     "--judge-cmd", _template(fake_agent, "judge", JUDGE),
+                     "--judge-model", "judge-x", "--judge-effort", "high"]) == 0
+    [task] = json.loads((bundle / "result.json").read_text(encoding="utf-8"))["tasks"]
+    assert task["judge"] == 80 and task["judge_parts"]["rendered"] == 25
+    assert sorted(path.name for path in stored.glob("*.png")) == [
+        "web-mondrian-landing-1s.png", "web-mondrian-landing-4s.png", "web-mondrian-landing.png"]
+    assert (stored / "web-mondrian-landing.png").read_bytes() == b"frame 8000"
+    assert sorted(path.read_bytes() for path in (bundle / "transcripts").iterdir()) == transcripts
+
+
 def test_every_rendered_task_has_its_three_references() -> None:
     pages = [task.id for task in catalog.all_tasks() if task.render_target is not None]
     assert sorted(pages) == ["3d-voxel-landscape", "web-mondrian-landing"]
