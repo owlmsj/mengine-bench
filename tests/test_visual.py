@@ -162,6 +162,29 @@ def test_headless_flags_windows_and_mac_unchanged(system: str) -> None:
                      visual.RENDER_HOST_RULES]
 
 
+RECORDING_BROWSER = r"""
+import sys
+from pathlib import Path
+[shot] = [arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--screenshot=")]
+[budget] = [arg for arg in sys.argv if arg.startswith("--virtual-time-budget=")]
+Path(shot).write_text(budget, encoding="utf-8")
+"""
+
+
+def test_render_waits_the_virtual_time_it_is_given(tmp_path: Path) -> None:
+    # #93: the judge asks for the same page at several moments.
+    script = tmp_path / "fakes" / "browser.py"
+    script.parent.mkdir()
+    script.write_text(RECORDING_BROWSER, encoding="utf-8")
+    html = write(tmp_path, "page.html", "<html></html>")
+    png = tmp_path / "shot.png"
+    browser = [sys.executable, "-I", str(script)]
+    assert visual.render_headless(html, png, 1000, browser_argv=browser) == visual.RENDERED
+    assert png.read_text(encoding="utf-8") == "--virtual-time-budget=1000"
+    assert visual.render_headless(html, png, browser_argv=browser) == visual.RENDERED
+    assert png.read_text(encoding="utf-8") == "--virtual-time-budget=8000"
+
+
 FAILING_BROWSER = r"""
 import sys
 sys.stderr.write("[0101/000000.0:FATAL:zygote_host_impl_linux.cc] No usable sandbox!\n")

@@ -47,7 +47,8 @@ STDERR_REASON_LINE_CHARS = 300
 RENDER_HOST_RULES = ("--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE cdn.jsdelivr.net, "
                      "EXCLUDE fonts.googleapis.com, EXCLUDE fonts.gstatic.com")
 _HEADLESS_FLAGS = ("--headless=new", "--no-first-run", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
-                   "--hide-scrollbars", "--window-size=1440,900", "--virtual-time-budget=8000", RENDER_HOST_RULES)
+                   "--hide-scrollbars", "--window-size=1440,900")
+DEFAULT_BUDGET_MS = 8000
 # Containers have a tiny /dev/shm and no GPU; headless Chrome on Ubuntu
 # failed to screenshot without these.
 _LINUX_FLAGS = ("--disable-dev-shm-usage", "--disable-gpu")
@@ -92,11 +93,12 @@ def find_browser() -> str | None:
     return None
 
 
-def headless_browser_flags(system: str, is_root: bool) -> list[str]:
+def headless_browser_flags(system: str, is_root: bool, budget_ms: int = DEFAULT_BUDGET_MS) -> list[str]:
     """Chromium flags for one OS, without the per-call profile, screenshot and URL."""
+    flags = [*_HEADLESS_FLAGS, f"--virtual-time-budget={budget_ms}", RENDER_HOST_RULES]
     if system != "Linux":
-        return list(_HEADLESS_FLAGS)
-    flags = [*_HEADLESS_FLAGS, *_LINUX_FLAGS]
+        return flags
+    flags.extend(_LINUX_FLAGS)
     # Chrome refuses to start as root with the sandbox; desktops keep it.
     if is_root:
         flags.append("--no-sandbox")
@@ -112,9 +114,9 @@ def is_render_failure(status: str) -> bool:
     return status == RENDER_FAILED or status.startswith(RENDER_FAILED + ":")
 
 
-def render_headless(html: Path, png: Path, browser_argv: Sequence[str] | None = None,
-                    console: list[str] | None = None) -> str:
-    """Screenshot `html` at 1440x900; returns RENDERED, NO_BROWSER or a RENDER_FAILED reason.
+def render_headless(html: Path, png: Path, budget_ms: int = DEFAULT_BUDGET_MS,
+                    browser_argv: Sequence[str] | None = None, console: list[str] | None = None) -> str:
+    """Screenshot `html` at 1440x900 after `budget_ms` of page time; returns RENDERED, NO_BROWSER or a RENDER_FAILED reason.
 
     A failure reads "render failed: <cause>" so the run log explains itself.
     `browser_argv` replaces the discovered browser executable (tests use a fake).
@@ -132,14 +134,15 @@ def render_headless(html: Path, png: Path, browser_argv: Sequence[str] | None = 
     # helper still holding its cache made archiving the workspace fail.
     profile = Path(tempfile.mkdtemp(prefix="mengine-bench-browser-"))
     try:
-        return _screenshot(list(browser_argv), profile, html, png, console)
+        return _screenshot(list(browser_argv), profile, html, png, budget_ms, console)
     finally:
         _stop_profile_processes(profile)
         _remove_profile(profile)
 
 
-def _screenshot(browser_argv: list[str], profile: Path, html: Path, png: Path, console: list[str] | None) -> str:
-    flags = headless_browser_flags(platform.system(), _running_as_root())
+def _screenshot(browser_argv: list[str], profile: Path, html: Path, png: Path, budget_ms: int,
+                console: list[str] | None) -> str:
+    flags = headless_browser_flags(platform.system(), _running_as_root(), budget_ms)
     logging = [CONSOLE_LOG_FLAG] if console is not None else []
     argv = [*browser_argv, *flags, *logging, f"--user-data-dir={profile}", f"--screenshot={png.resolve()}",
             html.resolve().as_uri()]
@@ -185,7 +188,7 @@ def probe_page(html: Path, browser_argv: Sequence[str] | None = None) -> PagePro
     console: list[str] = []
     with tempfile.TemporaryDirectory(prefix="mengine-bench-probe-") as tmp:
         png = Path(tmp) / "page.png"
-        status = render_headless(html, png, browser_argv, console)
+        status = render_headless(html, png, browser_argv=browser_argv, console=console)
         size = png.stat().st_size if png.is_file() else 0
     return PageProbe(status, tuple(page_errors(console)), size)
 

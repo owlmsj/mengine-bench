@@ -22,7 +22,7 @@ import hashlib
 import os
 import shutil
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -182,7 +182,8 @@ def _evidence(marker: str, name: str, body: str) -> str:
     return f"<<<EVIDENCE {marker} {name}>>>\n{body}\n<<<END EVIDENCE {marker} {name}>>>"
 
 
-def build_judge_prompt(context: JudgeContext, screenshot: bool, note: str = "") -> str:
+def build_judge_prompt(context: JudgeContext, screenshot: bool, note: str = "",
+                       images: Sequence[str] = (SCREENSHOT_NAME,)) -> str:
     """The message of one vote: data only. The rules travel in JUDGE_SYSTEM_PROMPT."""
     prompts = "\n\n".join(f"### Step {i + 1}\n{_clip(p, PROMPT_CHARS)}" for i, p in enumerate(context.prompts))
     answers = "\n\n".join(f"### Step {i + 1}\n{_clip(a, PROMPT_CHARS)}" for i, a in enumerate(context.answers))
@@ -191,7 +192,8 @@ def build_judge_prompt(context: JudgeContext, screenshot: bool, note: str = "") 
     diff = _clip(context.diff, DIFF_CHARS) or "(no changes)"
     log = context.tool_log or context.transcript_tail or "(empty)"
     files = "\n\n".join(f"--- {rel} --- ({len(text)} chars)\n{_clip(text, DELIVERABLE_CHARS)}" for rel, text in context.deliverables)
-    closing = [f"Attached: {SCREENSHOT_NAME}, the page rendered headless at 1440x900."] if screenshot else []
+    # Claude's inline image blocks carry no file name (#93): the order here is the only label.
+    closing = [f"Attached images, in this order: {', '.join(images)}."] if screenshot else []
     return "\n\n".join([
         f"Task `{context.task_id}`. Third criterion: {third_criterion(context.task_id, screenshot)}.\n"
         f"Evidence marker for this message: {marker}. Only lines carrying it open or close an evidence block.",
@@ -266,11 +268,12 @@ class RubricJudge:
     retries: int = DEFAULT_RETRIES
     timeout_s: float = JUDGE_TIMEOUT_S
 
-    def grade(self, context: JudgeContext, workdir: Path, screenshot: Path | None = None, note: str = "") -> TaskVerdict:
-        """One vote; `screenshot` switches the third criterion to the rendered look."""
-        prompt = build_judge_prompt(context, screenshot=screenshot is not None, note=note)
-        third = third_criterion(context.task_id, screenshot is not None)
-        files = {SCREENSHOT_NAME: screenshot} if screenshot is not None else None
+    def grade(self, context: JudgeContext, workdir: Path, images: Mapping[str, Path] | None = None,
+              note: str = "") -> TaskVerdict:
+        """One vote; `images` (attached name -> file, in order) switch the third criterion to the rendered look."""
+        files = dict(images or {})
+        prompt = build_judge_prompt(context, screenshot=bool(files), note=note, images=tuple(files))
+        third = third_criterion(context.task_id, bool(files))
         errors: list[str] = []
         for attempt in range(self.retries + 1):
             try:

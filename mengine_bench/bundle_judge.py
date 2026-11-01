@@ -6,10 +6,11 @@ all redacted) and each declared deliverable verbatim (redacted) under
 judge/<task>/<file>. The maintainer runs this while reviewing the result pull
 request, so contributors need no judge and every ranked run is judged the
 same way: one rubric 2.5 vote per task. For a task whose deliverable is an
-HTML page, the stored page is rendered headless in a temp dir and the judge
-sees the screenshot, kept as judge/<task>.png for audit. A render that keeps
-failing is noted and the judge votes without an image: a flaky browser is no
-grade. Nothing is written unless every task ends with a vote, and with no browser
+HTML page, the stored page is rendered headless in a temp dir at three moments
+and the judge sees the frames, kept for audit as judge/<task>-1s.png,
+judge/<task>-4s.png and judge/<task>.png (the last). A frame that keeps failing
+is noted and the judge votes on the others, or without an image when none
+rendered: a flaky browser is no grade. Nothing is written unless every task ends with a vote, and with no browser
 at all nothing is judged. `--again` replaces the votes of a judged bundle, which is
 how a change to the judging reaches the ranked runs without running them again.
 """
@@ -28,7 +29,7 @@ from pathlib import Path
 from mengine_bench import __version__, catalog
 from mengine_bench.bundle import JUDGE_DIR, RESULT_NAME, SUMMARY_NAME, public_json, public_text
 from mengine_bench.core import EvalTask
-from mengine_bench.judge import JUDGE_SYSTEM_PROMPT, RUBRIC_VERSION, JudgeContext, RubricJudge, TaskVerdict
+from mengine_bench.judge import JUDGE_SYSTEM_PROMPT, RUBRIC_VERSION, SCREENSHOT_NAME, JudgeContext, RubricJudge, TaskVerdict
 from mengine_bench.judge_view import NO_CALLS, tool_log, transcript_streams
 from mengine_bench.redact import PathScope, local_names
 from mengine_bench.report import render_summary
@@ -37,8 +38,11 @@ from mengine_bench.scoring import combined_score, judge_mean, speed_points
 from mengine_bench.visual import NO_BROWSER, RENDERED, is_render_failure, render_headless
 
 TaskEntry = MutableMapping[str, object]
-Renderer = Callable[[Path, Path], str]
+Renderer = Callable[[Path, Path, int], str]
 RENDER_ATTEMPTS = 3
+# (virtual time, suffix of the file kept in the bundle, name attached to the vote). Each frame is its own page load:
+# the Chromium command line cannot capture a running page twice, and a new dependency is out (#93).
+JUDGE_FRAMES = ((1000, "-1s", "frame-1s.png"), (4000, "-4s", "frame-4s.png"), (8000, "", SCREENSHOT_NAME))
 
 
 @dataclass(frozen=True)
@@ -99,19 +103,36 @@ def _render_verdict(bundle: Path, task_id: str, packet: JudgePacket, judge: Rubr
                                               f"({links[0].name}); judge 0 for this task")
     if stored.is_dir():
         shutil.copytree(stored, site)
-    png = workdir / "render" / "shot.png"
-    # #68: a browser timeout is not the page's fault until it repeats.
-    for _ in range(RENDER_ATTEMPTS):
-        status = render(site / page, png)
-        if not is_render_failure(status):
-            break
-    if status == NO_BROWSER:
-        raise ValueError(f"received {status!r} rendering {page}; expected a browser: nothing was judged")
-    if status == RENDERED:
-        return judge.grade(packet.context, workdir / "judge", png)
+    images: dict[str, Path] = {}
+    failures: list[str] = []
+    for budget_ms, suffix, name in JUDGE_FRAMES:
+        png = _frame_path(workdir, suffix)
+        status = _render_frame(site / page, png, budget_ms, render)
+        if status == NO_BROWSER:
+            raise ValueError(f"received {status!r} rendering {page}; expected a browser: nothing was judged")
+        if status == RENDERED:
+            images[name] = png
+        else:
+            failures.append(f"{name}: {status}")
     # #70: the same page rendered in 4 of 5 more tries after a timeout that had scored it 0.
-    verdict = judge.grade(packet.context, workdir / "judge", note=f"No screenshot: the render failed ({status}).")
-    return replace(verdict, errors=(*verdict.errors, f"{status}; voted without a screenshot"))
+    note = f"Not attached, the render failed, no defect of the page: {'; '.join(failures)}." if failures else ""
+    verdict = judge.grade(packet.context, workdir / "judge", images, note)
+    return replace(verdict, errors=(*verdict.errors, *failures))
+
+
+def _frame_path(workdir: Path, suffix: str) -> Path:
+    return workdir / "render" / f"shot{suffix}.png"
+
+
+def _render_frame(html: Path, png: Path, budget_ms: int, render: Renderer) -> str:
+    """#68: a browser timeout is not the page's fault until it repeats."""
+    for _ in range(RENDER_ATTEMPTS):
+        status = render(html, png, budget_ms)
+        if not is_render_failure(status):
+            return status
+    # The bundle keeps what the vote saw, not an image left by a browser that then failed.
+    png.unlink(missing_ok=True)
+    return status
 
 
 def judge_bundle(bundle: Path, judge_agent: Agent, render: Renderer | None = None, again: bool = False) -> dict[str, object]:
@@ -125,7 +146,7 @@ def judge_bundle(bundle: Path, judge_agent: Agent, render: Renderer | None = Non
     packets = {str(task["id"]): read_packet(bundle, str(task["id"])) for task in tasks}
     judge = RubricJudge(judge_agent)
     verdicts: dict[str, TaskVerdict] = {}
-    screenshots: dict[str, bytes] = {}
+    frames: dict[str, bytes | None] = {}
     with tempfile.TemporaryDirectory(prefix="mengine-bench-judge-") as tmp:
         for task_id, packet in packets.items():
             print(f"[{task_id}] judging", flush=True)
@@ -135,15 +156,18 @@ def judge_bundle(bundle: Path, judge_agent: Agent, render: Renderer | None = Non
                 continue
             verdicts[task_id] = _render_verdict(bundle, task_id, packet, judge, workdir,
                                                 render or render_headless)
-            shot = workdir / "render" / "shot.png"
-            if shot.is_file():
-                screenshots[task_id] = shot.read_bytes()
+            for _, suffix, _ in JUDGE_FRAMES:
+                shot = _frame_path(workdir, suffix)
+                frames[f"{task_id}{suffix}.png"] = shot.read_bytes() if shot.is_file() else None
     missing = {task_id: verdict.errors[-1:] for task_id, verdict in verdicts.items() if verdict.score is None}
     if missing:
         raise ValueError(f"received no judge vote for {sorted(missing)} ({missing}); expected one vote per task, "
                          f"so nothing was written")
-    for task_id, png in screenshots.items():
-        (bundle / JUDGE_DIR / f"{task_id}.png").write_bytes(png)
+    for name, png in frames.items():
+        # Unlinked first: --again must not leave the previous vote's frame, nor write through a link a PR committed.
+        (bundle / JUDGE_DIR / name).unlink(missing_ok=True)
+        if png is not None:
+            (bundle / JUDGE_DIR / name).write_bytes(png)
     for task in tasks:
         verdict = verdicts[str(task["id"])]
         task.update(judge=verdict.score, judge_rationale=verdict.rationale, judge_errors=list(verdict.errors),

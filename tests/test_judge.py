@@ -148,7 +148,7 @@ def test_visual_judge_cwd_holds_only_the_screenshot(fake_agent: FakeAgent, tmp_p
     png = tmp_path / "render" / "shot.png"
     png.parent.mkdir(parents=True)
     png.write_bytes(b"\x89PNG fake")
-    assert RubricJudge(agent, retries=0, timeout_s=60).grade(CONTEXT, tmp_path / "judge", png).score == 70
+    assert RubricJudge(agent, retries=0, timeout_s=60).grade(CONTEXT, tmp_path / "judge", {"screenshot.png": png}).score == 70
     seen = json.loads((tmp_path / "fakes" / "where.cwd").read_text(encoding="utf-8"))
     assert seen["files"] == ["screenshot.png"]
     assert not Path(seen["cwd"]).resolve().is_relative_to(tmp_path.resolve())
