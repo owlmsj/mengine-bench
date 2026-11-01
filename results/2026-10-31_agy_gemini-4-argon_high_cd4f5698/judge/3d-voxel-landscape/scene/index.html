@@ -1,0 +1,1422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mount Fuji &amp; Chureito Pagoda - Low-Poly Dusk Diorama</title>
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #17152b;
+      font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    #hud {
+      position: fixed;
+      left: 20px;
+      bottom: 18px;
+      pointer-events: none;
+      color: rgba(255, 238, 230, 0.82);
+      text-shadow: 0 2px 10px rgba(10, 8, 22, 0.85);
+      letter-spacing: 0.08em;
+      font-size: 12px;
+      line-height: 1.45;
+      user-select: none;
+    }
+    #hud strong {
+      display: block;
+      font-size: 14px;
+      font-weight: 600;
+      color: rgba(255, 245, 238, 0.96);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="hud">
+    <strong>Arakurayama Sengen Park &middot; Dusk</strong>
+    Chureito Pagoda &amp; Mount Fuji &middot; Drag to orbit, scroll to zoom
+  </div>
+
+  <script type="module">
+    import * as THREE from "three";
+    import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+
+    // Deterministic PRNG so the procedural low-poly composition is identical on every load
+    function createSeededRandom(seedValue) {
+      let state = seedValue >>> 0;
+      return function nextRandom() {
+        state = (1664525 * state + 1013904223) >>> 0;
+        return state / 4294967296;
+      };
+    }
+
+    const rng = createSeededRandom(20261031);
+    const randRange = (min, max) => min + (max - min) * rng();
+
+    // Scene, atmospheric dusk fog, and renderer setup
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0xd87b74, 0.00155);
+
+    const camera = new THREE.PerspectiveCamera(
+      39,
+      window.innerWidth / window.innerHeight,
+      0.5,
+      950
+    );
+
+    // Classic Arakurayama viewing deck vantage point:
+    // Elevated slightly above the pagoda terrace, looking past the 5-tier red Chureito Pagoda
+    // on the right and blooming sakura in the foreground toward Mount Fuji on the center-left.
+    const baseCameraPos = new THREE.Vector3(3.2, 18.8, 42.0);
+    const baseLookTarget = new THREE.Vector3(-4.2, 14.2, -38.0);
+    camera.position.copy(baseCameraPos);
+
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      powerPreference: "high-performance"
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.12;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.copy(baseLookTarget);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.maxPolarAngle = Math.PI * 0.52;
+    controls.minDistance = 12;
+    controls.maxDistance = 150;
+    controls.update();
+
+    let userInteracting = false;
+    let lastInteractionTime = -100;
+    controls.addEventListener("start", () => {
+      userInteracting = true;
+    });
+    controls.addEventListener("end", () => {
+      userInteracting = false;
+      lastInteractionTime = performance.now() * 0.001;
+    });
+
+    // Utility: perturb geometry vertices while keeping shared seams welded for crisp low-poly facets
+    function jitterGeometry(geometry, amountX, amountY, amountZ) {
+      const pos = geometry.attributes.position;
+      const vertexMap = new Map();
+      for (let i = 0; i < pos.count; i++) {
+        const vx = pos.getX(i);
+        const vy = pos.getY(i);
+        const vz = pos.getZ(i);
+        const key = `${vx.toFixed(3)},${vy.toFixed(3)},${vz.toFixed(3)}`;
+        let offset = vertexMap.get(key);
+        if (!offset) {
+          offset = [
+            (rng() - 0.5) * 2 * amountX,
+            (rng() - 0.5) * 2 * amountY,
+            (rng() - 0.5) * 2 * amountZ
+          ];
+          vertexMap.set(key);
+          vertexMap.set(key, offset);
+        }
+        pos.setXYZ(i, vx + offset[0], vy + offset[1], vz + offset[2]);
+      }
+      const nonIndexed = geometry.index ? geometry.toNonIndexed() : geometry;
+      nonIndexed.computeVertexNormals();
+      return nonIndexed;
+    }
+
+    // Shared low-poly materials
+    const materials = {
+      pagodaRed: new THREE.MeshStandardMaterial({
+        color: 0xd92924,
+        emissive: 0x380707,
+        emissiveIntensity: 0.22,
+        roughness: 0.48,
+        metalness: 0.08,
+        flatShading: true
+      }),
+      pagodaDeepRed: new THREE.MeshStandardMaterial({
+        color: 0x991917,
+        emissive: 0x240404,
+        emissiveIntensity: 0.18,
+        roughness: 0.55,
+        metalness: 0.08,
+        flatShading: true
+      }),
+      pagodaRoofTile: new THREE.MeshStandardMaterial({
+        color: 0xc22220,
+        emissive: 0x2b0505,
+        emissiveIntensity: 0.2,
+        roughness: 0.44,
+        metalness: 0.12,
+        flatShading: true
+      }),
+      pagodaRoofTrim: new THREE.MeshStandardMaterial({
+        color: 0xf74d38,
+        emissive: 0x420b06,
+        emissiveIntensity: 0.24,
+        roughness: 0.42,
+        metalness: 0.1,
+        flatShading: true
+      }),
+      pagodaWhiteWall: new THREE.MeshStandardMaterial({
+        color: 0xfff3eb,
+        emissive: 0x3b2622,
+        emissiveIntensity: 0.18,
+        roughness: 0.65,
+        metalness: 0.02,
+        flatShading: true
+      }),
+      pagodaGold: new THREE.MeshStandardMaterial({
+        color: 0xf5bc47,
+        roughness: 0.28,
+        metalness: 0.78,
+        emissive: 0x6e3d09,
+        emissiveIntensity: 0.42,
+        flatShading: true
+      }),
+      warmLanternGlow: new THREE.MeshStandardMaterial({
+        color: 0xffe6ad,
+        emissive: 0xffa03b,
+        emissiveIntensity: 1.85,
+        roughness: 0.22,
+        flatShading: true
+      }),
+      stoneBase: new THREE.MeshStandardMaterial({
+        color: 0x70687a,
+        roughness: 0.88,
+        metalness: 0.04,
+        flatShading: true
+      }),
+      darkStone: new THREE.MeshStandardMaterial({
+        color: 0x4b4557,
+        roughness: 0.9,
+        metalness: 0.05,
+        flatShading: true
+      }),
+      bark: new THREE.MeshStandardMaterial({
+        color: 0x3d252d,
+        roughness: 0.92,
+        metalness: 0.02,
+        flatShading: true
+      }),
+      pineDark: new THREE.MeshStandardMaterial({
+        color: 0x22303b,
+        roughness: 0.86,
+        flatShading: true
+      }),
+      pineMid: new THREE.MeshStandardMaterial({
+        color: 0x2d404a,
+        roughness: 0.85,
+        flatShading: true
+      }),
+      hillsideGrass: new THREE.MeshStandardMaterial({
+        color: 0x38314a,
+        roughness: 0.92,
+        flatShading: true
+      }),
+      distantHill: new THREE.MeshStandardMaterial({
+        color: 0x48385c,
+        roughness: 0.95,
+        flatShading: true
+      }),
+      townRoof: new THREE.MeshStandardMaterial({
+        color: 0x362d49,
+        roughness: 0.85,
+        flatShading: true
+      }),
+      townWall: new THREE.MeshStandardMaterial({
+        color: 0x63526b,
+        roughness: 0.88,
+        flatShading: true
+      }),
+      sakuraBlossoms: [
+        new THREE.MeshStandardMaterial({
+          color: 0xffd8e4,
+          emissive: 0x521b2b,
+          emissiveIntensity: 0.22,
+          roughness: 0.66,
+          flatShading: true
+        }),
+        new THREE.MeshStandardMaterial({
+          color: 0xffaec7,
+          emissive: 0x591c2f,
+          emissiveIntensity: 0.24,
+          roughness: 0.68,
+          flatShading: true
+        }),
+        new THREE.MeshStandardMaterial({
+          color: 0xf584a5,
+          emissive: 0x4c1526,
+          emissiveIntensity: 0.25,
+          roughness: 0.7,
+          flatShading: true
+        }),
+        new THREE.MeshStandardMaterial({
+          color: 0xfff0f5,
+          emissive: 0x592434,
+          emissiveIntensity: 0.2,
+          roughness: 0.62,
+          flatShading: true
+        })
+      ]
+    };
+
+    // 1. Atmospheric Dusk Sky Dome + Glowing Sun + Twilight Stars
+    function buildAtmosphericSky() {
+      const skyGeo = new THREE.SphereGeometry(520, 40, 28);
+      const skyMat = new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        depthWrite: false,
+        uniforms: {
+          uSunDirection: { value: new THREE.Vector3(-0.32, 0.14, -0.94).normalize() },
+          uTime: { value: 0 }
+        },
+        vertexShader: `
+          varying vec3 vWorldPosition;
+          void main() {
+            vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+            vWorldPosition = worldPosition.xyz;
+            gl_Position = projectionMatrix * viewMatrix * worldPosition;
+          }
+        `,
+        fragmentShader: `
+          varying vec3 vWorldPosition;
+          uniform vec3 uSunDirection;
+          uniform float uTime;
+
+          void main() {
+            vec3 dir = normalize(vWorldPosition);
+            float elevation = clamp(dir.y, -0.15, 1.0);
+
+            vec3 zenithColor = vec3(0.10, 0.11, 0.27);
+            vec3 upperMidColor = vec3(0.34, 0.21, 0.42);
+            vec3 lowerMidColor = vec3(0.80, 0.39, 0.45);
+            vec3 horizonColor = vec3(1.00, 0.70, 0.45);
+            vec3 groundHaze = vec3(0.60, 0.34, 0.42);
+
+            vec3 sky = mix(horizonColor, lowerMidColor, smoothstep(0.0, 0.16, elevation));
+            sky = mix(sky, upperMidColor, smoothstep(0.14, 0.42, elevation));
+            sky = mix(sky, zenithColor, smoothstep(0.38, 0.85, elevation));
+            if (elevation < 0.0) {
+              sky = mix(horizonColor, groundHaze, clamp(-elevation * 6.0, 0.0, 1.0));
+            }
+
+            // Dusk solar glow behind Mount Fuji
+            float sunDot = max(dot(dir, uSunDirection), 0.0);
+            sky += vec3(1.0, 0.58, 0.30) * pow(sunDot, 6.0) * 0.48;
+            sky += vec3(1.0, 0.86, 0.64) * pow(sunDot, 42.0) * 0.62;
+
+            // Subtle horizon haze band
+            float horizonBand = exp(-abs(dir.y - 0.035) * 15.0);
+            sky = mix(sky, vec3(1.0, 0.68, 0.50), horizonBand * 0.36);
+
+            gl_FragColor = vec4(sky, 1.0);
+          }
+        `
+      });
+      const skyMesh = new THREE.Mesh(skyGeo, skyMat);
+      scene.add(skyMesh);
+
+      // Low-poly faceted setting sun disc near Mount Fuji's western flank
+      const sunGroup = new THREE.Group();
+      sunGroup.position.set(-112, 54, -330);
+
+      const sunCoreGeo = new THREE.CircleGeometry(24, 16);
+      const sunCoreMat = new THREE.MeshBasicMaterial({
+        color: 0xffe8a8,
+        fog: false
+      });
+      const sunCore = new THREE.Mesh(sunCoreGeo, sunCoreMat);
+      sunGroup.add(sunCore);
+
+      const sunHaloGeo = new THREE.RingGeometry(24, 44, 16);
+      const sunHaloMat = new THREE.MeshBasicMaterial({
+        color: 0xff945e,
+        transparent: true,
+        opacity: 0.42,
+        side: THREE.DoubleSide,
+        fog: false
+      });
+      const sunHalo = new THREE.Mesh(sunHaloGeo, sunHaloMat);
+      sunGroup.add(sunHalo);
+
+      scene.add(sunGroup);
+
+      // Subtle upper-sky twilight stars
+      const starGeo = new THREE.OctahedronGeometry(0.6, 0);
+      const starMat = new THREE.MeshBasicMaterial({
+        color: 0xfff4df,
+        transparent: true,
+        opacity: 0.8,
+        fog: false
+      });
+      const starCount = 75;
+      const stars = new THREE.InstancedMesh(starGeo, starMat, starCount);
+      const dummy = new THREE.Object3D();
+      for (let i = 0; i < starCount; i++) {
+        const theta = randRange(0, Math.PI * 2);
+        const phi = randRange(0.16, 0.92);
+        const radius = 390;
+        dummy.position.set(
+          Math.cos(theta) * Math.sin(phi) * radius,
+          Math.cos(phi) * radius + 45,
+          Math.sin(theta) * Math.sin(phi) * radius
+        );
+        dummy.scale.setScalar(randRange(0.45, 1.3));
+        dummy.updateMatrix();
+        stars.setMatrixAt(i, dummy.matrix);
+      }
+      scene.add(stars);
+
+      return { skyMat, sunGroup };
+    }
+
+    // 2. Dusk Lighting Setup
+    function setupLighting() {
+      const hemiLight = new THREE.HemisphereLight(0xffbe9f, 0x2d2242, 1.35);
+      hemiLight.position.set(0, 90, 0);
+      scene.add(hemiLight);
+
+      // Warm golden-rose sunset directional light
+      const sunLight = new THREE.DirectionalLight(0xffa970, 2.65);
+      sunLight.position.set(-65, 52, -75);
+      sunLight.castShadow = true;
+      sunLight.shadow.mapSize.width = 2048;
+      sunLight.shadow.mapSize.height = 2048;
+      sunLight.shadow.camera.near = 10;
+      sunLight.shadow.camera.far = 260;
+      const d = 55;
+      sunLight.shadow.camera.left = -d;
+      sunLight.shadow.camera.right = d;
+      sunLight.shadow.camera.top = d;
+      sunLight.shadow.camera.bottom = -d;
+      sunLight.shadow.bias = -0.0005;
+      scene.add(sunLight);
+
+      // Warm frontal fill illuminating the 5-tier red pagoda and foreground sakura
+      const frontFill = new THREE.DirectionalLight(0xff96a8, 1.35);
+      frontFill.position.set(22, 32, 55);
+      scene.add(frontFill);
+
+      // Subtle violet twilight rim light from the east
+      const rimLight = new THREE.DirectionalLight(0x8c7cd1, 0.7);
+      rimLight.position.set(60, 38, -10);
+      scene.add(rimLight);
+    }
+
+    // 3. Procedural Mount Fuji (Iconic catenary volcanic cone + snow cap + ridge gullies)
+    function buildMountFuji() {
+      const fujiGroup = new THREE.Group();
+      // Framed prominently on the center-left horizon
+      fujiGroup.position.set(-38, -4, -175);
+
+      const radialSegments = 46;
+      const heightSegments = 28;
+      const maxRadius = 136;
+      const fujiHeight = 82;
+
+      const geo = new THREE.CylinderGeometry(
+        11.8,
+        maxRadius,
+        fujiHeight,
+        radialSegments,
+        heightSegments,
+        false
+      );
+
+      const pos = geo.attributes.position;
+      const vertexCache = new Map();
+
+      for (let i = 0; i < pos.count; i++) {
+        const vx = pos.getX(i);
+        const vy = pos.getY(i);
+        const vz = pos.getZ(i);
+
+        const t = (vy + fujiHeight * 0.5) / fujiHeight;
+        const angle = Math.atan2(vz, vx);
+        const rCurrent = Math.hypot(vx, vz);
+
+        if (rCurrent > 0.001) {
+          // Authentic concave volcanic curve (sweeping susono skirt rising to steep cone)
+          const profileRadius = 11.5 + (maxRadius - 11.5) * Math.pow(1.0 - t, 1.85);
+
+          const key = `${angle.toFixed(3)}_${t.toFixed(3)}`;
+          let noiseVal = vertexCache.get(key);
+          if (noiseVal === undefined) {
+            noiseVal =
+              Math.sin(angle * 9.0 + t * 3.5) * 1.45 +
+              Math.cos(angle * 17.0 - t * 5.0) * 0.95 +
+              (rng() - 0.5) * 1.65;
+            vertexCache.set(key, noiseVal);
+          }
+
+          const radialDisplacement = noiseVal * (1.0 - t * 0.35) * (t > 0.02 ? 1.0 : 0.2);
+          const finalRadius = Math.max(4.0, profileRadius + radialDisplacement);
+
+          pos.setX(i, Math.cos(angle) * finalRadius);
+          pos.setZ(i, Math.sin(angle) * finalRadius);
+
+          // Jagged volcanic crater rim at summit
+          if (t > 0.96) {
+            const rimDip = Math.sin(angle * 5.0 + 0.8) * 1.2 + Math.cos(angle * 3.0) * 0.75;
+            pos.setY(i, vy + rimDip);
+          }
+        } else if (t > 0.95) {
+          pos.setY(i, vy - 3.8);
+        }
+      }
+
+      const nonIndexed = geo.toNonIndexed();
+      nonIndexed.computeVertexNormals();
+
+      const niPos = nonIndexed.attributes.position;
+      const colors = new Float32Array(niPos.count * 3);
+
+      const colBase = new THREE.Color(0x282347);
+      const colMidSlope = new THREE.Color(0x3f3663);
+      const colUpperRock = new THREE.Color(0x574670);
+      const colSnowShadow = new THREE.Color(0xdccce8);
+      const colSnowSun = new THREE.Color(0xfff5f0);
+      const tempColor = new THREE.Color();
+
+      for (let i = 0; i < niPos.count; i += 3) {
+        const cx = (niPos.getX(i) + niPos.getX(i + 1) + niPos.getX(i + 2)) / 3;
+        const cy = (niPos.getY(i) + niPos.getY(i + 1) + niPos.getY(i + 2)) / 3;
+        const cz = (niPos.getZ(i) + niPos.getZ(i + 1) + niPos.getZ(i + 2)) / 3;
+
+        const t = (cy + fujiHeight * 0.5) / fujiHeight;
+        const angle = Math.atan2(cz, cx);
+
+        const gully =
+          Math.sin(angle * 11.0 + 0.5) * 0.07 +
+          Math.cos(angle * 23.0) * 0.048 +
+          Math.sin(angle * 5.0 - 1.2) * 0.042;
+        const snowThreshold = 0.56 + gully;
+
+        if (t >= snowThreshold) {
+          const westFactor = THREE.MathUtils.clamp((-cx / 45.0) * 0.5 + 0.5, 0, 1);
+          tempColor.copy(colSnowShadow).lerp(colSnowSun, westFactor * 0.82 + 0.18);
+          if (t < snowThreshold + 0.07 && Math.sin(angle * 29.0) > 0.62) {
+            tempColor.copy(colUpperRock);
+          }
+        } else if (t > 0.33) {
+          const blend = (t - 0.33) / 0.28;
+          tempColor.copy(colMidSlope).lerp(colUpperRock, blend);
+        } else {
+          const blend = t / 0.33;
+          tempColor.copy(colBase).lerp(colMidSlope, blend);
+        }
+
+        for (let v = 0; v < 3; v++) {
+          colors[(i + v) * 3] = tempColor.r;
+          colors[(i + v) * 3 + 1] = tempColor.g;
+          colors[(i + v) * 3 + 2] = tempColor.b;
+        }
+      }
+
+      nonIndexed.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+
+      const fujiMat = new THREE.MeshStandardMaterial({
+        vertexColors: true,
+        emissive: 0x261a38,
+        emissiveIntensity: 0.22,
+        roughness: 0.8,
+        metalness: 0.04,
+        flatShading: true
+      });
+
+      const fujiMesh = new THREE.Mesh(nonIndexed, fujiMat);
+      fujiMesh.position.y = fujiHeight * 0.5;
+      fujiMesh.receiveShadow = true;
+      fujiGroup.add(fujiMesh);
+
+      scene.add(fujiGroup);
+      return fujiGroup;
+    }
+
+    // 4. Five-Tier Red Chureito Pagoda on the Right Hillside
+    function buildChureitoPagoda(lanternLights) {
+      const pagodaGroup = new THREE.Group();
+      // Placed on the right hillside in full, unobstructed view
+      pagodaGroup.position.set(11.8, 6.2, 11.5);
+      pagodaGroup.rotation.y = -0.32;
+
+      // Stone platform & traditional retaining wall (ishigaki)
+      const foundationGeo = jitterGeometry(new THREE.CylinderGeometry(5.8, 6.8, 3.8, 8), 0.12, 0.06, 0.12);
+      const foundation = new THREE.Mesh(foundationGeo, materials.stoneBase);
+      foundation.position.y = -1.9;
+      foundation.castShadow = true;
+      foundation.receiveShadow = true;
+      pagodaGroup.add(foundation);
+
+      const plinthGeo = new THREE.BoxGeometry(7.4, 0.95, 7.4);
+      const plinth = new THREE.Mesh(plinthGeo, materials.darkStone);
+      plinth.position.y = 0.35;
+      plinth.castShadow = true;
+      plinth.receiveShadow = true;
+      pagodaGroup.add(plinth);
+
+      // Stone steps on the front of the pagoda platform
+      for (let s = 0; s < 4; s++) {
+        const stepGeo = new THREE.BoxGeometry(2.2, 0.26, 0.55);
+        const step = new THREE.Mesh(stepGeo, materials.stoneBase);
+        step.position.set(0, -0.05 + s * 0.24, 3.95 - s * 0.28);
+        pagodaGroup.add(step);
+      }
+
+      // Helper to create an upturned low-poly Japanese pagoda roof tier
+      function createPagodaRoof(baseHalfWidth, eaveOverhang, roofHeight, tipLift) {
+        const roofGroup = new THREE.Group();
+        const inner = baseHalfWidth * 0.56;
+        const mid = baseHalfWidth + eaveOverhang * 0.54;
+        const outer = baseHalfWidth + eaveOverhang;
+
+        // Upper sloped pagoda roof pyramid
+        const upperConeGeo = new THREE.ConeGeometry(mid * Math.SQRT2, roofHeight * 0.58, 4, 1, false);
+        upperConeGeo.rotateY(Math.PI * 0.25);
+        const upperRoof = new THREE.Mesh(upperConeGeo, materials.pagodaRoofTile);
+        upperRoof.position.y = roofHeight * 0.48;
+        upperRoof.castShadow = true;
+        upperRoof.receiveShadow = true;
+        roofGroup.add(upperRoof);
+
+        // Lower flared eave skirt with upturned corners
+        const skirtGeo = new THREE.CylinderGeometry(
+          mid * 0.95 * Math.SQRT2,
+          outer * Math.SQRT2,
+          roofHeight * 0.38,
+          8,
+          1,
+          false
+        );
+        skirtGeo.rotateY(Math.PI * 0.125);
+        const pos = skirtGeo.attributes.position;
+        for (let i = 0; i < pos.count; i++) {
+          const vx = pos.getX(i);
+          const vy = pos.getY(i);
+          const vz = pos.getZ(i);
+          if (vy < 0 && Math.abs(vx) > outer * 0.68 && Math.abs(vz) > outer * 0.68) {
+            pos.setY(i, vy + tipLift);
+          }
+        }
+        const nonIndexedSkirt = skirtGeo.toNonIndexed();
+        nonIndexedSkirt.computeVertexNormals();
+        const lowerSkirt = new THREE.Mesh(nonIndexedSkirt, materials.pagodaRed);
+        lowerSkirt.position.y = roofHeight * 0.14;
+        lowerSkirt.castShadow = true;
+        lowerSkirt.receiveShadow = true;
+        roofGroup.add(lowerSkirt);
+
+        // Bright vermilion underside rafters / fascia band
+        const eaveBandGeo = new THREE.BoxGeometry(outer * 1.9, 0.24, outer * 1.9);
+        const eaveBand = new THREE.Mesh(eaveBandGeo, materials.pagodaRoofTrim);
+        eaveBand.position.y = 0.02;
+        roofGroup.add(eaveBand);
+
+        // 4 diagonal hip ridges (kudarimune) with gold corner ornaments
+        for (let c = 0; c < 4; c++) {
+          const angle = c * (Math.PI * 0.5) + Math.PI * 0.25;
+          const ridgeLen = (outer - inner * 0.4) * 1.36;
+          const ridgeGeo = new THREE.BoxGeometry(0.18, 0.18, ridgeLen);
+          const ridge = new THREE.Mesh(ridgeGeo, materials.pagodaDeepRed);
+          ridge.position.set(
+            Math.cos(angle) * (outer * 0.52),
+            roofHeight * 0.26,
+            Math.sin(angle) * (outer * 0.52)
+          );
+          ridge.rotation.y = -angle + Math.PI * 0.5;
+          ridge.rotation.x = 0.24;
+          roofGroup.add(ridge);
+
+          const tipCapGeo = new THREE.OctahedronGeometry(0.18, 0);
+          const tipCap = new THREE.Mesh(tipCapGeo, materials.pagodaGold);
+          tipCap.position.set(
+            Math.cos(angle) * (outer * 0.94),
+            tipLift * 0.72,
+            Math.sin(angle) * (outer * 0.94)
+          );
+          roofGroup.add(tipCap);
+        }
+
+        return roofGroup;
+      }
+
+      // Build the 5 distinct tiers of the Chureito Pagoda with clear vertical separation
+      let currentY = 0.82;
+      const tierCount = 5;
+
+      for (let tier = 0; tier < tierCount; tier++) {
+        const scale = 1.0 - tier * 0.11;
+        const bodyWidth = 4.25 * scale;
+        const bodyHeight = (tier === 0 ? 2.55 : 2.25) * (1.0 - tier * 0.05);
+        const eaveOverhang = 1.9 * scale;
+        const roofHeight = 1.38 * scale;
+        const tipLift = 0.46 * scale;
+
+        const tierGroup = new THREE.Group();
+        tierGroup.position.y = currentY;
+
+        // Crisp white shikkui plaster wall core
+        const wallGeo = new THREE.BoxGeometry(bodyWidth * 0.9, bodyHeight * 0.88, bodyWidth * 0.9);
+        const wallMesh = new THREE.Mesh(wallGeo, materials.pagodaWhiteWall);
+        wallMesh.position.y = bodyHeight * 0.46;
+        wallMesh.castShadow = true;
+        wallMesh.receiveShadow = true;
+        tierGroup.add(wallMesh);
+
+        // Vermilion red structural pillars (hashira)
+        const pillarPositions = [-0.45, -0.15, 0.15, 0.45];
+        for (const px of pillarPositions) {
+          for (const pz of [-0.45, 0.45]) {
+            const p1 = new THREE.Mesh(
+              new THREE.BoxGeometry(0.17 * scale, bodyHeight, 0.17 * scale),
+              materials.pagodaRed
+            );
+            p1.position.set(px * bodyWidth, bodyHeight * 0.5, pz * bodyWidth);
+            tierGroup.add(p1);
+
+            const p2 = new THREE.Mesh(
+              new THREE.BoxGeometry(0.17 * scale, bodyHeight, 0.17 * scale),
+              materials.pagodaRed
+            );
+            p2.position.set(pz * bodyWidth, bodyHeight * 0.5, px * bodyWidth);
+            tierGroup.add(p2);
+          }
+        }
+
+        // Warm glowing shoji lantern windows on each face
+        for (let side = 0; side < 4; side++) {
+          const winGeo = new THREE.PlaneGeometry(bodyWidth * 0.25, bodyHeight * 0.36);
+          const winMesh = new THREE.Mesh(winGeo, materials.warmLanternGlow);
+          const dist = bodyWidth * 0.462;
+          winMesh.position.y = bodyHeight * 0.48;
+          if (side === 0) {
+            winMesh.position.z = dist;
+          } else if (side === 1) {
+            winMesh.position.z = -dist;
+            winMesh.rotation.y = Math.PI;
+          } else if (side === 2) {
+            winMesh.position.x = dist;
+            winMesh.rotation.y = Math.PI * 0.5;
+          } else {
+            winMesh.position.x = -dist;
+            winMesh.rotation.y = -Math.PI * 0.5;
+          }
+          tierGroup.add(winMesh);
+        }
+
+        // Vermilion balcony railing (kouran)
+        const balconyWidth = bodyWidth * 1.18;
+        const deckGeo = new THREE.BoxGeometry(balconyWidth, 0.18 * scale, balconyWidth);
+        const deck = new THREE.Mesh(deckGeo, materials.pagodaDeepRed);
+        deck.position.y = 0.08;
+        tierGroup.add(deck);
+
+        const railGeo = new THREE.BoxGeometry(balconyWidth * 1.04, 0.32 * scale, balconyWidth * 1.04);
+        const rail = new THREE.Mesh(railGeo, materials.pagodaRed);
+        rail.position.y = 0.28 * scale;
+        tierGroup.add(rail);
+
+        // Upper red bracket cornice supporting the roof eaves
+        const bracketGeo = new THREE.BoxGeometry(bodyWidth * 1.12, 0.34 * scale, bodyWidth * 1.12);
+        const bracket = new THREE.Mesh(bracketGeo, materials.pagodaRed);
+        bracket.position.y = bodyHeight * 0.9;
+        tierGroup.add(bracket);
+
+        // Upturned Pagoda Roof for this tier
+        const roof = createPagodaRoof(bodyWidth * 0.5, eaveOverhang, roofHeight, tipLift);
+        roof.position.y = bodyHeight * 0.94;
+        tierGroup.add(roof);
+
+        pagodaGroup.add(tierGroup);
+        currentY += bodyHeight + roofHeight * 0.78;
+      }
+
+      // Tall bronze/gold Sorin finial spire at the apex of the 5th tier
+      const sorinGroup = new THREE.Group();
+      sorinGroup.position.y = currentY + 0.18;
+
+      const baseBox = new THREE.Mesh(
+        new THREE.BoxGeometry(1.1, 0.45, 1.1),
+        materials.pagodaDeepRed
+      );
+      sorinGroup.add(baseBox);
+
+      const dewBasin = new THREE.Mesh(
+        new THREE.SphereGeometry(0.48, 8, 6),
+        materials.pagodaGold
+      );
+      dewBasin.position.y = 0.45;
+      sorinGroup.add(dewBasin);
+
+      const spirePole = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.09, 0.22, 4.6, 8),
+        materials.pagodaGold
+      );
+      spirePole.position.y = 2.55;
+      spirePole.castShadow = true;
+      sorinGroup.add(spirePole);
+
+      for (let r = 0; r < 9; r++) {
+        const ringRadius = 0.42 - r * 0.024;
+        const ringGeo = new THREE.TorusGeometry(ringRadius, 0.045, 6, 10);
+        ringGeo.rotateX(Math.PI * 0.5);
+        const ring = new THREE.Mesh(ringGeo, materials.pagodaGold);
+        ring.position.y = 1.0 + r * 0.33;
+        sorinGroup.add(ring);
+      }
+
+      const jewel = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.32, 0),
+        materials.pagodaGold
+      );
+      jewel.position.y = 4.75;
+      sorinGroup.add(jewel);
+
+      pagodaGroup.add(sorinGroup);
+
+      // Warm point light illuminating the pagoda tiers
+      const pagodaGlow = new THREE.PointLight(0xff9442, 2.5, 26);
+      pagodaGlow.position.set(-2.2, 9.5, 4.5);
+      pagodaGroup.add(pagodaGlow);
+      lanternLights.push(pagodaGlow);
+
+      scene.add(pagodaGroup);
+      return pagodaGroup;
+    }
+
+    // 5. Hillside Terrain, Stone Lanterns (Toro), Pines, and Fujiyoshida Valley Town
+    function buildHillsideAndShrineDetails(lanternLights) {
+      const terrainGroup = new THREE.Group();
+
+      // Foreground Arakurayama hillside supporting the pagoda and sakura grove
+      const mainHillGeo = jitterGeometry(new THREE.CylinderGeometry(24, 54, 18, 18, 4), 1.4, 0.6, 1.4);
+      const mainHill = new THREE.Mesh(mainHillGeo, materials.hillsideGrass);
+      mainHill.position.set(10, -4.5, 12);
+      mainHill.receiveShadow = true;
+      terrainGroup.add(mainHill);
+
+      // Left foreground sakura slope
+      const leftRidgeGeo = jitterGeometry(new THREE.ConeGeometry(28, 18, 14, 3), 1.4, 0.7, 1.4);
+      const leftRidge = new THREE.Mesh(leftRidgeGeo, materials.hillsideGrass);
+      leftRidge.position.set(-18, -3.5, 16);
+      leftRidge.receiveShadow = true;
+      terrainGroup.add(leftRidge);
+
+      // Midground ridges descending toward Fujiyoshida valley
+      const midRidgePositions = [
+        { x: -42, y: -11, z: -38, r: 42, h: 19 },
+        { x: 26, y: -10, z: -30, r: 38, h: 21 },
+        { x: -10, y: -14, z: -65, r: 58, h: 17 },
+        { x: 54, y: -9, z: -55, r: 48, h: 25 },
+        { x: -72, y: -10, z: -78, r: 54, h: 24 }
+      ];
+      for (const m of midRidgePositions) {
+        const ridgeGeo = jitterGeometry(new THREE.ConeGeometry(m.r, m.h, 12, 2), 2.0, 1.0, 2.0);
+        const ridge = new THREE.Mesh(ridgeGeo, materials.distantHill);
+        ridge.position.set(m.x, m.y, m.z);
+        ridge.receiveShadow = true;
+        terrainGroup.add(ridge);
+      }
+
+      // Broad valley floor plane
+      const valleyGeo = new THREE.PlaneGeometry(540, 440, 24, 24);
+      valleyGeo.rotateX(-Math.PI * 0.5);
+      const valley = new THREE.Mesh(valleyGeo, materials.distantHill);
+      valley.position.set(0, -16, -120);
+      terrainGroup.add(valley);
+
+      // Stone Toro lanterns flanking the pagoda terrace
+      function createToroLantern(x, y, z) {
+        const toro = new THREE.Group();
+        toro.position.set(x, y, z);
+
+        const pedestal = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.35, 0.48, 1.2, 6),
+          materials.stoneBase
+        );
+        pedestal.position.y = 0.6;
+        toro.add(pedestal);
+
+        const firebox = new THREE.Mesh(
+          new THREE.BoxGeometry(0.5, 0.52, 0.5),
+          materials.warmLanternGlow
+        );
+        firebox.position.y = 1.42;
+        toro.add(firebox);
+
+        const capGeo = new THREE.ConeGeometry(0.74, 0.52, 6);
+        const cap = new THREE.Mesh(capGeo, materials.darkStone);
+        cap.position.y = 1.88;
+        toro.add(cap);
+
+        const light = new THREE.PointLight(0xff9c45, 1.1, 12);
+        light.position.set(0, 1.45, 0);
+        toro.add(light);
+        lanternLights.push(light);
+
+        return toro;
+      }
+
+      terrainGroup.add(createToroLantern(5.6, 4.8, 15.2));
+      terrainGroup.add(createToroLantern(16.2, 5.0, 14.8));
+      terrainGroup.add(createToroLantern(-3.2, 4.2, 18.5));
+
+      // Dark Japanese cedar/pine trees (sugi) on the hillside for contrast with pink sakura
+      function createPineTree(x, y, z, scale) {
+        const pine = new THREE.Group();
+        pine.position.set(x, y, z);
+        pine.scale.setScalar(scale);
+
+        const trunk = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.18, 0.32, 2.2, 6),
+          materials.bark
+        );
+        trunk.position.y = 1.0;
+        pine.add(trunk);
+
+        for (let l = 0; l < 4; l++) {
+          const coneGeo = jitterGeometry(
+            new THREE.ConeGeometry(1.55 - l * 0.28, 2.2 - l * 0.2, 7),
+            0.12,
+            0.08,
+            0.12
+          );
+          const cone = new THREE.Mesh(
+            coneGeo,
+            l % 2 === 0 ? materials.pineDark : materials.pineMid
+          );
+          cone.position.y = 2.1 + l * 1.15;
+          cone.castShadow = true;
+          pine.add(cone);
+        }
+        return pine;
+      }
+
+      const pineSpots = [
+        [20.5, 3.2, 4.5, 1.35],
+        [23.5, 2.0, -2.5, 1.5],
+        [18.2, 2.2, -5.5, 1.25],
+        [6.2, 1.8, -7.5, 1.15],
+        [-23.5, 1.5, 4.0, 1.4],
+        [-27.0, -0.2, -5.0, 1.55],
+        [-15.5, 0.6, -10.5, 1.15]
+      ];
+      for (const [px, py, pz, ps] of pineSpots) {
+        terrainGroup.add(createPineTree(px, py, pz, ps));
+      }
+
+      // Fujiyoshida valley town silhouettes & warm evening window lights in the valley below
+      const townGroup = new THREE.Group();
+      const houseBodyGeo = new THREE.BoxGeometry(1, 1, 1);
+      const houseWindowGeo = new THREE.PlaneGeometry(0.36, 0.32);
+
+      for (let i = 0; i < 85; i++) {
+        const hx = randRange(-78, 44);
+        const hz = randRange(-95, -28);
+        const hy = -13.6 + Math.sin(hx * 0.08) * 1.1;
+        const w = randRange(1.4, 3.2);
+        const h = randRange(1.2, 2.5);
+        const d = randRange(1.4, 2.8);
+
+        const house = new THREE.Mesh(houseBodyGeo, i % 3 === 0 ? materials.townRoof : materials.townWall);
+        house.position.set(hx, hy + h * 0.5, hz);
+        house.scale.set(w, h, d);
+        townGroup.add(house);
+
+        if (rng() > 0.2) {
+          const win = new THREE.Mesh(houseWindowGeo, materials.warmLanternGlow);
+          win.position.set(hx + randRange(-0.2, 0.2), hy + h * 0.55, hz + d * 0.52);
+          townGroup.add(win);
+        }
+      }
+      terrainGroup.add(townGroup);
+
+      scene.add(terrainGroup);
+      return terrainGroup;
+    }
+
+    // 6. Blooming Cherry Trees (Sakura) Framing the Foreground & Surrounding the Pagoda
+    function buildBloomingCherryTrees(swayingCanopies) {
+      const sakuraGroup = new THREE.Group();
+
+      const blossomClusterGeos = [
+        jitterGeometry(new THREE.IcosahedronGeometry(1.28, 1), 0.2, 0.14, 0.2),
+        jitterGeometry(new THREE.DodecahedronGeometry(1.18, 1), 0.18, 0.14, 0.18),
+        jitterGeometry(new THREE.IcosahedronGeometry(0.92, 1), 0.15, 0.11, 0.15)
+      ];
+
+      function createBranchSegment(start, end, radiusStart, radiusEnd) {
+        const direction = new THREE.Vector3().subVectors(end, start);
+        const length = direction.length();
+        const branchGeo = new THREE.CylinderGeometry(radiusEnd, radiusStart, length, 6, 1);
+        branchGeo.translate(0, length * 0.5, 0);
+        branchGeo.rotateX(Math.PI * 0.5);
+        const mesh = new THREE.Mesh(branchGeo, materials.bark);
+        mesh.position.copy(start);
+        mesh.lookAt(end);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        return mesh;
+      }
+
+      function createCherryTree({
+        pos,
+        scale = 1.0,
+        leanX = 0.0,
+        leanZ = 0.0,
+        spread = 1.0,
+        blossomDensity = 22
+      }) {
+        const tree = new THREE.Group();
+        tree.position.copy(pos);
+        tree.scale.setScalar(scale);
+
+        const baseOrigin = new THREE.Vector3(0, 0, 0);
+        const trunkMid = new THREE.Vector3(leanX * 0.45, 2.1, leanZ * 0.45);
+        const trunkTop = new THREE.Vector3(leanX, 4.0, leanZ);
+
+        tree.add(createBranchSegment(baseOrigin, trunkMid, 0.5, 0.36));
+        tree.add(createBranchSegment(trunkMid, trunkTop, 0.36, 0.24));
+
+        const canopyPivot = new THREE.Group();
+        canopyPivot.position.copy(trunkTop);
+        tree.add(canopyPivot);
+
+        const mainBoughs = 6;
+        for (let b = 0; b < mainBoughs; b++) {
+          const angle = (b / mainBoughs) * Math.PI * 2 + randRange(-0.25, 0.25);
+          const reach = randRange(2.2, 3.8) * spread;
+          const lift = randRange(0.7, 2.1);
+          const boughEnd = new THREE.Vector3(
+            Math.cos(angle) * reach + leanX * 0.3,
+            lift,
+            Math.sin(angle) * reach + leanZ * 0.3
+          );
+
+          canopyPivot.add(createBranchSegment(new THREE.Vector3(0, -0.2, 0), boughEnd, 0.22, 0.1));
+
+          const subCount = 3;
+          for (let s = 0; s < subCount; s++) {
+            const subAngle = angle + randRange(-0.6, 0.6);
+            const subLen = randRange(1.0, 1.9) * spread;
+            const subEnd = new THREE.Vector3(
+              boughEnd.x + Math.cos(subAngle) * subLen,
+              boughEnd.y + randRange(0.1, 0.85),
+              boughEnd.z + Math.sin(subAngle) * subLen
+            );
+            canopyPivot.add(createBranchSegment(boughEnd, subEnd, 0.1, 0.04));
+
+            const puffs = Math.max(2, Math.floor(blossomDensity / 7));
+            for (let p = 0; p < puffs; p++) {
+              const geo = blossomClusterGeos[(b + s + p) % blossomClusterGeos.length];
+              const mat = materials.sakuraBlossoms[(b + p) % materials.sakuraBlossoms.length];
+              const puff = new THREE.Mesh(geo, mat);
+              puff.position.set(
+                subEnd.x + randRange(-0.75, 0.75),
+                subEnd.y + randRange(-0.3, 0.55),
+                subEnd.z + randRange(-0.75, 0.75)
+              );
+              puff.scale.set(
+                randRange(0.8, 1.35),
+                randRange(0.52, 0.85),
+                randRange(0.8, 1.35)
+              );
+              puff.rotation.set(
+                randRange(-0.22, 0.22),
+                randRange(0, Math.PI * 2),
+                randRange(-0.22, 0.22)
+              );
+              puff.castShadow = true;
+              puff.receiveShadow = true;
+              canopyPivot.add(puff);
+            }
+          }
+        }
+
+        for (let c = 0; c < Math.floor(blossomDensity * 0.6); c++) {
+          const geo = blossomClusterGeos[c % blossomClusterGeos.length];
+          const mat = materials.sakuraBlossoms[c % materials.sakuraBlossoms.length];
+          const crownPuff = new THREE.Mesh(geo, mat);
+          const a = randRange(0, Math.PI * 2);
+          const r = randRange(0.3, 2.8 * spread);
+          crownPuff.position.set(
+            Math.cos(a) * r + leanX * 0.2,
+            randRange(1.0, 2.6),
+            Math.sin(a) * r + leanZ * 0.2
+          );
+          crownPuff.scale.set(
+            randRange(0.95, 1.5),
+            randRange(0.55, 0.88),
+            randRange(0.95, 1.5)
+          );
+          crownPuff.rotation.y = randRange(0, Math.PI * 2);
+          crownPuff.castShadow = true;
+          crownPuff.receiveShadow = true;
+          canopyPivot.add(crownPuff);
+        }
+
+        swayingCanopies.push({
+          group: canopyPivot,
+          phase: randRange(0, Math.PI * 2),
+          speed: randRange(0.85, 1.35),
+          amp: randRange(0.018, 0.032)
+        });
+
+        return tree;
+      }
+
+      // Carefully positioned so blooming cherry trees frame the left, bottom, and pagoda base
+      // while keeping Mount Fuji (center-left) and all 5 tiers of Chureito Pagoda (right) unobstructed:
+      const treeSpecs = [
+        // Left foreground framing tree (frames the left margin with visible trunk & blossoms)
+        {
+          pos: new THREE.Vector3(-12.8, 6.2, 24.5),
+          scale: 1.25,
+          leanX: 1.4,
+          leanZ: -0.4,
+          spread: 1.15,
+          blossomDensity: 26
+        },
+        // Far-left mid-foreground tree
+        {
+          pos: new THREE.Vector3(-18.5, 4.8, 19.0),
+          scale: 1.35,
+          leanX: 1.6,
+          leanZ: -0.3,
+          spread: 1.2,
+          blossomDensity: 26
+        },
+        // Lower-left foreground sakura carpet (below the Mount Fuji sightline)
+        {
+          pos: new THREE.Vector3(-6.2, 2.2, 23.0),
+          scale: 1.08,
+          leanX: 0.5,
+          leanZ: -0.6,
+          spread: 1.15,
+          blossomDensity: 24
+        },
+        // Lower-center foreground sakura carpet (creates the classic sea of pink blossoms along the bottom)
+        {
+          pos: new THREE.Vector3(0.4, 2.0, 23.5),
+          scale: 1.05,
+          leanX: -0.2,
+          leanZ: -0.5,
+          spread: 1.18,
+          blossomDensity: 24
+        },
+        // Lower-right foreground sakura below the pagoda platform
+        {
+          pos: new THREE.Vector3(6.8, 2.1, 22.5),
+          scale: 1.02,
+          leanX: -0.5,
+          leanZ: -0.4,
+          spread: 1.12,
+          blossomDensity: 22
+        },
+        // Far-right foreground sakura framing the right edge beside the pagoda
+        {
+          pos: new THREE.Vector3(19.5, 6.0, 20.5),
+          scale: 1.25,
+          leanX: -1.2,
+          leanZ: -0.4,
+          spread: 1.15,
+          blossomDensity: 24
+        },
+        // Midground sakura trees flanking the Chureito Pagoda stone base
+        {
+          pos: new THREE.Vector3(3.2, 2.4, 11.5),
+          scale: 1.08,
+          leanX: -0.6,
+          leanZ: 0.3,
+          spread: 1.12,
+          blossomDensity: 22
+        },
+        {
+          pos: new THREE.Vector3(18.8, 3.8, 10.5),
+          scale: 1.15,
+          leanX: -0.6,
+          leanZ: 0.4,
+          spread: 1.12,
+          blossomDensity: 22
+        },
+        // Midground slope sakura grove leading toward the valley below Mount Fuji
+        {
+          pos: new THREE.Vector3(-12.5, 1.5, 10.5),
+          scale: 1.18,
+          leanX: 0.8,
+          leanZ: -0.3,
+          spread: 1.15,
+          blossomDensity: 24
+        },
+        {
+          pos: new THREE.Vector3(-4.5, 0.8, 10.0),
+          scale: 1.05,
+          leanX: 0.3,
+          leanZ: -0.2,
+          spread: 1.1,
+          blossomDensity: 22
+        }
+      ];
+
+      for (const spec of treeSpecs) {
+        sakuraGroup.add(createCherryTree(spec));
+      }
+
+      scene.add(sakuraGroup);
+      return sakuraGroup;
+    }
+
+    // 7. Drifting Atmospheric Dusk Mist & Lenticular Clouds Around Mount Fuji
+    function buildAtmosphericClouds(driftingClouds) {
+      const cloudGroup = new THREE.Group();
+
+      const cloudMat = new THREE.MeshStandardMaterial({
+        color: 0xffcdc0,
+        emissive: 0x7a3848,
+        emissiveIntensity: 0.34,
+        transparent: true,
+        opacity: 0.62,
+        roughness: 0.95,
+        flatShading: true,
+        depthWrite: false
+      });
+
+      const mistMat = new THREE.MeshStandardMaterial({
+        color: 0xf4aca4,
+        emissive: 0x6b3248,
+        emissiveIntensity: 0.3,
+        transparent: true,
+        opacity: 0.38,
+        roughness: 1.0,
+        flatShading: true,
+        depthWrite: false
+      });
+
+      function createCloudRibbon(x, y, z, scaleX, scaleY, scaleZ, isMist = false) {
+        const ribbon = new THREE.Group();
+        ribbon.position.set(x, y, z);
+
+        const lobeCount = 5;
+        for (let i = 0; i < lobeCount; i++) {
+          const lobeGeo = jitterGeometry(new THREE.IcosahedronGeometry(1.0, 1), 0.14, 0.08, 0.14);
+          const lobe = new THREE.Mesh(lobeGeo, isMist ? mistMat : cloudMat);
+          const offset = (i - (lobeCount - 1) * 0.5) * 1.15;
+          const sizeFactor = 1.0 - Math.abs(offset) * 0.22;
+          lobe.position.set(
+            offset * scaleX * 0.42,
+            randRange(-0.2, 0.25) * scaleY,
+            randRange(-0.3, 0.3) * scaleZ
+          );
+          lobe.scale.set(scaleX * 0.38 * sizeFactor, scaleY * sizeFactor, scaleZ * sizeFactor);
+          ribbon.add(lobe);
+        }
+
+        driftingClouds.push({
+          mesh: ribbon,
+          baseX: x,
+          baseY: y,
+          speed: randRange(0.18, 0.42) * (rng() > 0.5 ? 1 : -1),
+          range: randRange(4.5, 9.5),
+          phase: randRange(0, Math.PI * 2)
+        });
+
+        return ribbon;
+      }
+
+      // High dusk clouds flanking Mount Fuji
+      cloudGroup.add(createCloudRibbon(-92, 38, -165, 26, 2.3, 7.0, false));
+      cloudGroup.add(createCloudRibbon(10, 34, -155, 24, 2.1, 6.5, false));
+      cloudGroup.add(createCloudRibbon(-18, 52, -195, 22, 1.8, 6.0, false));
+      cloudGroup.add(createCloudRibbon(-128, 28, -175, 25, 2.2, 7.0, false));
+
+      // Soft valley mist bands floating between the town and Mount Fuji's base
+      cloudGroup.add(createCloudRibbon(-42, -1.5, -115, 52, 2.2, 14.0, true));
+      cloudGroup.add(createCloudRibbon(6, -3.5, -95, 44, 2.0, 12.0, true));
+      cloudGroup.add(createCloudRibbon(-18, -6.0, -68, 38, 1.8, 11.0, true));
+
+      scene.add(cloudGroup);
+      return cloudGroup;
+    }
+
+    // 8. Falling Cherry Blossom Petals
+    function buildFallingPetals() {
+      const petalCount = 280;
+      const petalGeo = new THREE.ConeGeometry(0.11, 0.22, 3);
+      petalGeo.scale(1.0, 0.25, 0.65);
+
+      const petalMat = new THREE.MeshStandardMaterial({
+        color: 0xffd6e4,
+        emissive: 0x70263c,
+        emissiveIntensity: 0.4,
+        roughness: 0.5,
+        flatShading: true
+      });
+
+      const instancedPetals = new THREE.InstancedMesh(petalGeo, petalMat, petalCount);
+      const dummy = new THREE.Object3D();
+      const petalData = [];
+
+      for (let i = 0; i < petalCount; i++) {
+        const item = {
+          x: randRange(-22, 22),
+          y: randRange(5, 26),
+          z: randRange(6, 36),
+          vx: randRange(-0.55, -0.18),
+          vy: randRange(-0.62, -0.26),
+          vz: randRange(-0.2, 0.25),
+          rx: randRange(0, Math.PI * 2),
+          ry: randRange(0, Math.PI * 2),
+          rz: randRange(0, Math.PI * 2),
+          spinX: randRange(1.0, 2.8),
+          spinY: randRange(0.8, 2.4),
+          swayPhase: randRange(0, Math.PI * 2),
+          scale: randRange(0.65, 1.3)
+        };
+        petalData.push(item);
+
+        dummy.position.set(item.x, item.y, item.z);
+        dummy.rotation.set(item.rx, item.ry, item.rz);
+        dummy.scale.setScalar(item.scale);
+        dummy.updateMatrix();
+        instancedPetals.setMatrixAt(i, dummy.matrix);
+      }
+
+      scene.add(instancedPetals);
+
+      return function updatePetals(dt, elapsed) {
+        for (let i = 0; i < petalCount; i++) {
+          const p = petalData[i];
+          p.x += (p.vx + Math.sin(elapsed * 1.4 + p.swayPhase) * 0.25) * dt;
+          p.y += p.vy * dt;
+          p.z += (p.vz + Math.cos(elapsed * 1.1 + p.swayPhase) * 0.18) * dt;
+
+          p.rx += p.spinX * dt;
+          p.ry += p.spinY * dt;
+
+          if (p.y < 3.5 || p.x < -24) {
+            p.x = randRange(-16, 22);
+            p.y = randRange(18, 27);
+            p.z = randRange(8, 35);
+          }
+
+          dummy.position.set(p.x, p.y, p.z);
+          dummy.rotation.set(p.rx, p.ry, p.rz);
+          dummy.scale.setScalar(p.scale);
+          dummy.updateMatrix();
+          instancedPetals.setMatrixAt(i, dummy.matrix);
+        }
+        instancedPetals.instanceMatrix.needsUpdate = true;
+      };
+    }
+
+    // Assemble the complete scene
+    const lanternLights = [];
+    const swayingCanopies = [];
+    const driftingClouds = [];
+
+    const skyObjects = buildAtmosphericSky();
+    setupLighting();
+    buildMountFuji();
+    buildChureitoPagoda(lanternLights);
+    buildHillsideAndShrineDetails(lanternLights);
+    buildBloomingCherryTrees(swayingCanopies);
+    buildAtmosphericClouds(driftingClouds);
+    const updatePetals = buildFallingPetals();
+
+    // Responsive framing so the composition stays balanced on any aspect ratio
+    function updateCameraFramingForAspect() {
+      const aspect = window.innerWidth / window.innerHeight;
+      camera.aspect = aspect;
+      camera.fov = aspect < 1.25 ? THREE.MathUtils.clamp(39 / Math.max(aspect, 0.55), 41, 60) : 39;
+      camera.updateProjectionMatrix();
+    }
+    updateCameraFramingForAspect();
+
+    window.addEventListener("resize", () => {
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      updateCameraFramingForAspect();
+    });
+
+    // Animation loop
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const dt = Math.min(clock.getDelta(), 0.05);
+      const elapsed = clock.getElapsedTime();
+
+      skyObjects.skyMat.uniforms.uTime.value = elapsed;
+
+      // Subtle breeze sway on cherry blossom canopies
+      for (let i = 0; i < swayingCanopies.length; i++) {
+        const item = swayingCanopies[i];
+        item.group.rotation.z = Math.sin(elapsed * item.speed + item.phase) * item.amp;
+        item.group.rotation.x = Math.cos(elapsed * item.speed * 0.8 + item.phase) * item.amp * 0.7;
+      }
+
+      // Slow drift of valley mist and lenticular clouds around Mount Fuji
+      for (let i = 0; i < driftingClouds.length; i++) {
+        const c = driftingClouds[i];
+        c.mesh.position.x = c.baseX + Math.sin(elapsed * 0.08 * c.speed + c.phase) * c.range;
+        c.mesh.position.y = c.baseY + Math.cos(elapsed * 0.14 + c.phase) * 0.35;
+      }
+
+      // Warm subtle candle flicker in the pagoda and stone lanterns
+      for (let i = 0; i < lanternLights.length; i++) {
+        const light = lanternLights[i];
+        const baseIntensity = i === 0 ? 2.5 : 1.1;
+        light.intensity =
+          baseIntensity +
+          Math.sin(elapsed * 3.7 + i * 1.9) * 0.12 +
+          Math.cos(elapsed * 6.3 + i) * 0.06;
+      }
+
+      // Update drifting sakura petals
+      updatePetals(dt, elapsed);
+
+      // Gentle cinematic camera breathing when the user isn't actively orbiting
+      if (!userInteracting && elapsed - lastInteractionTime > 2.5) {
+        const swayX = Math.sin(elapsed * 0.22) * 0.55;
+        const swayY = Math.cos(elapsed * 0.17) * 0.24;
+        camera.position.x = THREE.MathUtils.lerp(camera.position.x, baseCameraPos.x + swayX, 0.03);
+        camera.position.y = THREE.MathUtils.lerp(camera.position.y, baseCameraPos.y + swayY, 0.03);
+      }
+
+      controls.update();
+      renderer.render(scene, camera);
+    }
+
+    animate();
+  </script>
+</body>
+</html>
