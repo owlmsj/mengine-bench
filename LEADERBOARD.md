@@ -10,6 +10,7 @@ their Scores use that version's formula and do not compare with the table above.
 | # | Score | Correct % | Solved | Judge | Speed | Time | Timeouts | Cost | Est. price | Tokens | Generated | Turns | Agent | Model | Effort | Hardware | Config | Submitter | Date | Run |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | **97.2** | 100.0 | 14/14 | 88.9 | 100.0 | 4 min 46 s | 0 | n/a | ~$1.48 | 1.37M | 19.3k | 15 | codex codex-cli 0.165.0 | gpt-6.1-sol | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=codex, tier=0, role=default, service_tier=fast, i... | owlmsj | 2026-11-01 | [run](results/2026-11-01_codex_gpt-6.1-sol_low_f89e0d05/summary.md) |
+| 2 | **96.3** | 100.0 | 14/14 | 89.5 | 93.1 | 6 min 43 s | 0 | >= $0.00 (price) | $0.00 (local) | 1.22M | 40.1k | 112 | opencode opencode v2.2.2 | home/qwen38-flash-next-exl3-605-256k | xhigh | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=local, server_gpu=2x RTX 5090 + 2x RTX 4090, ser... | owlmsj | 2026-11-01 | [run](results/2026-11-01_opencode_home-qwen38-flash-next-exl3-605-256k_xhigh_11a9a46d/summary.md) |
 
 ## Bench 1.4 (history)
 
