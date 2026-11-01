@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import re
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 
@@ -20,6 +21,9 @@ OUTPUT_CHARS = 400
 FIRST_CALLS = 20
 LAST_CALLS = 40
 NO_CALLS = "(no tool calls)"
+HARNESS_FILE_MARK = "<harness file>"
+# A hidden folder in the home names its harness: .gemini/antigravity-cli, .local/share/opencode (#72).
+_HARNESS_FILE = re.compile(r"(?:file:///)?<HOME>[\\/]+\.[^\s\"'`]+")
 _KINDS = {"bash": "shell", "shell": "shell", "powershell": "shell", "run_command": "shell", "read": "read",
           "read_file": "read", "view_file": "read", "write": "write", "write_file": "write", "write_to_file": "write",
           "edit": "edit", "edit_file": "edit", "replace_file_content": "edit", "multi_replace_file_content": "edit",
@@ -60,9 +64,10 @@ def _input_text(kind: str, payload: object) -> str:
 
 def _line(step: int, kind: str, payload: object, ok: bool, output: object) -> str:
     text = output if isinstance(output, str) else "" if output is None else json.dumps(output, ensure_ascii=False)
-    shown = _clip(_input_text(kind, payload), INPUT_CHARS)
+    shown = _clip(_HARNESS_FILE.sub(HARNESS_FILE_MARK, _input_text(kind, payload)), INPUT_CHARS)
+    result = _clip(_HARNESS_FILE.sub(HARNESS_FILE_MARK, text).strip(), OUTPUT_CHARS)
     return (f"[step {step}] {kind} {json.dumps(shown, ensure_ascii=False)} {'ok' if ok else 'failed'} -> "
-            f"{json.dumps(_clip(text.strip(), OUTPUT_CHARS), ensure_ascii=False)}")
+            f"{json.dumps(result, ensure_ascii=False)}")
 
 
 def _opencode_calls(step: int, events: list[dict[str, object]]) -> Iterator[str]:

@@ -139,6 +139,23 @@ def test_the_judge_sees_files_by_path_and_why_a_call_failed() -> None:
     ]
 
 
+@pytest.mark.parametrize("path", [
+    # Seen in the live AGY and opencode runs: skills read, long output spilled to a file.
+    r"<HOME>\.gemini\antigravity-cli\skills\guide\SKILL.md",
+    "file:///<HOME>/.gemini/antigravity-cli/brain/44f7/.system_generated/steps/2/output.txt",
+    r"<HOME>\.local\share\opencode\tool-output\tool_1",
+])
+def test_a_file_in_a_harness_home_folder_does_not_name_it(path: str) -> None:
+    call = _tool(2, "DONE", "read_file", {"Path": path}, output=f"The full output is at {path}. Preview follows")
+    assert tool_log([_jsonl([BEGIN, call])]) == (
+        '[step 1] read "<harness file>" ok -> "The full output is at <harness file> Preview follows"')
+
+
+def test_a_project_under_the_home_keeps_its_path() -> None:
+    path = r"<HOME>\Code\arena\.venv\a.py"
+    assert "Code" in tool_log([_jsonl([BEGIN, _tool(2, "DONE", "read_file", {"Path": path})])])
+
+
 def test_a_run_with_no_calls_says_so() -> None:
     assert tool_log([_jsonl([BEGIN, FIRST_TURN, *LAST_TURN, RESULT])]) == "(no tool calls)"
 
