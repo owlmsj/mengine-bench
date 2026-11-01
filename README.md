@@ -1,6 +1,6 @@
 # mengine-bench
 
-**How well does your coding agent do real work, and how fast?** 14 everyday jobs,
+**How well does your coding agent do real work, and how fast?** 15 everyday jobs,
 one Score, about 10 minutes for a good setup. Every result is public and auditable.
 
 It grades the whole **agent**: the harness (Claude Code, Codex CLI, opencode, AGY or your
@@ -26,7 +26,7 @@ thinking time cost it about 10 points. Cost and an estimated price at API list p
 
 Formulas and edge cases: [docs/SCORING.md](docs/SCORING.md).
 
-## The 14 tasks
+## The 15 tasks
 
 Each runs in a fresh folder, needs no web and has a limit of 5 to 15 minutes. If time
 runs out, what is in the folder and the reply so far still get graded, and the prompt
@@ -49,6 +49,7 @@ says so. Each task has a reference solution that the test suite proves passes.
 | `gd-integration-repo` | gamedev | Find every cause behind a failing integration test in a game backend, and fix them. |
 | `web-mondrian-landing` | web-design | Build a landing page that tells the story of one Mondrian painting from a fact sheet. |
 | `3d-voxel-landscape` | 3d | Build a procedural 3D scene of Mount Fuji with a pagoda and cherry trees, good enough for a wallpaper. |
+| `web-word-universe` | data-viz | Collect a saved Portuguese dictionary site and build one view that shows how its words relate. |
 <!-- task-summaries:end -->
 
 Details: [docs/TASKS.md](docs/TASKS.md).
@@ -66,10 +67,10 @@ uv run mengine-bench run --agent claude --model claude-sonnet-5-5 --effort high 
 uv run mengine-bench run --agent claude --model claude-sonnet-5-5 --effort high
 ```
 
-The dry run prints the plan and runs nothing. The real run takes about 42 minutes at
+The dry run prints the plan and runs nothing. The real run takes about 100 minutes at
 worst, with every limit hit, and ends with `privacy check: clean`. Read
 `results/<run>/summary.md`, whose "Failed checks" say what each check expected and received, then publish it with
-`uv run mengine-bench submit results/<run>`. Grading the two pages needs a Chromium-family browser (Edge, Chrome or
+`uv run mengine-bench submit results/<run>`. Grading the three pages needs a Chromium-family browser (Edge, Chrome or
 Chromium); without one, their page checks are left out and the run says so.
 
 | Harness | `--agent` | `--model` example | Cost |

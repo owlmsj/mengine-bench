@@ -39,7 +39,8 @@ def test_win_share_is_the_same_on_every_call() -> None:
 def test_a_lead_that_rests_on_one_task_is_a_tie() -> None:
     one_task = _run("a", judge=80)
     one_task["tasks"][0]["judge"] = 100
-    share = analyze.win_share(analyze.task_points(one_task), analyze.task_points(_run("b", judge=81)))
+    # Scores round to 0.1: the gap is wide enough that a draw holding the task once still wins, at any task count.
+    share = analyze.win_share(analyze.task_points(one_task), analyze.task_points(_run("b", judge=80.5)))
     assert 0.5 < share < analyze.TIE_BELOW
 
 

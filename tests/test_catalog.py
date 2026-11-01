@@ -45,9 +45,9 @@ def test_duplicate_ids_are_rejected() -> None:
         catalog.collect([one, two])
 
 
-def test_limits_give_open_briefs_their_time_and_cap_the_worst_case_at_90_minutes() -> None:
-    # #98, owner's decision: open briefs get more time. The 90 min apply only when an agent hits every limit.
+def test_limits_give_open_briefs_their_time_and_cap_the_worst_case_at_100_minutes() -> None:
+    # #98, owner's decision: open briefs get more time. The 100 min apply only when an agent hits every limit.
     limits = {task.id: task.timeout_s for task in catalog.all_tasks()}
-    assert sum(limits.values()) == 5400, limits
+    assert sum(limits.values()) == 6000, limits
     assert {task: limit for task, limit in limits.items() if limit != 300} == {
-        "gd-integration-repo": 600, "web-mondrian-landing": 600, "3d-voxel-landscape": 900}
+        "gd-integration-repo": 600, "web-mondrian-landing": 600, "3d-voxel-landscape": 900, "web-word-universe": 600}

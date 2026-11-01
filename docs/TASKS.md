@@ -43,4 +43,5 @@ embedded images.
 | `gd-integration-repo` | gamedev | Find every cause behind a failing integration test in a game backend, and fix them. |
 | `web-mondrian-landing` | web-design | Build a landing page that tells the story of one Mondrian painting from a fact sheet. |
 | `3d-voxel-landscape` | 3d | Build a procedural 3D scene of Mount Fuji with a pagoda and cherry trees, good enough for a wallpaper. |
+| `web-word-universe` | data-viz | Collect a saved Portuguese dictionary site and build one view that shows how its words relate. |
 <!-- tasks:end -->

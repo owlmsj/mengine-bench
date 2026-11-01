@@ -17,7 +17,7 @@ The formulas live in `mengine_bench/scoring.py`. Runs compare when they ran the
 same bench major.minor (1.6.x). A patch release changes no task or prompt. When it changes how a run is judged or
 scored, every ranked run is judged again from its bundle (`mengine-bench judge --again`), so none has to run again. Rankings of older versions stay in LEADERBOARD.md as history, with the Scores of their own formula.
 
-A run is one sample and runs are not repeated, so ties come from the published tasks: draw the 14 tasks again with
+A run is one sample and runs are not repeated, so ties come from the published tasks: draw the 15 tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
 a tie. This shows how much the order rests on this set of tasks; it says nothing about the noise between two runs of one agent.
 `mengine-bench analyze` prints the shares, the points each part of the Score moves and the tasks that separate runs. No agent runs.
@@ -42,7 +42,7 @@ untouched", or the page file exists).
 A failed check says why in `result.json` and in the summary's "Failed checks": what it expected and what it received.
 The judge does not see that text.
 
-Visual tasks (`web-mondrian-landing`, `3d-voxel-landscape`) add two checks at grading, in a headless
+Visual tasks (`web-mondrian-landing`, `3d-voxel-landscape`, `web-word-universe`) add two checks at grading, in a headless
 Chromium-family browser: the page runs without an uncaught script error, and its screenshot is not blank. That takes
 about 2 s per page, 54 s at most over 46 published pages, and grading is not in Time. A machine with no browser, a render that fails or the
 three.js CDN out of reach leaves the two checks out, with a note on the task, and costs no point. The page
@@ -57,7 +57,7 @@ prompt keeps the question and a small `result.json` contract, because a person h
 Correct reads delivered files, never the chat. It accepts rounding, percent or fraction and common number formats, and
 rejects a wrong answer, not a different route. Two experts should reach the same verdict on any result.
 
-Limits are 5 min per eval, 10 min for `gd-integration-repo` and `web-mondrian-landing`, and 15 min for
+Limits are 5 min per eval, 10 min for `gd-integration-repo`, `web-mondrian-landing` and `web-word-universe`, and 15 min for
 `3d-voxel-landscape`. The limit is a safety net: the Speed formula still decides what time is worth.
 
 Each eval also declares checkpoints, key actions matched against the tool calls, published per task in the bundle and
@@ -93,7 +93,7 @@ The judge reads the task prompt, the check results, the final answers, each page
 and one tool log with the same shape for every harness. It does not read the raw stream, which carries the model id.
 
 Measured in 1.3.3: two votes on the same message differed by 1.35 points on average and 6 at most (23 pairs), so one
-task's vote is noisy and a run's mean of 14 is much less so.
+task's vote is noisy and a run's mean of 15 is much less so.
 The judge never changes the checks.
 
 After a change to the rubric or the judge model, `mengine-bench judge-anchors` votes the reference solution and the untouched
