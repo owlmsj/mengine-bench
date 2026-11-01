@@ -7,6 +7,7 @@ It says nothing about the noise between two runs of the same agent.
 
 from __future__ import annotations
 
+import json
 import random
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -21,6 +22,11 @@ RESAMPLE_SEED = 82
 # draws are a tie and 0.8 points that hold in 86% are a lead: the fixed 1 point gap had both backwards. At 90%, 7 of
 # the 8 neighbours were ties and the table said nothing.
 TIE_BELOW = 0.8
+# Ignore increases up to 25% so small time/token fluctuations do not warn (#94).
+TIME_INCREASE_LIMIT = 0.25
+INPUT_TOKEN_INCREASE_LIMIT = 0.25
+# Six points was the largest measured difference between two judge votes on the same message (#94).
+JUDGE_DROP_LIMIT = 6
 
 Run = Mapping[str, object]
 
@@ -121,6 +127,69 @@ def _pairs_table(runs: Sequence[Run]) -> list[str]:
     return lines
 
 
+def _regression_warnings(previous: Run, latest: Run, time_key: str) -> list[str]:
+    passed = {check["name"] for check in previous.get("checks", []) if check.get("ok") is True}
+    warnings = [f"check failed: {check['name']}" for check in latest.get("checks", [])
+                if check.get("ok") is False and check["name"] in passed]
+    old_tokens, new_tokens = previous.get("tokens") or {}, latest.get("tokens") or {}
+    metrics = (("Time", previous.get(time_key), latest.get(time_key), TIME_INCREASE_LIMIT),
+               ("Judge", previous.get("judge"), latest.get("judge"), None),
+               ("Input tokens", old_tokens.get("input"), new_tokens.get("input"), INPUT_TOKEN_INCREASE_LIMIT))
+    for label, before, after, increase in metrics:
+        if not isinstance(before, (int, float)) or not isinstance(after, (int, float)):
+            continue
+        worse = before - after > JUDGE_DROP_LIMIT if increase is None else after > before * (1 + increase)
+        if worse:
+            warnings.append(f"{label}: {before:g} -> {after:g}")
+    return warnings
+
+
+def _changed_tasks(previous: Run, latest: Run) -> list[str]:
+    old_tasks = {task["id"]: task for task in previous["tasks"]}
+    lines = []
+    for task in latest["tasks"]:
+        before = old_tasks.get(task["id"])
+        if before is None:
+            continue
+        warnings = _regression_warnings(before, task, "agent_s")
+        if warnings:
+            lines.append(f"  - {task['id']}: {'; '.join(warnings)}")
+    return lines
+
+
+def _run_date(run: Run) -> str:
+    return str(run.get("started_at") or run.get("date") or "")
+
+
+def _changes_section(runs: Sequence[Run]) -> list[str]:
+    groups: dict[tuple[str, str, str, str, str], list[Run]] = {}
+    for run in runs:
+        if not _run_date(run):
+            continue
+        agent, config = run["agent"], run.get("config") or {}
+        config_text = json.dumps({key: value for key, value in config.items() if key != "personal_instructions"},
+                                 sort_keys=True)
+        key = (".".join(str(run.get("bench_version")).split(".")[:2]), str(agent.get("name")),
+               str(agent.get("model")), str(agent.get("effort")), config_text)
+        groups.setdefault(key, []).append(run)
+    lines = ["## Changes since the last run", ""]
+    repeated = [key for key, group in groups.items() if len(group) > 1]
+    for key in repeated:
+        previous, latest = sorted(groups[key], key=_run_date)[-2:]
+        warnings = _regression_warnings(previous["totals"], latest["totals"], "time_s")
+        tasks = _changed_tasks(previous, latest)
+        if not warnings and not tasks:
+            continue
+        _, agent, model, effort, config = key
+        lines.append(f"- {agent} {model}/{effort}, config {config} ({_run_date(previous)} -> {_run_date(latest)})")
+        lines.extend([f"  - Run: {'; '.join(warnings)}"] if warnings else [])
+        lines.extend(tasks)
+    if len(lines) == 2:
+        lines.append("No warnings." if repeated else "No repeated combinations to compare.")
+    return lines
+
+
 def render_analysis(runs: Sequence[Run], version: str) -> str:
-    sections = [[f"# Bench {version}: {len(runs)} judged runs"], _parts_table(runs), _tasks_table(runs), _pairs_table(runs)]
+    sections = [[f"# Bench {version}: {len(runs)} judged runs"], _parts_table(runs), _tasks_table(runs), _pairs_table(runs),
+                _changes_section(runs)]
     return "\n\n".join("\n".join(section) for section in sections) + "\n"
