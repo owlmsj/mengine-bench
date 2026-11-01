@@ -125,7 +125,9 @@ def _render_verdict(bundle: Path, task_id: str, packet: JudgePacket, judge: Rubr
 
 
 def _reference_images(task_id: str) -> dict[str, Path]:
-    return {f"reference-{level}.png": REFERENCES_DIR / f"{task_id}-{level}.png" for level in REFERENCE_LEVELS}
+    # A visual task with no references yet votes on its frames alone (#99).
+    found = {f"reference-{level}.png": REFERENCES_DIR / f"{task_id}-{level}.png" for level in REFERENCE_LEVELS}
+    return {name: file for name, file in found.items() if file.is_file()}
 
 
 def _frame_path(workdir: Path, suffix: str) -> Path:
