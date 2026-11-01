@@ -68,7 +68,9 @@ uv run mengine-bench run --agent claude --model claude-sonnet-5-5 --effort high
 
 The dry run prints the plan and runs nothing. The real run takes about 42 minutes at
 worst, with every limit hit, and ends with `privacy check: clean`. Read
-`results/<run>/summary.md`, then publish it with `uv run mengine-bench submit results/<run>`.
+`results/<run>/summary.md`, whose "Failed checks" say what each check expected and received, then publish it with
+`uv run mengine-bench submit results/<run>`. Grading the two pages needs a Chromium-family browser (Edge, Chrome or
+Chromium); without one, their page checks are left out and the run says so.
 
 | Harness | `--agent` | `--model` example | Cost |
 | --- | --- | --- | --- |
@@ -117,7 +119,7 @@ projects, so skim `results/<run>/` before you submit.
 
 ## Limits
 
-- One run is one sample, and runs are not repeated: a lead under 1 point at the top is a tie.
+- One run is one sample, and runs are not repeated. A lead that holds in under 80% of the draws of the tasks is a tie, and that says nothing about the noise between two runs of one agent.
 - Results are self-reported. The transcripts let anyone check a run, but nothing re-runs it.
 - The task folder is an instruction, not a sandbox: an agent with full permissions can read the rest of your disk.
 - A timeout or a crash with nothing written has nothing to grade. There are no retries.
@@ -129,6 +131,8 @@ projects, so skim `results/<run>/` before you submit.
 uv run pytest -q                   # gold self-tests, no model calls
 uv run mengine-bench selftest      # every task's reference solution
 uv run mengine-bench list
+uv run mengine-bench analyze       # what separates the published runs; no agent runs
+uv run mengine-bench judge-anchors # after a rubric change: four judge votes
 ```
 
 Add a task or review a result: [CONTRIBUTING.md](CONTRIBUTING.md). MIT license, see [LICENSE](LICENSE).

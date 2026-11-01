@@ -288,8 +288,8 @@ def _check(ws: Path, answers: Sequence[str]) -> CheckResult:
                      "half_up_tie_rounds_up", "persisted_name_survives", "real_environment_when_env_is_none"):
         selection = ("\n\ndef load_tests(loader, tests, pattern):\n"
                      f"    return unittest.TestSuite([Hidden('test_{scenario}')])\n")
-        ok, _ = run_hidden_tests(ws, HIDDEN + selection)
-        result.add(f"hidden {scenario.replace('_', ' ')}", ok)
+        ok, why = run_hidden_tests(ws, HIDDEN + selection)
+        result.add(f"hidden {scenario.replace('_', ' ')}", ok, why)
     # #59: the prompt asks for a green suite, and the hidden scenarios do not reach most of the code.
     modules = [rel[:-3].replace("/", ".") for rel in PROTECTED if rel.endswith(".py") and "/test_" in rel]
     result.add("existing test suite passes", run_workspace_tests(ws, modules))

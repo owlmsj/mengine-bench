@@ -24,6 +24,7 @@ from mengine_bench.core import (
     close,
     has,
     only_number,
+    saw,
     write,
 )
 
@@ -78,11 +79,15 @@ def _changelog_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     # #59: the format is the judge's to grade; here it counts that the answer names that one build.
     texts = {key: json.dumps(got.get(key, "")) for key in ("build_change", "build_revert")}
     builds = {key: [] if has(text, r"\bnot") else re.findall(r"\d+\.\d+\.\d+", text) for key, text in texts.items()}
-    result.add("build that changed recoil_multiplier (not _ads)", builds["build_change"] == [gold["build_change"]])
-    result.add("build that reverted it", builds["build_revert"] == [gold["build_revert"]])
-    result.add("revert date", str(got.get("revert_date")) == gold["revert_date"])
-    result.add("revert approver", str(got.get("revert_approver", "")).strip().lower() == str(gold["revert_approver"]).lower())
-    result.add("builds between the two (exclusive)", close(only_number(got.get("builds_between")), 162, 0))
+    result.add("build that changed recoil_multiplier (not _ads)", builds["build_change"] == [gold["build_change"]],
+               saw(got.get("build_change"), gold["build_change"]))
+    result.add("build that reverted it", builds["build_revert"] == [gold["build_revert"]],
+               saw(got.get("build_revert"), gold["build_revert"]))
+    result.add("revert date", str(got.get("revert_date")) == gold["revert_date"], saw(got.get("revert_date"), gold["revert_date"]))
+    result.add("revert approver", str(got.get("revert_approver", "")).strip().lower() == str(gold["revert_approver"]).lower(),
+               saw(got.get("revert_approver"), gold["revert_approver"]))
+    result.add("builds between the two (exclusive)", close(only_number(got.get("builds_between")), 162, 0),
+               saw(got.get("builds_between"), 162))
     return result
 
 
@@ -111,10 +116,10 @@ def _chart_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     got = answer_json(answers)
     # #59: read from the axis, so the values take a reading margin of a fifth of a grid step. The 8k bars answer
     # differently, and the old chart printed sorted values that no run in 16 got wrong.
-    result.add("GPU with the highest TPS at 256k", _gpu_name(got.get("top_gpu")) == "H200")
-    result.add("value of that bar", close(only_number(got.get("top_tps")), 180, 10))
-    result.add("GPU with the lowest TPS at 256k", _gpu_name(got.get("bottom_gpu")) == "4090")
-    result.add("ratio top/bottom", close(only_number(got.get("ratio")), 6.0, 1.2))
+    result.add("GPU with the highest TPS at 256k", _gpu_name(got.get("top_gpu")) == "H200", saw(got.get("top_gpu"), "H200"))
+    result.add("value of that bar", close(only_number(got.get("top_tps")), 180, 10), saw(got.get("top_tps"), "180 +/- 10"))
+    result.add("GPU with the lowest TPS at 256k", _gpu_name(got.get("bottom_gpu")) == "4090", saw(got.get("bottom_gpu"), "4090"))
+    result.add("ratio top/bottom", close(only_number(got.get("ratio")), 6.0, 1.2), saw(got.get("ratio"), "6.0 +/- 1.2"))
     return result
 
 
@@ -127,8 +132,8 @@ TASKS = [
         provenance="AA-LCR style multi-hop over a long build changelog with near-duplicate distractor keys",
         summary="Find when a setting changed and was restored in a long changelog, including who approved the change.",
         setup=_changelog_setup, check=_changelog_check, reference=_changelog_reference, timeout_s=120,
-        steps=(Step("Keys: build_change (build that changed recoil_multiplier from 1.0 to 0.85; beware of parameters "
-                    "with similar names), build_revert (build that set it back to 1.0), revert_date (YYYY-MM-DD), "
+        steps=(Step("Keys: build_change (build that changed recoil_multiplier from 1.0 to 0.85), "
+                    "build_revert (build that set it back to 1.0), revert_date (YYYY-MM-DD), "
                     "revert_approver, builds_between (how many builds lie between the two, exclusive). " + LC_PROMPT,
                     inline=("_inline/changelog.md",), hide=("_inline",)),),
     ),

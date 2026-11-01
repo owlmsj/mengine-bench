@@ -1,4 +1,4 @@
-# Scoring (bench 1.3)
+# Scoring (bench 1.4)
 
 A run of an agent (harness + model + configuration) gets three numbers folded into
 the Score, and a Cost kept apart.
@@ -14,10 +14,13 @@ the Score, and a Cost kept apart.
 | **Est. price** | The run's tokens at public API list prices, so subscription and API runs compare. No points either. |
 
 The formulas live in `mengine_bench/scoring.py`. Runs compare when they ran the
-same bench major.minor (1.3.x). A patch release changes no task or prompt. When it changes how a run is judged or
-scored, every ranked run is judged again from its bundle (`mengine-bench judge --again`), so none has to run again. A run is one sample and runs are not repeated:
-runs within 1 point of each other at the top are a tie. Rankings of older
-versions stay in LEADERBOARD.md as history, with the Scores of their own formula.
+same bench major.minor (1.4.x). A patch release changes no task or prompt. When it changes how a run is judged or
+scored, every ranked run is judged again from its bundle (`mengine-bench judge --again`), so none has to run again. Rankings of older versions stay in LEADERBOARD.md as history, with the Scores of their own formula.
+
+A run is one sample and runs are not repeated, so ties come from the published tasks: draw the 14 tasks again with
+replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
+a tie. This shows how much the order rests on this set of tasks; it says nothing about the noise between two runs of one agent.
+`mengine-bench analyze` prints the shares, the points each part of the Score moves and the tasks that separate runs. No agent runs.
 
 ## Checks: c_i
 
@@ -36,8 +39,13 @@ untouched", or the page file exists).
   stand when time runs out. Load a local model before the run: a cold load counts against the first task.
 - **Solved** = the agent finished, and every gate and every check passed.
 
-Visual tasks (`web-mondrian-landing`, `3d-voxel-landscape`) are graded the same
-way at run time: content gates only, no browser and no vision model. The page
+A failed check says why in `result.json` and in the summary's "Failed checks": what it expected and what it received.
+The judge does not see that text.
+
+Visual tasks (`web-mondrian-landing`, `3d-voxel-landscape`) add two checks at grading, in a headless
+Chromium-family browser: the page runs without an uncaught script error, and its screenshot is not blank. That takes
+about 2 s per page, 54 s at most over 46 published pages, and grading is not in Time. A machine with no browser, a render that fails or the
+three.js CDN out of reach leaves the two checks out, with a note on the task, and costs no point. The page
 is a declared deliverable that the bundle keeps verbatim for the judge.
 
 ## Judge
@@ -67,6 +75,9 @@ and one tool log with the same shape for every harness. It does not read the raw
 Measured in 1.3.3: two votes on the same message differed by 1.35 points on average and 6 at most (23 pairs), so one
 task's vote is noisy and a run's mean of 14 is much less so.
 The judge never changes the checks.
+
+After a change to the rubric or the judge model, `mengine-bench judge-anchors` votes the reference solution and the untouched
+workspace of two tasks: four votes, no agent run, nothing written. The gap must be at least 30 points in each.
 
 The judge also sees the task's status and the tool-level run statistics (see below), not tokens, turns,
 time or speed: they depend on the harness or the hardware, and the judge grades without knowing the model or the machine.

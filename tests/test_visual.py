@@ -1,4 +1,4 @@
-"""Visual tasks: deterministic content gates at run time; the headless render serves only the maintainer's judge."""
+"""Visual tasks: a task's own check reads text and starts no browser; tests/test_page_checks.py covers running the page."""
 
 from __future__ import annotations
 

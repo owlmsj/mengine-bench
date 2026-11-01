@@ -22,6 +22,7 @@ from mengine_bench.core import (
     close,
     has,
     read,
+    saw,
     write,
 )
 
@@ -53,9 +54,10 @@ def _transcript(seed: int, key_turns: list[str], filler_turns: int, filler: Sequ
 
 
 def _summary_check(result: CheckResult, text: str | None, limit: int, must: Sequence[str]) -> None:
-    result.add(f"summary exists and fits in {limit} characters", text is not None and 0 < len(text) <= limit)
+    result.add(f"summary exists and fits in {limit} characters", text is not None and 0 < len(text) <= limit,
+               "no summary file" if text is None else f"{len(text)} characters")
     for literal in must:
-        result.add(f"summary keeps `{literal}`", bool(text) and literal in (text or ""))
+        result.add(f"summary keeps `{literal}`", bool(text) and literal in (text or ""), f"`{literal}` is not in the summary")
 
 
 # ------------------------------------------------------------ cmp-handoff --
@@ -102,8 +104,8 @@ def _handoff_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     vram = next((number for number in numbers if float(number) >= 1000), None)
     got["final_vram_mib"] = vram or ""
     for key, pattern in HANDOFF_GOLD.items():
-        result.add(f"answer {key}", has(str(got.get(key, "")), pattern))
-    result.add("does not repeat the spilled VRAM as final", vram is not None and not close(vram, 7881, 0))
+        result.add(f"answer {key}", has(str(got.get(key, "")), pattern), saw(got.get(key), f"a match for {pattern}"))
+    result.add("does not repeat the spilled VRAM as final", vram is not None and not close(vram, 7881, 0), saw(vram, "not 7881"))
     return result
 
 

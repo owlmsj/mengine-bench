@@ -90,20 +90,9 @@ def cost_of(grid, path):
     return total
 
 
-GRIDS = [
-    ["SDDDG", "....."],
-    ["S..G"],
-    ["S.#.....", "..#.###.", "..D...#G", "####..#."],
-    ["S#......", ".#.####.", ".#.#..#.", ".D.#G.#.", "...####.", "........"],
-    ["S..D..G"],
-    ["S.......", "#######D", "G.......", "........"],
-    ["S.#", "###", "..G"],
-]
-
-
 class HiddenTest(unittest.TestCase):
-    def test_optimal_costs(self):
-        for grid in GRIDS:
+    def assert_cheapest(self, *grids):
+        for grid in grids:
             best = optimal(grid)
             path = find_path(list(grid))
             if best is None:
@@ -113,6 +102,22 @@ class HiddenTest(unittest.TestCase):
             self.assertEqual(path[0], locate(grid, "S"))
             self.assertEqual(path[-1], locate(grid, "G"))
             self.assertEqual(cost_of(grid, path), best, grid)
+
+    def test_plain_floor(self):
+        self.assert_cheapest(["S..G"])
+
+    def test_walks_around_door(self):
+        self.assert_cheapest(["SDDDG", "....."])
+
+    def test_takes_door(self):
+        self.assert_cheapest(["S..D..G"], ["S.......", "#######D", "G.......", "........"])
+
+    def test_dead_ends(self):
+        self.assert_cheapest(["S.#.....", "..#.###.", "..D...#G", "####..#."],
+                             ["S#......", ".#.####.", ".#.#..#.", ".D.#G.#.", "...####.", "........"])
+
+    def test_unreachable(self):
+        self.assert_cheapest(["S.#", "###", "..G"])
 
 
 if __name__ == "__main__":
@@ -163,10 +168,18 @@ def _astar_setup(ws: Path) -> None:
     write(ws, "test_pathfind.py", ASTAR_VISIBLE)
 
 
+ASTAR_CASES = (("plain floor", "test_plain_floor"), ("walks around a door when that is cheaper", "test_walks_around_door"),
+               ("takes a door when it is the way", "test_takes_door"), ("finds the way past dead ends", "test_dead_ends"),
+               ("returns None when G is unreachable", "test_unreachable"))
+
+
 def _astar_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
-    ok, _ = run_hidden_tests(ws, ASTAR_HIDDEN)
-    result.add("hidden optimal-cost tests (doors, dead ends, unreachable)", ok)
+    # #82: one case per check, so a failure names what went wrong and earns the rest.
+    for case, method in ASTAR_CASES:
+        selection = f"\n\ndef load_tests(loader, tests, pattern):\n    return unittest.TestSuite([HiddenTest('{method}')])\n"
+        ok, why = run_hidden_tests(ws, ASTAR_HIDDEN + selection)
+        result.add(f"hidden {case}", ok, why)
     return result
 
 
@@ -344,8 +357,8 @@ def _ecs_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result.mandatory.append(("visible tests left untouched", untouched))
     for name, case in (("movement", "MovementTests"), ("collision", "CollisionTests")):
         selection = f"\n\ndef load_tests(loader, tests, pattern):\n    return loader.loadTestsFromTestCase({case})\n"
-        ok, _ = run_hidden_tests(ws, ECS_HIDDEN + selection)
-        result.add(f"hidden {name}", ok)
+        ok, why = run_hidden_tests(ws, ECS_HIDDEN + selection)
+        result.add(f"hidden {name}", ok, why)
     return result
 
 
@@ -365,7 +378,7 @@ TASKS = [
         provenance="Terminal-Bench style: implement + hidden tests; A* with weighted doors on a Pixel Arena tile map",
         summary="Implement the cheapest route across a game map where doors cost more to cross.",
         setup=_astar_setup, check=_astar_check, reference=_astar_reference, timeout_s=120,
-        steps=(Step("In {WS}/pathfind.py implement find_path as the docstring says (minimum cost, not just fewest steps). "
+        steps=(Step("In {WS}/pathfind.py implement find_path as the docstring says. "
                     "Run `python -m unittest test_pathfind` in {WS}. " + RULES),),
     ),
     EvalTask(

@@ -17,13 +17,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from mengine_bench import __version__, catalog
+from mengine_bench.analyze import tie_note
 from mengine_bench.bundle import RESULT_NAME, SUMMARY_NAME
 from mengine_bench.judge import OFFICIAL_JUDGE_EFFORT, OFFICIAL_JUDGE_MODEL, RUBRIC_VERSION
 from mengine_bench.prices import price_text
 from mengine_bench.report import count_text, cost_text, hardware_short_text, time_text, tokens_text
 
 CONFIG_CELL_CHARS = 60
-CLOSE_POINTS = 1.0
 COLUMNS = ("#", "Score", "Correct %", "Solved", "Judge", "Speed", "Time", "Timeouts", "Cost", "Est. price", "Tokens", "Generated",
            "Turns",
            "Agent", "Model", "Effort",
@@ -155,11 +155,17 @@ def _table(rows: Iterable[RankedBundle]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _too_close(ranked: list[RankedBundle]) -> list[str]:
-    """One run is one sample and a run is not repeated: a lead under 1 point is a tie (#70)."""
-    scores = [-_by_score(entry) for entry in ranked]
-    close = sum(scores[0] - score < CLOSE_POINTS for score in scores) if scores else 0
-    return [f"The top {close} runs are within 1 point: read them as a tie.\n"] if close > 1 else []
+def judged_runs(results_dir: Path, version: str) -> list[dict[str, object]]:
+    """Complete runs of one bench major.minor that the official judge model voted on."""
+    runs = []
+    for result_file in sorted(results_dir.glob(f"*/{RESULT_NAME}")):
+        result = json.loads(result_file.read_text(encoding="utf-8"))
+        judge = result.get("judge")
+        official = isinstance(judge, dict) and (judge.get("model"), judge.get("effort")) == (OFFICIAL_JUDGE_MODEL,
+                                                                                             OFFICIAL_JUDGE_EFFORT)
+        if major_minor(result.get("bench_version")) == version and is_complete_run(result) and official:
+            runs.append(result)
+    return runs
 
 
 def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
@@ -179,7 +185,8 @@ def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
         else:
             ranked.append(entry)
     ranked.sort(key=_by_score)
-    sections = [LEADERBOARD_HEADER, _table(ranked) if ranked else "No results yet.\n", *_too_close(ranked)]
+    sections = [LEADERBOARD_HEADER, _table(ranked) if ranked else "No results yet.\n",
+                *tie_note([entry.result for entry in ranked])]
     for version in sorted(history, key=_version_key, reverse=True):
         sections.append(f"## Bench {version} (history)\n\n" + _table(sorted(history[version], key=_by_score)))
     if unranked:

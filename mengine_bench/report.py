@@ -240,7 +240,21 @@ def render_summary(results: Mapping[str, object]) -> str:
         lines.append(f"| {task['id']} | {task['status']}{flags} | {100 * task['c']:.0f}% | {passed}/{len(checks)} | "
                      f"{_fmt(task.get('judge'))} | {time_text(task['agent_s'])} | "
                      f"{'-' if cost is None else f'{cost:.4f}'} | {_stats_cells(task.get('stats'))} |")
-    return "\n".join(lines) + "\n"
+    return "\n".join([*lines, *_failed_checks(tasks)]) + "\n"
+
+
+def _failed_checks(tasks: Iterable[Mapping[str, object]]) -> list[str]:
+    """#82: what went wrong, readable without opening the transcript."""
+    lines = []
+    for task in tasks:
+        checks = task["checks"]
+        assert isinstance(checks, list)
+        for check in checks:
+            if check["ok"]:
+                continue
+            detail = " ".join(str(check.get("detail") or "").split())
+            lines.append(f"- `{task['id']}` {check['name']}" + (f": {detail}" if detail else ""))
+    return ["", "## Failed checks", "", *lines] if lines else []
 
 
 def render_tasks_table(tasks: Iterable[EvalTask]) -> str:

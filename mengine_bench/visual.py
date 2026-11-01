@@ -1,25 +1,28 @@
-"""Headless Chromium screenshots of a task's HTML deliverable.
+"""Headless Chromium for a task's HTML deliverable: the page checks at grading and the judge's screenshot.
 
-Only the maintainer's `mengine-bench judge` renders (#23): runs grade visual
-tasks on deterministic content gates, so contributors need no browser and the
-render never changes CHECKS. The judge sees the screenshot for the
-rendered-look part of its rubric; a blank or failed render scores 0 there.
+Grading runs the page once (#82): text checks alone gave c=1 to a page that throws on load. A contributor
+without a browser or the CDN loses nothing: the page checks are left out and the run says so. The judge sees
+the screenshot for the rendered-look part of its rubric; a blank or failed render scores 0 there.
 """
 
 from __future__ import annotations
 
 import os
 import platform
+import re
 import shutil
+import socket
 import subprocess
 import tempfile
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
 
 import psutil
 
+from mengine_bench.core import CheckResult
 from mengine_bench.redact import PathScope, local_names, redact_paths, redact_text
 from mengine_bench.runner.process import kill_tree
 
@@ -48,6 +51,14 @@ _HEADLESS_FLAGS = ("--headless=new", "--no-first-run", "--use-angle=swiftshader"
 # Containers have a tiny /dev/shm and no GPU; headless Chrome on Ubuntu
 # failed to screenshot without these.
 _LINUX_FLAGS = ("--disable-dev-shm-usage", "--disable-gpu")
+CONSOLE_LOG_FLAG = "--enable-logging=stderr"
+SCRIPT_ERROR_CHECK = "page runs without script errors"
+DRAWS_CHECK = "page draws something (screenshot not blank)"
+# Measured on Edge at 1440x900 (#82): an empty page 5,850 bytes, one h1 8,616, the plain reference scene 31,253,
+# and the smallest of 46 published pages 55,611.
+BLANK_PAGE_MAX_BYTES = 12_000
+THREE_CDN_HOST = "cdn.jsdelivr.net"
+CDN_TIMEOUT_S = 5.0
 
 
 def browser_install_candidates(system: str | None = None, env: Mapping[str, str] | None = None) -> list[Path]:
@@ -101,11 +112,13 @@ def is_render_failure(status: str) -> bool:
     return status == RENDER_FAILED or status.startswith(RENDER_FAILED + ":")
 
 
-def render_headless(html: Path, png: Path, browser_argv: Sequence[str] | None = None) -> str:
+def render_headless(html: Path, png: Path, browser_argv: Sequence[str] | None = None,
+                    console: list[str] | None = None) -> str:
     """Screenshot `html` at 1440x900; returns RENDERED, NO_BROWSER or a RENDER_FAILED reason.
 
     A failure reads "render failed: <cause>" so the run log explains itself.
     `browser_argv` replaces the discovered browser executable (tests use a fake).
+    `console`, when given, receives the browser's log lines.
     """
     if not html.is_file():
         return f"{RENDER_FAILED}: no html file {html.name}"
@@ -119,15 +132,16 @@ def render_headless(html: Path, png: Path, browser_argv: Sequence[str] | None = 
     # helper still holding its cache made archiving the workspace fail.
     profile = Path(tempfile.mkdtemp(prefix="mengine-bench-browser-"))
     try:
-        return _screenshot(list(browser_argv), profile, html, png)
+        return _screenshot(list(browser_argv), profile, html, png, console)
     finally:
         _stop_profile_processes(profile)
         _remove_profile(profile)
 
 
-def _screenshot(browser_argv: list[str], profile: Path, html: Path, png: Path) -> str:
+def _screenshot(browser_argv: list[str], profile: Path, html: Path, png: Path, console: list[str] | None) -> str:
     flags = headless_browser_flags(platform.system(), _running_as_root())
-    argv = [*browser_argv, *flags, f"--user-data-dir={profile}", f"--screenshot={png.resolve()}",
+    logging = [CONSOLE_LOG_FLAG] if console is not None else []
+    argv = [*browser_argv, *flags, *logging, f"--user-data-dir={profile}", f"--screenshot={png.resolve()}",
             html.resolve().as_uri()]
     # stderr goes to a file, not a pipe: orphaned helpers inherit the handle
     # and a pipe would never reach EOF while they live.
@@ -146,7 +160,63 @@ def _screenshot(browser_argv: list[str], profile: Path, html: Path, png: Path) -
             return _failure_reason(f"exit code {returncode}", stderr_log, profile, html)
         if not png.is_file():
             return _failure_reason("exit code 0 but no screenshot", stderr_log, profile, html)
+        if console is not None:
+            stderr_log.seek(0)
+            console.extend(stderr_log.read().decode("utf-8", errors="replace").splitlines())
     return RENDERED
+
+
+@dataclass(frozen=True)
+class PageProbe:
+    """One run of a page: how the render ended, its own script errors, and the screenshot's size."""
+
+    status: str
+    errors: tuple[str, ...] = ()
+    png_bytes: int = 0
+
+
+def page_errors(console: Sequence[str]) -> list[str]:
+    """Uncaught errors of the page itself; a browser extension logs to the same stream."""
+    found = (re.search(r'CONSOLE\S*\] "(Uncaught .*)", source: file:', line) for line in console)
+    return [match.group(1) for match in found if match]
+
+
+def probe_page(html: Path, browser_argv: Sequence[str] | None = None) -> PageProbe:
+    console: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="mengine-bench-probe-") as tmp:
+        png = Path(tmp) / "page.png"
+        status = render_headless(html, png, browser_argv, console)
+        size = png.stat().st_size if png.is_file() else 0
+    return PageProbe(status, tuple(page_errors(console)), size)
+
+
+def three_cdn_reachable() -> bool:
+    try:
+        with socket.create_connection((THREE_CDN_HOST, 443), timeout=CDN_TIMEOUT_S):
+            return True
+    except OSError:
+        return False
+
+
+def add_page_checks(result: CheckResult, html: Path, probe: Callable[[Path], PageProbe] = probe_page,
+                    cdn_reachable: Callable[[], bool] = three_cdn_reachable) -> None:
+    """Run the page once and add two checks; what the machine cannot do is a note, never a lost point."""
+    if not html.is_file():
+        return
+    try:
+        page = probe(html)
+    except (OSError, psutil.Error, subprocess.SubprocessError) as error:
+        result.notes.append(f"page not run: {type(error).__name__}")
+        return
+    if page.status != RENDERED:
+        result.notes.append(f"page not run: {page.status}")
+        return
+    blank = page.png_bytes <= BLANK_PAGE_MAX_BYTES
+    if blank and not page.errors and not cdn_reachable():
+        result.notes.append(f"page not run: the {THREE_CDN_HOST} CDN is out of reach")
+        return
+    result.add(SCRIPT_ERROR_CHECK, not page.errors, " | ".join(page.errors[:2]))
+    result.add(DRAWS_CHECK, not blank, f"the screenshot has {page.png_bytes} bytes, a blank page has about 5850")
 
 
 def _failure_reason(cause: str, stderr_log: IO[bytes], profile: Path, html: Path) -> str:

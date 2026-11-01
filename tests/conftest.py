@@ -17,9 +17,12 @@ def isolated_preflight(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest
     """The real preflight reads this machine's home and temp dir; runner tests
     must not depend on them (tests/test_preflight.py covers it with fakes)."""
     from mengine_bench import cli
+    from mengine_bench.runner import task_run
     monkeypatch.setattr(cli, "personal_instructions", lambda *args, **kwargs: [])
     monkeypatch.setattr(cli, "blocking_problems", lambda *args, **kwargs: [])
     monkeypatch.setenv("MENGINE_BENCH_SCRATCH", str(tmp_path_factory.mktemp("scratch")))
+    # Grading runs a page in a real browser (#82); tests/test_page_checks.py covers it with fakes.
+    monkeypatch.setattr(task_run, "add_page_checks", lambda result, html: None)
 
 
 @pytest.fixture
