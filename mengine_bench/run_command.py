@@ -89,10 +89,10 @@ def agent_commands(stdout: str) -> list[str]:
             continue
         if not isinstance(value, dict):
             continue
-        command = value.get("command")
+        command = value.get("command") or value.get("CommandLine")
         if isinstance(command, str) and command and (not found or found[-1] != command):
             found.append(command)
-        pending[:0] = [item for key, item in value.items() if key != "command"]
+        pending[:0] = [item for key, item in value.items() if key not in ("command", "CommandLine")]
     return found
 
 

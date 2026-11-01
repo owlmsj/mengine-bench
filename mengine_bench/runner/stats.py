@@ -2,7 +2,8 @@
 
 They come from the stream rather than from `Usage`, so a run stopped at its limit
 still has them. None means the harness does not report that value, never zero:
-only opencode stamps its events, so the time fields are None for Claude and Codex.
+only opencode stamps its events, so the time fields are None for Claude and Codex;
+AGY reports each step's duration, so it has tool time and turn rates.
 """
 
 from __future__ import annotations
@@ -12,15 +13,16 @@ import statistics
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field
 
-from mengine_bench.runner.agents import split_jsonl
+from mengine_bench.runner.agents import agy_tool_result, split_jsonl
 
-SHELL_TOOLS = frozenset({"bash", "shell"})
-WRITE_TOOLS = frozenset({"write", "edit", "multiedit", "notebookedit", "apply_patch", "patch"})
+SHELL_TOOLS = frozenset({"bash", "shell", "run_command"})
+WRITE_TOOLS = frozenset({"write", "edit", "multiedit", "notebookedit", "apply_patch", "patch", "write_file", "edit_file",
+                         "write_to_file", "replace_file_content", "multi_replace_file_content", "sed_file", "notebook_edit"})
 # Below this a turn's rate says more about fixed latency than about generation.
 TURN_RATE_MIN_TOKENS = 500
 OUTSIDE_PATH_MARKS = ("../", "..\\")
 # Only where a tool is told where to act: a file body can hold relative imports.
-OUTSIDE_PATH_FIELDS = ("path", "file_path", "notebook_path", "workdir", "command")
+OUTSIDE_PATH_FIELDS = ("path", "file_path", "notebook_path", "workdir", "command", "Path", "CommandLine")
 
 
 @dataclass
@@ -233,10 +235,41 @@ def _claude_blocks(event: Mapping[str, object]) -> list[Mapping[str, object]]:
     return [block for block in content if isinstance(block, dict)] if isinstance(content, list) else []
 
 
+def _agy_stats(events: list[dict[str, object]]) -> RunStats:
+    stats = RunStats(tool_s=0.0)
+    seen: set[str] = set()
+    for event in events:
+        step = _mapping(event.get("step_update"))
+        # A step streams while ACTIVE and reports its usage and result when it ends.
+        if step.get("state") == "ACTIVE":
+            continue
+        if step.get("step_type") == "agent_response":
+            _agy_turn(stats, step)
+        elif step.get("step_type") == "tool":
+            info = _mapping(step.get("tool_info"))
+            stats.tool_s += step["duration_seconds"] if type(step.get("duration_seconds")) is float else 0.0
+            _note_tool(stats, seen, str(step.get("tool_name") or ""), info.get("parameters"),
+                       failed=step.get("state") != "DONE", exit_code=agy_tool_result(info)[0])
+    return stats
+
+
+def _agy_turn(stats: RunStats, step: Mapping[str, object]) -> None:
+    usage = _mapping(step.get("usage"))
+    stats.model_turns += 1
+    cached = _count(usage.get("cache_read_tokens"))
+    generated = _count(usage.get("output_tokens"))
+    _note_tokens(stats, _count(usage.get("input_tokens")) + cached, cached, generated, _count(usage.get("thinking_tokens")))
+    seconds = step.get("duration_seconds")
+    if type(seconds) is float and seconds > 0 and generated >= TURN_RATE_MIN_TOKENS:
+        stats.turn_rates.append(generated / seconds)
+
+
 def stream_stats(stdout: str) -> RunStats:
     """Statistics of one step's stream; a stream from an unknown harness gives empty ones."""
     events = split_jsonl(stdout)
     kinds = {event.get("type") for event in events}
+    if any(event.get("event") == "step_update" for event in events):
+        return _agy_stats(events)
     if kinds & {"step_start", "step_finish", "tool_use"}:
         return _opencode_stats(events)
     if kinds & {"turn.started", "turn.completed", "item.completed"}:
