@@ -1,4 +1,4 @@
-# Scoring (bench 1.4)
+# Scoring (bench 1.5)
 
 A run of an agent (harness + model + configuration) gets three numbers folded into
 the Score, and a Cost kept apart.
@@ -9,12 +9,12 @@ the Score, and a Cost kept apart.
 | **Judge** | Mean of one rubric vote per task, 0-100. Set by the maintainer with `mengine-bench judge`. |
 | **Speed** | 100 at 5 min of Time or less, 0 at 30 min or more, linear in between: `100 x (1800 - Time) / 1500`. |
 | **Score** | `0.6 x Correct % + 0.25 x Judge + 0.15 x Speed x Correct % / 100`, one decimal, from the published values. Speed pays only for work that is right. Only once judged. |
-| **Time** | Total agent wall seconds. Grading and judging are excluded; a timeout counts its full time. |
+| **Time** | Total agent wall seconds. Grading and judging are excluded; a timeout counts its full time. On Codex the clock stops at the final event (`turn.completed`); a process still alive 5 s later is ended and flagged, not counted as a timeout. |
 | **Cost** | USD estimate of inference, with its basis. A separate column: no points per dollar. |
 | **Est. price** | The run's tokens at public API list prices, so subscription and API runs compare. No points either. |
 
 The formulas live in `mengine_bench/scoring.py`. Runs compare when they ran the
-same bench major.minor (1.4.x). A patch release changes no task or prompt. When it changes how a run is judged or
+same bench major.minor (1.5.x). A patch release changes no task or prompt. When it changes how a run is judged or
 scored, every ranked run is judged again from its bundle (`mengine-bench judge --again`), so none has to run again. Rankings of older versions stay in LEADERBOARD.md as history, with the Scores of their own formula.
 
 A run is one sample and runs are not repeated, so ties come from the published tasks: draw the 14 tasks again with

@@ -13,7 +13,7 @@ from mengine_bench.judge import JUDGE_SYSTEM_PROMPT, build_judge_prompt, JudgeCo
 from mengine_bench.redact import PathScope, redact_paths
 from mengine_bench.run_command import _outcome
 from mengine_bench.runner import process
-from mengine_bench.runner.agents import OpencodeAgent, partial_answer
+from mengine_bench.runner.agents import CodexAgent, OpencodeAgent, partial_answer
 from mengine_bench.runner.task_run import _step_env, run_task, snapshot
 from mengine_bench.tasks import business, compaction, context, gamedev, ir, longrepo, visual
 
@@ -313,3 +313,24 @@ def test_redacting_a_long_line_stays_linear() -> None:
     cleaned = redact_paths(line, PathScope())
     assert time.perf_counter() - started < 2.0
     assert "mengine-bench-fresh" not in cleaned and "someone" not in cleaned and "a.py" in cleaned
+
+
+def test_every_step_prompt_offers_every_skill_tool_and_mcp_server(monkeypatch: pytest.MonkeyPatch,
+                                                                  tmp_path: Path) -> None:
+    # #85: AGENTS.md alone misses an agent that does not load it, so the prompt of each step says it too.
+    prompts: list[str] = []
+
+    def fake_run(argv: object, cwd: Path, *args: object, **kwargs: object) -> process.ProcessResult:
+        prompts.append(str(kwargs.get("stdin_text") or ""))
+        rules = (Path(cwd) / "AGENTS.md").read_text(encoding="utf-8")
+        assert "any skill, tool or MCP server" in rules
+        return process.ProcessResult(stdout="", stderr="", exit_code=0, timed_out=False, wall_s=0.1)
+
+    monkeypatch.setattr(process, "run_process", fake_run)
+    task = _by_id("cmp-handoff")
+    assert len(task.steps) > 1
+    run_task(task, CodexAgent("m", None), tmp_path / "run")
+    assert prompts
+    for prompt in prompts:
+        assert "any skill, tool or MCP server available to you" in prompt
+        assert "smarter, more correct or faster" in prompt

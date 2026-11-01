@@ -42,11 +42,14 @@ BROWSER_PROFILE_DIRS = frozenset({"_browser-profile", ".browser-profile", "brows
 # server, skill or subagent it has is fair game. Local files outside the
 # workspace are not: earlier steps and runs live next to it, and the
 # transcripts are published.
-WORKSPACE_RULES = ("Use any tool you have. Read and write local files only inside this directory.\n"
+WORKSPACE_RULES = ("Use any skill, tool or MCP server you have. Read and write local files only inside this directory.\n"
                    "Do not print credentials, environment variables or personal data: this session is published.\n")
 # #41: without this a model can plan until the limit and leave nothing to grade.
 TIME_LIMIT_NOTE = ("\n\nYou have {minutes} min for this step. The folder and your reply so far are graded as they stand "
                    "when time runs out, so deliver a first complete version early.")
+# #85: in every prompt too, for an agent that does not load AGENTS.md (AGY --print).
+ANY_TOOL_NOTE = ("\n\nYou may use any skill, tool or MCP server available to you whenever it makes your work smarter, "
+                 "more correct or faster.")
 COPY_IGNORE = shutil.ignore_patterns(".git", "tmp", "__pycache__", "_render")
 
 
@@ -74,6 +77,8 @@ class TaskRunRecord:
     grading_s: float = 0.0
     workspace: Path | None = None
     initial_files: dict[str, bytes] = field(default_factory=dict)
+    # Published next to the status: what the runner had to do, never a grade.
+    notes: list[str] = field(default_factory=list)
 
     @property
     def usage(self) -> Usage | None:
@@ -144,7 +149,7 @@ def run_task(task: EvalTask, agent: Agent, root: Path, fresh_root: Path | None =
                 settle_workspace(workspace, root, workspace_index)
                 workspace, workspace_index = fresh, index
             prompt = render_prompt(task, index, workspace, root / "hidden" / str(index))
-            prompt += TIME_LIMIT_NOTE.format(minutes=f"{task.timeout_s / 60:g}")
+            prompt += ANY_TOOL_NOTE + TIME_LIMIT_NOTE.format(minutes=f"{task.timeout_s / 60:g}")
             (workspace / "AGENTS.md").write_text(WORKSPACE_RULES, encoding="utf-8", newline="")
             _run_step(agent, task, workspace, root, index, prompt, record)
         except StepFailed as failure:
@@ -217,12 +222,15 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: in
     call = agent.invocation(prompt, prompt_file.resolve(), workspace.resolve(), attachments)
     try:
         result = process.run_process(call.argv, workspace, task.timeout_s, stdin_text=call.stdin_text,
-                                     env=_step_env(workspace, call.env))
+                                     env=_step_env(workspace, call.env), final_event=call.final_event)
     except OSError as error:
         record.steps.append(StepRecord(index, 0.0, None, "crash", str(error)))
         raise StepFailed("crash", f"could not start agent {call.argv[0]!r}: {error}") from error
     if result.reaped:
         print(f"[{task.id}] step {label}: killed {result.reaped} process(es) the agent left running", flush=True)
+    if result.stopped_after_final:
+        print(f"[{task.id}] step {label}: the agent reported its final event but did not exit; stopped it", flush=True)
+        record.notes.append("stopped after its final event")
     (transcripts / f"step-{label}.stdout.txt").write_text(result.stdout, encoding="utf-8")
     (transcripts / f"step-{label}.stderr.txt").write_text(result.stderr, encoding="utf-8")
     stats = stream_stats(result.stdout)

@@ -166,7 +166,7 @@ def _detail(task: EvalTask, record: TaskRunRecord) -> TaskDetail:
         steps=[{"index": s.index, "wall_s": round(s.wall_s, 2), "exit_code": s.exit_code, "status": s.status,
                 "usage": usage_record(s.usage)} for s in record.steps],
         grading_s=record.grading_s, checks=checks,
-        flags=([] if record.status == "ok" else [record.status]) + list(notes), error=_public_error(record.error, record),
+        flags=([] if record.status == "ok" else [record.status]) + list(notes) + record.notes, error=_public_error(record.error, record),
         answers=list(record.answers), usage=usage_record(record.usage), stats=record.stats,
     )
 
