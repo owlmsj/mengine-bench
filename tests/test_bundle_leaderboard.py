@@ -120,7 +120,7 @@ def _write_result(results: Path, name: str, score: float | None, *, model: str =
     result = {
         "date": "2026-10-19", "bench_version": bench_version, "submitter": "dquill",
         "agent": {"name": "codex", "model": model, "effort": "high", "version": "codex-cli 0.162.1"},
-        "judge": {"agent": "claude", "model": "claude-opus-5-5", "effort": "xhigh", "rubric": "2.4"} if judged else None,
+        "judge": {"agent": "claude", "model": "claude-opus-5-5", "effort": "xhigh", "rubric": "2.5"} if judged else None,
         "config": {"personal_instructions": [], "provider": "openai", "mcp": "none"},
         "environment": {"os": "Linux 6", "cpu": "AMD Ryzen 9 7950X", "cpu_count": 32, "ram_gb": 62.6,
                         "gpu": "NVIDIA GeForce RTX 4090 (24 GB)"},
@@ -202,10 +202,10 @@ def test_an_older_ranking_stays_on_the_board_as_history(tmp_path: Path) -> None:
     assert [name for name, _ in board.unranked] == ["results/old-pending"]
 
 
-def test_bench_is_version_1_5_x() -> None:
+def test_bench_is_version_1_6_x() -> None:
     import tomllib
     pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
-    assert __version__ == pyproject["project"]["version"] and __version__.startswith("1.5.")
+    assert __version__ == pyproject["project"]["version"] and __version__.startswith("1.6.")
 
 
 def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:
@@ -219,7 +219,7 @@ def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 0
     assert board.unranked == [("results/cheap-judge",
-                               "judged by claude claude-haiku-5-5@xhigh rubric 2.4; only claude claude-opus-5-5@xhigh rubric 2.4 judges are ranked")]
+                               "judged by claude claude-haiku-5-5@xhigh rubric 2.5; only claude claude-opus-5-5@xhigh rubric 2.5 judges are ranked")]
 
 
 @pytest.mark.parametrize("field,value", [("agent", "cmd"), ("rubric", "1.0")])

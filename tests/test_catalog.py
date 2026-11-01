@@ -45,9 +45,10 @@ def test_duplicate_ids_are_rejected() -> None:
         catalog.collect([one, two])
 
 
-def test_limits_keep_a_slow_run_under_40_minutes() -> None:
-    """#41: a good run takes about 10 min and 40 to 50 is too long; the six runs at Correct 100 fit these limits."""
+def test_limits_fit_the_measured_times_and_cap_the_worst_case_at_56_minutes() -> None:
+    # #98: from 7 to 10 runs. The slowest short eval took 50 s, Mondrian 194 s and 3D 288 s. The 56 min apply only when an
+    # agent hits every limit; the prompt also asks it to stop polishing once the work is right.
     limits = {task.id: task.timeout_s for task in catalog.all_tasks()}
-    assert sum(limits.values()) == 2400, limits
-    assert {task: limit for task, limit in limits.items() if limit != 120} == {
-        "gd-integration-repo": 300, "web-mondrian-landing": 300, "3d-voxel-landscape": 480}
+    assert sum(limits.values()) == 3360, limits
+    assert {task: limit for task, limit in limits.items() if limit != 180} == {
+        "gd-integration-repo": 300, "web-mondrian-landing": 300, "3d-voxel-landscape": 420, "web-word-universe": 360}

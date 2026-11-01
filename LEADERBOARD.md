@@ -7,6 +7,10 @@ by the maintainer on review; the transcripts are in each bundle. Only complete,
 judged runs of the current bench version are ranked. Older rankings stay below as history:
 their Scores use that version's formula and do not compare with the table above.
 
+No results yet.
+
+## Bench 1.5 (history)
+
 | # | Score | Correct % | Solved | Judge | Speed | Time | Timeouts | Cost | Est. price | Tokens | Generated | Turns | Agent | Model | Effort | Hardware | Config | Submitter | Date | Run |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | **97.2** | 100.0 | 14/14 | 88.9 | 100.0 | 4 min 46 s | 0 | n/a | ~$1.48 | 1.37M | 19.3k | 15 | codex codex-cli 0.165.0 | gpt-6.1-sol | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=codex, tier=0, role=default, service_tier=fast, i... | owlmsj | 2026-11-01 | [run](results/2026-11-01_codex_gpt-6.1-sol_low_f89e0d05/summary.md) |
@@ -14,8 +18,6 @@ their Scores use that version's formula and do not compare with the table above.
 | 3 | **96.2** | 100.0 | 14/14 | 90.4 | 90.7 | 7 min 19 s | 0 | n/a | ~$9.52 | 1.64M | 25.0k | 15 | codex codex-cli 0.165.0 | gpt-6-astra | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=codex, tier=0, role=default, service_tier=fast, i... | owlmsj | 2026-11-01 | [run](results/2026-11-01_codex_gpt-6-astra_low_43c80073/summary.md) |
 | 4 | **95.3** | 100.0 | 14/14 | 81.1 | 100.0 | 4 min 46 s | 0 | $1.79 (harness) | ~$1.79 | 1.81M | 30.5k | 51 | claude 2.1.316 (Claude Code) | claude-sonnet-5-5 | medium | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=claude-code, tier=0, role=default, instructions=~... | owlmsj | 2026-11-01 | [run](results/2026-11-01_claude_claude-sonnet-5-5_medium_3bc720d4/summary.md) |
 | 5 | **94.9** | 100.0 | 14/14 | 91.9 | 79.5 | 10 min 08 s | 0 | $4.94 (harness) | ~$4.94 | 2.40M | 65.5k | 59 | claude 2.1.316 (Claude Code) | claude-opus-5-5 | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=claude-code, tier=0, role=default, fast_mode=off,... | owlmsj | 2026-11-01 | [run](results/2026-11-01_claude_claude-opus-5-5_low_b7ccc861/summary.md) |
-
-Read as ties, because the higher run keeps its lead in under 80% of 2000 draws of the tasks: #2 and #3 (53%), #3 and #4 (75%), #4 and #5 (52%). `mengine-bench analyze` shows the rest.
 
 ## Bench 1.4 (history)
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -38,7 +39,8 @@ def test_win_share_is_the_same_on_every_call() -> None:
 def test_a_lead_that_rests_on_one_task_is_a_tie() -> None:
     one_task = _run("a", judge=80)
     one_task["tasks"][0]["judge"] = 100
-    share = analyze.win_share(analyze.task_points(one_task), analyze.task_points(_run("b", judge=81)))
+    # Scores round to 0.1: the gap is wide enough that a draw holding the task once still wins, at any task count.
+    share = analyze.win_share(analyze.task_points(one_task), analyze.task_points(_run("b", judge=80.5)))
     assert 0.5 < share < analyze.TIE_BELOW
 
 
@@ -91,3 +93,69 @@ def test_the_command_reads_one_version_and_says_when_it_has_no_runs(tmp_path: Pa
     assert cli.main(["analyze", "--results", str(results), "--version", "0.1"]) == 1
     out = capsys.readouterr().out
     assert "received no judged runs of bench 0.1" in out and leaderboard.major_minor(__version__) in out
+
+
+def _dated_run(date: str) -> dict[str, object]:
+    run = _run("repeat")
+    run.update(date=date, bench_version="1.5.0", config={"provider": "local", "personal_instructions": []})
+    run["agent"]["name"] = "codex"
+    run["totals"]["tokens"] = {"input": 1000}
+    for task in run["tasks"]:
+        task.update(checks=[{"name": "output matches", "ok": True}], tokens={"input": 100})
+    return run
+
+
+def _changes(runs: list[dict[str, object]]) -> str:
+    return analyze.render_analysis(runs, "1.5").split("## Changes since the last run\n", 1)[1]
+
+
+def test_changes_warn_about_regressions_and_name_only_affected_tasks() -> None:
+    previous, latest = _dated_run("2026-10-30"), _dated_run("2026-10-31")
+    latest["config"]["personal_instructions"] = ["different instructions"]
+    latest["bench_version"] = "1.5.1"
+    task = latest["tasks"][0]
+    task.update(agent_s=40.0, judge=73, tokens={"input": 126})
+    task["checks"][0]["ok"] = False
+    latest["totals"].update(time_s=600.0, judge=73, tokens={"input": 1260})
+    changes = _changes([latest, previous])
+    assert changes.count("codex repeat/low") == 1
+    assert "2026-10-30 -> 2026-10-31" in changes
+    assert f"Time: {30 * len(IDS)} -> 600" in changes
+    assert "Judge: 80 -> 73" in changes
+    assert "Input tokens: 1000 -> 1260" in changes
+    assert f"{IDS[0]}: check failed: output matches; Time: 30 -> 40; Judge: 80 -> 73; Input tokens: 100 -> 126" in changes
+    assert all(task_id not in changes for task_id in IDS[1:])
+    assert "personal_instructions" not in changes
+
+
+def test_changes_do_not_warn_at_thresholds_or_for_improvements() -> None:
+    previous, latest = _dated_run("2026-10-30"), _dated_run("2026-10-31")
+    latest["totals"].update(time_s=30.0 * len(IDS) * 1.25, judge=74, tokens={"input": 1250})
+    latest["tasks"][0].update(agent_s=37.5, judge=74, tokens={"input": 125})
+    latest["tasks"][1].update(agent_s=1.0, judge=100, tokens={"input": 1})
+    assert _changes([previous, latest]).strip() == "No warnings."
+
+
+@pytest.mark.parametrize("different", ["agent", "model", "effort", "config", "version"])
+def test_changes_require_the_same_combination_and_bench_major_minor(different: str) -> None:
+    previous, latest = _dated_run("2026-10-30"), _dated_run("2026-10-31")
+    latest["tasks"][0]["checks"][0]["ok"] = False
+    if different == "config":
+        latest["config"]["provider"] = "other"
+    elif different == "version":
+        latest["bench_version"] = "1.6.0"
+    else:
+        latest["agent"]["name" if different == "agent" else different] = "other"
+    assert _changes([previous, latest]).strip() == "No repeated combinations to compare."
+
+
+def test_changes_compare_only_the_latest_pair_by_started_at() -> None:
+    oldest = _dated_run("2026-10-30")
+    oldest["started_at"] = "2026-10-30T08:00:00Z"
+    previous = deepcopy(oldest)
+    previous["started_at"] = "2026-10-30T09:00:00Z"
+    previous["tasks"][0]["checks"][0]["ok"] = False
+    latest = deepcopy(previous)
+    latest["started_at"] = "2026-10-30T10:00:00Z"
+    latest["agent"]["version"] = "new CLI version"
+    assert _changes([latest, oldest, previous]).strip() == "No warnings."

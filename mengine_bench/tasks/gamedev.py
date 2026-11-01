@@ -15,6 +15,7 @@ from mengine_bench.core import (
     EvalTask,
     Step,
     read,
+    checkpoints,
     run_hidden_tests,
     write,
 )
@@ -370,23 +371,26 @@ def _ecs_reference(ws: Path) -> list[str]:
     return ["fixed movement.py:5 and collision.py:8"]
 
 
-RULES = "Python standard library only. Write your files inside {WS}. Do not ask for confirmation; finish the task and summarize in 2 lines."
+TESTS_RUN = ("ran the tests", r"unittest|pytest")
 
 TASKS = [
     EvalTask(
         id="gd-astar-doors", category="gamedev",
-        provenance="Terminal-Bench style: implement + hidden tests; A* with weighted doors on a Pixel Arena tile map",
-        summary="Implement the cheapest route across a game map where doors cost more to cross.",
-        setup=_astar_setup, check=_astar_check, reference=_astar_reference, timeout_s=120,
-        steps=(Step("In {WS}/pathfind.py implement find_path as the docstring says. "
-                    "Run `python -m unittest test_pathfind` in {WS}. " + RULES),),
+        provenance="Terminal-Bench style: implement + hidden tests; weighted doors on a Pixel Arena tile map",
+        summary="Make units find the cheapest route across a game map where doors cost more to cross.",
+        setup=_astar_setup, check=_astar_check, reference=_astar_reference, timeout_s=180,
+        checkpoints=checkpoints(("read the module", r"pathfind"), TESTS_RUN),
+        steps=(Step("Units in our tile game cannot find their way yet: find_path in {WS}/pathfind.py is still empty. Make it "
+                    "work as its docstring says. The project takes no new dependencies."),),
     ),
     EvalTask(
         id="gd-ecs-collision-bug", category="gamedev",
         provenance="SWE-bench style debug: two planted bugs across an ECS package; visible tests must stay untouched",
-        summary="Fix movement and box collision bugs in a small game codebase without changing its tests.",
-        setup=_ecs_setup, check=_ecs_check, reference=_ecs_reference, timeout_s=120,
-        steps=(Step("The package {WS}/arena_ecs has failing tests in {WS}/tests. Find the root cause and fix the code "
-                    "(do not change the tests). Run `python -m unittest discover -s tests` with cwd {WS}. " + RULES),),
+        summary="Find out why units move and collide wrong in a small game codebase, and fix it.",
+        setup=_ecs_setup, check=_ecs_check, reference=_ecs_reference, timeout_s=180,
+        checkpoints=checkpoints(TESTS_RUN, ("read movement", r"movement"), ("read collision", r"collision")),
+        steps=(Step("Playtesters say units in {WS}/arena_ecs drift and collide wrong, and the tests in {WS}/tests fail. Find out "
+                    "why and fix it. The tests describe the behavior we want, so they stay as they are, and the project takes "
+                    "no new dependencies."),),
     ),
 ]

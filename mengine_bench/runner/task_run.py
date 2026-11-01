@@ -46,10 +46,15 @@ WORKSPACE_RULES = ("Use any skill, tool or MCP server you have. Read and write l
                    "Do not print credentials, environment variables or personal data: this session is published.\n")
 # #41: without this a model can plan until the limit and leave nothing to grade.
 TIME_LIMIT_NOTE = ("\n\nYou have {minutes} min for this step. The folder and your reply so far are graded as they stand "
-                   "when time runs out, so deliver a first complete version early.")
+                   "when time runs out, so deliver a first complete version early. Time counts in your grade: finish as soon as the work "
+                   "is right, with at most 2 rounds of revision after that first version.")
 # #85: in every prompt too, for an agent that does not load AGENTS.md (AGY --print).
 ANY_TOOL_NOTE = ("\n\nYou may use any skill, tool or MCP server available to you whenever it makes your work smarter, "
                  "more correct or faster.")
+# #98: the route is open, so nothing here says how. Asking how they know it is right is the brief's last question.
+BRIEF_NOTE = ("\n\nThis is the whole brief: there is no second turn and nobody can answer questions. Choose your own "
+              "approach, decide what the brief leaves open and state your assumptions. End by saying what you found "
+              "and how you know it is right.")
 COPY_IGNORE = shutil.ignore_patterns(".git", "tmp", "__pycache__", "_render")
 
 
@@ -79,6 +84,8 @@ class TaskRunRecord:
     initial_files: dict[str, bytes] = field(default_factory=dict)
     # Published next to the status: what the runner had to do, never a grade.
     notes: list[str] = field(default_factory=list)
+    # Raw stdout of each step, for the checkpoints. Not published from here: the transcripts are, after redaction.
+    streams: list[str] = field(default_factory=list)
 
     @property
     def usage(self) -> Usage | None:
@@ -149,7 +156,7 @@ def run_task(task: EvalTask, agent: Agent, root: Path, fresh_root: Path | None =
                 settle_workspace(workspace, root, workspace_index)
                 workspace, workspace_index = fresh, index
             prompt = render_prompt(task, index, workspace, root / "hidden" / str(index))
-            prompt += ANY_TOOL_NOTE + TIME_LIMIT_NOTE.format(minutes=f"{task.timeout_s / 60:g}")
+            prompt += BRIEF_NOTE + ANY_TOOL_NOTE + TIME_LIMIT_NOTE.format(minutes=f"{task.timeout_s / 60:g}")
             (workspace / "AGENTS.md").write_text(WORKSPACE_RULES, encoding="utf-8", newline="")
             _run_step(agent, task, workspace, root, index, prompt, record)
         except StepFailed as failure:
@@ -207,7 +214,16 @@ def _step_env(workspace: Path, extra: Mapping[str, str] | None) -> dict[str, str
     """Caller env plus PWD=<workspace>: opencode 2.0.29 trusts PWD over the process cwd
     (cli/src/run/run.ts:73), and Popen(cwd=...) does not update PWD."""
     # #59: bytecode took 16,463 of the 19,198 characters a judge saw, and the suites the prompts ask for write it.
-    return {**os.environ, "PWD": str(workspace.resolve()), "PYTHONDONTWRITEBYTECODE": "1", **(extra or {})}
+    env = {**os.environ, "PWD": str(workspace.resolve()), "PYTHONDONTWRITEBYTECODE": "1", **(extra or {})}
+    # #95: a benchmark step must not inherit the launching Claude session.
+    for key in (
+        "CLAUDECODE", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID", "CLAUDE_PID",
+        "CLAUDE_EFFORT", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_BRIDGE_SESSION_ID",
+        "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXECPATH",
+        "CLAUDE_CODE_MESSAGING_TOKEN",
+    ):
+        env.pop(key, None)
+    return env
 
 
 def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: int, prompt: str,
@@ -234,6 +250,7 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: in
     (transcripts / f"step-{label}.stdout.txt").write_text(result.stdout, encoding="utf-8")
     (transcripts / f"step-{label}.stderr.txt").write_text(result.stderr, encoding="utf-8")
     stats = stream_stats(result.stdout)
+    record.streams.append(result.stdout)
     if result.timed_out:
         message = f"step {label} exceeded the {task.timeout_s}s timeout"
         # #59: a reply already given counts, or an answer-only task would zero at the limit.

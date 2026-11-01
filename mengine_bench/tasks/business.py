@@ -2,8 +2,8 @@
 
 Messy-but-real inputs on purpose: duplicated telemetry rows, a Brazilian
 ledger with `;` and `1.234,56`, bank memos in three formats. The gold is the
-exact number a careful analyst gets; rounding is tolerated, a different
-method is not.
+number a careful analyst gets by any valid route (#98): rounding, units and
+number formats are tolerated, a wrong answer is not.
 """
 
 from __future__ import annotations
@@ -22,14 +22,16 @@ from mengine_bench.core import (
     CheckResult,
     EvalTask,
     Step,
-    close,
-    read,
-    read_json,
+    WROTE_RESULT,
+    checkpoints,
+    is_yes,
+    near,
+    near_share,
+    number,
+    result_json,
     saw,
     write,
 )
-
-RULES = "Write your files inside {WS}. Do not ask for confirmation."
 
 # ----------------------------------------------------------- ds-ab-playtest --
 
@@ -85,7 +87,9 @@ def _ab_setup(ws: Path) -> None:
     write(ws, "telemetry/README.md",
           "# Playtest A/B - Pixel Arena tutorial\n\nExport from arena-panel. The ETL resends sessions: "
           "`session_id` is the unique key (repeated rows are the same session). `variant` may come lowercase "
-          "or with a leading space. `completed_tutorial` is 0/1.\n")
+          "or with a leading space. `completed_tutorial` is 0/1.\n\n"
+          "Release rule: a variant ships only when its gain in tutorial completion is statistically significant at the "
+          "5% level.\n")
 
 
 def _seen(got: Mapping[str, object], exp: Mapping[str, object], *keys: str) -> str:
@@ -95,25 +99,23 @@ def _seen(got: Mapping[str, object], exp: Mapping[str, object], *keys: str) -> s
 def _ab_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     exp = _ab_expected()
-    got = read_json(ws, "ab_result.json")
-    got = got if isinstance(got, dict) else {}
-    result.add("deduplicated session counts", close(got.get("sessions_a"), exp["sessions_a"], 0) and close(got.get("sessions_b"), exp["sessions_b"], 0),
+    got = result_json(ws)
+    result.add("deduplicated session counts", near(got.get("sessions_a"), exp["sessions_a"], 0) and near(got.get("sessions_b"), exp["sessions_b"], 0),
                _seen(got, exp, "sessions_a", "sessions_b"))
-    result.add("completion rates", close(got.get("rate_a"), float(exp["rate_a"]), 1e-3) and close(got.get("rate_b"), float(exp["rate_b"]), 1e-3),
-               _seen(got, exp, "rate_a", "rate_b"))
-    result.add("absolute and relative lift", close(got.get("abs_lift"), float(exp["abs_lift"]), 1e-3) and close(got.get("rel_lift"), float(exp["rel_lift"]), 2e-3),
-               _seen(got, exp, "abs_lift", "rel_lift"))
-    # Four decimals asked: a one-sided 0.0001 is another method, not rounding (#59).
-    result.add("two-proportion z-test p-value", close(got.get("p_value"), float(exp["p_value"]), 6e-5),
-               saw(got.get("p_value"), exp["p_value"]))
-    result.add("ship decision", got.get("ship_b") is exp["ship_b"], saw(got.get("ship_b"), exp["ship_b"]))
-    result.add("mean match minutes", close(got.get("mean_minutes_a"), float(exp["mean_minutes_a"]), 0.02) and close(got.get("mean_minutes_b"), float(exp["mean_minutes_b"]), 0.02),
-               _seen(got, exp, "mean_minutes_a", "mean_minutes_b"))
+    result.add("completion rates", near_share(got.get("completion_rate_a"), float(exp["rate_a"]), 2e-3)
+               and near_share(got.get("completion_rate_b"), float(exp["rate_b"]), 2e-3),
+               saw({key: got.get(key) for key in ("completion_rate_a", "completion_rate_b")}, (exp["rate_a"], exp["rate_b"])))
+    # #98: which valid test is the agent's call (z, chi-squared, Fisher); all put this gap well under 5%.
+    p_value = number(got.get("p_value"))
+    result.add("the gain is significant", p_value is not None and 0 <= p_value < 0.05, saw(got.get("p_value"), f"about {exp['p_value']:.4f}"))
+    result.add("ship decision", is_yes(got.get("ship_b")), saw(got.get("ship_b"), True))
     return result
 
 
 def _ab_reference(ws: Path) -> list[str]:
-    write(ws, "ab_result.json", json.dumps(_ab_expected()))
+    exp = _ab_expected()
+    write(ws, "result.json", json.dumps({"ship_b": exp["ship_b"], "sessions_a": exp["sessions_a"], "sessions_b": exp["sessions_b"],
+                                         "completion_rate_a": exp["rate_a"], "completion_rate_b": exp["rate_b"], "p_value": exp["p_value"]}))
     return ["done"]
 
 
@@ -185,6 +187,8 @@ def _pnl_setup(ws: Path) -> None:
     ledger = "date;account;description;amount\n" + "".join(
         f"{d.strftime('%d/%m/%Y')};{c};{desc};{_brl(v)}\n" for d, c, desc, v in _ledger())
     write(ws, "finance/ledger.csv", ledger)
+    write(ws, "finance/README.md", "# Finance notes\n\nThe board reads burn as the average monthly negative EBITDA of the "
+          "last three closed months. Runway is the latest closing cash balance divided by that burn.\n")
     write(ws, "finance/chart_of_accounts.csv", "account;name;pnl_line\n" + "".join(f"{c};{n};{line}\n" for c, n, line in CHART))
     write(ws, "finance/cash_balance.txt", f"Consolidated balance on 31/05/2026: R$ {_brl(CASH_MAY)}\n"
                                           f"Consolidated balance on 30/06/2026: R$ {_brl(CASH)}\n")
@@ -193,29 +197,26 @@ def _pnl_setup(ws: Path) -> None:
 def _pnl_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     table, runway = _pnl_expected()
-    rows = list(csv.DictReader(io.StringIO(read(ws, "pnl.csv") or "")))
-    got = {row.get("line"): row for row in rows}
-    lines = [row.get("line") for row in rows]
-    result.add("pnl.csv lines in order", lines == PNL_LINES, saw(lines, PNL_LINES))
-    for line in PNL_LINES:
-        tol = 0.02 if line == "gross_margin_pct" else 1.0
-        wrong = next((ym for ym in MONTHS if line not in got or not close(got[line].get(ym), table[line][ym], tol)), None)
-        result.add(f"{line} per month", wrong is None,
-                   f"{wrong}: {saw(got.get(line, {}).get(wrong), table[line].get(wrong))}")
-    rj = read_json(ws, "runway.json")
-    rj = rj if isinstance(rj, dict) else {}
-    result.add("3-month average burn", close(rj.get("burn_avg_3m"), runway["burn_avg_3m"], 1.0),
-               saw(rj.get("burn_avg_3m"), runway["burn_avg_3m"]))
-    result.add("runway in months", close(rj.get("runway_months"), runway["runway_months"], 0.051),
-               saw(rj.get("runway_months"), runway["runway_months"]))
+    got = result_json(ws)
+    for line in ("revenue", "gross_margin_pct", "ebitda"):
+        series = got.get(line)
+        series = series if isinstance(series, dict) else {}
+        if line == "gross_margin_pct":
+            wrong = next((ym for ym in MONTHS if not near_share(series.get(ym), table[line][ym] / 100, 1e-3)), None)
+        else:
+            wrong = next((ym for ym in MONTHS if not near(series.get(ym), table[line][ym], 1.0)), None)
+        result.add(f"{line} per month", wrong is None, f"{wrong}: {saw(series.get(wrong), table[line].get(wrong))}")
+    burn = number(got.get("burn"))
+    # #98: a burn of 197288 or -197288 says the same thing.
+    result.add("3-month average burn", burn is not None and abs(abs(burn) - runway["burn_avg_3m"]) <= 1.0, saw(got.get("burn"), runway["burn_avg_3m"]))
+    result.add("runway in months", near(got.get("runway_months"), runway["runway_months"], 0.1), saw(got.get("runway_months"), runway["runway_months"]))
     return result
 
 
 def _pnl_reference(ws: Path) -> list[str]:
     table, runway = _pnl_expected()
-    lines = ["line," + ",".join(MONTHS)] + [f"{line}," + ",".join(f"{table[line][ym]:.2f}" for ym in MONTHS) for line in PNL_LINES]
-    write(ws, "pnl.csv", "\n".join(lines) + "\n")
-    write(ws, "runway.json", json.dumps({"burn_avg_3m": round(runway["burn_avg_3m"], 2), "runway_months": round(runway["runway_months"], 1)}))
+    write(ws, "result.json", json.dumps({**{line: {ym: round(table[line][ym], 2) for ym in MONTHS} for line in ("revenue", "gross_margin_pct", "ebitda")},
+                                         "burn": round(runway["burn_avg_3m"], 2), "runway_months": round(runway["runway_months"], 1)}))
     return ["done"]
 
 
@@ -269,8 +270,7 @@ def _recon_setup(ws: Path) -> None:
 
 def _recon_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
-    got = read_json(ws, "reconciliation.json")
-    got = got if isinstance(got, dict) else {}
+    got = result_json(ws)
     for key, label in (("unpaid", "unpaid invoices"), ("duplicated", "duplicated payments")):
         entries = got.get(key)
         ids = sorted(str(entry.get("id") if isinstance(entry, dict) else entry)
@@ -284,8 +284,8 @@ def _recon_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     invoiced = {i: v for i, _, v in _invoices()}
     paid = {"INV-1021": round(invoiced["INV-1021"] - 250.0, 2), "INV-1036": round(invoiced["INV-1036"] * 0.9, 2)}
     result.add("invoiced vs paid on mismatches", valid_mismatches and ids == RECON["mismatched"] and all(
-        close(m.get("invoiced"), invoiced[str(m.get("id"))], 0.01)
-        and close(m.get("paid"), paid[str(m.get("id"))], 0.01) for m in mism),
+        near(m.get("invoiced"), invoiced[str(m.get("id"))], 0.01)
+        and near(m.get("paid"), paid[str(m.get("id"))], 0.01) for m in mism),
         saw(mism, [{"id": i, "invoiced": invoiced[i], "paid": paid[i]} for i in RECON["mismatched"]]))
     return result
 
@@ -293,7 +293,7 @@ def _recon_check(ws: Path, answers: Sequence[str]) -> CheckResult:
 def _recon_reference(ws: Path) -> list[str]:
     invoiced = {i: v for i, _, v in _invoices()}
     paid = {"INV-1021": invoiced["INV-1021"] - 250.0, "INV-1036": round(invoiced["INV-1036"] * 0.9, 2)}
-    write(ws, "reconciliation.json", json.dumps({
+    write(ws, "result.json", json.dumps({
         "unpaid": RECON["unpaid"], "duplicated": RECON["duplicated"],
         "mismatched": [{"id": i, "invoiced": invoiced[i], "paid": paid[i]} for i in RECON["mismatched"]]}))
     return ["done"]
@@ -302,35 +302,37 @@ def _recon_reference(ws: Path) -> list[str]:
 TASKS = [
     EvalTask(
         id="ds-ab-playtest", category="data-science",
-        provenance="Pixel Arena playtest A/B (arena-panel telemetry); two-proportion z-test on a dirty export",
-        summary="Compare two game tutorials using player data and decide which one to release.",
-        setup=_ab_setup, check=_ab_check, reference=_ab_reference, timeout_s=120,
-        steps=(Step("Read {WS}/telemetry/README.md and analyze {WS}/telemetry/playtest_ab.csv. Write {WS}/ab_result.json with "
-                    "the keys sessions_a, sessions_b, rate_a, rate_b (tutorial completion), abs_lift (B-A), rel_lift "
-                    "((B-A)/A), p_value (two-sided two-proportion z-test with pooled variance), ship_b (true if p<0.05 and "
-                    "B>A), mean_minutes_a, mean_minutes_b. Counts are integers; ship_b is a JSON boolean. "
-                    "Rates, lifts and p_value are fractions (0-1) with 4 decimals; mean minutes use 2 decimals. " + RULES),),
+        provenance="Pixel Arena playtest A/B (arena-panel telemetry); a release decision from a dirty export",
+        summary="Decide from player data whether a new game tutorial should replace the current one.",
+        setup=_ab_setup, check=_ab_check, reference=_ab_reference, timeout_s=180,
+        checkpoints=checkpoints(("read the notes", r"telemetry.{1,4}README"), ("read the data", r"playtest_ab"),
+                                ("removed duplicate sessions", r"session_id.{0,300}(seen|dedup|drop_duplicates|distinct|unique|set\(|setdefault)|(seen|dedup|drop_duplicates|distinct|unique|setdefault).{0,300}session_id"),
+                                ("tested significance", r"erfc|ztest|z_test|chi2|chisq|norm\.|fisher|p_value"), WROTE_RESULT),
+        steps=(Step("We playtested two versions of the Pixel Arena tutorial and have to pick one for the next release. "
+                    "The export and its notes are in {WS}/telemetry. Should we ship B instead of A? Give a recommendation "
+                    "a skeptical lead would accept. Record it in {WS}/result.json with ship_b, sessions_a, sessions_b, "
+                    "completion_rate_a, completion_rate_b and p_value."),),
     ),
     EvalTask(
         id="bo-pnl-runway", category="backoffice",
-        provenance="Startup monthly close: P&L from a Brazilian-format ledger (`;`, 1.234,56) + chart of accounts, burn and runway",
-        summary="Calculate monthly profit, cash burn and how long the business can keep running from its ledger.",
-        setup=_pnl_setup, check=_pnl_check, reference=_pnl_reference, timeout_s=120,
-        steps=(Step("Close the startup's half-year using {WS}/finance/ledger.csv (separator ;, Brazilian number format "
-                    "1.234,56, dates dd/mm/yyyy, costs negative) and {WS}/finance/chart_of_accounts.csv. Write {WS}/pnl.csv "
-                    "with header line,2026-01,...,2026-06 and these lines in this order: revenue (net of refunds), cogs, "
-                    "gross_profit, gross_margin_pct (0-100), sales_marketing, rnd, ga, ebitda; costs as positive numbers, "
-                    "2 decimals. Financial result does NOT go into EBITDA. Write {WS}/runway.json with burn_avg_3m (mean "
-                    "of -ebitda from April to June) and runway_months (balance in {WS}/finance/cash_balance.txt / burn, "
-                    "1 decimal). " + RULES),),
+        provenance="Startup half-year close from a Brazilian-format ledger and a chart of accounts, for an investor meeting",
+        summary="Close a startup's half-year from its ledger and say how long the cash lasts.",
+        setup=_pnl_setup, check=_pnl_check, reference=_pnl_reference, timeout_s=180,
+        checkpoints=checkpoints(("read the notes", r"finance.{1,4}README"), ("read the ledger", r"ledger"), ("used the chart of accounts", r"chart_of_accounts"),
+                                ("used the cash balance", r"cash_balance"), WROTE_RESULT),
+        steps=(Step("The investors meet tomorrow and want the first half of 2026 closed. The books and the board's notes "
+                    "are in {WS}/finance. How did each month go, and how many months of cash do we have left at the current "
+                    "burn? Prepare what the CFO needs to present. Record the key figures in {WS}/result.json: revenue, "
+                    "gross_margin_pct and ebitda, each mapping 2026-01 to 2026-06 to its value, plus burn and runway_months."),),
     ),
     EvalTask(
         id="bo-reconcile", category="backoffice",
         provenance="Accounts receivable reconciliation: invoices vs bank statement with PIX/TED memo variants and noise",
-        summary="Match invoices to bank payments and report missing, duplicate or incorrect payments.",
-        setup=_recon_setup, check=_recon_check, reference=_recon_reference, timeout_s=120,
-        steps=(Step("Read {WS}/backoffice/README.md and reconcile {WS}/backoffice/invoices.csv with "
-                    "{WS}/backoffice/bank_statement_june.csv. Write {WS}/reconciliation.json with unpaid (ids), "
-                    "duplicated (ids) and mismatched (list of objects id, invoiced, paid). " + RULES),),
+        summary="Find what finance still has to collect or fix after comparing invoices with bank payments.",
+        setup=_recon_setup, check=_recon_check, reference=_recon_reference, timeout_s=180,
+        checkpoints=checkpoints(("read the notes", r"backoffice.{1,4}README"), ("read the invoices", r"invoices"), ("read the statement", r"bank_statement"), WROTE_RESULT),
+        steps=(Step("Finance has to chase June's receivables. The invoices, the bank statement and our reconciliation notes "
+                    "are in {WS}/backoffice. What do we still have to collect or fix? Record it in {WS}/result.json: unpaid "
+                    "and duplicated (invoice ids) and mismatched (id, invoiced, paid)."),),
     ),
 ]

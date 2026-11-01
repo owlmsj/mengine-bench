@@ -37,23 +37,23 @@ def test_a_long_received_value_is_cut() -> None:
     assert len(saw("x" * 5000, 1)) <= 300
 
 
-@pytest.mark.parametrize(("task_id", "rel", "edit", "check", "shown"), [
-    ("ir-server-logs", "incident.json", {"minutes_down": 1.0}, "minutes down", "received 1.0"),
-    ("bo-reconcile", "reconciliation.json", {"unpaid": ["INV-1"]}, "unpaid invoices", "received ['INV-1']"),
-    ("ds-ab-playtest", "ab_result.json", {"p_value": 0.5}, "two-proportion z-test p-value", "received 0.5"),
+@pytest.mark.parametrize(("task_id", "edit", "check", "shown"), [
+    ("ir-server-logs", {"minutes_down": 1.0}, "minutes down", "received 1.0"),
+    ("bo-reconcile", {"unpaid": ["INV-1"]}, "unpaid invoices", "received ['INV-1']"),
+    ("ds-ab-playtest", {"p_value": 0.5}, "the gain is significant", "received 0.5"),
 ])
-def test_a_wrong_value_in_a_file_is_named(tmp_path: Path, task_id: str, rel: str, edit: dict[str, object], check: str,
+def test_a_wrong_value_in_a_file_is_named(tmp_path: Path, task_id: str, edit: dict[str, object], check: str,
                                           shown: str) -> None:
     answers = _solved(task_id, tmp_path)
-    path = tmp_path / rel
+    path = tmp_path / "result.json"
     path.write_text(json.dumps({**json.loads(path.read_text(encoding="utf-8")), **edit}), encoding="utf-8")
     result = _by_id(task_id).check(tmp_path, answers)
     assert check in result.failed() and "expected" in result.details[check] and shown in result.details[check]
 
 
-def test_a_wrong_reply_is_named(tmp_path: Path) -> None:
-    reply = json.dumps({"top_gpu": "4090", "top_tps": 180, "bottom_gpu": "4090", "ratio": 6.0})
-    result = _by_id("vis-chart").check(tmp_path, [reply])
+def test_a_wrong_answer_read_from_the_chart_is_named(tmp_path: Path) -> None:
+    write(tmp_path, "result.json", json.dumps({"top_gpu": "4090", "top_tps": 180, "bottom_gpu": "4090", "ratio": 6.0}))
+    result = _by_id("vis-chart").check(tmp_path, ["any reply"])
     assert "received '4090'" in result.details["GPU with the highest TPS at 256k"]
 
 
@@ -69,16 +69,15 @@ def test_every_failed_check_of_the_data_tasks_explains_itself(tmp_path: Path) ->
         assert not unexplained, (task_id, unexplained)
 
 
-def test_the_funnel_names_the_first_wrong_row(tmp_path: Path) -> None:
+def test_the_funnel_names_the_wrong_platform_and_shows_the_count(tmp_path: Path) -> None:
     answers = _solved("ds-sql-funnel", tmp_path)
-    path = tmp_path / "funnel.csv"
-    lines = path.read_text(encoding="utf-8").splitlines()
-    fields = lines[2].split(",")
-    fields[2] = "1"
-    lines[2] = ",".join(fields)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    detail = _by_id("ds-sql-funnel").check(tmp_path, answers).details["users per step"]
-    assert fields[0] in detail and fields[1] in detail and "received '1'" in detail
+    path = tmp_path / "result.json"
+    got = json.loads(path.read_text(encoding="utf-8"))
+    got["funnel"]["pc"]["tutorial_complete"] = 1
+    path.write_text(json.dumps(got), encoding="utf-8")
+    result = _by_id("ds-sql-funnel").check(tmp_path, answers)
+    assert result.failed() == ["players per step on pc"]
+    assert "'tutorial_complete': 1" in result.details["players per step on pc"]
 
 
 def test_a_hidden_test_failure_reads_as_the_assertion_not_as_a_count(tmp_path: Path) -> None:
@@ -174,12 +173,13 @@ def test_reconcile_keeps_its_rules_in_a_file_the_agent_must_read(tmp_path: Path)
     rules = (tmp_path / "backoffice/README.md").read_text(encoding="utf-8")
     assert "exclusive" in rules and "fees" in rules
     prompt = task.steps[0].prompt
-    assert "backoffice/README.md" in prompt and "exclusive" not in prompt and "fees" not in prompt
+    # #98: the brief points at the folder and its notes; the rules themselves stay in the file.
+    assert "{WS}/backoffice" in prompt and "notes" in prompt and "exclusive" not in prompt and "fees" not in prompt
 
 
 def test_reconcile_catches_a_duplicate_also_listed_as_mismatched(tmp_path: Path) -> None:
     answers = _solved("bo-reconcile", tmp_path)
-    path = tmp_path / "reconciliation.json"
+    path = tmp_path / "result.json"
     got = json.loads(path.read_text(encoding="utf-8"))
     invoice = business.RECON["duplicated"][0]
     got["mismatched"].append({"id": invoice, "invoiced": 1.0, "paid": 2.0})

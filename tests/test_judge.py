@@ -1,4 +1,4 @@
-"""Rubric 2.4 judge, driven by a fake judge command: one vote per task, retried only when the call or JSON fails."""
+"""Rubric 2.5 judge, driven by a fake judge command: one vote per task, retried only when the call or JSON fails."""
 
 from __future__ import annotations
 
@@ -64,8 +64,10 @@ def test_parse_rejects_malformed_or_out_of_range(reply: str) -> None:
 
 def test_rubric_grades_the_complement_of_the_checks() -> None:
     prompt = build_judge_prompt(CONTEXT, screenshot=False)
-    assert RUBRIC_VERSION == "2.4" and "rubric 2.4" in JUDGE_SYSTEM_PROMPT
-    for needle in ("approach (0-40)", "deliverable (0-30)", "verification (0-30)", "Never re-score", '"score"'):
+    assert RUBRIC_VERSION == "2.5" and "rubric 2.5" in JUDGE_SYSTEM_PROMPT
+    for needle in ("approach (0-40): the reasoning and the execution", "any valid route can earn full marks",
+                   "deliverable (0-30): the problem in the brief is solved and presented", "Format is free",
+                   "verification (0-30)", "Never re-score", '"score"'):
         assert needle in JUDGE_SYSTEM_PROMPT, needle
     for needle in ("Fix the bug", "fixed", "M a.py", "...done", "[FAIL] no regressions", "Third criterion: verification"):
         assert needle in prompt, needle
@@ -76,6 +78,12 @@ def test_visual_rubric_scores_the_rendered_look_from_the_screenshot() -> None:
     prompt = build_judge_prompt(CONTEXT, screenshot=True)
     assert "Third criterion: rendered" in prompt and "screenshot.png" in prompt
     assert "rendered (0-30)" in JUDGE_SYSTEM_PROMPT and "screenshot.png" in JUDGE_SYSTEM_PROMPT
+    # #93: the rubric names what the frames and the references are for.
+    for needle in ("frame-1s.png", "frame-4s.png", "reference.png",
+                   "composition", "aesthetics", "occlusion", "clipping", "z-fighting", "flicker", "noise", "broken camera",
+                   "goes blank after loading", "fresh load"):
+        assert needle in JUDGE_SYSTEM_PROMPT, needle
+    assert "a single still image" not in JUDGE_SYSTEM_PROMPT
 
 
 def test_one_vote_retried_only_on_invalid_replies(fake_agent: FakeAgent, tmp_path: Path) -> None:
@@ -146,7 +154,7 @@ def test_visual_judge_cwd_holds_only_the_screenshot(fake_agent: FakeAgent, tmp_p
     png = tmp_path / "render" / "shot.png"
     png.parent.mkdir(parents=True)
     png.write_bytes(b"\x89PNG fake")
-    assert RubricJudge(agent, retries=0, timeout_s=60).grade(CONTEXT, tmp_path / "judge", png).score == 70
+    assert RubricJudge(agent, retries=0, timeout_s=60).grade(CONTEXT, tmp_path / "judge", {"screenshot.png": png}).score == 70
     seen = json.loads((tmp_path / "fakes" / "where.cwd").read_text(encoding="utf-8"))
     assert seen["files"] == ["screenshot.png"]
     assert not Path(seen["cwd"]).resolve().is_relative_to(tmp_path.resolve())

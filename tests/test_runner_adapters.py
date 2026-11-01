@@ -28,6 +28,7 @@ def test_claude_new_session_reads_prompt_from_stdin() -> None:
     assert tail(call.argv) == ["-p", "--output-format", "stream-json", "--verbose", "--model", "claude-opus-5-5",
                                "--effort", "xhigh", "--permission-mode", "bypassPermissions"]
     assert call.stdin_text == "do it"
+    assert call.env == {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"}
     assert Path(call.argv[0]).stem.lower() == "claude"
 
 

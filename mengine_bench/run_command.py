@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from mengine_bench.bundle import bench_commit
+from mengine_bench.checkpoints import reached_checkpoints
 from mengine_bench.core import EvalTask
 from mengine_bench.judge import JudgeContext, workspace_diff
 from mengine_bench.environment import collect_environment
@@ -168,6 +169,7 @@ def _detail(task: EvalTask, record: TaskRunRecord) -> TaskDetail:
         grading_s=record.grading_s, checks=checks,
         flags=([] if record.status == "ok" else [record.status]) + list(notes) + record.notes, error=_public_error(record.error, record),
         answers=list(record.answers), usage=usage_record(record.usage), stats=record.stats,
+        checkpoints=reached_checkpoints(task.checkpoints, record.streams),
     )
 
 

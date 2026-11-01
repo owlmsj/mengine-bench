@@ -9,6 +9,7 @@ inherited pipe would otherwise block the read forever.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import tempfile
 import threading
@@ -58,8 +59,8 @@ class _FinalEventWatch(threading.Thread):
     """Ends the step when the agent says it is done (#85).
 
     `codex exec` gave its final reply at 128 s and was still alive when the 480 s limit killed it,
-    so finished work counted as a timeout. A line must start with the event: inside a message its
-    quotes are escaped and the newline before it is not a newline.
+    so finished work counted as a timeout. Match a complete JSON event, never text inside a message
+    or a partial write; Claude result fields can arrive in any order (#95).
     """
 
     def __init__(self, proc: subprocess.Popen[bytes], output: Path, final_event: str | None) -> None:
@@ -78,13 +79,19 @@ class _FinalEventWatch(threading.Thread):
             kill_tree(self._proc.pid)
 
     def _saw_final_event(self, final_event: str) -> bool:
-        needle = b"\n" + final_event.encode("utf-8")
-        seen = b"\n"
+        expected = json.loads(final_event + "}")
+        pending = b""
         with self._output.open("rb") as reader:
             while not self._closed.wait(WATCH_EVERY_S):
-                seen = seen[-len(needle):] + reader.read()
-                if needle in seen:
-                    return True
+                lines = (pending + reader.read()).split(b"\n")
+                pending = lines.pop()
+                for line in lines:
+                    try:
+                        event = json.loads(line)
+                    except (ValueError, UnicodeDecodeError):
+                        continue
+                    if isinstance(event, dict) and expected.items() <= event.items():
+                        return True
         return False
 
     def close(self) -> None:

@@ -48,7 +48,7 @@ class Invocation:
     stdin_text: str | None
     # Extra environment on top of the caller's; None keeps it unchanged.
     env: Mapping[str, str] | None = None
-    # How the line that ends a successful session starts, when the harness has one and may not exit after it (#85).
+    # JSON event discriminator, written as a prefix; field order in the stream may vary (#95).
     final_event: str | None = None
 
 
@@ -375,7 +375,8 @@ class ClaudeAgent:
         if self.effort:
             argv += ["--effort", self.effort]
         argv += ["--permission-mode", "bypassPermissions"]
-        return Invocation(argv=argv, stdin_text=prompt)
+        return Invocation(argv=argv, stdin_text=prompt, env={"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"},
+                          final_event='{"type":"result"')
 
     def judge_invocation(self, prompt: str, workdir: Path, attachments: Sequence[str],
                          prompt_file: Path | None = None, system_prompt: str | None = None) -> Invocation:
@@ -523,7 +524,7 @@ class AgyAgent:
         message = {"event": "user", "message": {"role": "user", "content": prompt}}
         return Invocation(argv=[_executable("agy"), "--model", model, "--output-format", "stream-json", "--input-format",
                                 "stream-json", "--dangerously-skip-permissions", "--print", ""],
-                          stdin_text=json.dumps(message) + "\n")
+                          stdin_text=json.dumps(message) + "\n", final_event='{"event":"result"')
 
     def judge_invocation(self, prompt: str, workdir: Path, attachments: Sequence[str],
                          prompt_file: Path | None = None, system_prompt: str | None = None) -> Invocation:

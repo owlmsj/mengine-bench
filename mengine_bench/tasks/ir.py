@@ -22,12 +22,17 @@ from mengine_bench.core import (
     close,
     has,
     only_number,
-    read_json,
+    WROTE_RESULT,
+    checkpoints,
+    is_no,
+    is_yes,
+    near,
+    near_share,
+    result_json,
     saw,
     write,
 )
 
-RULES = "Write your files inside {WS}. Do not ask for confirmation."
 
 # ------------------------------------------------------------ ir-studio-wiki --
 
@@ -144,8 +149,7 @@ WIKI_SOURCES = ("bugs/BUG-4471.md", "releases/changelog-0.14.md", "releases/appr
 
 def _wiki_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
-    got = read_json(ws, "answers.json")
-    got = got if isinstance(got, dict) else {}
+    got = result_json(ws)
     # #28, #59: every way of naming the one build, and no other build next to it.
     builds = re.findall(r"\d+\.\d+\.\d+(?:\.\d+)?(?:-\w+)?", str(got.get("build", "")))
     result.add("build with the BUG-4471 fix", builds == [WIKI_GOLD["build"]], saw(got.get("build"), WIKI_GOLD["build"]))
@@ -174,7 +178,7 @@ def _is_cited(src: str, cited: Sequence[str]) -> bool:
 
 
 def _wiki_reference(ws: Path) -> list[str]:
-    write(ws, "answers.json", json.dumps({**WIKI_GOLD, "sources": [f"wiki/{s}" for s in WIKI_SOURCES]}))
+    write(ws, "result.json", json.dumps({**WIKI_GOLD, "sources": [f"wiki/{s}" for s in WIKI_SOURCES]}))
     return ["done"]
 
 
@@ -243,19 +247,30 @@ def _logs_setup(ws: Path) -> None:
           "Down = from the first save error to the 'server ready' line. June has 30 days; there is only one incident.\n")
 
 
+def _minutes(value: object) -> object:
+    """Minutes from 35.82, "35 min 49 s" or "00:35:49"."""
+    text = str(value)
+    clock = re.search(r"\b(\d+):(\d{2}):(\d{2})\b", text)
+    if clock:
+        return int(clock[1]) * 60 + int(clock[2]) + int(clock[3]) / 60
+    spoken = re.search(r"(\d+)\s*m(?:in\w*)?\s*(\d+)\s*s", text)
+    return int(spoken[1]) + int(spoken[2]) / 60 if spoken else value
+
+
 def _logs_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     exp = _logs_expected()
-    got = read_json(ws, "incident.json")
-    got = got if isinstance(got, dict) else {}
-    result.add("incident start", str(got.get("start", "")).replace("T", " ") == exp["start"], saw(got.get("start"), exp["start"]))
-    result.add("incident end", str(got.get("end", "")).replace("T", " ") == exp["end"], saw(got.get("end"), exp["end"]))
-    result.add("minutes down", close(got.get("minutes_down"), float(str(exp["minutes_down"])), 0.011),
+    got = result_json(ws)
+    # #98: the moment, in any common writing ("2026-06-02T03:17:42Z").
+    result.add("incident start", str(exp["start"]) in str(got.get("start", "")).replace("T", " "), saw(got.get("start"), exp["start"]))
+    result.add("incident end", str(exp["end"]) in str(got.get("end", "")).replace("T", " "), saw(got.get("end"), exp["end"]))
+    # #98: the exact window is checked above, so a whole minute here is rounding, not a wrong outage.
+    result.add("minutes down", near(_minutes(got.get("minutes_down")), float(str(exp["minutes_down"])), 0.5),
                saw(got.get("minutes_down"), exp["minutes_down"]))
     result.add("June availability",
-               close(got.get("availability_june_pct"), float(str(exp["availability_june_pct"])), 0.001),
+               near_share(got.get("availability_june_pct"), float(str(exp["availability_june_pct"])) / 100, 5e-5),
                saw(got.get("availability_june_pct"), exp["availability_june_pct"]))
-    result.add("SLO 99.9 met", got.get("slo_999_ok") is exp["slo_999_ok"], saw(got.get("slo_999_ok"), exp["slo_999_ok"]))
+    result.add("SLO 99.9 met", (is_yes if exp["slo_999_ok"] else is_no)(got.get("slo_999_ok")), saw(got.get("slo_999_ok"), exp["slo_999_ok"]))
     result.add("root cause = /data disk full", _names_disk_full(str(got.get("root_cause", ""))),
                saw(got.get("root_cause"), "the /data disk was full"))
     return result
@@ -279,7 +294,7 @@ def _names_disk_full(root_cause: str) -> bool:
 
 
 def _logs_reference(ws: Path) -> list[str]:
-    write(ws, "incident.json", json.dumps({**_logs_expected(), "root_cause": "/data disk full (No space left on device)"}))
+    write(ws, "result.json", json.dumps({**_logs_expected(), "root_cause": "/data disk full (No space left on device)"}))
     return ["done"]
 
 
@@ -287,21 +302,23 @@ TASKS = [
     EvalTask(
         id="ir-studio-wiki", category="retrieval",
         provenance="Internal-wiki QA with multi-hop (bug -> changelog -> approvals) and planted distractors",
-        summary="Find release and game details across a studio wiki and cite the files that support each answer.",
-        setup=_wiki_setup, check=_wiki_check, reference=_wiki_reference, timeout_s=120,
-        steps=(Step("Use the wiki in {WS}/wiki to answer: (1) in which build the fix for BUG-4471 first shipped and "
-                    "(2) who approved that build; (3) the maximum number of players in ranked mode on the current "
-                    "Neoplastic map; (4) which flag was reverted in PM-12 and (5) to which value. Write "
-                    "{WS}/answers.json with build, approver, neoplastic_ranked_max, flag, restored_value and sources "
-                    "(list of the wiki files used). " + RULES),),
+        summary="Answer a support lead's questions from a studio wiki, citing the pages behind each answer.",
+        setup=_wiki_setup, check=_wiki_check, reference=_wiki_reference, timeout_s=180,
+        checkpoints=checkpoints(("followed the bug", r"BUG-4471"), ("checked the approvals", r"approvals"), ("read the postmortem", r"PM-12|postmortem"), WROTE_RESULT),
+        steps=(Step("A support lead needs answers from the studio wiki in {WS}/wiki: in which build the fix for BUG-4471 first "
+                    "shipped, who approved that build, the ranked player limit on the current Neoplastic map, and which flag "
+                    "PM-12 reverted and to what value. Record it in {WS}/result.json: build, approver, neoplastic_ranked_max, "
+                    "flag, restored_value and sources (the wiki files behind the answers)."),),
     ),
     EvalTask(
         id="ir-server-logs", category="retrieval",
         provenance="Game server ops: incident window, root cause and monthly SLO from 3 days of logs",
-        summary="Read game server logs to explain an outage and calculate downtime and monthly availability.",
-        setup=_logs_setup, check=_logs_check, reference=_logs_reference, timeout_s=120,
-        steps=(Step("Read {WS}/logs/README.md and investigate the logs in {WS}/logs. Write {WS}/incident.json with "
-                    "start and end (format 'YYYY-MM-DD HH:MM:SS'), minutes_down (2 decimals), availability_june_pct "
-                    "(3 decimals), slo_999_ok (bool) and root_cause (one sentence). " + RULES),),
+        summary="Investigate a game server outage from its logs and report what happened.",
+        setup=_logs_setup, check=_logs_check, reference=_logs_reference, timeout_s=180,
+        checkpoints=checkpoints(("read the notes", r"logs.{1,4}README"), ("read the logs", r"gameserver|logs"), WROTE_RESULT),
+        steps=(Step("The game went down in June and we owe the team an incident report. The logs and their notes are in "
+                    "{WS}/logs. When did it start and end, how long was it, did we keep our monthly availability target, and "
+                    "why did it happen? Record it in {WS}/result.json: start, end, minutes_down, availability_june_pct, "
+                    "slo_999_ok, root_cause."),),
     ),
 ]

@@ -40,6 +40,20 @@ class Step:
     carry: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class Checkpoint:
+    """A key action, matched against the tool calls: diagnosis only, never a grade, never shown to the judge (#98)."""
+
+    name: str
+    pattern: str
+
+
+def checkpoints(*pairs: tuple[str, str]) -> tuple[Checkpoint, ...]:
+    return tuple(Checkpoint(name, pattern) for name, pattern in pairs)
+
+
+RESULT_FILE = "result.json"
+WROTE_RESULT = ("recorded the result", r"result\.json")
 WAIVED_GATE_CAP = 0.5
 DETAIL_CHARS = 300
 
@@ -119,6 +133,7 @@ class EvalTask:
     # Workspace files stored verbatim in the bundle for the maintainer's judge
     # (visual tasks: the page it renders).
     deliverables: tuple[str, ...] = ()
+    checkpoints: tuple[Checkpoint, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.steps:
@@ -171,6 +186,65 @@ def close(value: object, expected: float, tol: float = 1e-2) -> bool:
     except (TypeError, ValueError):
         return False
     return math.isfinite(number) and abs(number - expected) <= tol
+
+
+def number(value: object) -> float | None:
+    """The number in 9.4, "9,4", "R$ 1.234,56", "1,234.56" or "9.4 months"; "10 or 12" is not one answer (#98)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value) if math.isfinite(value) else None
+    text = str(value).replace("\u2212", "-")
+    if re.search(r"\b(or|ou)\b", text, re.IGNORECASE):
+        return None
+    scientific = re.search(r"-?\d+(?:\.\d+)?[eE][-+]?\d+", text)
+    if scientific:
+        return float(scientific.group())
+    found = re.search(r"-?\d[\d.,]*\d|-?\d", text)
+    if found is None:
+        return None
+    digits = found.group()
+    if re.search(r"\(\s*(?:R\$\s*)?" + re.escape(digits) + r"\s*\)", text) and not digits.startswith("-"):
+        digits = "-" + digits  # Accounting writes a negative in parentheses.
+    if "," in digits and "." in digits:
+        decimal = max(digits.rfind(","), digits.rfind("."))
+        digits = re.sub(r"[.,]", "", digits[:decimal]) + "." + digits[decimal + 1:]
+    elif re.fullmatch(r"-?\d{1,3}([.,]\d{3}){2,}|-?\d{1,3},\d{3}", digits):
+        digits = re.sub(r"[.,]", "", digits)
+    else:
+        digits = digits.replace(",", ".")
+    return float(digits)
+
+
+def near(value: object, expected: float, tol: float) -> bool:
+    got = number(value)
+    if got is not None and abs(got - expected) <= tol:
+        return True
+    # "182.000" is 182 or, in the ledger's own Brazilian format, 182000: only the expected value can tell.
+    thousands = isinstance(value, str) and re.search(r"(?<![\d.,])-?\d{1,3}\.\d{3}(?![\d.,])", value)
+    return bool(thousands) and abs(float(thousands.group().replace(".", "")) - expected) <= tol
+
+
+def near_share(value: object, fraction: float, tol: float) -> bool:
+    """A share given as 0.38, 38 or "38%": the brief does not fix the unit, so neither does the check (#98)."""
+    got = number(value)
+    if got is None:
+        return False
+    return abs(got / 100 - fraction) <= tol or ("%" not in str(value) and abs(got - fraction) <= tol)
+
+
+def is_yes(value: object) -> bool:
+    return value is True or str(value).strip().lower() in {"true", "yes", "y", "sim"}
+
+
+def is_no(value: object) -> bool:
+    return value is False or str(value).strip().lower() in {"false", "no", "n", "nao", "não"}
+
+
+def result_json(ws: Path) -> dict[str, object]:
+    """The one file every brief asks for. Correct never reads the chat (#98, #92)."""
+    got = read_json(ws, RESULT_FILE)
+    return got if isinstance(got, dict) else {}
 
 
 def has(text: str | None, pattern: str) -> bool:

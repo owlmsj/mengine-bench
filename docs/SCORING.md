@@ -1,4 +1,4 @@
-# Scoring (bench 1.5)
+# Scoring (bench 1.6)
 
 A run of an agent (harness + model + configuration) gets three numbers folded into
 the Score, and a Cost kept apart.
@@ -14,10 +14,10 @@ the Score, and a Cost kept apart.
 | **Est. price** | The run's tokens at public API list prices, so subscription and API runs compare. No points either. |
 
 The formulas live in `mengine_bench/scoring.py`. Runs compare when they ran the
-same bench major.minor (1.5.x). A patch release changes no task or prompt. When it changes how a run is judged or
+same bench major.minor (1.6.x). A patch release changes no task or prompt. When it changes how a run is judged or
 scored, every ranked run is judged again from its bundle (`mengine-bench judge --again`), so none has to run again. Rankings of older versions stay in LEADERBOARD.md as history, with the Scores of their own formula.
 
-A run is one sample and runs are not repeated, so ties come from the published tasks: draw the 14 tasks again with
+A run is one sample and runs are not repeated, so ties come from the published tasks: draw the 15 tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
 a tie. This shows how much the order rests on this set of tasks; it says nothing about the noise between two runs of one agent.
 `mengine-bench analyze` prints the shares, the points each part of the Score moves and the tasks that separate runs. No agent runs.
@@ -42,38 +42,59 @@ untouched", or the page file exists).
 A failed check says why in `result.json` and in the summary's "Failed checks": what it expected and what it received.
 The judge does not see that text.
 
-Visual tasks (`web-mondrian-landing`, `3d-voxel-landscape`) add two checks at grading, in a headless
+Visual tasks (`web-mondrian-landing`, `3d-voxel-landscape`, `web-word-universe`) add two checks at grading, in a headless
 Chromium-family browser: the page runs without an uncaught script error, and its screenshot is not blank. That takes
 about 2 s per page, 54 s at most over 46 published pages, and grading is not in Time. A machine with no browser, a render that fails or the
 three.js CDN out of reach leaves the two checks out, with a note on the task, and costs no point. The page
 is a declared deliverable that the bundle keeps verbatim for the judge.
+
+## Open briefs
+
+Since 1.6 every eval is an open brief: the context, the problem and the outcome wanted. The method, the tools and the
+traps are left to the agent. Business definitions live in documents in the workspace, as they would at a company. The
+prompt keeps the question and a small `result.json` contract, because a person has to be able to check the answer.
+
+Correct reads delivered files, never the chat. It accepts rounding, percent or fraction and common number formats, and
+rejects a wrong answer, not a different route. Two experts should reach the same verdict on any result.
+
+Limits are 3 min per eval, 5 min for `gd-integration-repo` and `web-mondrian-landing`, 6 min for `web-word-universe`
+and 7 min for `3d-voxel-landscape`, from measured times: the slowest short eval took 50 s. Each prompt states its limit and
+asks the agent to finish once the work is right, with at most 2 rounds of revision. At the limit the agent stops, and what it delivered is graded.
+
+Each eval also declares checkpoints, key actions matched against the tool calls, published per task in the bundle and
+`summary.md`. They exist to diagnose a run. They change no grade and the judge never sees them, because scoring them
+would reward one route over another. "Not seen" can simply be a different route.
 
 ## Judge
 
 `mengine-bench judge results/<run>` (maintainer only) runs one judge, Claude
 `claude-opus-5-5` at effort `xhigh`, exactly once per task. A call that fails or
 returns invalid JSON is retried; if a task still has no vote, nothing is written.
-Rubric 2.4 grades what the checks cannot see. The check results are shown to
+Rubric 2.5 grades what the checks cannot see. The check results are shown to
 the judge as context with the instruction not to re-score correctness. Its rules and
 anchors travel in a system prompt, and every vote comes with its three subscores, which
 must add up to the score.
 
 | Criterion | Points |
 | --- | --- |
-| Approach and code/solution quality | 40 |
-| Deliverable and instruction following | 30 |
-| Self-verification; on the reply-only `lc-changelog` and `vis-chart`, answer discipline; on pages, the rendered look | 30 |
+| Reasoning and execution: understood the problem, chose a sound strategy of its own, carried it out simply and reproducibly. Any valid route can earn full marks. | 40 |
+| Deliverable and presentation: the problem is solved, nothing invented, and the final message says what was found, the assumptions and any limit left open. Format is never a defect. | 30 |
+| Quality assurance: an independent check of its own result; on `lc-changelog` and `vis-chart`, which only ask for a few facts, answer discipline; on pages, the rendered look | 30 |
+
+The plan is judged from the actions: a written plan earns nothing by itself.
 
 For a visual task the maintainer's machine renders the stored page with headless
 Chromium (Edge, Chrome or Chromium; `MENGINE_BENCH_BROWSER` overrides it) and the
-judge sees the screenshot. A render that fails is tried up to 3 times; if it keeps failing, the judge votes without a
-screenshot and the bundle records it. With no browser at all, nothing is judged.
+judge sees three frames, each from a fresh load after about 1, 4 and 8 seconds of page time, next to three fixed
+a reference page, made by Opus 5.5 xhigh for the same brief, which sets the bar and stays fixed so a grade does not move when a new run comes out. A frame that fails is
+tried up to 3 times; if it keeps failing, the judge votes on the other frames, or without images when none rendered, and
+the bundle records it. With no browser at all, nothing is judged.
 
 The judge reads the task prompt, the check results, the final answers, each page whole, the agent's other changes
 and one tool log with the same shape for every harness. It does not read the raw stream, which carries the model id.
 
 Measured in 1.3.3: two votes on the same message differed by 1.35 points on average and 6 at most (23 pairs), so one
-task's vote is noisy and a run's mean of 14 is much less so.
+task's vote is noisy and a run's mean of 15 is much less so.
 The judge never changes the checks.
 
 After a change to the rubric or the judge model, `mengine-bench judge-anchors` votes the reference solution and the untouched
@@ -105,7 +126,7 @@ formula can be refined later from many runs.
 A value a harness does not report is `null`, never 0.
 
 Isolation: each call is a new judge process in a new empty temp directory
-(holding only `screenshot.png` for visual tasks) with tools off where the CLI
+(holding only the frames and references for visual tasks) with tools off where the CLI
 allows it. Agent-written evidence sits in `<<<EVIDENCE <marker> <name>>>>`
 blocks; the marker is a hash of the evidence, so the agent cannot forge the
 closing line.
