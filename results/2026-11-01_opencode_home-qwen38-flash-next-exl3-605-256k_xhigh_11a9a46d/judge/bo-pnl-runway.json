@@ -1,0 +1,73 @@
+{
+ "task_id": "bo-pnl-runway",
+ "prompts": [
+  "Close the startup's half-year using {WS}/finance/ledger.csv (separator ;, Brazilian number format 1.234,56, dates dd/mm/yyyy, costs negative) and {WS}/finance/chart_of_accounts.csv. Write {WS}/pnl.csv with header line,2026-01,...,2026-06 and these lines in this order: revenue (net of refunds), cogs, gross_profit, gross_margin_pct (0-100), sales_marketing, rnd, ga, ebitda; costs as positive numbers, 2 decimals. Financial result does NOT go into EBITDA. Write {WS}/runway.json with burn_avg_3m (mean of -ebitda from April to June) and runway_months (balance in {WS}/finance/cash_balance.txt / burn, 1 decimal). Write your files inside {WS}. Do not ask for confirmation."
+ ],
+ "answers": [
+  "\n\n**[goal]** Fechar o semestre: gerar `pnl.csv` e `runway.json` a partir do razão em formato brasileiro.\n\n**[action]** Mapeei as 86 linhas do `finance/ledger.csv` pelas contas de `finance/chart_of_accounts.csv` (0 contas sem mapa, só meses 01-06/2026, sem duplicatas). Receita líquida = 3.1.01 + 3.1.02 + 3.1.09 (estornos já negativos, Mar -6.814,15 e Mai -8.634,37). Custos invertidos para positivo. Resultado financeiro (6.1.01/6.1.02, +5.621 a +7.300/mês) ficou fora do EBITDA. Cálculo em `Decimal` com arredondamento half-up (`tmp/tmp_calc.py`).\n\n**[result]** `pnl.csv`:\n\n| line | 2026-01 | 2026-02 | 2026-03 | 2026-04 | 2026-05 | 2026-06 |\n|---|---|---|---|---|---|---|\n| revenue | 200510.87 | 216328.06 | 219066.17 | 238163.26 | 243032.89 | 272391.57 |\n| cogs | 60091.92 | 64278.71 | 69096.05 | 70867.73 | 73973.13 | 75162.69 |\n| gross_profit | 140418.95 | 152049.35 | 149970.12 | 167295.53 | 169059.76 | 197228.88 |\n| gross_margin_pct | 70.03 | 70.29 | 68.46 | 70.24 | 69.56 | 72.41 |\n| sales_marketing | 143475.23 | 138161.28 | 135519.34 | 139688.11 | 138680.10 | 151896.54 |\n| rnd | 163396.33 | 182271.02 | 171742.87 | 179804.44 | 185905.30 | 189990.01 |\n| ga | 43826.35 | 43917.13 | 47233.36 | 44753.63 | 46420.18 | 48310.55 |\n| ebitda | -210278.96 | -212300.08 | -204525.45 | -196950.65 | -201945.82 | -192968.22 |\n\n`runway.json`: `burn_avg_3m` 197288.23 (média de abr/mai/jun: 196950.65+201945.82+192968.22 = 591864.69 / 3), `runway_months` 9.4 (1.847.350,40 do saldo de 30/06/2026, a linha mais recente de `finance/cash_balance.txt`, / 197288.23 = 9.3637).\n\nChecagens: receita de março 97.788,41+106.637,50+21.454,41-6.814,15 = 219.066,17 confere; EBITDA de junho 197228.88-151896.54-189990.01-48310.55 = -192968.22 confere; parser lê 9 linhas x 7 colunas na ordem pedida.\n\n**[next]** Nada pendente. Se o runway devesse usar o saldo de 31/05 em vez do de 30/06, o valor muda para 11.7 meses; usei o saldo mais recente."
+ ],
+ "diff": "A pnl.csv\nA runway.json\nA tmp/tmp_calc.py\n\n--- pnl.csv ---\nline,2026-01,2026-02,2026-03,2026-04,2026-05,2026-06\nrevenue,200510.87,216328.06,219066.17,238163.26,243032.89,272391.57\ncogs,60091.92,64278.71,69096.05,70867.73,73973.13,75162.69\ngross_profit,140418.95,152049.35,149970.12,167295.53,169059.76,197228.88\ngross_margin_pct,70.03,70.29,68.46,70.24,69.56,72.41\nsales_marketing,143475.23,138161.28,135519.34,139688.11,138680.10,151896.54\nrnd,163396.33,182271.02,171742.87,179804.44,185905.30,189990.01\nga,43826.35,43917.13,47233.36,44753.63,46420.18,48310.55\nebitda,-210278.96,-212300.08,-204525.45,-196950.65,-201945.82,-192968.22\n\n\n--- runway.json ---\n{\r\n  \"burn_avg_3m\": 197288.23,\r\n  \"runway_months\": 9.4\r\n}\n\n--- tmp/tmp_calc.py ---\nimport csv, json, re\nfrom decimal import Decimal, ROUND_HALF_UP\n\ndef num(s):\n    return Decimal(s.strip().replace('.', '').replace(',', '.'))\n\ncoa = {r['account']: r['pnl_line'] for r in csv.DictReader(open('finance/chart_of_accounts.csv', encoding='utf-8-sig'), delimiter=';')}\nmonths = ['2026-%02d' % m for m in range(1, 7)]\ntab = {}\nunmapped = set()\nseen = set()\nfor r in csv.DictReader(open('finance/ledger.csv', encoding='utf-8-sig'), delimiter=';'):\n    line = coa.get(r['account'])\n    if line is None:\n        unmapped.add(r['account']); continue\n    dd, mm, yy = r['date'].split('/')\n    key = '%s-%s' % (yy, mm)\n    seen.add(key)\n    tab.setdefault(line, {}).setdefault(key, Decimal(0))\n    tab[line][key] += num(r['amount'])\nprint('unmapped', unmapped, 'months', sorted(seen))\n\ndef q(d):\n    return d.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)\n\nZ = Decimal(0)\nrev = [tab['revenue'].get(m, Z) for m in months]\ncogs_raw = [tab['cogs'].get(m, Z) for m in months]\ngp = [rev[i] + cogs_raw[i] for i in range(6)]\ngm = [gp[i] / rev[i] * 100 for i in range(6)]\nsm = [-tab['sales_marketing'].get(m, Z) for m in months]\nrd = [-tab['rnd'].get(m, Z) for m in months]\nga = [-tab['ga'].get(m, Z) for m in months]\nebitda = [gp[i] - sm[i] - rd[i] - ga[i] for i in range(6)]\n\nrows = [('revenue', rev), ('cogs', [-c for c in cogs_raw]), ('gross_profit', gp),\n        ('gross_margin_pct', gm), ('sales_marketing', sm), ('rnd', rd), ('ga', ga), ('ebitda', ebitda)]\nwith open('pnl.csv', 'w', newline='') as f:\n    f.write('line,' + ','.join(months) + '\\n')\n    for k, vs in rows:\n        f.write(k + ',' + ','.join(str(q(v)) for v in vs) + '\\n')\n\nburn = sum(-ebitda[i] for i in (3, 4, 5)) / 3\ntxt = open('finance/cash_balance.txt', encoding='utf-8-sig').read()\nvals = re.findall(r'R\\$\\s*([0-9.]+,[0-9]{2})', txt)\nbal = num(vals[-1])\nrunway = (bal / burn).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)\njson.dump({'burn_avg_3m': float(q(burn)), 'runway_months': float(runway)}, open('runway.json', 'w'), indent=2)\nprint('balances found', vals, '-> used', bal)\nprint('financial (excluded)', {m: str(tab['financial'].get(m, Z)) for m in months})\nprint('burn', burn, 'runway', runway)",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ ls -la; echo \"---\"; ls -la finance; echo \"---\"; cat finance/cash_balance.txt; echo \"---\"; cat finance/chart_of_accounts.csv; echo \"---\"; head -30 finance/ledger.csv\n$ python -c \"\nimport csv,collections\nrows=list(csv.DictReader(open('finance/ledger.csv',encoding='utf-8-sig'),delimiter=';'))\nprint('n',len(rows))\nacc=collections.Counter(r['account'] for r in rows)\nprint(sorted(acc.items()))\nmon=collections.Counter(r['date'][3:] for r in rows)\nprint(sorted(mon.items(\n$ python -c \"\nimport csv,collections\nrows=list(csv.DictReader(open('finance/ledger.csv',encoding='utf-8-sig'),delimiter=';'))\nc=collections.Counter((r['date'],r['account'],r['amount']) for r in rows)\nprint([k for k,v in c.items() if v>1])\nfor a in ['3.1.09','3.1.01']:\n    print(a,[ (r['date'],r['descr\n$ cat > tmp_calc.py << 'EOF'\nimport csv, json\nfrom decimal import Decimal, ROUND_HALF_UP\n\ndef num(s):\n    return Decimal(s.strip().replace('.', '').replace(',', '.'))\n\ncoa = {r['account']: r['pnl_line'] for r in csv.DictReader(open('finance/chart_of_accounts.csv', encoding='utf-8-sig'), delimiter=';')\n$ python tmp_calc.py; echo \"=== pnl.csv\"; cat pnl.csv; echo \"=== runway.json\"; cat runway.json\n$ mkdir -Force tmp | Out-Null; Move-Item -Force tmp_calc.py tmp/; python -c \"\nimport csv\nr=list(csv.reader(open('pnl.csv')))\nprint([len(x) for x in r]); print(r[0]); print([x[0] for x in r[1:]])\nimport json; print(json.load(open('runway.json')))\n\"; ls\n\nStream <WORKSPACE>\\r\\n\\r\\n\\u001b[32;1mMode   \\u001b[0m\\u001b[32;1m              LastWriteTime\\u001b[0m \\u001b[32;1;3m        Length\\u001b[0m\\u001b[32;1m Name\\u001b[0m\\r\\n\\u001b[32;1m----   \\u001b[0m \\u001b[32;1m             -------------\\u001b[0m \\u001b[32;1m        ------\\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\nd----          01/11/2026    11:25                \\u001b[44;1mfinance\\u001b[0m\\r\\nd----          01/11/2026    11:26                \\u001b[44;1mtmp\\u001b[0m\\r\\n-a---          01/11/2026    11:25            192 AGENTS.md\\r\\n-a---          01/11/2026    11:26            576 pnl.csv\\r\\n-a---          01/11/2026    11:26             57 runway.json\\r\\n\\r\\n\"}],\"providerCall\":{\"executed\":false},\"providerResult\":{\"executed\":false},\"rawInput\":\"{\\\"command\\\": \\\"mkdir -Force tmp | Out-Null; Move-Item -Force tmp_calc.py tmp/; python -c \\\\\\\"\\\\nimport csv\\\\nr=list(csv.reader(open('pnl.csv')))\\\\nprint([len(x) for x in r]); print(r[0]); print([x[0] for x in r[1:]])\\\\nimport json; print(json.load(open('runway.json')))\\\\n\\\\\\\"; ls\\\"}\"},\"time\":{\"start\":1793543178537,\"end\":1793543178923}}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793543178925,\"sessionID\":\"ses_e687f63acffelf22vlO5PE9oPH\",\"part\":{\"id\":\"prt_197810aad001xI0ISDtLMMr5Cw\",\"sessionID\":\"ses_e687f63acffelf22vlO5PE9oPH\",\"messageID\":\"msg_19780f70c001uvC1mCvvRf2GJ0\",\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"cost\":0,\"tokens\":{\"input\":1151,\"output\":615,\"reasoning\":0,\"cache\":{\"read\":13568,\"write\":0}}}}\n\n{\"type\":\"step_start\",\"timestamp\":1793543179469,\"sessionID\":\"ses_e687f63acffelf22vlO5PE9oPH\",\"part\":{\"id\":\"prt_197810ccd0011bG2D7ljPGSDVF\",\"sessionID\":\"ses_e687f63acffelf22vlO5PE9oPH\",\"messageID\":\"msg_197810ab6001JzjnRh2OOycGA0\",\"type\":\"step-start\"}}\n\n{\"type\":\"text\",\"timestamp\":1793543185952,\"sessionID\":\"ses_e687f63acffelf22vlO5PE9oPH\",\"part\":{\"id\":\"prt_197810ab6001JzjnRh2OOycGA0_text-0\",\"sessionID\":\"ses_e687f63acffelf22vlO5PE9oPH\",\"messageID\":\"msg_197810ab6001JzjnRh2OOycGA0\",\"type\":\"text\",\"text\":\"\\n\\n**[goal]** Fechar o semestre: gerar `pnl.csv` e `runway.json` a partir do razão em formato brasileiro.\\n\\n**[action]** Mapeei as 86 linhas do `finance/ledger.csv` pelas contas de `finance/chart_of_accounts.csv` (0 contas sem mapa, só meses 01-06/2026, sem duplicatas). Receita líquida = 3.1.01 + 3.1.02 + 3.1.09 (estornos já negativos, Mar -6.814,15 e Mai -8.634,37). Custos invertidos para positivo. Resultado financeiro (6.1.01/6.1.02, +5.621 a +7.300/mês) ficou fora do EBITDA. Cálculo em `Decimal` com arredondamento half-up (`tmp/tmp_calc.py`).\\n\\n**[result]** `pnl.csv`:\\n\\n| line | 2026-01 | 2026-02 | 2026-03 | 2026-04 | 2026-05 | 2026-06 |\\n|---|---|---|---|---|---|---|\\n| revenue | 200510.87 | 216328.06 | 219066.17 | 238163.26 | 243032.89 | 272391.57 |\\n| cogs | 60091.92 | 64278.71 | 69096.05 | 70867.73 | 73973.13 | 75162.69 |\\n| gross_profit | 140418.95 | 152049.35 | 149970.12 | 167295.53 | 169059.76 | 197228.88 |\\n| gross_margin_pct | 70.03 | 70.29 | 68.46 | 70.24 | 69.56 | 72.41 |\\n| sales_marketing | 143475.23 | 138161.28 | 135519.34 | 139688.11 | 138680.10 | 151896.54 |\\n| rnd | 163396.33 | 182271.02 | 171742.87 | 179804.44 | 185905.30 | 189990.01 |\\n| ga | 43826.35 | 43917.13 | 47233.36 | 44753.63 | 46420.18 | 48310.55 |\\n| ebitda | -210278.96 | -212300.08 | -204525.45 | -196950.65 | -201945.82 | -192968.22 |\\n\\n`runway.json`: `burn_avg_3m` 197288.23 (média de abr/mai/jun: 196950.65+201945.82+192968.22 = 591864.69 / 3), `runway_months` 9.4 (1.847.350,40 do saldo de 30/06/2026, a linha mais recente de `finance/cash_balance.txt`, / 197288.23 = 9.3637).\\n\\nChecagens: receita de março 97.788,41+106.637,50+21.454,41-6.814,15 = 219.066,17 confere; EBITDA de junho 197228.88-151896.54-189990.01-48310.55 = -192968.22 confere; parser lê 9 linhas x 7 colunas na ordem pedida.\\n\\n**[next]** Nada pendente. Se o runway devesse usar o saldo de 31/05 em vez do de 30/06, o valor muda para 11.7 meses; usei o saldo mais recente.\",\"time\":{\"start\":1793543178948,\"end\":1793543185952}}}\n\n",
+ "checks": [
+  [
+   "pnl.csv lines in order",
+   true
+  ],
+  [
+   "revenue per month",
+   true
+  ],
+  [
+   "cogs per month",
+   true
+  ],
+  [
+   "gross_profit per month",
+   true
+  ],
+  [
+   "gross_margin_pct per month",
+   true
+  ],
+  [
+   "sales_marketing per month",
+   true
+  ],
+  [
+   "rnd per month",
+   true
+  ],
+  [
+   "ga per month",
+   true
+  ],
+  [
+   "ebitda per month",
+   true
+  ],
+  [
+   "3-month average burn",
+   true
+  ],
+  [
+   "runway in months",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 10,
+  "tool_calls": 9,
+  "tool_errors": 0,
+  "shell_commands": 7,
+  "shell_failures": 2,
+  "file_writes": 2,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 3537,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1029
+ },
+ "deliverables": [],
+ "render": null
+}
