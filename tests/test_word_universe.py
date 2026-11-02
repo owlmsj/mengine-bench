@@ -363,3 +363,23 @@ def test_a_new_eval_keeps_older_complete_runs_in_the_history() -> None:
     assert is_complete_run({"bench_version": "1.5.0", "tasks": [{"id": task} for task in older]})
     assert not is_complete_run({"bench_version": "1.5.0", "tasks": [{"id": task} for task in older[1:]]})
     assert not is_complete_run({"bench_version": __version__, "tasks": [{"id": task} for task in older]})
+
+@pytest.mark.parametrize('ranking', [
+    {'tempo': 16, 'palavra': 16, 'pescador': 9},
+    [{'word': 'palavra', 'degree': 16}, {'word': 'tempo', 'degree': 16}, {'word': 'pescador', 'degree': 9}],
+    [{'name': 'tempo', 'count': 16}, {'name': 'palavra', 'count': 16}],
+])
+def test_ranked_most_connected_accepts_exact_top_tie(graded: Path, ranking: object) -> None:
+    _deliver(graded, _gold_lists(), _summary(most_connected=ranking))
+    assert _check(graded).passed
+
+
+@pytest.mark.parametrize('ranking', [
+    {'palavra': 16, 'pescador': 9},
+    {'palavra': 16, 'tempo': 16, 'pescador': 16},
+    [{'word': 'palavra', 'degree': 16}],
+    [{'word': 'palavra', 'degree': 16}, {'word': 'tempo', 'degree': 15}],
+])
+def test_ranked_most_connected_rejects_wrong_top_tie(graded: Path, ranking: object) -> None:
+    _deliver(graded, _gold_lists(), _summary(most_connected=ranking))
+    assert RESULT_CHECK in _check(graded).failed()
