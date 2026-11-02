@@ -1,0 +1,74 @@
+{
+ "task_id": "cmp-handoff",
+ "prompts": [
+  "You are handing this debugging work to a colleague who will never see {WS}/session/transcript.md. Write {WS}/HANDOFF.md, at most 1000 characters, so they can carry on from where it really stands.",
+  "You just took over this work, and {WS}/HANDOFF.md is all you have. Where was the recipe applied, what are the final decode speed and VRAM, which quantization was discarded, what is still pending, and which command measures it again? Record it in {WS}/result.json: file_line, final_decode, final_vram_mib, discarded_quant, pending, measure_command."
+ ],
+ "answers": [
+  "[goal] Write `HANDOFF.md`, at most 1000 characters, for the local-9b Q5 128k measurement.\n\n[action] I read `session/transcript.md` (about 80 steps, mostly repeated filler) and `AGENTS.md`. I wrote `HANDOFF.md` from the transcript alone and ran nothing else.\n\n[result] `HANDOFF.md` is 936 bytes (`wc -c`). It records:\n- **Valid number:** 38.0 t/s and 7697 MiB, using `--no-mmproj-offload -ub 512`.\n- **Discarded number:** the first measurement of 37.8 t/s and 7881 MiB. It hit the WDDM ceiling, with 1494 MiB spilled.\n- **Q6_K:** discarded, because it does not fit at 128k.\n- **Q4_K_M:** a fallback only.\n- **Recipe location:** `scripts/start_server.ps1:165` and `profiles/local/local-9b.json`.\n- **Left to do:** fix the evals README, which cites the deleted `check_vision.ps1`.\n\nI also flagged two gaps in the handoff:\n- The transcript shows no re-measure after the recipe was applied to the script and profile.\n- The transcript does not show whether `--no-mmproj-offload` affects vision.\n\n[next] How I know it is right: each figure and path above is quoted from transcript lines 30, 44, 124, 132, 185 and 222. The two gaps are the absence of any such entry, not something I tested. I did not verify the numbers or open the referenced files. The colleague should do one clean re-measure first.",
+  "[goal] Fill `result.json` from `HANDOFF.md`.\n\n[action] I read `HANDOFF.md` and `AGENTS.md`. The workspace has only those two files, so I could not open the scripts or run anything. I wrote `result.json` straight from the handoff text.\n\n[result] `result.json` has the six fields:\n- **file_line:** `scripts/start_server.ps1:165` (local9 block), plus `profiles/local/local-9b.json`.\n- **final_decode and final_vram_mib:** 38.0 t/s (median of 3) and 7697 MiB. This is the valid run with `--no-mmproj-offload -ub 512`, with no spill.\n- **discarded_quant:** Q6_K, because it does not fit at 128k. I read \"quantization discarded\" as that. The handoff's DISCARD line is a Q5 run (37.8 t/s, 7881 MiB, 1494 MiB spilled), not a quant, so I noted it in the field. Q4_K_M (7305 MiB, 40.4 t/s) is only a fallback.\n- **pending:** three items. The evals README still cites `check_vision.ps1`, which no longer exists. A re-measure is needed after the recipe went into the script and profile, with Shared Usage at 0. And `--no-mmproj-offload` must be checked against vision use.\n- **measure_command:** `scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`. The handoff names this command only on the discarded run. I assumed it is the measuring script and that the recipe flags come from the server start script, so the field says to run it against a server started with those flags.\n\n[next] The numbers are unverified against the real files or hardware. The handoff itself says nothing was re-run after the recipe was applied. I checked the values against the handoff text only."
+ ],
+ "diff": "A HANDOFF.md\nA result.json\nD session/transcript.md\n\n--- HANDOFF.md ---\n# Handoff: local-9b Q5 at 128k context\n\nTask: measure local-9b Q5 at 131072 ctx.\n\n## Result\n- Valid: `--no-mmproj-offload -ub 512`: VRAM 7697 MiB, decode 38.0 t/s (median of 3), no spill.\n- DISCARD 37.8 t/s / 7881 MiB (`scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`): 7881 is the WDDM ceiling, Shared Usage showed 1494 MiB spilled.\n- Q6_K (7.03 GiB) does not fit at 128k. Q4_K_M fits (7305 MiB, 40.4 t/s): fallback only.\n\n## Done\nRecipe applied in `scripts/start_server.ps1:165` (local9 block) and `profiles/local/local-9b.json`.\n\n## Left\n- evals README still cites `check_vision.ps1`, which no longer exists: update it.\n- Not seen in transcript: a re-measure after applying the recipe to the script/profile. Do one run (no download running) and confirm Shared Usage is 0.\n- Check that `--no-mmproj-offload` does not break vision use.\n\nAssumption: the transcript is the only source; I did not run anything or open those files.\n\n\n--- result.json ---\n{\n  \"file_line\": \"scripts/start_server.ps1:165 (local9 block); also profiles/local/local-9b.json\",\n  \"final_decode\": \"38.0 t/s (median of 3)\",\n  \"final_vram_mib\": 7697,\n  \"discarded_quant\": \"Q6_K (7.03 GiB, does not fit at 128k ctx). Q4_K_M is only a fallback (7305 MiB, 40.4 t/s). The discarded 37.8 t/s / 7881 MiB run was a config run on Q5, not a quant.\",\n  \"pending\": [\n    \"Update evals README: it cites check_vision.ps1, which no longer exists\",\n    \"Re-measure after the recipe was applied to script/profile (no download running); confirm Shared Usage is 0\",\n    \"Check that --no-mmproj-offload does not break vision use\"\n  ],\n  \"measure_command\": \"scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024 (run against the server started from scripts/start_server.ps1 with --no-mmproj-offload -ub 512; check Shared Usage = 0)\"\n}\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ cd session 2>/dev/null && ls -la && wc -c transcript.md; ls ..\n$ cat > HANDOFF.md <<'EOF'\n# Handoff: local-9b Q5 at 128k context\n\nTask: measure local-9b Q5 at 131072 ctx.\n\n## Result\n- Valid: `--no-mmproj-offload -ub 512`: VRAM 7697 MiB, decode 38.0 t/s (median of 3), no spill.\n- DISCARD 37.8 t/s / 7881 MiB (`scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`)\n$ cd \"<WORKSPACE>\"; ls -R | head -30\n$ cat AGENTS.md\n$ cat > result.json <<'E'\n{\n  \"file_line\": \"scripts/start_server.ps1:165 (local9 block); also profiles/local/local-9b.json\",\n  \"final_decode\": \"38.0 t/s (median of 3)\",\n  \"final_vram_mib\": 7697,\n  \"discarded_quant\": \"Q6_K (7.03 GiB, does not fit at 128k ctx). Q4_K_M is only a fallback (7305 MiB, 40.4 \n\nStream tail:\n\",\"timestamp\":\"2026-11-02T18:33:43.845Z\",\"request_id\":\"req_011Cgeagsp6YrFizNkBYZ9X2\"}\n{\"duration_api_ms\":33380,\"stop_reason\":\"end_turn\",\"session_id\":\"26ae320e-836b-4f0d-87d4-71d430974c91\",\"total_cost_usd\":0.0957826,\"usage\":{\"input_tokens\":10,\"cache_creation_input_tokens\":16180,\"cache_read_input_tokens\":152426,\"output_tokens\":1580,\"output_tokens_details\":{\"thinking_tokens\":272},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":16180,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":604,\"cache_read_input_tokens\":34484,\"cache_creation_input_tokens\":734,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":734},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-sonnet-5-5\":{\"inputTokens\":10,\"outputTokens\":1580,\"cacheReadInputTokens\":152426,\"cacheCreationInputTokens\":16180,\"webSearchRequests\":0,\"costUSD\":0.0957826,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":272,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":16180,\"canonicalModel\":\"claude-sonnet-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":5,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"[goal] Fill `result.json` from `HANDOFF.md`.\\n\\n[action] I read `HANDOFF.md` and `AGENTS.md`. The workspace has only those two files, so I could not open the scripts or run anything. I wrote `result.json` straight from the handoff text.\\n\\n[result] `result.json` has the six fields:\\n- **file_line:** `scripts/start_server.ps1:165` (local9 block), plus `profiles/local/local-9b.json`.\\n- **final_decode and final_vram_mib:** 38.0 t/s (median of 3) and 7697 MiB. This is the valid run with `--no-mmproj-offload -ub 512`, with no spill.\\n- **discarded_quant:** Q6_K, because it does not fit at 128k. I read \\\"quantization discarded\\\" as that. The handoff's DISCARD line is a Q5 run (37.8 t/s, 7881 MiB, 1494 MiB spilled), not a quant, so I noted it in the field. Q4_K_M (7305 MiB, 40.4 t/s) is only a fallback.\\n- **pending:** three items. The evals README still cites `check_vision.ps1`, which no longer exists. A re-measure is needed after the recipe went into the script and profile, with Shared Usage at 0. And `--no-mmproj-offload` must be checked against vision use.\\n- **measure_command:** `scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`. The handoff names this command only on the discarded run. I assumed it is the measuring script and that the recipe flags come from the server start script, so the field says to run it against a server started with those flags.\\n\\n[next] The numbers are unverified against the real files or hardware. The handoff itself says nothing was re-run after the recipe was applied. I checked the values against the handoff text only.\",\"ttft_ms\":2283,\"type\":\"result\",\"duration_ms\":34970,\"uuid\":\"cbcd973d-42d8-4384-99b3-c7b562fd8df3\",\"ttft_stream_ms\":1719,\"time_to_request_ms\":131,\"first_content_frame_ms\":1719,\"queued_turn_count\":0,\"result_index\":0,\"model_usage_since_last_result\":{\"claude-sonnet-5-5\":{\"inputTokens\":10,\"outputTokens\":1580,\"cacheReadInputTokens\":152426,\"cacheCreationInputTokens\":16180,\"webSearchRequests\":0,\"costUSD\":0.0957826,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":272,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":16180,\"canonicalModel\":\"claude-sonnet-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}}}\n",
+ "checks": [
+  [
+   "summary exists and fits in 1000 characters",
+   true
+  ],
+  [
+   "summary keeps `--no-mmproj-offload`",
+   true
+  ],
+  [
+   "summary keeps `-ub 512`",
+   true
+  ],
+  [
+   "summary keeps `7697`",
+   true
+  ],
+  [
+   "answer file_line",
+   true
+  ],
+  [
+   "answer final_decode",
+   true
+  ],
+  [
+   "answer final_vram_mib",
+   true
+  ],
+  [
+   "answer discarded_quant",
+   true
+  ],
+  [
+   "answer pending",
+   true
+  ],
+  [
+   "answer measure_command",
+   true
+  ],
+  [
+   "does not repeat the spilled VRAM as final",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 9,
+  "tool_calls": 8,
+  "tool_errors": 0,
+  "shell_commands": 5,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 3094,
+  "reasoning_tokens": 446
+ },
+ "deliverables": [],
+ "render": null
+}
