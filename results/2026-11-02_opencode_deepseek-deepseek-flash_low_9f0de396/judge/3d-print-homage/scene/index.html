@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Great Wave - Low Poly Study</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #e9dfc6; }
+  canvas { display: block; }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'three';
+
+/* ---------- palette ---------- */
+const C = {
+  deep:   '#0f2a52',
+  indigo: '#173f6d',
+  blue:   '#215a8b',
+  mid:    '#3576a0',
+  pale:   '#a9c8d4',
+  foam:   '#f5f0e2',
+  bone:   '#fbf7ea',
+  cream:  '#ece2c9',
+  skyTop: '#e9dfc4',
+  skyMid: '#f0e9d6',
+  horizon:'#cbc7b4',
+  peach:  '#e0ac78',
+  peach2: '#cf9463',
+  hull:   '#1a3355',
+  rock:   '#6e7f8e',
+  snow:   '#f8f5e9'
+};
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 300);
+camera.position.set(0, 0.6, 30);
+camera.lookAt(0, 0.3, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setClearColor(C.cream);
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xfff6e2, 0x24405f, 1.25));
+const sun = new THREE.DirectionalLight(0xfff2d8, 1.5);
+sun.position.set(-10, 16, 14);
+scene.add(sun);
+const fill = new THREE.DirectionalLight(0xbfd6e2, 0.7);
+fill.position.set(8, -4, 10);
+scene.add(fill);
+
+/* ---------- helpers ---------- */
+const gradStops = (stops) => stops.map(([y, hex]) => [y, new THREE.Color(hex)]);
+
+function colorAt(stops, y, x = 0, z = 0) {
+  if (y <= stops[0][0]) return stops[0][1];
+  for (let i = 1; i < stops.length; i++) {
+    if (y <= stops[i][0]) {
+      const [y0, c0] = stops[i - 1], [y1, c1] = stops[i];
+      const t = (y - y0) / (y1 - y0);
+      return c0.clone().lerp(c1, t);
+    }
+  }
+  return stops[stops.length - 1][1];
+}
+
+function polyShape(pts) {
+  const s = new THREE.Shape();
+  s.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) s.lineTo(pts[i][0], pts[i][1]);
+  s.closePath();
+  return s;
+}
+
+function coloredMesh(pts, depth, stops, opts = {}) {
+  const geo = new THREE.ExtrudeGeometry(polyShape(pts), {
+    depth, bevelEnabled: false, steps: 1, curveSegments: 1
+  });
+  geo.translate(0, 0, -depth / 2);
+  const pos = geo.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const c = colorAt(stops, y, x, z);
+    // faint paper/ink mottling so the flat facets breathe
+    const k = 1 + 0.045 * Math.sin(x * 1.7 + z * 2.3 + y * 0.6);
+    colors[i * 3] = c.r * k;
+    colors[i * 3 + 1] = c.g * k;
+    colors[i * 3 + 2] = c.b * k;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({
+    vertexColors: true, flatShading: true, roughness: 0.95, metalness: 0,
+    side: THREE.DoubleSide
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.userData.pts = pts;
+  mesh.userData.depth = depth;
+  return mesh;
+}
+
+const inkMat = new THREE.LineBasicMaterial({ color: 0x142b4d, transparent: true, opacity: 0.85 });
+function inkOutline(pts, z) {
+  const g = new THREE.BufferGeometry().setFromPoints(
+    pts.map(([x, y]) => new THREE.Vector3(x, y, z))
+  );
+  return new THREE.LineLoop(g, inkMat);
+}
+
+function samplePolyline(pts, a, b, count) {
+  const seq = pts.slice(a, b);
+  const lens = [0];
+  for (let i = 1; i < seq.length; i++) {
+    const dx = seq[i][0] - seq[i - 1][0], dy = seq[i][1] - seq[i - 1][1];
+    lens.push(lens[i - 1] + Math.hypot(dx, dy));
+  }
+  const total = lens[lens.length - 1];
+  const out = [];
+  for (let k = 0; k < count; k++) {
+    const target = total * (k / (count - 1));
+    let i = 1;
+    while (i < lens.length - 1 && lens[i] < target) i++;
+    const t = (target - lens[i - 1]) / Math.max(1e-6, lens[i] - lens[i - 1]);
+    const p0 = seq[i - 1], p1 = seq[i];
+    out.push({
+      x: p0[0] + (p1[0] - p0[0]) * t,
+      y: p0[1] + (p1[1] - p0[1]) * t,
+      a: Math.atan2(p1[1] - p0[1], p1[0] - p0[0])
+    });
+  }
+  return out;
+}
+
+const foamBlobGeo = new THREE.IcosahedronGeometry(0.55, 0);
+const foamMat = new THREE.MeshStandardMaterial({
+  color: 0xf7f2e4, flatShading: true, roughness: 1, metalness: 0
+});
+const foamMatCool = new THREE.MeshStandardMaterial({
+  color: 0xe4eee9, flatShading: true, roughness: 1, metalness: 0
+});
+
+function addFoamScroll(parent, x, y, z, s, cool = false) {
+  const m = new THREE.Mesh(foamBlobGeo, cool ? foamMatCool : foamMat);
+  m.position.set(x, y, z);
+  m.scale.set(1.7 * s, 0.5 * s, 0.7 * s);
+  m.rotation.set(0, Math.random() * 3, (Math.random() - 0.5) * 0.6);
+  parent.add(m);
+  return m;
+}
+
+/* ---------- sky ---------- */
+{
+  const geo = new THREE.PlaneGeometry(150, 80, 1, 10);
+  const pos = geo.attributes.position;
+  const cols = new Float32Array(pos.count * 3);
+  const py = (y) => {
+    // plane local y maps to world y
+    const stops = gradStops([[-24, C.skyTop], [-6, C.skyMid], [2, C.skyMid], [7, C.horizon], [34, C.skyMid]]);
+    return colorAt(stops, y);
+  };
+  for (let i = 0; i < pos.count; i++) {
+    const c = py(pos.getY(i));
+    cols[i * 3] = c.r; cols[i * 3 + 1] = c.g; cols[i * 3 + 2] = c.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+  const sky = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true }));
+  sky.position.set(0, 8, -26);
+  scene.add(sky);
+
+  // warm cloud bank on the right, as in the print
+  const cloudMat = new THREE.MeshBasicMaterial({ color: 0xf4eedb });
+  const cloudGeo = new THREE.IcosahedronGeometry(1, 0);
+  const cloud = new THREE.Group();
+  const blobs = [[9, 8.4, 0, 7.5, 2.2], [13.5, 9.2, 0, 5.5, 1.9], [6, 7.6, 0, 4.6, 1.6],
+                 [16.8, 10.1, 0, 4.2, 1.5], [11.6, 6.9, 0, 3.8, 1.2]];
+  for (const [x, y, z, sx, sy] of blobs) {
+    const m = new THREE.Mesh(cloudGeo, cloudMat);
+    m.position.set(x, y, z);
+    m.scale.set(sx, sy, 1);
+    cloud.add(m);
+  }
+  cloud.position.z = -21;
+  scene.add(cloud);
+}
+
+/* ---------- distant sea / horizon lines ---------- */
+{
+  const seaGeo = new THREE.PlaneGeometry(150, 9, 1, 1);
+  const sea = new THREE.Mesh(seaGeo, new THREE.MeshBasicMaterial({ color: 0xcfd3c4 }));
+  sea.position.set(0, -6.4, -20);
+  scene.add(sea);
+
+  const lineMat = new THREE.LineBasicMaterial({ color: 0x8fa4a8, transparent: true, opacity: 0.55 });
+  for (let i = 0; i < 3; i++) {
+    const pts = [];
+    for (let x = -40; x <= 40; x += 4) pts.push(new THREE.Vector3(x, -7.1 + i * 0.7 + Math.sin(x * 0.35 + i) * 0.14, -19.5));
+    scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lineMat));
+  }
+}
+
+/* ---------- Mount Fuji ---------- */
+const fuji = new THREE.Group();
+{
+  const body = new THREE.Mesh(
+    new THREE.ConeGeometry(2.0, 3.6, 9, 1),
+    new THREE.MeshStandardMaterial({ color: 0x7c8b99, flatShading: true, roughness: 1 })
+  );
+  body.position.y = 1.8;
+  fuji.add(body);
+
+  const snow = new THREE.Mesh(
+    new THREE.ConeGeometry(1.3, 2.2, 9, 1),
+    new THREE.MeshStandardMaterial({ color: C.snow, flatShading: true, roughness: 1 })
+  );
+  snow.position.y = 2.5;
+  snow.rotation.y = 0.25;
+  fuji.add(snow);
+
+  fuji.position.set(5.4, -3.8, -9);
+  fuji.scale.set(1, 1, 1);
+  scene.add(fuji);
+}
+
+/* ---------- the great wave ---------- */
+const wavePts = [
+  [-19.4, -9.4], [-19.6, -3.2], [-18.9, 1.4], [-17.4, 4.6], [-15.2, 6.7],
+  [-12.6, 8.1], [-9.7, 9.0], [-6.8, 9.3], [-4.1, 9.0], [-1.7, 8.2],
+  [0.3, 6.9], [1.9, 5.2], [3.0, 4.2], [4.0, 2.9], [4.5, 1.9],
+  [3.5, 0.8], [2.3, -0.6], [0.8, -2.0], [-0.8, -3.3], [-2.6, -4.8],
+  [-4.6, -6.4], [-6.8, -7.9], [-9.4, -8.9], [-12.6, -10.2], [-15.8, -10.5], [-18.4, -10.0]
+];
+const waveStops = gradStops([
+  [-10, C.deep], [-5, C.indigo], [-0.5, C.blue], [3.2, C.mid],
+  [5.6, '#3b7495'], [7.2, '#7fa9b8'], [8.2, '#d6e5de'], [9.2, '#f6f1e3'], [9.7, C.bone]
+]);
+
+const waveRig = new THREE.Group();
+const waveGroup = new THREE.Group();
+{
+  const wave = coloredMesh(wavePts, 2.6, waveStops);
+  waveGroup.add(wave);
+  waveGroup.add(inkOutline(wavePts, 1.34));
+
+  // continuous cream foam band along the crest
+  {
+    const seq = wavePts.slice(3, 15);
+    const band = [
+      ...seq.map(([x, y]) => [x, y + 0.05]),
+      ...seq.slice().reverse().map(([x, y]) => [x, y - 0.72])
+    ];
+    const bandMesh = coloredMesh(band, 0.18,
+      gradStops([[-12, C.foam], [8, C.bone], [12, C.foam]]));
+    bandMesh.position.z = 1.46;
+    waveGroup.add(bandMesh);
+  }
+
+  // ink ridges inside the face: the print's banded water
+  const ridgeMat = new THREE.MeshStandardMaterial({
+    color: 0x16375f, flatShading: true, roughness: 1, side: THREE.DoubleSide
+  });
+  const ridgeDefs = [
+    [[-17.8, 2.2], [-15.2, 5.2], [-12.0, 7.1], [-8.4, 7.9], [-5.0, 7.6], [-2.4, 6.5], [-0.6, 4.8]],
+    [[-17.0, -0.6], [-14.4, 2.4], [-11.4, 4.4], [-8.0, 5.2], [-4.8, 4.9], [-2.4, 3.6]],
+    [[-16.2, -3.6], [-13.8, -0.8], [-10.8, 1.2], [-7.4, 1.8], [-4.6, 1.2]]
+  ];
+  for (const def of ridgeDefs) {
+    const pts = def.map(([x, y]) => new THREE.Vector3(x, y, 1.33));
+    const curve = new THREE.CatmullRomCurve3(pts);
+    const tube = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, 12, 0.10, 4, false), ridgeMat
+    );
+    waveGroup.add(tube);
+  }
+
+  // crest foam blobs straddling the silhouette edge
+  const crest = samplePolyline(wavePts, 3, 15, 20);
+  for (let i = 0; i < crest.length; i++) {
+    const p = crest[i];
+    const s = 0.9 + 0.5 * Math.sin(i * 1.7);
+    addFoamScroll(waveGroup, p.x, p.y - 0.16, 1.42, s * 1.15);
+    if (i % 2 === 0) addFoamScroll(waveGroup, p.x, p.y - 0.05, -1.38, s * 0.7, true);
+  }
+
+  // Hokusai's foam claws: white fingers draped down the dark face
+  const clawMat = new THREE.MeshStandardMaterial({
+    color: 0xf9f5e8, flatShading: true, roughness: 1
+  });
+  const clawCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0, 0, 0), new THREE.Vector3(0.30, -0.42, 0),
+    new THREE.Vector3(0.44, -0.92, 0), new THREE.Vector3(0.26, -1.36, 0),
+    new THREE.Vector3(0.02, -1.55, 0)
+  ]);
+  const clawGeo = new THREE.TubeGeometry(clawCurve, 6, 0.15, 4, false);
+
+  const clawSpots = samplePolyline(wavePts, 4, 15, 13);
+  clawSpots.forEach((p, i) => {
+    const holder = new THREE.Group();
+    holder.position.set(p.x + 0.15, p.y - 0.1, 1.52);
+    holder.rotation.z = 0.15 + 0.2 * Math.sin(i * 2.1);
+    const claw = new THREE.Mesh(clawGeo, clawMat);
+    claw.scale.setScalar(1.25 + 0.4 * Math.sin(i * 1.3));
+    holder.add(claw);
+    holder.userData.base = holder.rotation.z;
+    holder.userData.phase = i * 1.7;
+    holder.userData.kind = 'claw';
+    waveGroup.add(holder);
+
+    if (i % 2 === 0) {
+      const up = new THREE.Group();
+      up.position.set(p.x, p.y + 0.15, 1.45);
+      up.rotation.z = Math.PI - 0.35;
+      const c2 = new THREE.Mesh(clawGeo, clawMat);
+      c2.scale.setScalar(0.65 + 0.2 * Math.sin(i));
+      up.add(c2);
+      up.userData.base = up.rotation.z;
+      up.userData.phase = i * 2.3;
+      up.userData.kind = 'claw';
+      waveGroup.add(up);
+    }
+  });
+
+  // foam fingers hanging under the overhanging tip
+  for (let i = 0; i < 3; i++) {
+    const holder = new THREE.Group();
+    holder.position.set(4.15 - i * 0.45, 2.35 - i * 0.18, 1.6);
+    holder.rotation.z = 0.25 + i * 0.12;
+    const claw = new THREE.Mesh(clawGeo, clawMat);
+    claw.scale.setScalar(1.95 - i * 0.2);
+    holder.add(claw);
+    holder.userData.base = holder.rotation.z;
+    holder.userData.phase = i * 2.2 + 1;
+    holder.userData.kind = 'claw';
+    waveGroup.add(holder);
+  }
+
+  waveGroup.position.z = 0.4;
+  waveRig.add(waveGroup);
+  scene.add(waveRig);
+}
+
+{
+  const pts = [
+    [25.5, -13], [22.9, -4], [21.3, 1.4], [19.5, 5.0], [17.1, 7.0],
+    [14.7, 7.8], [12.3, 7.6], [10.5, 6.7], [9.4, 5.1], [9.0, 3.2],
+    [9.2, 1.2], [9.7, -2.4], [10.3, -6.2], [11.1, -13]
+  ];
+  const stops = gradStops([
+    [-13, C.deep], [-5, C.indigo], [1, C.blue], [4.4, C.mid],
+    [6.4, '#a5c8d2'], [7.6, C.foam]
+  ]);
+  const g = new THREE.Group();
+  const m = coloredMesh(pts, 2.2, stops);
+  g.add(m);
+  g.add(inkOutline(pts, 1.12));
+  const crest = samplePolyline(pts, 1, 10, 14);
+  crest.forEach((p, i) => {
+    addFoamScroll(g, p.x - 0.25, p.y - 0.12, 1.2, 0.7 + 0.3 * Math.sin(i * 1.9));
+  });
+  // ink bands down the swell face
+  const ridgeMat = new THREE.MeshStandardMaterial({ color: 0x1b4471, flatShading: true, roughness: 1, side: THREE.DoubleSide });
+  for (let i = 0; i < 3; i++) {
+    const c = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(20.0 - i * 1.2, 2.5 + i * 1.6, 1.14),
+      new THREE.Vector3(17.0 - i * 1.0, 4.0 + i * 1.2, 1.14),
+      new THREE.Vector3(14.1 - i * 0.8, 4.8 + i * 0.8, 1.14),
+      new THREE.Vector3(11.7 - i * 0.5, 4.4 + i * 0.5, 1.14)
+    ]);
+    g.add(new THREE.Mesh(new THREE.TubeGeometry(c, 10, 0.09, 4, false), ridgeMat));
+  }
+  g.position.set(0.4, -0.3, 0.9);
+  scene.add(g);
+}
+
+/* ---------- foreground swells ---------- */
+const swellRig = new THREE.Group();
+const inkLineMat = new THREE.LineBasicMaterial({ color: 0x173a63, transparent: true, opacity: 0.6 });
+
+function makeSwell(yBase, amp, waveLen, phase, z, stops, foam) {
+  const g = new THREE.Group();
+  const top = [];
+  for (let x = -34; x <= 34; x += 1.0) {
+    top.push([x, yBase + amp * Math.sin(x / waveLen + phase) + amp * 0.35 * Math.sin(x / (waveLen * 0.37) + phase * 2)]);
+  }
+  const pts = [...top, [34, -40], [-34, -40]];
+  const m = coloredMesh(pts, 1.6, stops);
+  g.add(m);
+
+  const linePts = top.map(([x, y]) => new THREE.Vector3(x, y + 0.02, 0.82));
+  g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(linePts), inkLineMat));
+
+  if (foam) {
+    for (let i = 2; i < top.length - 2; i += 2) {
+      const [x, y] = top[i];
+      const s = 0.32 + 0.22 * Math.abs(Math.sin(i * 1.3));
+      addFoamScroll(g, x, y + 0.14, 0.85, s);
+    }
+    const bandPts = [...top.map(([x, y]) => [x, y + 0.05]), [34, yBase + amp + 0.05], [-34, yBase + amp + 0.05]];
+    // pale crest strip
+    const stripPts = [];
+    for (let i = 0; i < top.length; i++) stripPts.push([top[i][0], top[i][1] + 0.02]);
+    for (let i = top.length - 1; i >= 0; i--) stripPts.push([top[i][0], top[i][1] - 0.32]);
+    const strip = coloredMesh(stripPts, 1.72,
+      gradStops([[yBase - 1, '#b7d2d4'], [yBase + amp + 1, '#f0eee0']]));
+    g.add(strip);
+  }
+  g.position.z = z;
+  swellRig.add(g);
+  return g;
+}
+
+const swellStopsPale = gradStops([[-13, '#2f638d'], [-8, '#5d93b0'], [-5.5, '#9dc0c9'], [-4, '#e2e6d8']]);
+const swellStopsDeep = gradStops([[-14, '#102a4c'], [-8, '#1c4675'], [-5, '#3a749b'], [-3, '#cfe0dc']]);
+
+makeSwell(-6.6, 0.62, 5.2, 1.1, 2.4, swellStopsPale, true);
+makeSwell(-9.2, 0.85, 6.4, 0.2, 4.0, swellStopsDeep, true);
+makeSwell(-12.4, 1.05, 7.8, 2.4, 5.6, swellStopsDeep, false);
+
+scene.add(swellRig);
+
+/* ---------- boats ---------- */
+const boatRig = [];
+function makeBoat(scale) {
+  const g = new THREE.Group();
+
+  const hullGeo = new THREE.CapsuleGeometry(0.58, 4.4, 2, 8);
+  const hullMat = new THREE.MeshStandardMaterial({ color: C.hull, flatShading: true, roughness: 0.9 });
+  const hull = new THREE.Mesh(hullGeo, hullMat);
+  hull.rotation.z = Math.PI / 2;
+  hull.scale.set(1, 0.52, 0.85);
+  hull.position.y = 0.05;
+  g.add(hull);
+
+  const deckGeo = new THREE.CapsuleGeometry(0.46, 4.2, 1, 8);
+  const deckMat = new THREE.MeshStandardMaterial({ color: 0xe9cba4, flatShading: true, roughness: 0.95 });
+  const deck = new THREE.Mesh(deckGeo, deckMat);
+  deck.rotation.z = Math.PI / 2;
+  deck.scale.set(1, 0.18, 0.62);
+  deck.position.set(0, 0.28, 0);
+  g.add(deck);
+
+  const railMat = new THREE.MeshStandardMaterial({ color: 0x233f60, flatShading: true, roughness: 1 });
+  for (const zs of [-0.3, 0.3]) {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(4.5, 0.09, 0.08), railMat);
+    rail.position.set(0, 0.42, zs);
+    g.add(rail);
+  }
+
+  // rowers: small indigo bodies with pale heads
+  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x203c5f, flatShading: true });
+  const headMat = new THREE.MeshStandardMaterial({ color: 0xe8dcc4, flatShading: true });
+  const headGeo = new THREE.IcosahedronGeometry(0.13, 0);
+  for (let i = 0; i < 6; i++) {
+    const x = -1.5 + i * 0.58;
+    for (const zs of [-0.24, 0.24]) {
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.24, 0.2), bodyMat);
+      body.position.set(x, 0.42, zs);
+      g.add(body);
+      const head = new THREE.Mesh(headGeo, headMat);
+      head.position.set(x, 0.59, zs);
+      g.add(head);
+      if (i % 2 === 0 && zs > 0) {
+        const oar = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.7, 4), railMat);
+        oar.position.set(x + 0.5, 0.15, zs * 1.9);
+        oar.rotation.set(-0.9, 0, -1.3);
+        g.add(oar);
+      }
+    }
+  }
+
+  // pointed prow / stern caps
+  const capMat = new THREE.MeshStandardMaterial({ color: 0x233f60, flatShading: true });
+  for (const side of [-1, 1]) {
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(0.34, 0.9, 6), capMat);
+    cap.rotation.z = side * Math.PI / 2;
+    cap.position.set(side * 2.7, 0.18, 0);
+    cap.scale.set(1, 1, 0.5);
+    g.add(cap);
+  }
+
+  g.scale.setScalar(scale);
+  return g;
+}
+
+function placeBoat(x, y, z, rot, scale, phase) {
+  const b = makeBoat(scale);
+  b.position.set(x, y, z);
+  b.rotation.z = rot;
+  b.userData = { baseY: y, baseRot: rot, phase, kind: 'boat' };
+  scene.add(b);
+  boatRig.push(b);
+}
+placeBoat(-11.4, -4.1, 2.0, 0.36, 1.15, 0.4);
+placeBoat(5.6, -4.3, 1.5, 0.1, 0.92, 2.1);
+placeBoat(-0.9, -7.5, 4.8, -0.05, 1.5, 4.0);
+
+/* ---------- spray ---------- */
+let sprayPoints, sprayVel;
+{
+  const N = 260;
+  const pos = new Float32Array(N * 3);
+  sprayVel = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    const zone = Math.random();
+    let x, y;
+    if (zone < 0.55) { x = -2 + Math.random() * 9; y = 1.8 + Math.random() * 6.4; }
+    else if (zone < 0.8) { x = -13 + Math.random() * 12; y = 4.5 + Math.random() * 4.8; }
+    else { x = -8 + Math.random() * 16; y = -8 + Math.random() * 5.5; }
+    pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = 2.4 + Math.random() * 1.6;
+    sprayVel[i * 3] = (Math.random() - 0.5) * 0.22;
+    sprayVel[i * 3 + 1] = 0.12 + Math.random() * 0.34;
+    sprayVel[i * 3 + 2] = 0;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 32;
+  const ctx = cv.getContext('2d');
+  const grd = ctx.createRadialGradient(16, 16, 1, 16, 16, 15);
+  grd.addColorStop(0, 'rgba(255,252,240,1)');
+  grd.addColorStop(0.55, 'rgba(250,246,232,0.85)');
+  grd.addColorStop(1, 'rgba(250,246,232,0)');
+  ctx.fillStyle = grd;
+  ctx.fillRect(0, 0, 32, 32);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const mat = new THREE.PointsMaterial({
+    size: 0.24, map: tex, transparent: true, depthWrite: false,
+    opacity: 0.95, color: 0xfffaf0, sizeAttenuation: true
+  });
+  sprayPoints = new THREE.Points(geo, mat);
+  scene.add(sprayPoints);
+}
+
+/* ---------- cartouche ---------- */
+function makeCartouche(w, h, cols) {
+  const cv = document.createElement('canvas');
+  cv.width = 128; cv.height = Math.round(128 * h / w);
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#efe6cf';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.strokeStyle = '#26456d';
+  ctx.lineWidth = 2.5;
+  ctx.strokeRect(7, 7, cv.width - 14, cv.height - 14);
+  ctx.strokeRect(12, 12, cv.width - 24, cv.height - 24);
+
+  // abstract vertical brush marks (no glyph dependency)
+  const colW = (cv.width - 40) / cols;
+  for (let c = 0; c < cols; c++) {
+    const cx = 20 + colW * (c + 0.5);
+    const top = 26 + (c % 2) * 6;
+    const count = 3 + ((c * 3) % 2);
+    for (let j = 0; j < count; j++) {
+      const y = top + j * (cv.height - 70) / count;
+      ctx.strokeStyle = '#203f68';
+      ctx.lineWidth = 5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx - colW * 0.28, y);
+      ctx.lineTo(cx + colW * 0.28, y);
+      ctx.stroke();
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(cx, y - 6);
+      ctx.lineTo(cx, y + 14);
+      ctx.stroke();
+      if (j % 2 === 0) {
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(cx - colW * 0.2, y + 12);
+        ctx.lineTo(cx + colW * 0.12, y + 16);
+        ctx.stroke();
+      }
+    }
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(w, h),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: false })
+  );
+  return mesh;
+}
+{
+  const big = makeCartouche(1.8, 4.6, 2);
+  big.position.set(-14.2, 6.8, 3.2);
+  big.rotation.z = 0.012;
+  scene.add(big);
+
+  const small = makeCartouche(0.9, 2.9, 1);
+  small.position.set(-16.0, 4.9, 3.2);
+  small.rotation.z = 0.03;
+  scene.add(small);
+}
+
+/* ---------- gentle motion ---------- */
+let mouseX = 0, mouseY = 0, camX = 0, camY = 0;
+addEventListener('pointermove', (e) => {
+  mouseX = (e.clientX / innerWidth) * 2 - 1;
+  mouseY = (e.clientY / innerHeight) * 2 - 1;
+});
+
+const claws = [];
+waveGroup.traverse((o) => { if (o.userData && o.userData.kind === 'claw') claws.push(o); });
+
+const clock = new THREE.Clock();
+let elapsed = 0;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  elapsed += dt;
+  const t = elapsed;
+
+  // big wave breathing and swaying
+  waveRig.position.y = Math.sin(t * 0.45) * 0.16;
+  waveRig.rotation.z = Math.sin(t * 0.32) * 0.008;
+  waveGroup.scale.set(1 + Math.sin(t * 0.5) * 0.004, 1 + Math.sin(t * 0.5 + 1) * 0.005, 1);
+
+  for (const c of claws) {
+    c.rotation.z = c.userData.base + Math.sin(t * 0.9 + c.userData.phase) * 0.07;
+    c.rotation.x = Math.sin(t * 0.65 + c.userData.phase * 1.3) * 0.05;
+  }
+
+  for (const b of boatRig) {
+    b.position.y = b.userData.baseY + Math.sin(t * 0.62 + b.userData.phase) * 0.22;
+    b.rotation.z = b.userData.baseRot + Math.sin(t * 0.5 + b.userData.phase) * 0.045;
+    b.rotation.x = Math.sin(t * 0.43 + b.userData.phase * 1.7) * 0.035;
+  }
+
+  for (let k = 0; k < swellRig.children.length; k++) {
+    const g = swellRig.children[k];
+    g.position.x = Math.sin(t * 0.18 + k * 1.9) * 0.45;
+    g.position.y = Math.sin(t * 0.4 + k * 1.2) * 0.08;
+  }
+
+  // spray drifting up and falling back
+  const pos = sprayPoints.geometry.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    let y = pos.getY(i) + sprayVel[i * 3 + 1] * dt;
+    let x = pos.getX(i) + sprayVel[i * 3] * dt + Math.sin(t * 0.7 + i) * 0.002;
+    if (y > 12) { y = 0.5 + Math.random() * 2; x = -3 + Math.random() * 10; }
+    pos.setY(i, y);
+    pos.setX(i, x);
+  }
+  pos.needsUpdate = true;
+
+  // parallax camera
+  camX += (mouseX * 1.1 - camX) * 0.03;
+  camY += (-mouseY * 0.5 - camY) * 0.03;
+  camera.position.x = camX + Math.sin(t * 0.14) * 0.25;
+  camera.position.y = 0.6 + camY + Math.sin(t * 0.19) * 0.12;
+  camera.lookAt(0, 0.3, 0);
+
+  renderer.render(scene, camera);
+}
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+});
+
+animate();
+</script>
+</body>
+</html>
