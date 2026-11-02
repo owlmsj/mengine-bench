@@ -37,8 +37,7 @@ def test_reference_passes_and_untouched_workspace_fails(task: EvalTask, tmp_path
 
 def test_part2_ids_are_stable() -> None:
     by_id = {task.id: task for task in PART2}
-    assert set(by_id) == {"ir-studio-wiki", "ir-server-logs", "gd-integration-repo",
-                          "web-mondrian-landing", "3d-voxel-landscape"}
+    assert set(by_id) == {"ir-server-logs", "gd-integration-repo", "web-mondrian-landing", "3d-print-homage"}
 
 
 def test_prompts_are_english() -> None:
@@ -191,45 +190,3 @@ def test_logs_root_cause_accepts_every_out_of_space_wording(tmp_path: Path, root
     incident["root_cause"] = root_cause
     (tmp_path / "result.json").write_text(json.dumps(incident), encoding="utf-8")
     assert ir._logs_check(tmp_path, answers).passed is ok
-
-
-@pytest.mark.parametrize("field,value,ok", [
-    # #28 B2: legitimate forms of the right answer.
-    ("build", "Build 0.14.3", True),
-    ("build", "v0.14.3", True),
-    ("build", " 0.14.3 ", True),
-    ("approver", "Alice Sato (producer)", True),
-    ("approver", "alice sato", True),
-    ("neoplastic_ranked_max", "10 players", True),
-    ("restored_value", "120 ms", True),
-    ("sources", ["BUG-4471.md", "changelog-0.14.md", "approvals.md", "neoplastic.md", "PM-12.md"], True),
-    ("sources", {"build": ["wiki/bugs/BUG-4471.md", "wiki/releases/changelog-0.14.md"],
-                 "approver": ["wiki/releases/approvals.md"], "map": ["wiki/maps/neoplastic.md"],
-                 "flag": ["C:\\ws\\wiki\\postmortems\\PM-12.md"]}, True),
-    ("sources", "bugs/BUG-4471.md, releases/changelog-0.14.md, releases/approvals.md, maps/neoplastic.md, "
-                "postmortems/PM-12.md", True),
-    # Wrong answers stay wrong.
-    ("build", "0.14.2.1", False),
-    ("build", "0.14.3-rc1", False),
-    ("build", "Build 0.14.2", False),
-    ("approver", "Bruno Costa", False),
-    ("approver", "Alice Sato and Bruno Costa", False),
-    ("neoplastic_ranked_max", "12 players", False),
-    ("restored_value", "250 ms", False),
-    ("sources", ["missing/BUG-4471.md", "changelog-0.14.md", "approvals.md", "neoplastic.md", "PM-12.md"], False),
-    ("sources", ["BUG-4417.md", "changelog-0.14.md", "approvals.md", "neoplastic.md", "PM-12.md"], False),
-])
-def test_wiki_accepts_answer_forms_but_not_wrong_answers(tmp_path: Path, field: str, value: object, ok: bool) -> None:
-    ir._wiki_setup(tmp_path)
-    answers = ir._wiki_reference(tmp_path)
-    got = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
-    got[field] = value
-    (tmp_path / "result.json").write_text(json.dumps(got), encoding="utf-8")
-    assert ir._wiki_check(tmp_path, answers).passed is ok
-
-
-def test_wiki_approver_is_not_the_rc_decoy(tmp_path: Path) -> None:
-    # #41: the release candidate sits above the build in the table, under another name.
-    ir._wiki_setup(tmp_path)
-    table = (tmp_path / "wiki" / "releases" / "approvals.md").read_text(encoding="utf-8")
-    assert table.index("0.14.3-rc1 | Bruno Costa") < table.index("0.14.3 | Alice Sato")

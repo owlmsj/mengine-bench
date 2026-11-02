@@ -55,8 +55,8 @@ def test_the_report_names_the_tasks_that_separate_runs_and_the_points_of_each_pa
 
 def test_a_timeout_shows_on_its_task() -> None:
     timed = _run("a")
-    next(task for task in timed["tasks"] if task["id"] == "3d-voxel-landscape")["status"] = "timeout"
-    row = next(line for line in analyze.render_analysis([timed], "1.4").splitlines() if "3d-voxel-landscape" in line)
+    next(task for task in timed["tasks"] if task["id"] == "3d-print-homage")["status"] = "timeout"
+    row = next(line for line in analyze.render_analysis([timed], "1.4").splitlines() if "3d-print-homage" in line)
     assert row.endswith("| 1 |")
 
 
@@ -116,11 +116,11 @@ def test_changes_warn_about_regressions_and_name_only_affected_tasks() -> None:
     task = latest["tasks"][0]
     task.update(agent_s=40.0, judge=73, tokens={"input": 126})
     task["checks"][0]["ok"] = False
-    latest["totals"].update(time_s=600.0, judge=73, tokens={"input": 1260})
+    latest["totals"].update(time_s=45.0 * len(IDS), judge=73, tokens={"input": 1260})
     changes = _changes([latest, previous])
     assert changes.count("codex repeat/low") == 1
     assert "2026-10-30 -> 2026-10-31" in changes
-    assert f"Time: {30 * len(IDS)} -> 600" in changes
+    assert f"Time: {30 * len(IDS)} -> {45 * len(IDS)}" in changes
     assert "Judge: 80 -> 73" in changes
     assert "Input tokens: 1000 -> 1260" in changes
     assert f"{IDS[0]}: check failed: output matches; Time: 30 -> 40; Judge: 80 -> 73; Input tokens: 100 -> 126" in changes

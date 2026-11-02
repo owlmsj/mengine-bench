@@ -88,7 +88,7 @@ def test_a_script_run_inline_is_shown_like_a_file_written_first() -> None:
 
 
 def test_a_crash_packet_tells_the_judge_it_crashed() -> None:
-    task = next(item for item in catalog.all_tasks() if item.id == "lc-changelog")
+    task = next(item for item in catalog.all_tasks() if item.id == "ir-server-logs")
     packet = _crash_packet(task, TaskRunRecord(task_id=task.id, status="crash", error="boom"))
     assert packet["status"] == "crash"
 
@@ -124,7 +124,8 @@ def test_the_judge_reads_a_whole_page_and_no_raw_stream() -> None:
 
 def test_files_the_bench_moved_and_shown_deliverables_leave_the_diff() -> None:
     by_id = {task.id: task for task in catalog.all_tasks()}
-    assert _agent_diff("D _inline/changelog.md\nA notes.txt\n\n--- notes.txt ---\nhi", by_id["lc-changelog"]) == \
+    hidden = by_id["cmp-handoff"].steps[1].hide[0]
+    assert _agent_diff(f"D {hidden}\nA notes.txt\n\n--- notes.txt ---\nhi", by_id["cmp-handoff"]) == \
         "A notes.txt\n\n--- notes.txt ---\nhi"
     diff = "A landing/index.html\nA a.py\n\n--- landing/index.html ---\n<html>\n\n--- a.py ---\nx = 1"
     assert _agent_diff(diff, by_id["web-mondrian-landing"]) == "A landing/index.html\nA a.py\n\n--- a.py ---\nx = 1"
@@ -141,7 +142,6 @@ def test_the_judge_sees_tool_counts_but_not_tokens_or_turns() -> None:
 
 
 @pytest.mark.parametrize("task_id,screenshot,third", [
-    ("lc-changelog", False, "answer_discipline"), ("vis-chart", False, "answer_discipline"),
     ("ds-ab-playtest", False, "verification"), ("web-mondrian-landing", True, "rendered"),
     ("web-mondrian-landing", False, "verification"),
 ])
@@ -205,15 +205,15 @@ def test_a_reply_and_a_result_before_a_crash_are_kept(tmp_path: Path, monkeypatc
     from mengine_bench.runner.agents import OpencodeAgent
     from mengine_bench.runner.task_run import run_task
 
-    task = next(item for item in catalog.all_tasks() if item.id == "lc-changelog")
-    from mengine_bench.tasks import context
-    answer = "the build is 0.9.214"
+    task = next(item for item in catalog.all_tasks() if item.id == "ir-server-logs")
+    from mengine_bench.tasks import ir
+    answer = "the disk filled up"
     stream = json.dumps({"type": "text", "part": {"text": answer}})
     assert partial_answer(stream) == answer
 
     # #98: Correct reads the file, so the agent delivers it before the harness dies.
     def fake_run(argv: object, cwd: Path, *args: object, **kwargs: object) -> process.ProcessResult:
-        context._changelog_reference(Path(cwd))
+        ir._logs_reference(Path(cwd))
         return process.ProcessResult(stream, "", 1, False, 5.0)
 
     monkeypatch.setattr(process, "run_process", fake_run)

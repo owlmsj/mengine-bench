@@ -43,7 +43,8 @@ FILE_CHARS = 4_000
 # A page has to be seen whole: at 4,000 characters the judge saw a third of it and took points for that (#70).
 DELIVERABLE_CHARS = 60_000
 SCREENSHOT_NAME = "screenshot.png"
-REPLY_ONLY_TASKS = frozenset({"lc-changelog", "vis-chart"})
+# #124: bench 2.0 dropped the two tasks that only asked for facts; the criterion stays for one that does.
+REPLY_ONLY_TASKS: frozenset[str] = frozenset()
 THIRD_CRITERIA = ("verification", "answer_discipline", "rendered")
 # Tokens and turns stay out: they differ by harness and runtime, and the judge cited them as evidence (#70).
 JUDGE_SHOWN_STATS = ("tool_calls", "tool_errors", "shell_commands", "shell_failures", "file_writes",
