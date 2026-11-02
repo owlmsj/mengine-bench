@@ -1,0 +1,52 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "[goal] Find hitch cause on rig arena-01 from capture, pick fix within constraints, write result.json.\n\n[action] Parsed presentmon.csv (8238 frames) and sensors.csv (60 s), cross-correlated spike seconds with sensor columns, wrote `./result.json`. Nothing applied to this host.\n\n[result]\n| metric | value |\n|---|---|\n| avg_fps | 137.3 (1000 / mean 7.284 ms) |\n| low_1pct_fps | 45.4 (1000 / p99 22.049 ms) |\n\n- Hitches: 15 bursts of 12 frames each at ~21-23 ms, at seconds 2, 6, 10 ... 58, i.e. every 4 s.\n- Sensor log: `gpu_pcie_link_state` reads L1 in exactly those same seconds, L0 everywhere else. Link speed stays Gen5 x4 the whole time, clocks flat, so the stall is the L1 exit latency, not bandwidth.\n- Ruled out: Defender burst at t=43-45 (MsMpEng.exe, DPC 420-455 us, disk 94%) shows a per-second max frame time of only 7.7-8.1 ms, so it caused no hitch. Disk bursts at 13, 27, 52 likewise clean.\n- Fix recorded: `pcie_aspm_rp1_gpu` L1 -> disabled (BIOS). Keeps Gen5 x4, XMP, PBO and core ratio untouched, so it satisfies the owner's constraints.\n\nAssumptions: settings dump is complete; \"disabled\" is the ASPM off value, as already used for `pcie_aspm_rp2_chipset`. Expected post-fix 1% low is not measured, so not recorded.\n\n[next] Owner flips the one BIOS setting and re-captures to confirm; optional Defender exclusion for Arena.exe is not needed for this symptom."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\r\n  \"avg_fps\": 137.3,\r\n  \"low_1pct_fps\": 45.4,\r\n  \"cause\": \"PCIe ASPM L1 on the GPU root port (BIOS pcie_aspm_rp1_gpu=L1). The sensor log shows the GPU link dropping to L1 every 4 s (t=2,6,10,...58) and every one of the 15 hitch bursts (12 frames of ~21-23 ms vs ~7 ms baseline, 180 frames total) lands exactly in those seconds; link speed stays Gen5 x4 throughout, so the exit-latency of L1, not bandwidth, causes the stall. The MsMpEng.exe/Defender burst at t=43-45 (DPC 420 us, disk 94%) is the only other anomaly and produced no >20 ms frames, so it is not the hitch source. CPU/GPU clocks are flat and stable.\",\r\n  \"changes\": [\r\n    {\r\n      \"setting\": \"pcie_aspm_rp1_gpu\",\r\n      \"from\": \"L1\",\r\n      \"to\": \"disabled\"\r\n    }\r\n  ]\r\n}",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ cd \"<WORKSPACE>\" && ls -la && for f in *; do echo \"=== $f\"; head -c 1500 \"$f\"; echo; done\n$ cd \"<WORKSPACE>\" && tail -c 1000 settings.json && ls -la capture && for f in capture/*; do echo \"=== $f\"; head -5 \"$f\"; wc -l \"$f\"; done\n$ cd \"<WORKSPACE>\" && cat capture/sensors.csv && python -I - <<'EOF'\nimport csv,statistics\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\nms=[float(r['MsBetweenPresents']) for r in rows]\nms_s=sorted(ms); n=len(ms)\np99=ms_s[int(\n$ cd \"<WORKSPACE>\" && python -I - <<'EOF'\nimport csv,json,statistics\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\nms=[float(r['MsBetweenPresents']) for r in rows]\npersec={}\nfor r,m in zip(rows,ms):\n    s=int(float(r['TimeInSe\n\nStream tail:\ns\":null,\"context_management\":null},\"parent_tool_use_id\":null,\"session_id\":\"6a9dcbe5-67bc-4912-b3fd-c254de9edef3\",\"uuid\":\"a68e9384-5d91-4818-9449-671739e9b01c\",\"timestamp\":\"2026-11-02T21:39:08.653Z\",\"request_id\":\"req_011CgeppjthFxnr4i71i6LMX\"}\n{\"duration_api_ms\":31379,\"stop_reason\":\"end_turn\",\"session_id\":\"6a9dcbe5-67bc-4912-b3fd-c254de9edef3\",\"total_cost_usd\":0.6144860000000001,\"usage\":{\"input_tokens\":130,\"cache_creation_input_tokens\":22429,\"cache_read_input_tokens\":170824,\"output_tokens\":2438,\"output_tokens_details\":{\"thinking_tokens\":205},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":22429,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":32,\"output_tokens\":648,\"cache_read_input_tokens\":41698,\"cache_creation_input_tokens\":1554,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":1554},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-fable-5-1\":{\"inputTokens\":130,\"outputTokens\":2438,\"cacheReadInputTokens\":170824,\"cacheCreationInputTokens\":22429,\"webSearchRequests\":0,\"costUSD\":0.6144860000000001,\"contextWindow\":1000000,\"maxOutputTokens\":64000,\"thinkingTokens\":205,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":22429,\"canonicalModel\":\"claude-fable-5-1\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":5,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"[goal] Find hitch cause on rig arena-01 from capture, pick fix within constraints, write result.json.\\n\\n[action] Parsed presentmon.csv (8238 frames) and sensors.csv (60 s), cross-correlated spike seconds with sensor columns, wrote `./result.json`. Nothing applied to this host.\\n\\n[result]\\n| metric | value |\\n|---|---|\\n| avg_fps | 137.3 (1000 / mean 7.284 ms) |\\n| low_1pct_fps | 45.4 (1000 / p99 22.049 ms) |\\n\\n- Hitches: 15 bursts of 12 frames each at ~21-23 ms, at seconds 2, 6, 10 ... 58, i.e. every 4 s.\\n- Sensor log: `gpu_pcie_link_state` reads L1 in exactly those same seconds, L0 everywhere else. Link speed stays Gen5 x4 the whole time, clocks flat, so the stall is the L1 exit latency, not bandwidth.\\n- Ruled out: Defender burst at t=43-45 (MsMpEng.exe, DPC 420-455 us, disk 94%) shows a per-second max frame time of only 7.7-8.1 ms, so it caused no hitch. Disk bursts at 13, 27, 52 likewise clean.\\n- Fix recorded: `pcie_aspm_rp1_gpu` L1 -> disabled (BIOS). Keeps Gen5 x4, XMP, PBO and core ratio untouched, so it satisfies the owner's constraints.\\n\\nAssumptions: settings dump is complete; \\\"disabled\\\" is the ASPM off value, as already used for `pcie_aspm_rp2_chipset`. Expected post-fix 1% low is not measured, so not recorded.\\n\\n[next] Owner flips the one BIOS setting and re-captures to confirm; optional Defender exclusion for Arena.exe is not needed for this symptom.\",\"ttft_ms\":1208,\"type\":\"result\",\"duration_ms\":33402,\"uuid\":\"67b1682c-7d22-4110-8ff9-f469c2552b8f\",\"ttft_stream_ms\":896,\"time_to_request_ms\":104,\"first_content_frame_ms\":896,\"queued_turn_count\":0,\"result_index\":0,\"model_usage_since_last_result\":{\"claude-fable-5-1\":{\"inputTokens\":130,\"outputTokens\":2438,\"cacheReadInputTokens\":170824,\"cacheCreationInputTokens\":22429,\"webSearchRequests\":0,\"costUSD\":0.6144860000000001,\"contextWindow\":1000000,\"maxOutputTokens\":64000,\"thinkingTokens\":205,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":22429,\"canonicalModel\":\"claude-fable-5-1\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}}}\n",
+ "checks": [
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 4,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2438,
+  "reasoning_tokens": 205
+ },
+ "deliverables": [],
+ "render": null
+}
