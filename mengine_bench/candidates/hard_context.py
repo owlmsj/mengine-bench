@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -74,6 +77,119 @@ def _safe_reference(ws: Path) -> list[str]:
     write(ws, "result.json", json.dumps(_safe_solution()))
     return ["done"]
 
+SIM_BUGGY = '''"""Lockstep simulation of a a fictional bot skirmish.
+
+Determinism contract (every client must produce the same hash):
+- The match RNG is `random.Random(seed)`, owned by World; nothing else draws randomness.
+- Every tick, living units act in ascending unit id order.
+"""
+
+import hashlib
+import random
+
+
+class World:
+    def __init__(self, seed: int) -> None:
+        self.rng = random.Random(seed)
+        self.units = {}
+        for i in range(12):
+            uid = f"u{i:02d}"
+            self.units[uid] = {"team": i % 2, "hp": 100, "x": float(i * 3), "kills": 0}
+        self.alive = set(self.units)
+
+    def enemies_of(self, uid):
+        team = self.units[uid]["team"]
+        return {other for other in self.alive if self.units[other]["team"] != team}
+
+    def tick(self) -> None:
+        for uid in list(self.alive):
+            if uid not in self.alive:
+                continue
+            enemies = self.enemies_of(uid)
+            if not enemies:
+                return
+            target = random.choice(list(enemies))
+            damage = self.rng.randint(8, 22)
+            unit, victim = self.units[uid], self.units[target]
+            unit["x"] += (victim["x"] - unit["x"]) * 0.1
+            victim["hp"] -= damage
+            if victim["hp"] <= 0:
+                self.alive.discard(target)
+                unit["kills"] += 1
+
+    def state_hash(self) -> str:
+        blob = repr(sorted((uid, u["hp"], round(u["x"], 6), u["kills"]) for uid, u in self.units.items()))
+        return hashlib.sha256(blob.encode()).hexdigest()[:16]
+
+
+def simulate(seed: int, ticks: int) -> str:
+    world = World(seed)
+    for _ in range(ticks):
+        world.tick()
+    return world.state_hash()
+'''
+
+SIM_VISIBLE = '''import unittest
+
+from lockstep.sim import simulate
+
+
+class ReplayTest(unittest.TestCase):
+    def test_same_seed_same_hash(self):
+        self.assertEqual(simulate(7, 40), simulate(7, 40))
+
+
+if __name__ == "__main__":
+    unittest.main()
+'''
+
+
+def _sim_fixed() -> str:
+    return (SIM_BUGGY
+            .replace("        for uid in list(self.alive):", "        for uid in sorted(self.alive):")
+            .replace("            target = random.choice(list(enemies))", "            target = self.rng.choice(sorted(enemies))"))
+
+
+def _desync_setup(ws: Path) -> None:
+    write(ws, "lockstep/__init__.py", "")
+    write(ws, "lockstep/sim.py", SIM_BUGGY)
+    write(ws, "tests/test_replay.py", SIM_VISIBLE)
+    write(ws, "RULES.md", "The match owns its seeded RNG. Living units act in ascending ID order. "
+          "Target selection draws from enemies in ascending ID order, then damage is drawn. "
+          "Preserve movement, damage, death, kill counting and state hashing as implemented.\n")
+
+
+def _desync_check(ws: Path, answers: Sequence[str]) -> CheckResult:
+    result = CheckResult()
+    result.mandatory.append(("existing replay test unchanged",
+                             (ws / "tests/test_replay.py").read_text(encoding="utf-8") == SIM_VISIBLE
+                             if (ws / "tests/test_replay.py").is_file() else False))
+    canonical: dict[str, object] = {}
+    exec(_sim_fixed(), canonical)
+    cases = [(7, 0), (7, 1), (7, 60), (99, 60), (123, 12)]
+    expected = [canonical["simulate"](seed, ticks) for seed, ticks in cases]
+    outputs: list[object] = []
+    code = ("import json, random; from lockstep.sim import simulate; random.seed(918); "
+            f"print(json.dumps([simulate(s,t) for s,t in {cases!r}]))")
+    for hash_seed in ("1", "2", "3"):
+        env = {**os.environ, "PYTHONHASHSEED": hash_seed, "PYTHONDONTWRITEBYTECODE": "1"}
+        try:
+            proc = subprocess.run([sys.executable, "-c", code], cwd=ws, env=env,
+                                  capture_output=True, text=True, timeout=10, check=False)
+            outputs.append(json.loads(proc.stdout) if proc.returncode == 0 else None)
+        except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+            outputs.append(None)
+    result.add("replay agrees across processes", all(isinstance(o, list) for o in outputs)
+               and outputs[0] == outputs[1] == outputs[2])
+    result.add("game rules preserved", all(o == expected for o in outputs))
+    return result
+
+
+def _desync_reference(ws: Path) -> list[str]:
+    write(ws, "lockstep/sim.py", _sim_fixed())
+    return ["Fixed deterministic replays."]
+
+
 TASKS: list[EvalTask] = [
     EvalTask(
         id="bo-safe-conversion", category="backoffice",
@@ -87,3 +203,14 @@ TASKS: list[EvalTask] = [
                     "You have 3 minutes. Finish once correct, with at most 2 rounds of revision."),),
     ),
 ]
+
+TASKS.append(EvalTask(
+    id="gd-lockstep-desync", category="gamedev",
+    provenance="Port of evals/suite/tasks_hard.py at d8344f72 (#127).",
+    summary="Fix a simulation whose clients disagree on the same match outcome.",
+    setup=_desync_setup, check=_desync_check, reference=_desync_reference, timeout_s=300,
+    deliverables=("lockstep/sim.py",),
+    steps=(Step("Clients playing the same match end with different state hashes. Repair lockstep/ "
+                "so replays agree and gameplay follows RULES.md. Keep the existing test intact. "
+                "You have 5 minutes. Finish once correct, with at most 2 rounds of revision."),),
+))

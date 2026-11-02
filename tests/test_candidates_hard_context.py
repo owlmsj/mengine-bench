@@ -41,3 +41,21 @@ def test_safe_accepts_rounding_and_fraction(tmp_path: Path) -> None:
     outcome["participacao_fundadores_pct"] /= 100
     path.write_text(json.dumps(outcome))
     assert task.check(tmp_path, [""]).passed
+
+
+@pytest.mark.parametrize("wrong", ["rng_only", "constant", "crash", "test_edit"])
+def test_desync_rejects_partial_or_fake_fix(wrong: str, tmp_path: Path) -> None:
+    from mengine_bench.candidates.hard_context import SIM_BUGGY
+    task = next(t for t in TASKS if t.id == "gd-lockstep-desync")
+    task.setup(tmp_path)
+    task.reference(tmp_path)
+    path = tmp_path / "lockstep/sim.py"
+    if wrong == "rng_only":
+        path.write_text(SIM_BUGGY.replace("random.choice(list(enemies))", "self.rng.choice(list(enemies))"))
+    if wrong == "constant":
+        path.write_text("def simulate(seed, ticks): return 'constant'\n")
+    if wrong == "crash":
+        path.write_text("raise RuntimeError('broken')\n")
+    if wrong == "test_edit":
+        (tmp_path / "tests/test_replay.py").write_text("")
+    assert not task.check(tmp_path, [""]).passed
