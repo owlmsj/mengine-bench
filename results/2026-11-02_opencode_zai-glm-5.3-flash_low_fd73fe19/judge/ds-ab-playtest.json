@@ -1,0 +1,45 @@
+{
+ "task_id": "ds-ab-playtest",
+ "prompts": [
+  "We playtested two versions of the Pixel Arena tutorial and have to pick one for the next release. The export and its notes are in {WS}/telemetry. Should we ship B instead of A? Give a recommendation a skeptical lead would accept. Record it in {WS}/result.json with ship_b, sessions_a, sessions_b, completion_rate_a, completion_rate_b and p_value."
+ ],
+ "answers": [
+  "**Recommendation: ship B.**\n\n**Analysis** (deduplicated `session_id` as the README instructs, variant normalized for case/leading spaces, two-proportion two-sided z-test):\n\n- A: 900 sessions, 342 completions → 38.0%\n- B: 900 sessions, 420 completions → 46.7%\n- Absolute gain: +8.7 points; z = 3.72, **p ≈ 0.0002** (two-sided), well under the 5% significance rule in the README.\n\n**Assumptions I decided:** sessions (not players) are the analysis unit, since the export's unique key is `session_id` and the release rule is stated at session level; duplicate rows carry identical outcomes, so dedupe by `session_id` with last-wins is safe; `completed_tutorial` is treated as binary as documented; `match_minutes` unused (no stated decision rule for it). Repeated raw rows (1870 → 1800 unique) are ETL resends, not double-weighted.\n\nRecorded in `./result.json`:\n\n```json\n{\n  \"ship_b\": true,\n  \"sessions_a\": 900,\n  \"sessions_b\": 900,\n  \"completion_rate_a\": 0.38,\n  \"completion_rate_b\": 0.4667,\n  \"p_value\": 0.0002\n}\n```\n\n**Why a skeptical lead should accept it:** the data is clean (README documents the dedupe/normalization quirks, which I applied), the sample is balanced (900 vs 900), and the effect is large and far past the 5% threshold — B's lift is not a fluke of a few sessions. The only caveat: the rule is per the README's 5% significance standard; I did not adjust for multiple comparisons (only one planned comparison exists, so no correction is warranted)."
+ ],
+ "diff": "A result.json\nA tmp/analyze.py\n\n--- result.json ---\n{\r\n  \"ship_b\": true,\r\n  \"sessions_a\": 900,\r\n  \"sessions_b\": 900,\r\n  \"completion_rate_a\": 0.38,\r\n  \"completion_rate_b\": 0.4667,\r\n  \"p_value\": 0.0002\r\n}\n\n--- tmp/analyze.py ---\nimport csv, math, json\nfrom collections import Counter\n\nrows = {}\nwith open('telemetry/playtest_ab.csv') as f:\n    for r in csv.DictReader(f):\n        v = r['variant'].strip().upper()\n        rows[r['session_id']] = (v, int(r['completed_tutorial']))\n\nagg = Counter()\nfor v, c in rows.values():\n    agg[(v, c)] += 1\nnA = agg[('A', 0)] + agg[('A', 1)]\nnB = agg[('B', 0)] + agg[('B', 1)]\nxA, xB = agg[('A', 1)], agg[('B', 1)]\npA, pB = xA / nA, xB / nB\np = (xA + xB) / (nA + nB)\nse = math.sqrt(p * (1 - p) * (1 / nA + 1 / nB))\nz = (pB - pA) / se\npval = 2 * (1 - 0.5 * (1 + math.erf(abs(z) / math.sqrt(2))))\nprint(dict(agg), 'nA', nA, 'nB', nB, 'xA', xA, 'xB', xB)\nprint('rates', pA, pB, 'z', z, 'p', pval)\n\nresult = {\n    'ship_b': bool(pval < 0.05 and pB > pA),\n    'sessions_a': nA,\n    'sessions_b': nB,\n    'completion_rate_a': round(pA, 4),\n    'completion_rate_b': round(pB, 4),\n    'p_value': round(pval, 4),\n}\nprint(json.dumps(result))\nwith open('result.json', 'w') as f:\n    json.dump(result, f, indent=2)\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ python - <<'EOF'\nimport csv, math\nrows={}\nwith open('telemetry/playtest_ab.csv') as f:\n    for r in csv.DictReader(f):\n        v=r['variant'].strip().upper()\n        rows[r['session_id']]=(v, int(r['completed_tutorial']))\nfrom collections import Counter\nagg=Counter()\nfor v,c in rows.values():\n    ag\n$ python tmp/analyze.py\n\nStream tail:\npe\":\"step_start\",\"timestamp\":1793592199644,\"sessionID\":\"ses_e6593afd0ffeqsAT5ndEMB4a28\",\"part\":{\"id\":\"prt_19a6d09dc001j7ozPH7FvGbFxd\",\"sessionID\":\"ses_e6593afd0ffeqsAT5ndEMB4a28\",\"messageID\":\"msg_19a6cf8a5001ckaaPlUC7lFbn8\",\"type\":\"step-start\"}}\n\n{\"type\":\"tool_use\",\"timestamp\":1793592200293,\"sessionID\":\"ses_e6593afd0ffeqsAT5ndEMB4a28\",\"part\":{\"partID\":\"prt_19a6d09de001eqb9vWooXOiiW3\",\"sessionID\":\"ses_e6593afd0ffeqsAT5ndEMB4a28\",\"messageID\":\"msg_19a6cf8a5001ckaaPlUC7lFbn8\",\"type\":\"tool\",\"id\":\"call_df47cbbc6ad14755a7aad4ce\",\"tool\":\"shell\",\"state\":{\"status\":\"completed\",\"input\":{\"command\":\"python tmp/analyze.py\"},\"output\":\"{('B', 1): 420, ('A', 1): 342, ('A', 0): 558, ('B', 0): 480} nA 900 nB 900 xA 342 xB 420\\r\\nrates 0.38 0.4666666666666667 z 3.7209573559508202 p 0.00019846895397623854\\r\\n{\\\"ship_b\\\": true, \\\"sessions_a\\\": 900, \\\"sessions_b\\\": 900, \\\"completion_rate_a\\\": 0.38, \\\"completion_rate_b\\\": 0.4667, \\\"p_value\\\": 0.0002}\\r\\n\",\"title\":\"shell\",\"metadata\":{\"metadata\":{\"status\":\"completed\",\"truncated\":false,\"exit\":0},\"content\":[{\"type\":\"text\",\"text\":\"{('B', 1): 420, ('A', 1): 342, ('A', 0): 558, ('B', 0): 480} nA 900 nB 900 xA 342 xB 420\\r\\nrates 0.38 0.4666666666666667 z 3.7209573559508202 p 0.00019846895397623854\\r\\n{\\\"ship_b\\\": true, \\\"sessions_a\\\": 900, \\\"sessions_b\\\": 900, \\\"completion_rate_a\\\": 0.38, \\\"completion_rate_b\\\": 0.4667, \\\"p_value\\\": 0.0002}\\r\\n\"}],\"providerCall\":{\"executed\":false},\"providerResult\":{\"executed\":false},\"rawInput\":\"{\\\"command\\\":\\\"python tmp/analyze.py\\\"}\"},\"time\":{\"start\":1793592199646,\"end\":1793592200293}}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793592200294,\"sessionID\":\"ses_e6593afd0ffeqsAT5ndEMB4a28\",\"part\":{\"id\":\"prt_19a6d0c660019vp7L6SZ07a876\",\"sessionID\":\"ses_e6593afd0ffeqsAT5ndEMB4a28\",\"messageID\":\"msg_19a6cf8a5001ckaaPlUC7lFbn8\",\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"cost\":0.00143643,\"tokens\":{\"input\":451,\"output\":15,\"reasoning\":0,\"cache\":{\"read\":45376,\"write\":0}}}}\n\n{\"type\":\"step_start\",\"timestamp\":1793592205660,\"sessionID\":\"ses_e6593afd0ffeqsAT5ndEMB4a28\",\"part\":{\"id\":\"prt_19a6d215c001hoq8FocCx284uQ\",\"sessionID\":\"ses_e6593afd0ffeqsAT5ndEMB4a28\",\"messageID\":\"msg_19a6d0c6d001WG4XqxgsoOyh4W\",\"type\":\"step-start\"}}\n\n{\"type\":\"text\",\"timestamp\":1793592217751,\"sessionID\":\"ses_e6593afd0ffeqsAT5ndEMB4a28\",\"part\":{\"id\":\"prt_19a6d0c6d001WG4XqxgsoOyh4W_text-0\",\"sessionID\":\"ses_e6593afd0ffeqsAT5ndEMB4a28\",\"messageID\":\"msg_19a6d0c6d001WG4XqxgsoOyh4W\",\"type\":\"text\",\"text\":\"**Recommendation: ship B.**\\n\\n**Analysis** (deduplicated `session_id` as the README instructs, variant normalized for case/leading spaces, two-proportion two-sided z-test):\\n\\n- A: 900 sessions, 342 completions → 38.0%\\n- B: 900 sessions, 420 completions → 46.7%\\n- Absolute gain: +8.7 points; z = 3.72, **p ≈ 0.0002** (two-sided), well under the 5% significance rule in the README.\\n\\n**Assumptions I decided:** sessions (not players) are the analysis unit, since the export's unique key is `session_id` and the release rule is stated at session level; duplicate rows carry identical outcomes, so dedupe by `session_id` with last-wins is safe; `completed_tutorial` is treated as binary as documented; `match_minutes` unused (no stated decision rule for it). Repeated raw rows (1870 → 1800 unique) are ETL resends, not double-weighted.\\n\\nRecorded in `./result.json`:\\n\\n```json\\n{\\n  \\\"ship_b\\\": true,\\n  \\\"sessions_a\\\": 900,\\n  \\\"sessions_b\\\": 900,\\n  \\\"completion_rate_a\\\": 0.38,\\n  \\\"completion_rate_b\\\": 0.4667,\\n  \\\"p_value\\\": 0.0002\\n}\\n```\\n\\n**Why a skeptical lead should accept it:** the data is clean (README documents the dedupe/normalization quirks, which I applied), the sample is balanced (900 vs 900), and the effect is large and far past the 5% threshold — B's lift is not a fluke of a few sessions. The only caveat: the rule is per the README's 5% significance standard; I did not adjust for multiple comparisons (only one planned comparison exists, so no correction is warranted).\",\"time\":{\"start\":1793592200309,\"end\":1793592217751}}}\n\n",
+ "checks": [
+  [
+   "deduplicated session counts",
+   true
+  ],
+  [
+   "completion rates",
+   true
+  ],
+  [
+   "the gain is significant",
+   true
+  ],
+  [
+   "ship decision",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 6,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 1,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 772,
+  "reasoning_tokens": 28,
+  "largest_turn_tokens": 426
+ },
+ "deliverables": [],
+ "render": null
+}

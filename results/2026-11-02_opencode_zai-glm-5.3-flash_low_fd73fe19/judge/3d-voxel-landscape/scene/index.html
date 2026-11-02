@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mount Fuji Dusk — Chureito Pagoda</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;1,400&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#1a1030}
+  #c{display:block;width:100%;height:100%}
+  .title{
+    position:fixed;left:4vw;bottom:6vh;color:#ffe9f2;pointer-events:none;
+    font-family:'Cormorant Garamond',serif;
+    text-shadow:0 2px 18px rgba(20,10,40,.8);
+    user-select:none;
+  }
+  .title h1{margin:0;font-weight:500;font-size:clamp(28px,4.5vw,54px);letter-spacing:.06em}
+  .title p{margin:.35em 0 0;font-style:italic;font-size:clamp(13px,1.4vw,18px);opacity:.75;letter-spacing:.12em}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="title"><h1>Chureito · Mount Fuji</h1><p>桜と黄昏 — dusk in full bloom</p></div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+/* ---------- renderer / scene / camera ---------- */
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth, innerHeight);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x4a2f66, 0.0011);
+
+const camera = new THREE.PerspectiveCamera(38, innerWidth/innerHeight, .1, 4000);
+
+/* dusk palette */
+const P = {
+  skyTop:0x241245, skyMid:0x6b3f7a, skyLow:0xd97a6a, horizon:0xf2a68c,
+  fuji:0x4a3a6e, snow:0xf3e6ef, snowLit:0xffd9e0,
+  pagodaRed:0xa63a2f, pagodaDark:0x6e241d, roof:0x35204a,
+  trunk:0x4a2f33, blossomA:0xf5a8c4, blossomB:0xfbcfe0,
+  ground:0x453465, water:0x3a2a5e, sun:0xffcf9e
+};
+
+/* ---------- sky dome (vertex-colored gradient, dusk) ---------- */
+{
+  const geo = new THREE.SphereGeometry(1600, 32, 24);
+  const cols = [];
+  const pos = geo.attributes.position;
+  const cTop = new THREE.Color(P.skyTop), cMid = new THREE.Color(P.skyMid),
+        cLow = new THREE.Color(P.skyLow), cHor = new THREE.Color(P.horizon);
+  for (let i=0;i<pos.count;i++){
+    const y = pos.getY(i)/1600; // -1..1
+    const c = new THREE.Color();
+    if (y > 0.25)      c.copy(cMid).lerp(cTop, Math.min((y-0.25)/0.75,1));
+    else if (y > 0.02) c.copy(cLow).lerp(cMid, (y-0.02)/0.23);
+    else if (y > -0.05) c.copy(cHor).lerp(cLow, (y+0.05)/0.07);
+    else               c.copy(cHor);
+    cols.push(c.r,c.g,c.b);
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(cols,3));
+  const sky = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({vertexColors:true, side:THREE.BackSide, fog:false, depthWrite:false}));
+  sky.renderOrder = -1;
+  scene.add(sky);
+}
+
+/* ---------- lights ---------- */
+scene.add(new THREE.HemisphereLight(0xffc4d2, 0x4a3568, 1.35));
+const sun = new THREE.DirectionalLight(0xffb08a, 2.4);
+sun.position.set(-700, 160, -300);
+scene.add(sun);
+const rim = new THREE.DirectionalLight(0x9a7aff, 0.8);
+rim.position.set(400, 250, 600);
+scene.add(rim);
+
+/* ---------- low-poly helper: flat-shaded mesh ---------- */
+function lowPoly(geo, color, opts={}){
+  geo.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({color, flatShading:true, roughness:0.9, metalness:0, ...opts});
+  return new THREE.Mesh(geo, mat);
+}
+
+/* ---------- Mount Fuji (flattened cone + snow cap) ---------- */
+{
+  const g = new THREE.ConeGeometry(820, 640, 11, 3);
+  // jitter vertices for low-poly rocky silhouette
+  const pos = g.attributes.position;
+  for (let i=0;i<pos.count;i++){
+    const y = pos.getY(i);
+    if (y > -318){ // skip base ring duplicate handling; jitter x/z only
+      pos.setX(i, pos.getX(i) + (Math.sin(i*12.9898)*18));
+      pos.setZ(i, pos.getZ(i) + (Math.sin(i*78.233)*18));
+    }
+  }
+  const fuji = lowPoly(g, 0x6b5290);
+  fuji.position.set(0, 320-60, -1500);
+  scene.add(fuji);
+
+  // snow cap: second cone slightly wider, clipped look via scale
+  const snowGeo = new THREE.ConeGeometry(252, 192, 11, 1);
+  const sp = snowGeo.attributes.position;
+  for (let i=0;i<sp.count;i++){
+    sp.setX(i, sp.getX(i) + Math.sin(i*39.7)*8);
+    sp.setZ(i, sp.getZ(i) + Math.sin(i*11.3)*8);
+  }
+  const snow = lowPoly(snowGeo, 0xffe9f0, {emissive:0xb06880, emissiveIntensity:.55});
+  snow.position.set(0, 484, -1500);
+  scene.add(snow);
+}
+
+/* ---------- terrain: rolling foreground hills + lake ---------- */
+function hill(x,z,w,h,seed,color){
+  const g = new THREE.CylinderGeometry(w*0.98, w, h, 9, 1);
+  const pos = g.attributes.position;
+  for (let i=0;i<pos.count;i++){
+    if (pos.getY(i) > h/2-1){ pos.setX(i, pos.getX(i)+Math.sin(i*seed)*w*0.06); pos.setZ(i, pos.getZ(i)+Math.cos(i*seed*1.7)*w*0.06); }
+  }
+  const m = lowPoly(g, color);
+  m.position.set(x, h/2, z);
+  return m;
+}
+scene.add(hill(  -60, -180, 420, 46, 1.3, P.ground));
+scene.add(hill( -320, -120, 260, 30, 2.7, P.ground));
+scene.add(hill(  300, -140, 300, 36, 4.1, P.ground));
+scene.add(hill(    0,  -80, 520, 22, 5.9, P.ground));
+
+/* lake glint at base of Fuji */
+{
+  const g = new THREE.CircleGeometry(420, 24);
+  const lake = new THREE.Mesh(g, new THREE.MeshStandardMaterial({color:P.water, roughness:0.25, metalness:0.6, flatShading:true}));
+  lake.rotation.x = -Math.PI/2;
+  lake.position.set(120, 20.5, -1150);
+  scene.add(lake);
+}
+
+/* ---------- Chureito pagoda: five tiers ---------- */
+const pagoda = new THREE.Group();
+const terraceTop = 78;
+function tier(y, w, first){
+  const t = new THREE.Group();
+  // body
+  t.add(lowPoly(new THREE.BoxGeometry(w, 2.6, w), P.pagodaRed));
+  // white band
+  const band = lowPoly(new THREE.BoxGeometry(w*1.02, 0.5, w*1.02), 0xe8dfd2);
+  band.position.y = 1.3; t.add(band);
+  // roof: pyramid, upturned edges approximated by cone with 4 segments
+  const roof = lowPoly(new THREE.ConeGeometry(w*0.95, 1.9, 4), P.roof);
+  roof.rotation.y = Math.PI/4;
+  roof.position.y = 1.3+1.5;
+  t.add(roof);
+  // roof ridge tip
+  const tip = lowPoly(new THREE.ConeGeometry(0.12, 0.7, 4), P.pagodaDark);
+  tip.position.y = 1.3+1.9+0.35; t.add(tip);
+  t.position.y = y;
+  return t;
+}
+{
+  let y = 0;
+  const base = lowPoly(new THREE.CylinderGeometry(5.4, 6.2, 1.6, 8), 0x513c62);
+  base.position.y = 0.8; pagoda.add(base);
+  for (let i=0;i<5;i++){
+    const w = 8 - i*1.15;
+    pagoda.add(tier(y, w, i===0));
+    y += 2.6 + 2.6;
+  }
+  // finial (sōrin): stacked small cylinders
+  for (let i=0;i<4;i++){
+    const c = lowPoly(new THREE.CylinderGeometry(0.16-i*0.02, 0.16-i*0.02, 0.7, 5), 0xd8b56a);
+    c.position.y = y + 0.4 + i*0.6;
+    pagoda.add(c);
+  }
+  pagoda.scale.setScalar(5.4);
+  pagoda.position.set(-260, terraceTop-2, -620);
+  pagoda.rotation.y = 0.35;
+  scene.add(pagoda);
+}
+
+/* ---------- cherry trees ---------- */
+const blossomMats = [P.blossomA, P.blossomB].map(c => new THREE.MeshStandardMaterial({color:c, flatShading:true, roughness:.9}));
+const trunkMat = new THREE.MeshStandardMaterial({color:P.trunk, flatShading:true, roughness:.95});
+const trees = []; // for sway
+function cherryTree(x, y, z, s){
+  const t = new THREE.Group();
+  const trunk = lowPoly(new THREE.CylinderGeometry(0.55, 0.8, 4.5, 5), null, {});
+  trunk.material = trunkMat;
+  trunk.position.y = 2.2; t.add(trunk);
+  const branches = 3 + Math.floor(Math.random()*2);
+  const blobs = new THREE.Group();
+  for (let i=0;i<branches+2;i++){
+    const r = 1.1 + Math.random()*0.9;
+    const b = lowPoly(new THREE.IcosahedronGeometry(r, 0), null);
+    b.material = blossomMats[Math.random()<0.5?0:1];
+    b.position.set((Math.random()-0.5)*3.4, 4.6+Math.random()*2.2, (Math.random()-0.5)*3.4);
+    b.userData.phase = Math.random()*Math.PI*2;
+    blobs.add(b);
+    trees.push(b);
+  }
+  t.add(blobs);
+  t.position.set(x, y, z);
+  t.scale.setScalar(s);
+  return t;
+}
+// pagoda terrace hill (like the real Chureito viewpoint)
+{
+  const g = new THREE.CylinderGeometry(170, 210, terraceTop, 9, 1);
+  const pos = g.attributes.position;
+  for (let i=0;i<pos.count;i++){
+    if (pos.getY(i) > terraceTop/2-1){ pos.setX(i, pos.getX(i)+Math.sin(i*7.1)*12); pos.setZ(i, pos.getZ(i)+Math.cos(i*3.3)*12); }
+  }
+  const hillMesh = lowPoly(g, P.ground);
+  hillMesh.position.set(-190, terraceTop/2, -620);
+  scene.add(hillMesh);
+}
+// rows flanking the pagoda, like the classic photo
+[[-230,7,-620],[-160,6,-690],[-290,5,-560],[-120,7,-560],[-70,4,-520],[-190,6,-760],[40,3,-560],[110,3,-480],[-390,4,-660],[200,3,-640],[-30,3,-620],[270,3,-540],[-60,3,-470],[230,2,-380],[-140,3,-430],[120,2,-330]].forEach(([x,y,z],i)=>{
+  scene.add(cherryTree(x, terraceTop*y/7 + (i%3), z, 7 + Math.random()*4));
+});
+// scattered trees on the low ground
+for (let i=0;i<16;i++){
+  const a = (i/16)*Math.PI*2;
+  scene.add(cherryTree(Math.cos(a)*330+Math.random()*90, 20, -240-Math.random()*300, 4+Math.random()*2.5));
+}
+
+/* ---------- torii-ish path stones (small detail) ---------- */
+for (let i=0;i<6;i++){
+  const s = lowPoly(new THREE.BoxGeometry(2.4,0.4,1.6), 0x6a5878);
+  s.position.set(-20+i*10, 22, -250-i*30);
+  s.rotation.y = Math.random();
+  scene.add(s);
+}
+
+/* ---------- falling petals (gentle motion) ---------- */
+const PETALS = 260;
+const petalGeo = new THREE.PlaneGeometry(1.4, 1.0);
+const petalMat = new THREE.MeshBasicMaterial({color:0xfbc4da, side:THREE.DoubleSide, transparent:true, opacity:0.9});
+const petals = new THREE.InstancedMesh(petalGeo, petalMat, PETALS);
+scene.add(petals);
+const petalData = [];
+const dummy = new THREE.Object3D();
+for (let i=0;i<PETALS;i++){
+  petalData.push({
+    x:(Math.random()-0.5)*700, y:Math.random()*190, z:-60-Math.random()*600,
+    vy:3+Math.random()*4, phase:Math.random()*Math.PI*2, spin:(Math.random()-.5)*3
+  });
+}
+
+/* ---------- sun glow sprite near horizon ---------- */
+{
+  const g = new THREE.CircleGeometry(90, 24);
+  const m = new THREE.MeshBasicMaterial({color:P.sun, transparent:true, opacity:0.85, fog:false});
+  const glow = new THREE.Mesh(g, m);
+  glow.position.set(-860, 120, -1450);
+  scene.add(glow);
+}
+
+/* ---------- camera: slow cinematic drift + parallax on mouse ---------- */
+let mx=0, my=0;
+addEventListener('pointermove', e=>{ mx=(e.clientX/innerWidth-0.5); my=(e.clientY/innerHeight-0.5); });
+addEventListener('resize', ()=>{
+  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+const clock = new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+
+  camera.position.set(Math.sin(t*0.05)*10, 62 + Math.sin(t*0.11)*1.5, 210);
+  camera.lookAt(-60, 120, -500);
+  camera.rotation.z = Math.sin(t*0.07)*0.004;
+  // parallax
+  camera.position.x += mx*18;
+  camera.position.y += -my*8;
+  camera.lookAt(-60 + mx*30, 120 - my*14, -500);
+
+  // tree sway
+  for (const b of trees){
+    b.rotation.z = Math.sin(t*0.9 + b.userData.phase)*0.045;
+  }
+  // pagoda subtle breathing (very small, keeps it grounded)
+  pagoda.rotation.y = 0.35 + Math.sin(t*0.12)*0.02;
+
+  // petals
+  for (let i=0;i<PETALS;i++){
+    const d = petalData[i];
+    d.y -= d.vy*0.016;
+    if (d.y < 12){ d.y = 190; d.x = (Math.random()-0.5)*700; }
+    d.x += Math.sin(t*0.8 + d.phase)*0.6;
+    dummy.position.set(d.x, d.y, d.z);
+    dummy.rotation.set(t*d.spin + d.phase, t*d.spin*0.7, d.phase);
+    dummy.updateMatrix();
+    petals.setMatrixAt(i, dummy.matrix);
+  }
+  petals.instanceMatrix.needsUpdate = true;
+
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
