@@ -18,6 +18,8 @@ def isolated_preflight(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest
     must not depend on them (tests/test_preflight.py covers it with fakes)."""
     from mengine_bench import cli
     from mengine_bench.runner import task_run
+    # Launcher behavior is isolated in test_safe_runner.py; keep fake-agent tests in process.
+    monkeypatch.setattr(cli, "relaunch_run", lambda argv: None)
     monkeypatch.setattr(cli, "personal_instructions", lambda *args, **kwargs: [])
     monkeypatch.setattr(cli, "blocking_problems", lambda *args, **kwargs: [])
     monkeypatch.setenv("MENGINE_BENCH_SCRATCH", str(tmp_path_factory.mktemp("scratch")))

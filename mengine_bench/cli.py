@@ -32,6 +32,7 @@ from mengine_bench.runner.agents import AGENT_NAMES, make_agent
 from mengine_bench.visual import add_page_checks
 from mengine_bench.scoring import parse_price
 from mengine_bench.submit import SubmitError, gh_login, submit
+from mengine_bench.safe_runner import relaunch_run
 
 # The flags exist for tests; the leaderboard ranks only the default judge.
 DEFAULT_JUDGE_MODEL = OFFICIAL_JUDGE_MODEL
@@ -100,7 +101,12 @@ def _select(pool: Sequence[EvalTask], ids: str) -> list[EvalTask]:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
     args = _parser().parse_args(argv)
+    if args.command == "run":
+        exit_code = relaunch_run(argv)
+        if exit_code is not None:
+            return exit_code
     if args.command == "list":
         for task in catalog.all_tasks():
             print(f"{task.id}\t{task.category}\t{task.summary}")
