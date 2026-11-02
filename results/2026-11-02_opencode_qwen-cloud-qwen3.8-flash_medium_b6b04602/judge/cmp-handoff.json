@@ -1,0 +1,75 @@
+{
+ "task_id": "cmp-handoff",
+ "prompts": [
+  "You are handing this debugging work to a colleague who will never see {WS}/session/transcript.md. Write {WS}/HANDOFF.md, at most 1000 characters, so they can carry on from where it really stands.",
+  "You just took over this work, and {WS}/HANDOFF.md is all you have. Where was the recipe applied, what are the final decode speed and VRAM, which quantization was discarded, what is still pending, and which command measures it again? Record it in {WS}/result.json: file_line, final_decode, final_vram_mib, discarded_quant, pending, measure_command."
+ ],
+ "answers": [
+  "[goal] Write ./HANDOFF.md (≤1000 chars) from session/transcript.md.\n\n[action] Read the full transcript, extracted the signal steps (the measurement, the WDDM-spill warning, the fix, the quant comparison, the applied config, the pending README item), and wrote the handoff; then verified the workspace contents.\n\n[result] ./HANDOFF.md (997 bytes) captures: task (local-9b Q5 at 128k), root cause (7881 MiB = WDDM ceiling with 1494 MiB shared spill, so 37.8 t/s was not a real GPU number), fix (`--no-mmproj-offload -ub 512` → 7697 MiB, 38.0 t/s median of 3), where applied (scripts/start_server.ps1:165, profiles/local/local-9b.json), quant notes (Q6_K discarded, Q4_K_M fallback at 40.4 t/s), and open items (stale evals README reference to check_vision.ps1, scratchpad naming).\n\nHow I know it's right: every claim is a direct quote or restatement of transcript lines 30, 44, 124, 132, 185, 222 — I read all 225 lines, and the filler steps (repeated diffs/git status) carry no state. I also confirmed the workspace only contains session/ and AGENTS.md, so the handoff explicitly flags that scripts/profiles/evals are not present here and the numbers could not be re-verified — that's why it instructs the colleague to measure again before trusting figures.\n\n[next] Nothing pending on my side; colleague picks up the README fix and re-verification.",
+  "[action] Read HANDOFF.md in full, listed the workspace (only `HANDOFF.md` and `AGENTS.md` exist), and wrote `./result.json`.\n\n[result]\n- **Recipe applied in:** `scripts/start_server.ps1:165` (local9 block) and `profiles/local/local-9b.json` — the spill fix `--no-mmproj-offload -ub 512`.\n- **Final decode:** 38.0 t/s (median of 3 runs); **VRAM:** 7697 MiB.\n- **Discarded quant:** Q6_K (7.03 GiB, doesn't fit at 128k); Q4_K_M survives only as fallback (7305 MiB / 40.4 t/s).\n- **Pending:** evals README cites the deleted `check_vision.ps1`; scratchpad temp file names never reviewed; plus nothing in the handoff is verifiable here.\n- **Measure again:** relaunch local9 Q5_K_M with `-ctx 131072 --no-mmproj-offload -ub 512`, median of 3 runs, and check `nvidia-smi` shows 0 MiB Shared Usage under the 7881 MiB WDDM ceiling. The handoff names the flags but not the literal command, so this is a labeled reconstruction in the JSON.\n\nHow I know it's right: every field is transcribed line-by-line from HANDOFF.md (lines 5-18), and the \"not verifiable\" status is confirmed directly — the referenced `scripts/`, `profiles/`, and `evals/` trees do not exist in this workspace, so I recorded figures as handoff claims, not measurements. Assumptions are stated inside result.json."
+ ],
+ "diff": "A HANDOFF.md\nA result.json\nD session/transcript.md\n\n--- HANDOFF.md ---\n# Handoff: local-9b at 128k\n\nGoal: measure local-9b Q5_K_M at 131072 ctx.\n\nFinding (root cause): at `-ctx 131072` VRAM hit the WDDM ceiling 7881 MiB with\n1494 MiB in the Shared Usage counter, i.e. spill to system RAM. 37.8 t/s was\ntherefore not a real GPU number. Fix: `--no-mmproj-offload -ub 512` removed the\nspill; final 7697 MiB, 38.0 t/s (median of 3 runs).\n\nApplied in: scripts/start_server.ps1:165 (local9 block) and\nprofiles/local/local-9b.json.\n\nOther quantisations: Q6_K (7.03 GiB) does not fit at 128k, discarded. Q4_K_M\nfits at 7305 MiB / 40.4 t/s, kept only as fallback.\n\nStill open:\n1. evals README still cites check_vision.ps1, a file that no longer exists.\n2. Scratchpad temp file names were never reviewed.\n\nAssumptions to verify: the workspace contains only AGENTS.md and\nsession/transcript.md. There is no scripts/, profiles/ or evals/ tree and no\ngit repo here, so no cited line or number could be re-run or confirmed against\nsource. Measure again before repeating any figure.\n\n\n--- result.json ---\n{\n  \"file_line\": \"scripts/start_server.ps1:165 (local9 block) and profiles/local/local-9b.json\",\n  \"final_decode\": \"38.0 t/s (median of 3 runs, local-9b Q5_K_M at ctx 131072)\",\n  \"final_vram_mib\": 7697,\n  \"discarded_quant\": \"Q6_K (7.03 GiB, does not fit at 128k); Q4_K_M kept only as fallback at 7305 MiB / 40.4 t/s\",\n  \"pending\": [\n    \"evals README still cites check_vision.ps1, a file that no longer exists\",\n    \"Scratchpad temp file names were never reviewed\",\n    \"All figures unverified: workspace has no scripts/, profiles/ or evals/ tree and no git repo, so nothing can be re-run or confirmed against source (per HANDOFF.md lines 20-23)\"\n  ],\n  \"measure_command\": \"Re-run the local9 server block (scripts/start_server.ps1:165 / profiles/local/local-9b.json) launching Q5_K_M with '-ctx 131072 --no-mmproj-offload -ub 512', take the median decode over 3 runs, and confirm no spill: VRAM must stay at or below the 7881 MiB WDDM ceiling with 0 MiB Shared Usage (e.g. nvidia-smi). Exact command string not given in HANDOFF.md; this is reconstructed from the flags it names.\",\n  \"assumptions\": [\n    \"Only HANDOFF.md and AGENTS.md exist in the workspace (verified by directory listing), so all answers are transcribed from the handoff text, not independently measured.\",\n    \"'Recipe' = the spill fix '--no-mmproj-offload -ub 512'; it was applied in both cited locations.\",\n    \"Q5_K_M is the final quant (Q6_K discarded, Q4_K_M fallback only).\"\n  ]\n}\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ Get-ChildItem -Force | Select-Object Name, Length, LastWriteTime\n$ Get-ChildItem -Force -Recurse session | Select-Object FullName, Length, LastWriteTime\n$ Get-ChildItem -Force; if (Test-Path scripts) { Get-ChildItem scripts }; if (Test-Path profiles) { Get-ChildItem -Recurse profiles }\n\nStream tail:\nh\\\": \\\"<WORKSPACE>\\\\\\\\result.json\\\", \\\"content\\\": \\\"{\\\\n  \\\\\\\"file_line\\\\\\\": \\\\\\\"scripts/start_server.ps1:165 (local9 block) and profiles/local/local-9b.json\\\\\\\",\\\\n  \\\\\\\"final_decode\\\\\\\": \\\\\\\"38.0 t/s (median of 3 runs, local-9b Q5_K_M at ctx 131072)\\\\\\\",\\\\n  \\\\\\\"final_vram_mib\\\\\\\": 7697,\\\\n  \\\\\\\"discarded_quant\\\\\\\": \\\\\\\"Q6_K (7.03 GiB, does not fit at 128k); Q4_K_M kept only as fallback at 7305 MiB / 40.4 t/s\\\\\\\",\\\\n  \\\\\\\"pending\\\\\\\": [\\\\n    \\\\\\\"evals README still cites check_vision.ps1, a file that no longer exists\\\\\\\",\\\\n    \\\\\\\"Scratchpad temp file names were never reviewed\\\\\\\",\\\\n    \\\\\\\"All figures unverified: workspace has no scripts/, profiles/ or evals/ tree and no git repo, so nothing can be re-run or confirmed against source (per HANDOFF.md lines 20-23)\\\\\\\"\\\\n  ],\\\\n  \\\\\\\"measure_command\\\\\\\": \\\\\\\"Re-run the local9 server block (scripts/start_server.ps1:165 / profiles/local/local-9b.json) launching Q5_K_M with '-ctx 131072 --no-mmproj-offload -ub 512', take the median decode over 3 runs, and confirm no spill: VRAM must stay at or below the 7881 MiB WDDM ceiling with 0 MiB Shared Usage (e.g. nvidia-smi). Exact command string not given in HANDOFF.md; this is reconstructed from the flags it names.\\\\\\\",\\\\n  \\\\\\\"assumptions\\\\\\\": [\\\\n    \\\\\\\"Only HANDOFF.md and AGENTS.md exist in the workspace (verified by directory listing), so all answers are transcribed from the handoff text, not independently measured.\\\\\\\",\\\\n    \\\\\\\"'Recipe' = the spill fix '--no-mmproj-offload -ub 512'; it was applied in both cited locations.\\\\\\\",\\\\n    \\\\\\\"Q5_K_M is the final quant (Q6_K discarded, Q4_K_M fallback only).\\\\\\\"\\\\n  ]\\\\n}\\\\n\\\"}\"},\"time\":{\"start\":1793598049121,\"end\":1793598055385}}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793598055387,\"sessionID\":\"ses_e653a0296ffeVzd5TqwFphNEwL\",\"part\":{\"id\":\"prt_19ac663db001kKzgObMdg3x3SE\",\"sessionID\":\"ses_e653a0296ffeVzd5TqwFphNEwL\",\"messageID\":\"msg_19ac62ec7001bgU6egrOCiEzdP\",\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"cost\":0,\"tokens\":{\"input\":1223,\"output\":532,\"reasoning\":402,\"cache\":{\"read\":7168,\"write\":0}}}}\n\n{\"type\":\"step_start\",\"timestamp\":1793598057577,\"sessionID\":\"ses_e653a0296ffeVzd5TqwFphNEwL\",\"part\":{\"id\":\"prt_19ac66c69001wpQzdIf6qh03p6\",\"sessionID\":\"ses_e653a0296ffeVzd5TqwFphNEwL\",\"messageID\":\"msg_19ac663e20018QoEjjJPhpZBkE\",\"type\":\"step-start\"}}\n\n{\"type\":\"text\",\"timestamp\":1793598063573,\"sessionID\":\"ses_e653a0296ffeVzd5TqwFphNEwL\",\"part\":{\"id\":\"prt_19ac663e20018QoEjjJPhpZBkE_text-0\",\"sessionID\":\"ses_e653a0296ffeVzd5TqwFphNEwL\",\"messageID\":\"msg_19ac663e20018QoEjjJPhpZBkE\",\"type\":\"text\",\"text\":\"[action] Read HANDOFF.md in full, listed the workspace (only `HANDOFF.md` and `AGENTS.md` exist), and wrote `./result.json`.\\n\\n[result]\\n- **Recipe applied in:** `scripts/start_server.ps1:165` (local9 block) and `profiles/local/local-9b.json` — the spill fix `--no-mmproj-offload -ub 512`.\\n- **Final decode:** 38.0 t/s (median of 3 runs); **VRAM:** 7697 MiB.\\n- **Discarded quant:** Q6_K (7.03 GiB, doesn't fit at 128k); Q4_K_M survives only as fallback (7305 MiB / 40.4 t/s).\\n- **Pending:** evals README cites the deleted `check_vision.ps1`; scratchpad temp file names never reviewed; plus nothing in the handoff is verifiable here.\\n- **Measure again:** relaunch local9 Q5_K_M with `-ctx 131072 --no-mmproj-offload -ub 512`, median of 3 runs, and check `nvidia-smi` shows 0 MiB Shared Usage under the 7881 MiB WDDM ceiling. The handoff names the flags but not the literal command, so this is a labeled reconstruction in the JSON.\\n\\nHow I know it's right: every field is transcribed line-by-line from HANDOFF.md (lines 5-18), and the \\\"not verifiable\\\" status is confirmed directly — the referenced `scripts/`, `profiles/`, and `evals/` trees do not exist in this workspace, so I recorded figures as handoff claims, not measurements. Assumptions are stated inside result.json.\",\"time\":{\"start\":1793598055402,\"end\":1793598063573}}}\n\n",
+ "checks": [
+  [
+   "summary exists and fits in 1000 characters",
+   true
+  ],
+  [
+   "summary keeps `--no-mmproj-offload`",
+   true
+  ],
+  [
+   "summary keeps `-ub 512`",
+   true
+  ],
+  [
+   "summary keeps `7697`",
+   true
+  ],
+  [
+   "answer file_line",
+   true
+  ],
+  [
+   "answer final_decode",
+   true
+  ],
+  [
+   "answer final_vram_mib",
+   true
+  ],
+  [
+   "answer discarded_quant",
+   true
+  ],
+  [
+   "answer pending",
+   true
+  ],
+  [
+   "answer measure_command",
+   false
+  ],
+  [
+   "does not repeat the spilled VRAM as final",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 13,
+  "tool_calls": 11,
+  "tool_errors": 2,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2341,
+  "reasoning_tokens": 912,
+  "largest_turn_tokens": 934
+ },
+ "deliverables": [],
+ "render": null
+}
