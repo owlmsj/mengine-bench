@@ -42,6 +42,9 @@ def _mapping(value: object) -> Mapping[str, object]:
 
 
 def _list_price(result: Mapping[str, object]) -> ListPrice | None:
+    declared = _mapping(result.get("price_per_mtok"))
+    if declared:
+        return ListPrice(float(declared["input"]), float(declared["cached"]), float(declared["output"]))
     model = str(_mapping(result.get("agent")).get("model"))
     if _mapping(result.get("config")).get("service_tier") == "fast" and model in FAST_PRICES:
         return FAST_PRICES[model]
@@ -65,8 +68,10 @@ def estimated_usd(result: Mapping[str, object]) -> float | None:
 
 def price_text(result: Mapping[str, object]) -> str:
     """'~$2.04', '< $0.01', '$0.00 (local)' when the submitter declared it free, or 'n/a'."""
+    declared = _mapping(result.get("price_per_mtok"))
+    if declared and not any(declared.values()):
+        return "$0.00 (local)"
     usd = estimated_usd(result)
     if usd is None:
-        declared = _mapping(result.get("price_per_mtok"))
-        return "$0.00 (local)" if declared and not any(declared.values()) else "n/a"
+        return "n/a"
     return f"~${usd:.2f}" if usd >= _SMALLEST_SHOWN else f"< ${_SMALLEST_SHOWN:.2f}"
