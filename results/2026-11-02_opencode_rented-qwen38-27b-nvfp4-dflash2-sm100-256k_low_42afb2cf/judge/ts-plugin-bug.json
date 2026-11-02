@@ -1,0 +1,57 @@
+{
+ "task_id": "ts-plugin-bug",
+ "prompts": [
+  "Users of our harness plugins report that tool.after hooks run out of order, that sometimes a hook never runs, and that a failing hook is silently ignored. The hook bus and the plugin are in {WS}; the README there says how the bus must behave. Fix the bus. Its public API stays as it is, the tests in {WS}/test stay as they are, and package.json takes no dependencies."
+ ],
+ "answers": [
+  "\n\nDone. The bus is fixed and verified.\n\n**[goal]** Fix the hook bus so `tool.after` hooks run in order, never skip, and propagate failures, per the README contract — without changing the public API, `./test`, or `package.json`.\n\n**[action]** Rewrote `HookBus.emit` in `src/bus.ts` to snapshot the handler list and `await` each handler sequentially in a `for...of` loop. Left `on`/`count` (public API), `test/bus.test.ts`, `package.json`, and `src/plugin.ts` untouched.\n\n**[result]** Verified with `node --test` (both existing tests pass) plus a throwaway contract test covering order, self-unsubscribe-during-emit, error propagation, and snapshot semantics — all passed; scratch file removed after.\n\n**[next]** None — work is complete.\n\n---\n\n### What I found\n\nThree bugs, all in `emit`, matching the three reports exactly. The old code was:\n```js\nlist.forEach(async (handler) => { await handler(payload); });\n```\n\n1. **Ran out of order** — `Array.forEach` never awaits async callbacks, so every handler started in parallel and finished in completion order (e.g. a 5 ms handler before a 30 ms one), not subscription order.\n2. **Sometimes a hook never ran** — the *live* array was iterated by index. The audit plugin's notice handler splices *itself* out of the live list (index 0); that shift makes `forEach` skip the next handler (the redaction step). So redaction was silently dropped. This was a **bus** bug, not a plugin bug.\n3. **A failing hook was silently ignored** — rejections were fire-and-forget: `emit` resolved on its own, the error went unhandled, and the later handlers still ran (contradicting \"the handlers after it do not run\").\n\n### How I know it is right\n\nThe fix snapshots the list `[...(this.handlers.get(event) ?? [])]` and awaits each handler in order:\n- Sequential `for...of` + `await` ⇒ each handler settles before the next starts ⇒ subscription order guaranteed.\n- Snapshot ⇒ self-unsubscribe (or a late subscription) during an emit doesn't skip neighbours or change the current run; it counts from the next emit, exactly as the README specifies.\n- A thrown/rejected handler rejects `emit` with that same error and short-circuits the loop ⇒ later handlers don't run.\n\nProof:\n- Existing tests pass unchanged: `pass 2, fail 0` from `node --test`.\n- My throwaway contract test asserted, and passed, on: ordering of 3 async handlers (30/10/5 ms → `a,b,c`); the plugin's self-unsub notice still letting redaction + audit run and dropping the notice only from the next emit; a throwing handler making `emit` reject with that exact error and skipping the following handler; an async rejection doing the same; `emit` awaiting a slow handler before resolving; and a mid-emit subscription not running until the next emit.\n- End-to-end the audit plugin now logs `notice` then `bash: password=[redacted] done` in that order.\n\n**Assumption:** the README contract is authoritative and `src/bus.ts` is the \"bus\" to fix; the plugin was treated as a correct consumer and left as-is (its self-unsubscribe is legitimate and now handled by the bus). Public API (`on`/`emit`/`count`), `./test`, and `package.json` are byte-for-byte untouched."
+ ],
+ "diff": "M src/bus.ts\n\n--- src/bus.ts ---\n/**\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\n * handlers run one after another in subscription order, emit resolves after all of them,\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\n */\n\nexport type Handler<T> = (payload: T) => void | Promise<void>;\n\nexport class HookBus {\n  private handlers: Map<string, Handler<unknown>[]> = new Map();\n\n  /** Subscribes a handler to an event; returns the function that unsubscribes it. */\n  on<T>(event: string, handler: Handler<T>): () => void {\n    const list = this.handlers.get(event) ?? [];\n    list.push(handler as Handler<unknown>);\n    this.handlers.set(event, list);\n    return () => {\n      const index = list.indexOf(handler as Handler<unknown>);\n      if (index >= 0) {\n        list.splice(index, 1);\n      }\n    };\n  }\n\n  /** Runs the handlers of an event with the payload, sequentially in subscription order. */\n  async emit<T>(event: string, payload: T): Promise<void> {\n    // Snapshot the list so handlers added or removed during this emit don't\n    // change what runs now (the README says that counts from the next emit on);\n    // iterating a copy also keeps a handler that splices itself out from\n    // skipping its neighbours.\n    const list = [...(this.handlers.get(event) ?? [])];\n    for (const handler of list) {\n      await handler(payload);\n    }\n  }\n\n  /** How many handlers an event has. */\n  count(event: string): number {\n    return (this.handlers.get(event) ?? []).length;\n  }\n}\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ cd <WORKSPACE> && node --test 2>&1\n$ cd <WORKSPACE> && node _verify.mjs 2>&1\n$ cd <WORKSPACE> && Remove-Item _verify.mjs && node --test 2>&1\n\nStream tail:\n00001zrFX8dyBJnhE9A\",\"sessionID\":\"ses_e617ad694ffeG81ZmbQxKHOQLS\",\"messageID\":\"msg_19e858796001ca215ca9GbnL3E\",\"type\":\"step-start\"}}\n\n{\"type\":\"text\",\"timestamp\":1793660917020,\"sessionID\":\"ses_e617ad694ffeG81ZmbQxKHOQLS\",\"part\":{\"id\":\"prt_19e858796001ca215ca9GbnL3E_text-0\",\"sessionID\":\"ses_e617ad694ffeG81ZmbQxKHOQLS\",\"messageID\":\"msg_19e858796001ca215ca9GbnL3E\",\"type\":\"text\",\"text\":\"\\n\\nDone. The bus is fixed and verified.\\n\\n**[goal]** Fix the hook bus so `tool.after` hooks run in order, never skip, and propagate failures, per the README contract — without changing the public API, `./test`, or `package.json`.\\n\\n**[action]** Rewrote `HookBus.emit` in `src/bus.ts` to snapshot the handler list and `await` each handler sequentially in a `for...of` loop. Left `on`/`count` (public API), `test/bus.test.ts`, `package.json`, and `src/plugin.ts` untouched.\\n\\n**[result]** Verified with `node --test` (both existing tests pass) plus a throwaway contract test covering order, self-unsubscribe-during-emit, error propagation, and snapshot semantics — all passed; scratch file removed after.\\n\\n**[next]** None — work is complete.\\n\\n---\\n\\n### What I found\\n\\nThree bugs, all in `emit`, matching the three reports exactly. The old code was:\\n```js\\nlist.forEach(async (handler) => { await handler(payload); });\\n```\\n\\n1. **Ran out of order** — `Array.forEach` never awaits async callbacks, so every handler started in parallel and finished in completion order (e.g. a 5 ms handler before a 30 ms one), not subscription order.\\n2. **Sometimes a hook never ran** — the *live* array was iterated by index. The audit plugin's notice handler splices *itself* out of the live list (index 0); that shift makes `forEach` skip the next handler (the redaction step). So redaction was silently dropped. This was a **bus** bug, not a plugin bug.\\n3. **A failing hook was silently ignored** — rejections were fire-and-forget: `emit` resolved on its own, the error went unhandled, and the later handlers still ran (contradicting \\\"the handlers after it do not run\\\").\\n\\n### How I know it is right\\n\\nThe fix snapshots the list `[...(this.handlers.get(event) ?? [])]` and awaits each handler in order:\\n- Sequential `for...of` + `await` ⇒ each handler settles before the next starts ⇒ subscription order guaranteed.\\n- Snapshot ⇒ self-unsubscribe (or a late subscription) during an emit doesn't skip neighbours or change the current run; it counts from the next emit, exactly as the README specifies.\\n- A thrown/rejected handler rejects `emit` with that same error and short-circuits the loop ⇒ later handlers don't run.\\n\\nProof:\\n- Existing tests pass unchanged: `pass 2, fail 0` from `node --test`.\\n- My throwaway contract test asserted, and passed, on: ordering of 3 async handlers (30/10/5 ms → `a,b,c`); the plugin's self-unsub notice still letting redaction + audit run and dropping the notice only from the next emit; a throwing handler making `emit` reject with that exact error and skipping the following handler; an async rejection doing the same; `emit` awaiting a slow handler before resolving; and a mid-emit subscription not running until the next emit.\\n- End-to-end the audit plugin now logs `notice` then `bash: password=[redacted] done` in that order.\\n\\n**Assumption:** the README contract is authoritative and `src/bus.ts` is the \\\"bus\\\" to fix; the plugin was treated as a correct consumer and left as-is (its self-unsubscribe is legitimate and now handled by the bus). Public API (`on`/`emit`/`count`), `./test`, and `package.json` are byte-for-byte untouched.\",\"time\":{\"start\":1793660913729,\"end\":1793660917020}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793660917020,\"sessionID\":\"ses_e617ad694ffeG81ZmbQxKHOQLS\",\"part\":{\"id\":\"prt_19e858796001ca215ca9GbnL3E_step-finish\",\"sessionID\":\"ses_e617ad694ffeG81ZmbQxKHOQLS\",\"messageID\":\"msg_19e858796001ca215ca9GbnL3E\",\"type\":\"step-finish\",\"reason\":\"stop\",\"cost\":0,\"tokens\":{\"input\":16718,\"output\":973,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}}}}\n\n",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "package.json takes no dependencies",
+   true
+  ],
+  [
+   "hidden handlers run in subscription order",
+   true
+  ],
+  [
+   "hidden emit resolves after every handler",
+   true
+  ],
+  [
+   "hidden a failing handler rejects emit",
+   true
+  ],
+  [
+   "hidden a handler that unsubscribes itself does not stop the others",
+   true
+  ],
+  [
+   "hidden the audit plugin redacts before it logs",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 14,
+  "tool_calls": 18,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 1,
+  "file_writes": 5,
+  "repeated_tool_calls": 2,
+  "outside_path_uses": 0,
+  "generated_tokens": 7339,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 2080
+ },
+ "deliverables": [],
+ "render": null
+}
