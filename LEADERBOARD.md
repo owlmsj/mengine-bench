@@ -10,6 +10,7 @@ their Scores use that version's formula and do not compare with the table above.
 | # | Score | Correct % | Solved | Judge | Speed | Time | Timeouts | Cost | Est. price | Tokens | Generated | Turns | Agent | Model | Effort | Hardware | Config | Submitter | Date | Run |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | **90.6** | 100.0 | 20/20 | 81.0 | 73.8 | 11 min 32 s | 0 | $2.54 (harness) | ~$2.49 | 3.73M | 50.2k | 103 | claude 2.1.316 (Claude Code) | claude-sonnet-5-5 | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=claude-code, tier=0, role=default, instructions=~... | owlmsj | 2026-11-02 | [run](results/2026-11-02_claude_claude-sonnet-5-5_low_228a1e76/summary.md) |
+| 2 | **86.3** | 99.4 | 19/20 | 85.2 | 56.0 | 16 min 00 s | 0 | n/a | ~$3.30 | 3.84M | 55.4k | 21 | codex codex-cli 0.165.0 | gpt-6.1-sol | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=codex, tier=0, role=default, service_tier=fast, i... | owlmsj | 2026-11-02 | [run](results/2026-11-02_codex_gpt-6.1-sol_low_6a53654b/summary.md) |
 
 ## Bench 1.7 (history)
 
