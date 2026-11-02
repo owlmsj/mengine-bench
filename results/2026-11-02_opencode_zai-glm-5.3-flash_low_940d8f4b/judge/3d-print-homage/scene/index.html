@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Great Wave - Low Poly</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#f0e4c8}
+  canvas{display:block}
+</style>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+// Palette taken from the print: cream sky, Prussian blues, pale foam, ochre boats
+const C = {
+  sky:      0xf0e4c8,
+  cream:    0xf5ead0,
+  prussian: 0x1d4e89,
+  midBlue:  0x2f6bab,
+  paleBlue: 0x9fc4d4,
+  foam:     0xfdf8ea,
+  navy:     0x16355c,
+  boat:     0xe6c193,
+  boatDark: 0x8a5a2b,
+  fuji:     0xe9edf2,
+  fujiBase: 0x5b7fa6
+};
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(C.sky);
+scene.fog = new THREE.Fog(C.cream, 60, 160);
+
+const camera = new THREE.PerspectiveCamera(42, innerWidth/innerHeight, 0.1, 400);
+camera.position.set(2, 11, 56);
+camera.lookAt(0, 9, 0);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xfff6e0, 0x6f87a8, 1.1));
+const sun = new THREE.DirectionalLight(0xfff2d8, 1.6);
+sun.position.set(-20, 30, 25);
+scene.add(sun);
+
+function mat(color){ return new THREE.MeshLambertMaterial({color, flatShading:true}); }
+
+// ---------- Ground swell (rolling sea, right side like the print) ----------
+const seaMat = mat(C.midBlue);
+const seaGeo = new THREE.PlaneGeometry(220, 140, 22, 14);
+seaGeo.rotateX(-Math.PI/2);
+const seaBase = seaGeo.attributes.position.array.slice();
+const sea = new THREE.Mesh(seaGeo, seaMat);
+sea.position.set(0, -1, -10);
+scene.add(sea);
+
+// ---------- The Great Wave: big curling mass + foam claws ----------
+const wave = new THREE.Group();
+
+// main wave body: lathe-like curled shape built from a custom extruded arc
+function claw(len, thick, color){
+  // a curved tapered slab, like a wave claw in low poly
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0);
+  shape.quadraticCurveTo(len*0.5, len*0.55, len*1.05, len*0.35);
+  shape.quadraticCurveTo(len*0.55, len*0.35, len*0.18, -thick);
+  shape.lineTo(0,0);
+  const geo = new THREE.ExtrudeGeometry(shape, {depth: thick, bevelEnabled:false, steps:1, curveSegments:4});
+  return new THREE.Mesh(geo, mat(color));
+}
+
+// big wave body: one curling profile, extruded, like the print's silhouette
+const body = new THREE.Group();
+const prof = new THREE.Shape();
+// from sea level, up the steep back, over the crest, curling down to the claw tip
+prof.moveTo(14, 0);
+prof.lineTo(2, 0);
+prof.lineTo(-2, 14);
+prof.quadraticCurveTo(-4, 24, 6, 27);   // over the crest
+prof.quadraticCurveTo(16, 26, 20, 16);  // start of the curl
+prof.quadraticCurveTo(22, 9, 15, 7);    // curling under
+prof.quadraticCurveTo(10, 6, 8, 2);     // underside back to sea
+prof.lineTo(14, 0);
+const pgeo = new THREE.ExtrudeGeometry(prof, {depth: 12, bevelEnabled:false, steps:1, curveSegments:6});
+pgeo.translate(0, 0, -6);
+const pmat = mat(C.prussian);
+pmat.side = THREE.DoubleSide;
+body.add(new THREE.Mesh(pgeo, pmat));
+// inner face highlight band on the wave's front
+const inner = new THREE.Shape();
+inner.moveTo(8, 2);
+inner.quadraticCurveTo(10, 6, 15, 7);
+inner.quadraticCurveTo(21, 9, 19, 15);
+inner.quadraticCurveTo(16, 22, 7, 24);
+inner.quadraticCurveTo(1, 22, 0, 14);
+inner.lineTo(3, 4);
+inner.lineTo(8, 2);
+const imat = mat(C.midBlue);
+imat.side = THREE.DoubleSide;
+const ig = new THREE.ExtrudeGeometry(inner, {depth: 13, bevelEnabled:false, steps:1, curveSegments:5});
+ig.translate(0, 0, -6.5);
+body.add(new THREE.Mesh(ig, imat));
+wave.add(body);
+
+// foam crest: jagged pale cap along the curl
+const cap = new THREE.Group();
+for (let i=0;i<8;i++){
+  const c = new THREE.Mesh(new THREE.ConeGeometry(1.5+Math.random(), 3.5+Math.random()*2, 5), mat(C.foam));
+  const a = i/7;
+  c.position.set(-2 + a*20, 26 + Math.sin(i*1.7)*1.0 - a*8, -2 + (i%2)*2.0);
+  c.rotation.z = 0.5 - a*1.2;
+  cap.add(c);
+}
+wave.add(cap);
+
+// claws: fingers of foam reaching down over the front
+const claws = [];
+const clawSpots = [
+  [18, 18, 1, 9, 0.9], [20, 15, 2.5, 10, 1.0], [22, 12, 3.5, 11, 1.1],
+  [24, 9, 4, 8, 1.0], [15, 20, 0.5, 6, 0.8]
+];
+for (const [x,y,z,len,th] of clawSpots){
+  const c = claw(len, th, C.foam);
+  c.position.set(x, y, z);
+  c.rotation.z = -0.9 - Math.random()*0.3;
+  c.rotation.y = 0.3;
+  claws.push(c); wave.add(c);
+}
+// foam patches on the wave face
+for (let i=0;i<14;i++){
+  const p = new THREE.Mesh(new THREE.ConeGeometry(0.7+Math.random()*0.8, 1.2, 4), mat(C.foam));
+  p.position.set(0+Math.random()*12, 4+Math.random()*16, 2+Math.random()*5);
+  p.rotation.x = Math.PI;
+  wave.add(p);
+}
+wave.position.set(-16, 0, -4);
+wave.rotation.y = 0.12;
+scene.add(wave);
+
+// ---------- Mount Fuji, small on the horizon (right of center) ----------
+const fuji = new THREE.Group();
+const cone = new THREE.Mesh(new THREE.ConeGeometry(9, 10, 7), mat(C.fujiBase));
+cone.position.y = 5;
+const snow = new THREE.Mesh(new THREE.ConeGeometry(4.6, 5, 7), mat(C.fuji));
+snow.position.y = 7.5;
+fuji.add(cone, snow);
+fuji.position.set(22, 0, -58);
+scene.add(fuji);
+
+// distant sky band + hint of clouds (cream gradient feel via fog already)
+const cloudMat = mat(0xf7efdc);
+for (const [x,y,z,s] of [[-30,26,-70,10],[25,30,-80,14],[5,22,-75,7]]){
+  const cl = new THREE.Mesh(new THREE.BoxGeometry(s*2.4, s*0.35, s*0.4), cloudMat);
+  cl.position.set(x,y,z); scene.add(cl);
+}
+
+// ---------- Three boats (as in the print) with rowers ----------
+const boats = [];
+function boat(x,y,z,ry,tilt){
+  const g = new THREE.Group();
+  const hull = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.35, 7, 5, 1), mat(C.boat));
+  hull.rotation.z = Math.PI/2; hull.scale.set(1,1,0.6);
+  g.add(hull);
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(5.4, 0.25, 0.9), mat(C.boatDark));
+  deck.position.y = 0.5; g.add(deck);
+  // cargo bundle at the stern
+  const cargo = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.7, 0.9), mat(C.navy));
+  cargo.position.set(-2.2, 0.9, 0); g.add(cargo);
+  // rowers: small blue heads/bodies clustered amidships
+  for (let i=0;i<5;i++){
+    const r = new THREE.Mesh(new THREE.SphereGeometry(0.32, 5, 4), mat(C.prussian));
+    r.position.set(-0.8 + i*0.8, 0.9, 0.1*Math.sin(i));
+    g.add(r);
+  }
+  const oar = new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.06,4.5,4), mat(C.boatDark));
+  oar.position.set(2.2, 0.6, 0.3); oar.rotation.z = -0.9; g.add(oar);
+  g.position.set(x,y,z); g.rotation.set(0, ry, tilt);
+  boats.push(g); scene.add(g);
+  return g;
+}
+boat(-24, 4.5, 3,  0.5,  0.3);    // boat swallowed by the wave, left
+boat(5,  -0.5, 10, -0.15, -0.1);  // center boat in the trough
+boat(28, 2.2, 1, -2.6, -0.35);    // boat riding the swell, right
+
+// ---------- spray particles in the trough (white dots of the print) ----------
+const sprayGeo = new THREE.BufferGeometry();
+const N = 120, pos = new Float32Array(N*3), vel = [];
+for (let i=0;i<N;i++){
+  pos[i*3] = (Math.random()-0.5)*30;
+  pos[i*3+1] = Math.random()*14;
+  pos[i*3+2] = Math.random()*14;
+  vel.push(0.2+Math.random()*0.4);
+}
+sprayGeo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+const spray = new THREE.Points(sprayGeo, new THREE.PointsMaterial({color:C.foam, size:0.35}));
+scene.add(spray);
+
+// ---------- gentle motion ----------
+const clock = new THREE.Clock();
+function tick(){
+  const t = clock.getElapsedTime();
+  // wave breathes and leans slightly
+  wave.rotation.z = Math.sin(t*0.5)*0.03;
+  wave.position.y = Math.sin(t*0.7)*0.4;
+  cap.rotation.y = Math.sin(t*0.4)*0.05;
+  claws.forEach((c,i)=>{ c.rotation.x = Math.sin(t*0.8+i)*0.06; });
+  // sea rolls
+  const p = seaGeo.attributes.position;
+  for (let i=0;i<p.count;i++){
+    const bx = seaBase[i*3], bz = seaBase[i*3+2];
+    p.setY(i, Math.sin(bx*0.12 + t*0.9)*0.7 + Math.cos(bz*0.15 + t*0.6)*0.5);
+  }
+  p.needsUpdate = true;
+  seaGeo.computeVertexNormals();
+  // boats bob on the swell
+  boats.forEach((b,i)=>{
+    b.position.y += Math.sin(t*1.1 + i*2.1)*0.012;
+    b.rotation.z += Math.sin(t*0.9 + i)*0.0035;
+    b.rotation.x = Math.sin(t*0.7 + i*1.3)*0.05;
+  });
+  // spray drifts up and resets
+  const sp = sprayGeo.attributes.position;
+  for (let i=0;i<N;i++){
+    let y = sp.getY(i) + vel[i]*0.02;
+    if (y > 15) y = 0;
+    sp.setY(i, y);
+    sp.setX(i, sp.getX(i) + Math.sin(t+i)*0.004);
+  }
+  sp.needsUpdate = true;
+  // very subtle camera sway for wallpaper feel
+  camera.position.x = 2 + Math.sin(t*0.15)*1.5;
+  camera.lookAt(0, 9, 0);
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+tick();
+
+addEventListener('resize', ()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
