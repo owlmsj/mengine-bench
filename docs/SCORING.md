@@ -14,7 +14,7 @@ the Score, and a Cost kept apart.
 | **Est. price** | The run's tokens at public API list prices, so subscription and API runs compare. No points either. |
 
 The formulas live in `mengine_bench/scoring.py`. Runs compare when they ran the
-same bench major.minor (1.7.x). A patch release changes no task or prompt. When it changes how a run is judged or
+same bench major.minor (1.7.x). A patch release changes no task or brief; a workspace safety rule may change. When it changes how a run is judged or
 scored, every ranked run is judged again from its bundle (`mengine-bench judge --again`), so none has to run again. Rankings of older versions stay in LEADERBOARD.md as history, with the Scores of their own formula.
 
 A run is one sample and runs are not repeated, so ties come from the published tasks: draw the 15 tasks again with

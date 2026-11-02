@@ -42,7 +42,9 @@ BROWSER_PROFILE_DIRS = frozenset({"_browser-profile", ".browser-profile", "brows
 # server, skill or subagent it has is fair game. Local files outside the
 # workspace are not: earlier steps and runs live next to it, and the
 # transcripts are published.
+# A Sonnet run stopped its page server with `Get-Process python | Stop-Process -Force`, which killed this runner too (#107).
 WORKSPACE_RULES = ("Use any skill, tool or MCP server you have. Read and write local files only inside this directory.\n"
+                   "Other programs run on this machine: stop only the processes you started, by their id, never by name.\n"
                    "Do not print credentials, environment variables or personal data: this session is published.\n")
 # #41: without this a model can plan until the limit and leave nothing to grade.
 TIME_LIMIT_NOTE = ("\n\nYou have {minutes} min for this step. The folder and your reply so far are graded as they stand "
