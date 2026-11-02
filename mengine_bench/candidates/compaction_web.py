@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
@@ -84,6 +85,60 @@ def _meeting_reference(ws: Path) -> list[str]:
     return ["Handoff ready.", "Decisions recorded."]
 
 
+def _trajectory_setup(ws: Path) -> None:
+    rng = random.Random(6331)
+    files = ("server/net/replication.cpp", "server/net/serializer.cpp", "server/sim/tick.cpp", "tests/net_test.cpp")
+    milestones: dict[int, dict[str, object]] = {
+        30: {"tool": "bash", "cmd": "tools/bench_tick.sh", "result": "tick p99 = 14.2 ms"},
+        55: {"tool": "note", "text": "Trying SIMD (AVX2) serializer for delta compression."},
+        78: {"tool": "bash", "cmd": "tools/bench_tick.sh", "result": "tick p99 = 13.6 ms"},
+        96: {"tool": "note", "text": "Abandoning SIMD serializer: crashes in dedicated-server ARM64 build; reverted."},
+        120: {"tool": "bash", "cmd": "tools/bench_tick.sh", "result": "tick p99 = 12.9 ms"},
+        150: {"tool": "bash", "cmd": "tools/bench_tick.sh", "result": "tick p99 = 11.8 ms"},
+        157: {"tool": "edit", "file": "server/net/replication.cpp"},
+        158: {"tool": "read", "file": "tests/net_test.cpp"},
+        159: {"tool": "bash", "cmd": "ctest -R Net --output-on-failure",
+              "result": "1 failed: ReplicationTest.DeltaCompression"},
+    }
+    events: list[str] = []
+    for index in range(160):
+        kind = rng.choice(("read", "grep", "bash", "edit"))
+        entry: dict[str, object] = {"tool": kind, "file": rng.choice(files[1:] if kind == "edit" else files)}
+        if kind == "bash":
+            entry = {"tool": kind, "cmd": "ctest -R Net --output-on-failure", "result": "12 passed"}
+        events.append(json.dumps({"step": index, **milestones.get(index, entry)}))
+    write(ws, "agent/trajectory.jsonl", "\n".join(events) + "\n")
+
+
+def _trajectory_check(ws: Path, answers: Sequence[str]) -> CheckResult:
+    result = CheckResult()
+    _note_check(result, ws, "STATE.md", 1800)
+    got = result_json(ws)
+    path = str(got.get("last_edited_file", "")).strip().replace("\\", "/").removeprefix("./")
+    result.add("answer last_edited_file", path == "server/net/replication.cpp",
+               saw(got.get("last_edited_file"), "server/net/replication.cpp"))
+    result.add("answer failing_test", str(got.get("failing_test", "")).strip() == "ReplicationTest.DeltaCompression",
+               saw(got.get("failing_test"), "ReplicationTest.DeltaCompression"))
+    result.add("answer last_p99_ms", near(got.get("last_p99_ms"), 11.8, 0.005), saw(got.get("last_p99_ms"), 11.8))
+    approach = str(got.get("abandoned_approach", ""))
+    reason = str(got.get("abandonment_reason", ""))
+    result.add("answer abandoned_approach", bool(re.search(r"\b(?:SIMD|AVX2?)\b", approach, re.I)),
+               saw(approach, "SIMD / AVX2 serializer"))
+    result.add("answer abandonment_reason", bool(re.search(r"\bARM(?:64)?\b", reason, re.I))
+               and bool(re.search(r"\bcrash\w*\b", reason, re.I)), saw(reason, "crashes on ARM64"))
+    return result
+
+
+def _trajectory_reference(ws: Path) -> list[str]:
+    write(ws, "STATE.md", "Last measured tick p99: 11.8 ms (tools/bench_tick.sh). SIMD/AVX2 serializer reverted "
+          "because it crashes on dedicated-server ARM64. Last edit: server/net/replication.cpp; "
+          "last read: tests/net_test.cpp. Current failure: ReplicationTest.DeltaCompression.\n")
+    write(ws, "result.json", json.dumps({"last_edited_file": "server/net/replication.cpp",
+          "failing_test": "ReplicationTest.DeltaCompression", "last_p99_ms": 11.8,
+          "abandoned_approach": "SIMD AVX2 serializer", "abandonment_reason": "crash on ARM64"}))
+    return ["State handed over.", "Current state recorded."]
+
+
 TASKS: list[EvalTask] = [
     EvalTask(
         id="cmp-meeting-decisions", category="compaction",
@@ -97,6 +152,19 @@ TASKS: list[EvalTask] = [
                  "{WS}/result.json: new_price_brl (monthly), starts_on, approved_role, role_owner, cloud_cap_brl "
                  "(monthly), billing_due, designer_gate (quarter and revenue_above_brl, monthly).",
                  fresh_session=True, hide=("meetings/2026-06-30-ops.md",), carry=("DECISIONS.md",)),
+        ),
+    ),
+    EvalTask(
+        id="cmp-agent-trajectory", category="compaction",
+        provenance="mengine evals/suite/tasks_compaction.py at d8344f72; AMA-Bench-style 160-event trajectory (#127)",
+        summary="Hand over a tool-call history so a colleague can resume debugging from the current state.",
+        setup=_trajectory_setup, check=_trajectory_check, reference=_trajectory_reference, timeout_s=180,
+        steps=(
+            Step("A colleague needs to resume the debugging work in {WS}/agent/trajectory.jsonl without that history. "
+                 "Write {WS}/STATE.md, at most 1800 characters, so they can continue from the current state."),
+            Step("You are resuming debugging with only {WS}/STATE.md. Record the current state in {WS}/result.json: "
+                 "last_edited_file, failing_test, last_p99_ms, abandoned_approach, abandonment_reason.",
+                 fresh_session=True, hide=("agent/trajectory.jsonl",), carry=("STATE.md",)),
         ),
     ),
 ]

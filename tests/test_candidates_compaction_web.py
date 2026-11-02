@@ -78,3 +78,34 @@ def test_meeting_accepts_common_formats(tmp_path: Path) -> None:
                        "approved_role": "sre", "role_owner": "LIVIA"}.items():
         _replace_result(tmp_path, key, value)
     assert task.check(tmp_path, []).passed
+
+
+@pytest.mark.parametrize("key,wrong", [
+    ("last_edited_file", "tests/net_test.cpp"),
+    ("failing_test", "ReplicationTest.Serialization"),
+    ("last_p99_ms", 12.9), ("last_p99_ms", "11.8 or 12.9"),
+    ("abandoned_approach", "scalar serializer"),
+    ("abandonment_reason", "too slow on x86"),
+])
+def test_trajectory_rejects_plausible_wrong_answer(tmp_path: Path, key: str, wrong: object) -> None:
+    task = next(task for task in TASKS if task.id == "cmp-agent-trajectory")
+    task.reference(tmp_path)
+    _replace_result(tmp_path, key, wrong)
+    assert f"answer {key}" in task.check(tmp_path, []).failed()
+
+
+@pytest.mark.parametrize("summary", ["", "x" * 1801])
+def test_trajectory_rejects_unusable_note(tmp_path: Path, summary: str) -> None:
+    task = next(task for task in TASKS if task.id == "cmp-agent-trajectory")
+    task.reference(tmp_path)
+    (tmp_path / "STATE.md").write_text(summary, encoding="utf-8")
+    assert not task.check(tmp_path, []).passed
+
+
+def test_trajectory_accepts_common_formats(tmp_path: Path) -> None:
+    task = next(task for task in TASKS if task.id == "cmp-agent-trajectory")
+    task.reference(tmp_path)
+    for key, value in {"last_p99_ms": "11,80 ms", "last_edited_file": "server\\net\\replication.cpp",
+                       "abandoned_approach": "AVX2 serializer", "abandonment_reason": "ARM64 build crashes"}.items():
+        _replace_result(tmp_path, key, value)
+    assert task.check(tmp_path, []).passed
