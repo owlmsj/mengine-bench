@@ -14,6 +14,9 @@ their Scores use that version's formula and do not compare with the table above.
 | 3 | **93.1** | 99.2 | 14/15 | 81.8 | 88.3 | 7 min 55 s | 0 | $1.99 (harness) | ~$1.99 | 3.06M | 60.9k | 79 | claude 2.1.316 (Claude Code) | claude-sonnet-5-5 | medium | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=claude-code, tier=0, role=default, instructions=~... | owlmsj | 2026-11-01 | [run](results/2026-11-01_claude_claude-sonnet-5-5_medium_8244c053/summary.md) |
 | 4 | **87.5** | 93.3 | 14/15 | 78.1 | 85.5 | 8 min 38 s | 0 | $2.18 (harness) | ~$2.18 | 2.85M | 64.3k | 77 | claude 2.1.316 (Claude Code) | claude-sonnet-5-5 | medium | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=claude-code default clean install | owlmsj | 2026-11-01 | [run](results/2026-11-01_claude_claude-sonnet-5-5_medium_d5787b15/summary.md) |
 | 5 | **73.7** | 90.8 | 13/15 | 72.7 | 7.5 | 28 min 07 s | 2 | >= $0.08 (harness) | n/a | 1.04M | 52.3k | 116 | opencode opencode v2.2.2 | alibaba/qwen3.8-flash | medium | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=opencode default clean install | owlmsj | 2026-11-02 | [run](results/2026-11-02_opencode_alibaba-qwen3.8-flash_medium_7909d3ce/summary.md) |
+| 6 | **68.9** | 80.0 | 12/15 | 68.0 | 32.2 | 21 min 58 s | 0 | >= $0.00 (harness) | n/a | 1.97M | 60.6k | 125 | opencode opencode v2.2.2 | qwen-cloud/qwen3.8-flash | medium | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=opencode, tier=1, role=default, instructions=~/.c... | owlmsj | 2026-11-02 | [run](results/2026-11-02_opencode_qwen-cloud-qwen3.8-flash_medium_dec421df/summary.md) |
+
+Read as ties, because the higher run keeps its lead in under 80% of 2000 draws of the tasks: #5 and #6 (73%). `mengine-bench analyze` shows the rest.
 
 ## Bench 1.5 (history)
 
