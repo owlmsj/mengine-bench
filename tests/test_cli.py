@@ -79,3 +79,9 @@ def test_tasks_doc_readme_rewrites_only_the_marked_block(tmp_path: Path) -> None
     text = readme.read_text(encoding="utf-8")
     assert "stale" not in text and text.startswith("intro\n") and text.endswith("outro\n")
     assert render_task_summaries(catalog.all_tasks()).strip() in text
+
+
+def test_run_returns_renamed_runner_exit_before_running_in_parent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli, 'relaunch_run', lambda argv: 23, raising=False)
+    monkeypatch.setattr(cli, '_run', lambda args: 0)
+    assert cli.main(['run', '--agent', 'cmd', '--model', 'm']) == 23

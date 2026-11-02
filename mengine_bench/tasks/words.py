@@ -249,6 +249,17 @@ def _set_detail(got: set[str], want: set[str]) -> str:
 
 
 def _most_connected_ok(value: object, tied: set[str]) -> bool:
+    ranking = None
+    if isinstance(value, dict) and not _row_name(value):
+        ranking = {_word_key(name): count for name, count in value.items()}
+    if isinstance(value, list) and value and all(isinstance(row, dict) for row in value):
+        ranking = {_row_name(row): next((row[key] for key in ("degree", "count", "links") if key in row), None)
+                   for row in value}
+    if ranking is not None:
+        if not ranking or not all(isinstance(count, (int, float)) for count in ranking.values()):
+            return False
+        maximum = max(ranking.values())
+        return {name for name, count in ranking.items() if count == maximum} == tied
     rows = value if isinstance(value, list) else [value]
     names = {_word_key(row) if isinstance(row, str) else _row_name(row) if isinstance(row, dict) else "" for row in rows}
     return bool(names) and names <= tied

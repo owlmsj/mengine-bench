@@ -64,3 +64,19 @@ def test_a_run_without_tokens_has_no_estimate() -> None:
 def test_local_inference_declared_free_says_so() -> None:
     free = {"input": 0.0, "cached": 0.0, "output": 0.0}
     assert price_text(_result("home/qwen38-flash-next-exl3-605-256k", 1_000, 0, 1_000, price_per_mtok=free)) == "$0.00 (local)"
+
+
+def test_declared_price_estimates_the_existing_token_scope() -> None:
+    declared = {'input': 0.15, 'cached': 0.016, 'output': 0.47}
+    run = _result('unknown/model', 1_000_000, 500_000, 10, generated=100_000, price_per_mtok=declared)
+    assert estimated_usd(run) == 0.13
+    assert price_text(run) == '~$0.13'
+
+
+def test_declared_price_overrides_list_price_and_zero_stays_local() -> None:
+    run = _result('gpt-6-astra', 1_000_000, 0, 1_000_000,
+                  price_per_mtok={'input': 1.0, 'cached': 0.1, 'output': 2.0})
+    assert estimated_usd(run) == 3.0
+    run['price_per_mtok'] = {'input': 0.0, 'cached': 0.0, 'output': 0.0}
+    assert estimated_usd(run) == 0.0
+    assert price_text(run) == '$0.00 (local)'

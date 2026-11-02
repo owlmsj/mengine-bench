@@ -354,3 +354,40 @@ def test_opencode_invalid_cost_and_tokens_are_unknown(cost: object) -> None:
 
 def test_cmd_usage_is_unmeasured() -> None:
     assert CmdAgent("agent {prompt_file}", "m", None).parse("done", 0).usage is None
+
+
+def test_opencode_error_is_never_a_partial_answer() -> None:
+    from mengine_bench.runner.agents import partial_answer
+    assert partial_answer(json.dumps({'type': 'error', 'error': {'message': 'provider failed'}})) == ''
+
+
+@pytest.mark.parametrize('final', [
+    [{'type': 'step_finish', 'part': {'reason': 'stop'}}],
+    [{'type': 'tool_use', 'part': {}}],
+])
+def test_opencode_empty_last_step_cannot_reuse_old_text_or_stop(final: list[dict[str, object]]) -> None:
+    from mengine_bench.runner.agents import partial_answer
+    events = [
+        {'type': 'step_start'}, {'type': 'text', 'part': {'text': 'old answer'}},
+        {'type': 'step_finish', 'part': {'reason': 'stop'}}, {'type': 'step_start'}, *final,
+    ]
+    stream = '\n'.join(map(json.dumps, events))
+    with pytest.raises(AgentError):
+        parse_opencode_jsonl(stream, 0)
+    assert partial_answer(stream) == ''
+
+
+@pytest.mark.parametrize('finish', [[], [{'type': 'step_finish', 'part': {'reason': 'stop'}}]])
+def test_opencode_answer_is_only_the_last_step(finish: list[dict[str, object]]) -> None:
+    from mengine_bench.runner.agents import partial_answer
+    events = [
+        {'type': 'step_start'}, {'type': 'text', 'part': {'text': 'working'}},
+        {'type': 'step_finish', 'part': {'reason': 'tool-calls'}}, {'type': 'step_start'},
+        {'type': 'text', 'part': {'text': 'final '}}, {'type': 'text', 'part': {'text': 'answer'}}, *finish,
+    ]
+    stream = '\n'.join(map(json.dumps, events))
+    parsed = parse_opencode_jsonl(stream, 0)
+    assert parsed.answer == 'final answer'
+    assert partial_answer(stream) == 'final answer'
+    if not finish:
+        assert parsed.usage.cost_source == 'partial'

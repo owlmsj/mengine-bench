@@ -19,7 +19,6 @@ def _touch(path: Path) -> Path:
     ("claude", ".claude/CLAUDE.md"),
     ("codex", ".codex/AGENTS.md"),
     ("opencode", ".config/opencode/AGENTS.md"),
-    ("opencode", ".claude/CLAUDE.md"),
 ])
 def test_global_instructions_of_the_harness_are_found(tmp_path: Path, agent: str, relative: str) -> None:
     found = _touch(tmp_path / "home" / relative)
@@ -70,3 +69,15 @@ def test_only_earlier_runs_block(tmp_path: Path) -> None:
     (scratch / "runs" / "old").mkdir(parents=True)
     assert preflight.blocking_problems(scratch, work, temp) == [f"earlier run left on disk: {scratch / 'runs' / 'old'}"]
     assert not hasattr(preflight, "contamination")
+
+
+def test_opencode_does_not_publish_claude_global_instructions(tmp_path: Path) -> None:
+    home = tmp_path / 'home'
+    _touch(home / '.claude' / 'CLAUDE.md')
+    _touch(home / '.config' / 'opencode' / 'AGENTS.md')
+    work = tmp_path / 'project'
+    _touch(work / 'AGENTS.md')
+    found = preflight.personal_instructions('opencode', work, home=home)
+    assert '~/.config/opencode/AGENTS.md' in found
+    assert 'AGENTS.md above the workspaces' in found
+    assert '~/.claude/CLAUDE.md' not in found
