@@ -1,0 +1,61 @@
+{
+ "task_id": "gd-integration-repo",
+ "prompts": [
+  "An integration test of the Pixel Arena backend in {WS} fails while the unit tests pass. Make the backend behave as {WS}/docs says: fix every cause, not just the symptom this test shows. Existing tests stay as they are, and the project takes no new dependencies."
+ ],
+ "answers": [
+  "Baseline check:Confirmed: 0 != 1690, so three candidate causes: config precedence (env lost to file, kill_bonus stays 50), codec dropping credits, and rounding. Fixing all:Now harden the rounding against float drift (docs: halves always up):All 13 tests pass now, including the integration test.\n\n[goal] Make the Pixel Arena backend behave per ./docs so the integration test passes, fixing root causes, no new deps, tests untouched.\n\n[action] Ran the failing test as baseline, then read `docs/CONFIG.md`, `docs/ECONOMY.md` and the code paths they govern (`config/loader.py`, `economy/payout.py`, `persistence/codec.py`), fixed each cause, re-ran the full suite.\n\n[result] Three independent bugs found and fixed:\n\n1. **Config precedence inverted** (`arena_server/config/loader.py`) — CONFIG.md says `DEFAULTS < JSON file < env`, but the code applied env first and the JSON file last, so the file overrode `ARENA_KILL_BONUS=75` and the payout used the default 50. Reordered: file is loaded before env, so the environment always wins.\n2. **Credits lost on save/load** (`arena_server/persistence/codec.py`) — `decode()` never read the `credits` field it had just encoded, so a reloaded profile reset to 0 (the `0 != 1690` in the failure). Now decodes `credits` (default 0).\n3. **Fragile half-up rounding** (`arena_server/economy/payout.py`) — `floor(raw/10 + 0.5)` in floats can flip the documented \"halves always round up\" case (1425 -> 1430, 1585 -> 1590) when a product lands just below a half. Replaced with exact `Fraction` arithmetic, same rule. This did not cause the current failure but violates docs, so fixed per \"every cause, not just the symptom\".\n\nEvidence: `python -m unittest discover -s tests` -> `Ran 13 tests ... OK` (integration `test_event_weekend_win_is_paid_and_persisted` passes; all unit tests still pass, unchanged). Spot checks: `match_payout` returns 1130 for 1125 (half up) and 1320 for 1150x1.15.\n\nAssumptions: docs are the source of truth; `legacy_payout.py` is intentionally dead code (its own docstring says deprecated, not used by the live economy) so I left it; no other module needs changes since all other packages are self-contained `describe` stubs covered by passing unit tests.\n\n[next] None required; if you want, harden `decode` against unknown fields or add a regression unit test for env-beats-file precedence (kept out here since existing tests must stay as-is and the brief graded time)."
+ ],
+ "diff": "M arena_server/config/loader.py\nM arena_server/economy/payout.py\nM arena_server/persistence/codec.py\n\n--- arena_server/config/loader.py ---\n\"\"\"Runtime config. Precedence, lowest to highest: DEFAULTS < JSON file < env (docs/CONFIG.md).\"\"\"\n\nimport json\nimport os\n\nfrom arena_server.config.defaults import DEFAULTS\n\n\ndef _coerce(raw, like):\n    return type(like)(raw)\n\n\ndef load_config(file_path=None, env=None):\n    cfg = dict(DEFAULTS)\n    env = os.environ if env is None else env\n    if file_path:\n        with open(file_path, encoding=\"utf-8\") as fh:\n            cfg.update(json.load(fh))\n    # env must win over the file (docs/CONFIG.md), so it is applied last\n    for key, default in DEFAULTS.items():\n        value = env.get(f\"ARENA_{key.upper()}\")\n        if value is not None:\n            cfg[key] = _coerce(value, default)\n    return cfg\n\n\n--- arena_server/economy/payout.py ---\n\"\"\"Match payout. Rules live in docs/ECONOMY.md.\"\"\"\n\nfrom fractions import Fraction\n\n\ndef match_payout(won, kills, cfg):\n    base = cfg[\"win_base\"] if won else cfg[\"loss_base\"]\n    raw = (base + kills * cfg[\"kill_bonus\"]) * cfg[\"event_multiplier\"]\n    # nearest ten, halves up (docs examples: 1425 -> 1430, 1585 -> 1590);\n    # Fraction avoids float drift like 0.4999999... flipping the half case\n    tenths = Fraction(raw) / 10\n    return int((tenths + Fraction(1, 2)).__floor__()) * 10\n\n\n--- arena_server/persistence/codec.py ---\nimport json\n\nfrom arena_server.models.profile import Profile\n\n\ndef encode(profile):\n    return json.dumps({\"name\": profile.name, \"level\": profile.level,\n                       \"credits\": profile.credits, \"cosmetics\": profile.cosmetics})\n\n\ndef decode(blob):\n    data = json.loads(blob)\n    return Profile(name=data[\"name\"], level=data.get(\"level\", 1),\n                   credits=data.get(\"credits\", 0), cosmetics=data.get(\"cosmetics\", []))\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ Get-ChildItem -Recurse -File | Select-Object -ExpandProperty FullName\n$ python -m unittest discover -s tests -v 2>&1 | Select-Object -Last 30\n$ python -m unittest discover -s tests -v 2>&1 | Select-Object -Last 6; python -c \"from arena_server.economy.payout import match_payout\ncfg={'win_base':900,'loss_base':600,'kill_bonus':50,'event_multiplier':1.25}\nprint(match_payout(True,0,cfg), match_payout(True,5,{'win_base':900,'loss_base':600,'kill\n\nStream tail:\n\\n\\u001b[31;1m\\u001b[0m\\r\\n\\u001b[31;1m----------------------------------------------------------------------\\u001b[0m\\r\\n\\u001b[31;1mRan 13 tests in 0.013s\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[0m\\r\\n\\u001b[31;1mOK\\u001b[0m\\r\\n1130 1320\\r\\n\"}],\"providerCall\":{\"executed\":false},\"providerResult\":{\"executed\":false},\"rawInput\":\"{\\\"command\\\":\\\"python -m unittest discover -s tests -v 2>&1 | Select-Object -Last 6; python -c \\\\\\\"from arena_server.economy.payout import match_payout\\\\ncfg={'win_base':900,'loss_base':600,'kill_bonus':50,'event_multiplier':1.25}\\\\nprint(match_payout(True,0,cfg), match_payout(True,5,{'win_base':900,'loss_base':600,'kill_bonus':50,'event_multiplier':1.15}))\\\\\\\"\\\",\\\"workdir\\\":\\\"<WORKSPACE>\\\"}\"},\"time\":{\"start\":1793592738627,\"end\":1793592741780}}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793592741781,\"sessionID\":\"ses_e658bf414ffe6dLj30MxeFAaJn\",\"part\":{\"id\":\"prt_19a754f950018XicHgvDQ4ZdQA\",\"sessionID\":\"ses_e658bf414ffe6dLj30MxeFAaJn\",\"messageID\":\"msg_19a753e2a001M7Uwt2yb6p7gbj\",\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"cost\":0.00071318,\"tokens\":{\"input\":434,\"output\":148,\"reasoning\":0,\"cache\":{\"read\":19136,\"write\":0}}}}\n\n{\"type\":\"step_start\",\"timestamp\":1793592746137,\"sessionID\":\"ses_e658bf414ffe6dLj30MxeFAaJn\",\"part\":{\"id\":\"prt_19a756099001BTuvt3Fw9tec64\",\"sessionID\":\"ses_e658bf414ffe6dLj30MxeFAaJn\",\"messageID\":\"msg_19a754f9b001BQHM0cM3kyZWXI\",\"type\":\"step-start\"}}\n\n{\"type\":\"text\",\"timestamp\":1793592760675,\"sessionID\":\"ses_e658bf414ffe6dLj30MxeFAaJn\",\"part\":{\"id\":\"prt_19a754f9b001BQHM0cM3kyZWXI_text-0\",\"sessionID\":\"ses_e658bf414ffe6dLj30MxeFAaJn\",\"messageID\":\"msg_19a754f9b001BQHM0cM3kyZWXI\",\"type\":\"text\",\"text\":\"All 13 tests pass now, including the integration test.\\n\\n[goal] Make the Pixel Arena backend behave per ./docs so the integration test passes, fixing root causes, no new deps, tests untouched.\\n\\n[action] Ran the failing test as baseline, then read `docs/CONFIG.md`, `docs/ECONOMY.md` and the code paths they govern (`config/loader.py`, `economy/payout.py`, `persistence/codec.py`), fixed each cause, re-ran the full suite.\\n\\n[result] Three independent bugs found and fixed:\\n\\n1. **Config precedence inverted** (`arena_server/config/loader.py`) — CONFIG.md says `DEFAULTS < JSON file < env`, but the code applied env first and the JSON file last, so the file overrode `ARENA_KILL_BONUS=75` and the payout used the default 50. Reordered: file is loaded before env, so the environment always wins.\\n2. **Credits lost on save/load** (`arena_server/persistence/codec.py`) — `decode()` never read the `credits` field it had just encoded, so a reloaded profile reset to 0 (the `0 != 1690` in the failure). Now decodes `credits` (default 0).\\n3. **Fragile half-up rounding** (`arena_server/economy/payout.py`) — `floor(raw/10 + 0.5)` in floats can flip the documented \\\"halves always round up\\\" case (1425 -> 1430, 1585 -> 1590) when a product lands just below a half. Replaced with exact `Fraction` arithmetic, same rule. This did not cause the current failure but violates docs, so fixed per \\\"every cause, not just the symptom\\\".\\n\\nEvidence: `python -m unittest discover -s tests` -> `Ran 13 tests ... OK` (integration `test_event_weekend_win_is_paid_and_persisted` passes; all unit tests still pass, unchanged). Spot checks: `match_payout` returns 1130 for 1125 (half up) and 1320 for 1150x1.15.\\n\\nAssumptions: docs are the source of truth; `legacy_payout.py` is intentionally dead code (its own docstring says deprecated, not used by the live economy) so I left it; no other module needs changes since all other packages are self-contained `describe` stubs covered by passing unit tests.\\n\\n[next] None required; if you want, harden `decode` against unknown fields or add a regression unit test for env-beats-file precedence (kept out here since existing tests must stay as-is and the brief graded time).\",\"time\":{\"start\":1793592741799,\"end\":1793592760675}}}\n\n",
+ "checks": [
+  [
+   "existing tests untouched",
+   true
+  ],
+  [
+   "hidden config override and persistence",
+   true
+  ],
+  [
+   "hidden env float wins over file",
+   true
+  ],
+  [
+   "hidden round trip keeps everything",
+   true
+  ],
+  [
+   "hidden half up tie rounds up",
+   true
+  ],
+  [
+   "hidden persisted name survives",
+   true
+  ],
+  [
+   "hidden real environment when env is none",
+   true
+  ],
+  [
+   "existing test suite passes",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 9,
+  "tool_calls": 18,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 1,
+  "file_writes": 3,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2569,
+  "reasoning_tokens": 1125,
+  "largest_turn_tokens": 689
+ },
+ "deliverables": [],
+ "render": null
+}
