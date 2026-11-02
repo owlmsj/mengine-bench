@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from statistics import mean, median
 
 from mengine_bench.report import time_text
-from mengine_bench.scoring import combined_score, speed_points
+from mengine_bench.scoring import CORRECT_SHARE, JUDGE_SHARE, SPEED_SHARE, combined_score, speed_points
 
 RESAMPLES = 2000
 RESAMPLE_SEED = 82
@@ -89,8 +89,8 @@ def _parts_table(runs: Sequence[Run]) -> list[str]:
     def points(key: str, share: float) -> list[float]:
         return [share * float(run["totals"][key]) for run in runs]  # type: ignore[index]
 
-    speed = [0.15 * float(run["totals"]["speed"]) * float(run["totals"]["correct"]) / 100 for run in runs]  # type: ignore[index]
-    parts = (("Correct", points("correct", 0.6)), ("Judge", points("judge", 0.25)), ("Speed", speed))
+    speed = [SPEED_SHARE * float(run["totals"]["speed"]) * float(run["totals"]["correct"]) / 100 for run in runs]  # type: ignore[index]
+    parts = (("Correct", points("correct", CORRECT_SHARE)), ("Judge", points("judge", JUDGE_SHARE)), ("Speed", speed))
     return ["## Score points between the best and the worst run", "", "| part | points |", "| --- | --- |",
             *(f"| {name} | {max(values) - min(values):.1f} |" for name, values in parts)]
 
