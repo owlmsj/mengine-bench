@@ -220,12 +220,14 @@ def _agy_replies(events: list[dict[str, object]]) -> list[object]:
 def partial_answer(stdout: str) -> str:
     """The last reply in a stream stopped at its limit; plain output is its own reply."""
     events = split_jsonl(stdout)
+    if any(event.get("type") in ("step_start", "step_finish", "text") for event in events):
+        return _opencode_step_text(_opencode_final_step(events))
     replies: list[object] = []
     known = False
     for event in events:
         kind = event.get("type")
         known = known or kind in ("text", "step_start", "step_finish", "tool_use", "assistant", "user", "turn.started",
-                                  "turn.completed", "item.completed", "thread.started", "system") or "event" in event
+                                  "turn.completed", "item.completed", "thread.started", "system", "error") or "event" in event
         part, message, item = event.get("part"), event.get("message"), event.get("item")
         if kind == "text" and isinstance(part, dict):
             replies.append(part.get("text"))
@@ -279,6 +281,16 @@ def parse_codex_jsonl(stdout: str, exit_code: int) -> Parsed:
     return Parsed(answer=answers[-1], session_id=session if isinstance(session, str) else None, usage=usage)
 
 
+def _opencode_final_step(events: list[dict[str, object]]) -> list[dict[str, object]]:
+    start = max((index for index, event in enumerate(events) if event.get("type") == "step_start"), default=0)
+    return events[start:]
+
+
+def _opencode_step_text(events: list[dict[str, object]]) -> str:
+    texts = [_usage_mapping(event.get("part")).get("text") for event in events if event.get("type") == "text"]
+    return "".join(text for text in texts if isinstance(text, str))
+
+
 def parse_opencode_jsonl(stdout: str, exit_code: int) -> Parsed:
     _require_exit_zero(exit_code)
     events = split_jsonl(stdout)
@@ -289,13 +301,13 @@ def parse_opencode_jsonl(stdout: str, exit_code: int) -> Parsed:
     finishes = [part for event, part in zip(events, parts) if event.get("type") == "step_finish"]
     if any(isinstance(part, dict) and part.get("reason") == "length" for part in finishes):
         raise AgentError("received step_finish reason=length; expected a complete answer")
-    last = finishes[-1].get("reason") if finishes and isinstance(finishes[-1], dict) else None
+    final_step = _opencode_final_step(events)
+    final_finishes = [event.get("part") for event in final_step if event.get("type") == "step_finish"]
+    last = _usage_mapping(final_finishes[-1]).get("reason") if final_finishes else None
     if last != "stop" and not _final_step_answered(events):
         raise AgentError(f"received last step_finish reason={last!r} in {len(events)} events; "
                          "expected a terminal step_finish with reason=stop")
-    texts = [part.get("text") for event, part in zip(events, parts)
-             if event.get("type") == "text" and isinstance(part, dict)]
-    answer = "".join(text for text in texts if isinstance(text, str))
+    answer = _opencode_step_text(final_step)
     if not answer.strip():
         raise AgentError(f"received no text in {len(events)} events; expected a non-empty answer")
     session = next((event.get("sessionID") for event in events if isinstance(event.get("sessionID"), str)), None)
