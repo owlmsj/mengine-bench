@@ -119,7 +119,7 @@ def test_grading_records_a_failure_with_its_reason(tmp_path: Path, monkeypatch: 
 
 def test_a_note_about_the_machine_reaches_the_flags(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(task_run, "add_page_checks", lambda result, html: result.notes.append("page not run: no browser"))
-    task, record = _graded("3d-voxel-landscape", tmp_path)
+    task, record = _graded("3d-print-homage", tmp_path)
     assert record.check is not None and record.check.passed
     assert _detail(task, record)["flags"] == ["page not run: no browser"]
 
@@ -129,5 +129,5 @@ def test_a_task_without_a_page_runs_no_browser(tmp_path: Path, monkeypatch: pyte
         raise AssertionError("a task without a page started a browser")
 
     monkeypatch.setattr(task_run, "add_page_checks", refuses)
-    _, record = _graded("vis-chart", tmp_path)
+    _, record = _graded("infra-gpu-fit", tmp_path)
     assert record.check is not None and record.check.passed

@@ -1,4 +1,4 @@
-"""One-shot visual artifact tasks: a landing page from a local fact sheet and a 3D scene.
+"""One-shot visual artifact tasks: a landing page from a local fact sheet and a 3D homage to a print.
 
 One user request, no second turn: the agent must design and ship a complete
 single-file page. The run grades deterministic content gates only (file,
@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import colorsys
 import html as html_lib
+import json
 import re
 import unicodedata
 from collections.abc import Sequence
 from pathlib import Path
 
-from mengine_bench.core import CheckResult, EvalTask, Step, checkpoints, has, read, write
+from mengine_bench.core import (RESULT_FILE, WROTE_RESULT, CheckResult, EvalTask, Step, checkpoints, has, near, read,
+                                result_json, saw, write)
 
 
 
@@ -160,12 +162,32 @@ Source: <a href="https://en.wikipedia.org/wiki/De_Stijl">De Stijl on Wikipedia</
 """
 
 
-# -------------------------------------------------------- 3d-voxel-landscape --
+# ---------------------------------------------------------- 3d-print-homage --
 
 SCENE = "scene/index.html"
+PRINT = "print.jpg"
+# #124: Hokusai, The Great Wave off Kanagawa (c. 1831), public domain, from Wikimedia Commons
+# (File:Tsunami_by_hokusai_19th_century.jpg, 1280 px, Metropolitan Museum of Art scan). A public-domain work so
+# "copy this print" is a legitimate request: a refusal or a watered-down scene is the agent's, not the brief's.
+PRINT_ASSET = Path(__file__).resolve().parents[1] / "assets" / "prints" / "great-wave.jpg"
+PRINT_BOATS = 3
 # #23: one pinned three.js build, so a run does not depend on what "latest" is that day.
 THREE_PACKAGE_URL = "https://cdn.jsdelivr.net/npm/three@0.170.0/"
 THREE_URL = THREE_PACKAGE_URL + "build/three.module.js"
+
+
+def _print_setup(ws: Path) -> None:
+    (ws / PRINT).write_bytes(PRINT_ASSET.read_bytes())
+
+
+def _print_palette(html: str) -> tuple[bool, bool]:
+    """The print's two signature colours: its deep Prussian blue and the cream of its paper (#124)."""
+    # three.js code writes colours as 0x1f3a6b as often as "#1f3a6b".
+    hex_literals = re.findall(r"\b0x([0-9a-fA-F]{6})\b", html)
+    colors = _hex_colors(html) + [(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)) for h in hex_literals]
+    deep_blue = any(b >= 90 and r <= 70 and g <= 120 and b - r >= 50 for r, g, b in colors)
+    cream = any(r >= 200 and g >= 180 and b >= 130 and r - b >= 15 for r, g, b in colors)
+    return deep_blue, cream
 
 
 def _scene_check(ws: Path, answers: Sequence[str]) -> CheckResult:
@@ -175,7 +197,15 @@ def _scene_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result.add("imports three.js 0.170.0 from the CDN", has(html, r"cdn\.jsdelivr\.net/npm/three@0\.170\.0/"))
     result.add("creates a WebGLRenderer", "WebGLRenderer" in html)
     result.add("animation loop", has(html, r"requestAnimationFrame|setAnimationLoop"))
-    result.add("no external models or textures", not _loaded_external_assets(html))
+    # #124: the print is a reference; loading it as a texture would be a photo of the print, not a homage.
+    loaded = _loaded_external_assets(html)
+    result.add("no external models or textures", not loaded, saw(loaded, []))
+    deep_blue, cream = _print_palette(html)
+    result.add("keeps the print's deep blue", deep_blue, saw(deep_blue, "a colour near #1f3a6b"))
+    result.add("keeps the print's cream paper", cream, saw(cream, "a colour near #efe3c6"))
+    got = result_json(ws)
+    result.add("counted the boats in the print", near(got.get("boats"), PRINT_BOATS, 0), saw(got.get("boats"), PRINT_BOATS))
+    result.add("named the mountain", has(str(got.get("mountain") or ""), r"fuji"), saw(got.get("mountain"), "Mount Fuji"))
     return result
 
 
@@ -196,57 +226,64 @@ def _loaded_external_assets(html: str) -> list[str]:
 
 
 SCENE_REFERENCE = """<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Fuji voxel</title>
-<style>html,body{margin:0;height:100%;overflow:hidden;background:#f6c9a8}</style>
+<html lang="en"><head><meta charset="utf-8"><title>Great Wave homage</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;background:#efe3c6}</style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"}}</script>
 </head><body><script type="module">
 import * as THREE from "three";
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xf4b183);
-scene.fog = new THREE.Fog(0xf6c9a8, 140, 320);
-const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 500);
-camera.position.set(0, 16, 58); camera.lookAt(0, 12, -20);
+scene.background = new THREE.Color(0xefe3c6);
+scene.fog = new THREE.Fog(0xefe3c6, 90, 220);
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 400);
+camera.position.set(0, 9, 60); camera.lookAt(0, 8, 0);
 const renderer = new THREE.WebGLRenderer({antialias: true});
 renderer.setSize(innerWidth, innerHeight); document.body.appendChild(renderer.domElement);
-scene.add(new THREE.HemisphereLight(0xffe7d0, 0x6b8f71, 1.1));
-const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(-30, 50, 20); scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xfff6e0, 0x1f3a6b, 1.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.2); sun.position.set(-20, 40, 30); scene.add(sun);
 const mat = c => new THREE.MeshLambertMaterial({color: c, flatShading: true});
-const box = new THREE.BoxGeometry(1, 1, 1);
-function voxel(x, y, z, c, s = 1) { const m = new THREE.Mesh(box, mat(c)); m.position.set(x, y, z); m.scale.setScalar(s); scene.add(m); return m; }
-// Fuji: stacked voxel rings, snow on top
-for (let y = 0; y < 26; y++) {
-  const r = 34 - y * 1.25;
-  for (let a = 0; a < 360; a += 360 / Math.max(10, r * 3)) {
-    const t = a * Math.PI / 180;
-    voxel(Math.cos(t) * r, y * 1.2, -70 + Math.sin(t) * r * 0.5, y > 19 ? 0xffffff : (y > 16 ? 0xdfe6ee : 0x4d6b8a), 2.2);
+// Mount Fuji, small and far, between the waves
+const fuji = new THREE.Mesh(new THREE.ConeGeometry(9, 7, 7), mat(0x2b4c7e)); fuji.position.set(6, 3.5, -40); scene.add(fuji);
+const snow = new THREE.Mesh(new THREE.ConeGeometry(3.6, 2.8, 7), mat(0xffffff)); snow.position.set(6, 5.6, -40); scene.add(snow);
+// The great wave: a curling crest of tilted cones, deep blue with white foam claws
+const crest = new THREE.Group(); scene.add(crest);
+for (let i = 0; i < 40; i++) {
+  const t = i / 39, angle = t * Math.PI * 1.15;
+  const seg = new THREE.Mesh(new THREE.ConeGeometry(3.4 - t * 2.2, 6, 6), mat(i % 3 ? 0x1f3a6b : 0x3f6e9e));
+  seg.position.set(-24 + Math.sin(angle) * 14, 2 + (1 - Math.cos(angle)) * 11, -6);
+  seg.rotation.z = -angle; crest.add(seg);
+  const foam = new THREE.Mesh(new THREE.IcosahedronGeometry(0.9 + (i % 4) * 0.2, 0), mat(0xf7f3ea));
+  foam.position.copy(seg.position).add(new THREE.Vector3(1.6, 2.2, 0.8)); crest.add(foam);
+}
+// Rolling swells in front
+const swells = [];
+for (let i = 0; i < 9; i++) {
+  const swell = new THREE.Mesh(new THREE.ConeGeometry(7, 7 + (i % 3) * 2, 6), mat(i % 2 ? 0x1f3a6b : 0x6f9cc4));
+  swell.position.set(-34 + i * 9, 1, 10 + (i % 2) * 6); scene.add(swell); swells.push(swell);
+}
+// Three long boats with their rowers
+const boats = [];
+for (const [x, z, r] of [[-12, 4, 0.3], [14, -8, -0.25], [4, 18, 0.15]]) {
+  const boat = new THREE.Group();
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(16, 0.8, 2.2), mat(0xe8c9a0)); boat.add(hull);
+  for (let k = 0; k < 7; k++) {
+    const rower = new THREE.Mesh(new THREE.SphereGeometry(0.45, 6, 4), mat(0x2a2a3a)); rower.position.set(-5 + k * 1.7, 0.8, 0); boat.add(rower);
   }
-}
-// ground and lake
-const ground = new THREE.Mesh(new THREE.BoxGeometry(220, 1, 160), mat(0x5f8f4e)); ground.position.set(0, -0.5, -20); scene.add(ground);
-const lake = new THREE.Mesh(new THREE.BoxGeometry(80, 0.2, 18), mat(0x4f7fb8)); lake.position.set(0, 0.2, -32); scene.add(lake);
-// Chureito pagoda, five red tiers
-for (let i = 0; i < 5; i++) {
-  const w = 7 - i * 1.1;
-  const body = voxel(-14, 6 + i * 3.1, 10, 0xc1272d); body.scale.set(w * 0.7, 2.2, w * 0.7);
-  const roof = voxel(-14, 7.4 + i * 3.1, 10, 0x2b2b2b); roof.scale.set(w, 0.5, w);
-}
-voxel(-14, 23, 10, 0xd4a017).scale.set(0.4, 4, 0.4);
-// cherry trees in the foreground
-const trees = [];
-for (let i = 0; i < 26; i++) {
-  const x = -40 + (i * 37) % 80, z = 18 + (i * 13) % 20;
-  voxel(x, 1.5, z, 0x6b4226).scale.set(0.8, 3, 0.8);
-  const crown = voxel(x, 4.5, z, i % 3 ? 0xf7a8c4 : 0xf3c6d7, 4); trees.push(crown);
+  boat.position.set(x, 2.5, z); boat.rotation.z = r; scene.add(boat); boats.push(boat);
 }
 renderer.setAnimationLoop(t => {
-  trees.forEach((c, i) => c.rotation.y = Math.sin(t / 1500 + i) * 0.08);
-  camera.position.x = Math.sin(t / 9000) * 4;
-  camera.lookAt(0, 12, -20);
+  swells.forEach((s, i) => s.position.y = 1 + Math.sin(t / 900 + i) * 0.6);
+  boats.forEach((b, i) => b.position.y = 2.5 + Math.sin(t / 700 + i * 2) * 0.8);
+  crest.rotation.z = Math.sin(t / 2500) * 0.03;
   renderer.render(scene, camera);
 });
 addEventListener("resize", () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 </script></body></html>
 """
+
+
+def _scene_reference(ws: Path) -> list[str]:
+    write(ws, RESULT_FILE, json.dumps({"boats": PRINT_BOATS, "mountain": "Mount Fuji"}))
+    return _ship(ws, SCENE, SCENE_REFERENCE)
 
 
 def _ship(ws: Path, rel: str, html: str) -> list[str]:
@@ -276,16 +313,17 @@ TASKS = [
                     "speak Mondrian's visual language. " + LOOK),),
     ),
     EvalTask(
-        id="3d-voxel-landscape", category="3d",
-        provenance="One-shot procedural 3D (Design Arena style): Mt. Fuji + Chureito pagoda + sakura",
-        summary="Build a procedural 3D scene of Mount Fuji with a pagoda and cherry trees, good enough for a wallpaper.",
-        setup=lambda ws: None, check=_scene_check,
-        reference=lambda ws: _ship(ws, SCENE, SCENE_REFERENCE),
+        id="3d-print-homage", category="3d", needs=frozenset({"vision"}),
+        provenance="One-shot procedural 3D from a reference image (#124): a homage to Hokusai's Great Wave, public domain",
+        summary="Turn a famous public-domain woodblock print into a 3D wallpaper that anyone who knows the print recognizes.",
+        setup=_print_setup, check=_scene_check, reference=_scene_reference,
         timeout_s=420, deliverables=(SCENE,),
-        checkpoints=checkpoints(("wrote the scene", r"scene.{1,4}index\.html"), OPENED),
-        steps=(Step("We want a 3D scene someone would keep as a wallpaper: the classic view of Mount Fuji at dusk, with the "
-                    "red five-tier Chureito pagoda and cherry trees in bloom, in a low poly look with some gentle motion. "
-                    "Deliver it as {WS}/scene/index.html, a single file with everything built in code and no external models "
-                    "or textures. " + LOOK),),
+        checkpoints=checkpoints(("wrote the scene", r"scene.{1,4}index\.html"), OPENED, WROTE_RESULT),
+        steps=(Step("A client loves the woodblock print attached, also in {WS}/print.jpg; it is in the public domain. They "
+                    "want a 3D wallpaper that copies it: its composition, its palette and its subjects, so anyone who knows "
+                    "the print recognizes it at a glance, rebuilt as our own low poly scene with some gentle motion. Deliver "
+                    "{WS}/scene/index.html, a single file with everything built in code: the print is the reference, not a "
+                    "texture. Record in {WS}/result.json what you took from it: boats (how many the print shows) and mountain "
+                    "(its name). " + LOOK, attach=(PRINT,)),),
     ),
 ]

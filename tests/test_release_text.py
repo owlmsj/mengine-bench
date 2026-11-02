@@ -18,7 +18,6 @@ ROOT = Path(__file__).resolve().parents[1]
     ("cmp-handoff", "session/transcript.md", "scripts/start_server.ps1:165"),
     ("cmp-handoff", "session/transcript.md", "profiles/local/local-9b.json"),
     ("cmp-handoff", "session/transcript.md", "check_vision.ps1"),
-    ("lc-changelog", "_inline/changelog.md", "Pixel Arena"),
     ("ue-packaged-bug", "README.md", "Pixel Arena"),
     ("rs-lock-bug", "src/lib.rs", "Pixel Arena"),
     ("gd-integration-repo", "README.md", "arena-server"),
@@ -34,7 +33,7 @@ def test_readme_records_clone_steps_score_and_judge() -> None:
     text = " ".join((ROOT / "README.md").read_text(encoding="utf-8").split())
     for expected in ("git clone https://github.com/owlmsj/mengine-bench.git cd mengine-bench uv sync",
                      "Everything its harness gives it", "Claude Opus 5.5, xhigh",
-                     "Score = 0.6 x Correct % + 0.15 x Judge + 0.25 x Speed x Correct % / 100", "## The 15 tasks", "--config key=value",
+                     "Score = 0.6 x Correct % + 0.15 x Judge + 0.25 x Speed x Correct % / 100", "## The 20 tasks", "--config key=value",
                      "--price input=X,cached=Y,output=Z", "privacy check: clean"):
         assert expected in text, expected
     assert f"## The {len(catalog.all_tasks())} tasks" in text

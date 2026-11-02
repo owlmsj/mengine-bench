@@ -16,7 +16,7 @@ import pytest
 
 from mengine_bench.core import EvalTask
 
-PART1_MODULES = ("gamedev", "business", "funnel", "context", "compaction")
+PART1_MODULES = ("gamedev", "business", "funnel", "compaction")
 
 # Source catalog membership (private v1 suite); ids must not drift.
 EXPECTED_IDS = {
@@ -25,8 +25,6 @@ EXPECTED_IDS = {
     "bo-pnl-runway",
     "bo-reconcile",
     "ds-sql-funnel",
-    "lc-changelog",
-    "vis-chart",
     "cmp-handoff",
 }
 
@@ -272,40 +270,6 @@ def test_funnel_accepts_only_exact_numeric_users(tmp_path: Path, count: str, exp
     counts["pc"]["install"] = count.format(count=counts["pc"]["install"])
     _edit_result(tmp_path, funnel=counts)
     assert funnel._funnel_check(tmp_path, [""]).passed is expected
-
-
-@pytest.mark.parametrize("key", ["build_change", "build_revert"])
-@pytest.mark.parametrize("form,expected", [
-    ("{}", True), ("Build {}", True), ("v{}", True), ("  build {}  ", True),
-    ("{}0", False), ("NotBuild {}", False), ("0.9.180", False),
-])
-def test_changelog_normalizes_only_build_prefixes(
-    tmp_path: Path, key: str, form: str, expected: bool,
-) -> None:
-    from mengine_bench.tasks import context
-
-    answers = context._changelog_reference(tmp_path)
-    build = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))[key]
-    _edit_result(tmp_path, **{key: form.format(build)})
-    assert context._changelog_check(tmp_path, answers).passed is expected
-
-
-@pytest.mark.parametrize("key,value,expected", [
-    ("top_gpu", " h200 ", True), ("bottom_gpu", " 40 90 ", True),
-    ("top_gpu", "NVIDIA H200", True), ("bottom_gpu", "Nvidia 4090 GPU", True),
-    ("top_gpu", "NOT-H200: H100", False), ("bottom_gpu", "NOT-4090: H100", False),
-    ("top_gpu", "H2000", False), ("bottom_gpu", "H100", False),
-    ("ratio", 6.0, True), ("ratio", "5.8", True), ("ratio", 7.3, False),
-    ("ratio", 4.7, False), ("ratio", "nan", False),
-])
-def test_chart_normalizes_names_and_reads_the_ratio_with_a_margin(
-    tmp_path: Path, key: str, value: object, expected: bool,
-) -> None:
-    from mengine_bench.tasks import context
-
-    answers = context._chart_reference(tmp_path)
-    _edit_result(tmp_path, **{key: value})
-    assert context._chart_check(tmp_path, answers).passed is expected
 
 
 @pytest.mark.parametrize("key,value,expected", [

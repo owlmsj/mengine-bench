@@ -12,6 +12,8 @@ import json
 import math
 import os
 import re
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -321,3 +323,19 @@ def scratch_root() -> Path:
     root = Path(override) if override else Path(tempfile.gettempdir()) / "mengine-bench"
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def remove_tree(path: Path) -> None:
+    """Delete a folder, read-only files included: git marks its objects read-only on Windows (#124)."""
+
+    def writable_retry(func: Callable[..., object], target: str, _error: object) -> None:
+        os.chmod(target, stat.S_IWRITE)
+        func(target)
+
+    try:
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(path, onexc=writable_retry)
+        else:
+            shutil.rmtree(path, onerror=writable_retry)
+    except OSError:
+        pass  # A file another process still holds stays; the caller reports what is left.

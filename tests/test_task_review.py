@@ -15,7 +15,8 @@ from mengine_bench.run_command import _outcome
 from mengine_bench.runner import process
 from mengine_bench.runner.agents import CodexAgent, OpencodeAgent, partial_answer
 from mengine_bench.runner.task_run import _step_env, run_task, snapshot
-from mengine_bench.tasks import business, compaction, context, ir, longrepo, visual
+from mengine_bench import judge
+from mengine_bench.tasks import business, compaction, ir, longrepo, visual
 
 
 def _by_id(task_id: str) -> EvalTask:
@@ -47,7 +48,7 @@ def test_the_workspace_has_nothing_next_to_it(tmp_path: Path, monkeypatch: pytes
         return _stopped()
 
     monkeypatch.setattr(process, "run_process", fake_run)
-    record = run_task(_by_id("lc-changelog"), OpencodeAgent("m", None), tmp_path / "run")
+    record = run_task(_by_id("ir-server-logs"), OpencodeAgent("m", None), tmp_path / "run")
     assert seen and not seen[0].is_relative_to(tmp_path)
     assert record.workspace is not None and record.workspace.is_relative_to(tmp_path)
     assert not seen[0].parent.exists(), "the temp root is gone once the workspace is back in the run"
@@ -69,11 +70,11 @@ def test_a_stream_with_no_reply_gives_nothing_and_plain_output_gives_itself() ->
 
 def test_a_result_written_before_the_limit_is_graded_and_the_reply_is_kept(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # An answer-only task lost everything at the limit. #98: the facts live in result.json, so that file is what counts.
-    task = _by_id("lc-changelog")
+    task = _by_id("ir-server-logs")
     stream = json.dumps({"type": "text", "part": {"text": "almost there"}})
 
     def fake_run(argv: object, cwd: Path, *args: object, **kwargs: object) -> process.ProcessResult:
-        context._changelog_reference(Path(cwd))
+        ir._logs_reference(Path(cwd))
         return _stopped(stream)
 
     monkeypatch.setattr(process, "run_process", fake_run)
@@ -83,8 +84,8 @@ def test_a_result_written_before_the_limit_is_graded_and_the_reply_is_kept(tmp_p
 
 
 def test_the_right_facts_in_a_reply_alone_earn_nothing_at_the_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    task = _by_id("lc-changelog")
-    answer = json.dumps(context._changelog()[1])
+    task = _by_id("ir-server-logs")
+    answer = json.dumps({**ir._logs_expected(), "root_cause": "/data disk full"}, default=str)
     stream = json.dumps({"type": "text", "part": {"text": answer}})
     monkeypatch.setattr(process, "run_process", lambda *args, **kwargs: _stopped(stream))
     record = run_task(task, OpencodeAgent("m", None), tmp_path / "run")
@@ -105,10 +106,11 @@ def test_bytecode_and_the_rules_file_stay_out_of_the_judge_diff(tmp_path: Path, 
     # In one run __pycache__ took 16,463 of the 19,198 characters the judge saw, and the judge took points for it.
     write(tmp_path, "a.py", "x = 1\n")
     write(tmp_path, "__pycache__/a.cpython-313.pyc", "bytes")
+    write(tmp_path, ".git/objects/ab/cdef", "zlib bytes")  # #124: the merge task ships a repo
     assert list(snapshot(tmp_path)) == ["a.py"]
     assert _step_env(tmp_path, None)["PYTHONDONTWRITEBYTECODE"] == "1"
     monkeypatch.setattr(process, "run_process", lambda *args, **kwargs: _stopped())
-    record = run_task(_by_id("lc-changelog"), OpencodeAgent("m", None), tmp_path / "run")
+    record = run_task(_by_id("ir-server-logs"), OpencodeAgent("m", None), tmp_path / "run")
     assert record.workspace is not None
     assert "AGENTS.md" not in workspace_diff(record.initial_files, snapshot(record.workspace))
 
@@ -119,17 +121,19 @@ def test_the_temporary_workspace_path_is_redacted() -> None:
     assert "mengine-bench-fresh" not in cleaned and "someone" not in cleaned and "a.py" in cleaned
 
 
-def test_the_format_of_a_reply_is_never_marked_down() -> None:
+def test_the_format_of_a_reply_is_never_marked_down(monkeypatch: pytest.MonkeyPatch) -> None:
+    # #124: no task in 2.0 only asks for facts; the criterion stays for one that does.
+    monkeypatch.setattr(judge, "REPLY_ONLY_TASKS", frozenset({"facts-only"}))
     # #70: the rule moved to the system prompt; the message names the criterion that applies it.
     # #98, rubric 2.5: no prompt fixes a format any more, so the exception is gone with it.
-    context_ = JudgeContext(task_id="lc-changelog", prompts=("do it",), answers=("{}",), diff="", transcript_tail="", checks=())
+    context_ = JudgeContext(task_id="facts-only", prompts=("do it",), answers=("{}",), diff="", transcript_tail="", checks=())
     assert "code fences, bullet shapes and brevity conventions in a reply are never defects" in JUDGE_SYSTEM_PROMPT
     assert "unless the prompt fixed a format" not in JUDGE_SYSTEM_PROMPT
     assert "Third criterion: answer_discipline" in build_judge_prompt(context_, screenshot=False)
 
 
-@pytest.mark.parametrize("task_id", ["lc-changelog", "vis-chart", "cmp-handoff"])
-@pytest.mark.parametrize("reply", ["", "not json at all", '{"top_gpu": "wrong", "build_change": "wrong"}'])
+@pytest.mark.parametrize("task_id", ["ir-server-logs", "cmp-handoff"])
+@pytest.mark.parametrize("reply", ["", "not json at all", '{"start": "wrong", "root_cause": "wrong"}'])
 def test_a_right_result_file_passes_whatever_the_reply_says(tmp_path: Path, task_id: str, reply: str) -> None:
     # #98, #92: the tasks that used to be graded on their reply now deliver the same facts in result.json.
     task = _by_id(task_id)
@@ -190,22 +194,6 @@ def test_a_right_p_value_does_not_save_a_wrong_ship_decision(tmp_path: Path) -> 
 # ----------------------------------------------------------- retrieval and logs --
 
 
-@pytest.mark.parametrize("field,value,ok", [
-    ("approver", "Alice Sato, producer", True),
-    ("approver", "Alice Sato, Bruno Costa", False),
-    ("flag", "`matchmaking.max_ping_ms`", True),
-    ("build", "Build: 0.14.3", True),
-    ("build", "0.14.3-rc1", False),
-    ("neoplastic_ranked_max", "10 or 12", False),
-    ("restored_value", "120 or 250", False),
-])
-def test_wiki_answer_forms(tmp_path: Path, field: str, value: str, ok: bool) -> None:
-    ir._wiki_setup(tmp_path)
-    answers = ir._wiki_reference(tmp_path)
-    _edit_result(tmp_path, **{field: value})
-    assert ir._wiki_check(tmp_path, answers).passed is ok
-
-
 @pytest.mark.parametrize("cause,ok", [
     ("A full /data disk prevented the server from saving.", True),
     ("A full disk on /data broke SaveGame.", True),
@@ -247,44 +235,6 @@ def test_every_log_day_is_in_time_order(tmp_path: Path) -> None:
     for log in (tmp_path / "logs").glob("*.log"):
         stamps = [line[:19] for line in log.read_text(encoding="utf-8").splitlines() if line[:4] == "2026"]
         assert stamps == sorted(stamps), log.name
-
-
-@pytest.mark.parametrize("field,value", [
-    ("build_change", {"build": "0.9.214"}), ("build_change", "build v0.9.214"), ("builds_between", "162 builds"),
-])
-def test_changelog_answer_forms(tmp_path: Path, field: str, value: object) -> None:
-    answers = context._changelog_reference(tmp_path)
-    _edit_result(tmp_path, **{field: value})
-    assert context._changelog_check(tmp_path, answers).passed
-
-
-def test_changelog_wants_one_build(tmp_path: Path) -> None:
-    answers = context._changelog_reference(tmp_path)
-    _edit_result(tmp_path, build_change="0.9.180 or 0.9.214")
-    result = context._changelog_check(tmp_path, answers)
-    assert result.failed() == ["build that changed recoil_multiplier (not _ads)"]
-
-
-# ---------------------------------------------------------------------- vision --
-
-
-@pytest.mark.parametrize("change,ok", [
-    ({}, True),
-    ({"top_tps": "175 TPS"}, True),
-    ({"ratio": "5.8x"}, True),
-    ({"top_gpu": "Nvidia Tesla H200"}, True),
-    # The other series: the 8k bars.
-    ({"top_gpu": "B200", "top_tps": 210}, False),
-    ({"bottom_gpu": "A100", "ratio": 3.0}, False),
-])
-def test_chart_reads_the_asked_series(tmp_path: Path, change: dict[str, object], ok: bool) -> None:
-    answers = context._chart_reference(tmp_path)
-    _edit_result(tmp_path, **change)
-    assert context._chart_check(tmp_path, answers).passed is ok
-
-
-def test_chart_prompt_names_the_series() -> None:
-    assert "256k" in _by_id("vis-chart").steps[0].prompt
 
 
 # ------------------------------------------------------------------- compaction --
@@ -334,8 +284,9 @@ def test_palette_ignores_color_words_in_font_names() -> None:
 def test_procedural_geometry_counts_and_a_fetched_model_does_not(tmp_path: Path) -> None:
     filler = "x" * 2100
     page = (f'<script src="https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js"></script>WebGLRenderer '
-            f"requestAnimationFrame new THREE.LatheGeometry(p) {filler}")
+            f"requestAnimationFrame new THREE.LatheGeometry(p) 0x1f3a6b 0xefe3c6 {filler}")
     write(tmp_path, visual.SCENE, page)
+    write(tmp_path, "result.json", '{"boats": 3, "mountain": "Fuji"}')
     assert visual._scene_check(tmp_path, [""]).passed
     write(tmp_path, visual.SCENE, page + ' fetch("https://example.com/fuji.glb")')
     assert not visual._scene_check(tmp_path, [""]).passed

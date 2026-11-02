@@ -33,15 +33,20 @@ embedded images.
 | `bo-pnl-runway` | backoffice | Close a startup's half-year from its ledger and say how long the cash lasts. |
 | `bo-reconcile` | backoffice | Find what finance still has to collect or fix after comparing invoices with bank payments. |
 | `cmp-handoff` | compaction | Hand over a debugging session in a short note, then continue from that note alone. |
-| `lc-changelog` | long-context | Trace in a long changelog when a setting changed, when it came back and who approved that. |
-| `vis-chart` | vision | Read a benchmark chart to say which GPU is fastest at one context size and by how much. |
+| `cfg-source-drift` | engineering | Make three harness configs agree on a model's context window, for good. |
+| `doc-lab-pdf` | documents | Turn two lab exam PDFs from different labs into one comparable history per marker. |
 | `ds-sql-funnel` | data-science | Find where players drop off on each platform from a product analytics database. |
 | `ue-packaged-bug` | gamedev | Find out why an Unreal game loses its colors and crashes only in the packaged build, and fix it. |
-| `ir-studio-wiki` | retrieval | Answer a support lead's questions from a studio wiki, citing the pages behind each answer. |
+| `git-merge-conflict` | engineering | Merge a feature branch into main without losing what main shipped meanwhile. |
+| `infra-gpu-fit` | infra | Pick the cheapest rented GPU offer that can serve a model within a spending policy. |
 | `ir-server-logs` | retrieval | Investigate a game server outage from its logs and report what happened. |
 | `gd-integration-repo` | gamedev | Find every cause behind a failing integration test in a game backend, and fix them. |
 | `rs-lock-bug` | engineering | Find out why a Rust game server hangs under load and loses points, and fix it. |
+| `sec-leak-fix` | security | Clear a small backup service for open source: no token in code or logs, no form input run as a command. |
+| `hw-stutter-tuning` | performance | Find from captured logs why a gaming PC stutters and which settings fix it within the owner's rules. |
+| `ts-plugin-bug` | engineering | Fix a TypeScript plugin hook bus that runs hooks out of order, skips some and hides failures. |
 | `web-mondrian-landing` | web-design | Build a landing page that tells the story of one Mondrian painting from a fact sheet. |
-| `3d-voxel-landscape` | 3d | Build a procedural 3D scene of Mount Fuji with a pagoda and cherry trees, good enough for a wallpaper. |
+| `3d-print-homage` | 3d | Turn a famous public-domain woodblock print into a 3D wallpaper that anyone who knows the print recognizes. |
+| `web-plan-ranking` | web-research | Research Brazil's anti-inflation plans on the web and rank which delivered, with sources. |
 | `web-word-universe` | data-viz | Collect a saved Portuguese dictionary site and build one view that shows how its words relate. |
 <!-- tasks:end -->

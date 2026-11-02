@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -15,7 +16,7 @@ from mengine_bench.core import CheckResult, write
 from mengine_bench.tasks import visual as visual_tasks
 
 LANDING = next(task for task in visual_tasks.TASKS if task.id == "web-mondrian-landing")
-SCENE = next(task for task in visual_tasks.TASKS if task.id == "3d-voxel-landscape")
+SCENE = next(task for task in visual_tasks.TASKS if task.id == "3d-print-homage")
 
 
 def _solved(task: object, ws: Path) -> CheckResult:
@@ -223,7 +224,7 @@ def test_the_judge_render_reaches_only_the_pinned_cdn_and_fonts(system: str) -> 
         assert f"EXCLUDE {host}" in rules
 
 
-@pytest.mark.parametrize("task_id", ["web-mondrian-landing", "3d-voxel-landscape"])
+@pytest.mark.parametrize("task_id", ["web-mondrian-landing", "3d-print-homage"])
 def test_a_commented_out_page_earns_no_checks(task_id: str, tmp_path: Path) -> None:
     # Content inside <!-- --> never renders, so it must not pass content gates (#23 review).
     task = next(t for t in catalog.all_tasks() if t.id == task_id)
@@ -324,3 +325,49 @@ def test_scene_accepts_low_poly_forms_but_not_external_assets(
     page.write_text(edit(page.read_text(encoding="utf-8")), encoding="utf-8")
     result = SCENE.check(tmp_path, answers)
     assert result.mandatory_ok and result.failed() == failed
+
+
+# ------------------------------------------------------------ 3d-print-homage (#124) --
+
+
+def test_the_homage_attaches_the_print_and_ships_it(tmp_path: Path) -> None:
+    SCENE.setup(tmp_path)
+    assert (tmp_path / visual_tasks.PRINT).read_bytes()[:3] == b"\xff\xd8\xff", "the print is a JPEG in the workspace"
+    assert SCENE.steps[0].attach == (visual_tasks.PRINT,) and "vision" in SCENE.needs
+    assert "public domain" in SCENE.steps[0].prompt
+
+
+def test_the_brief_leaves_the_subjects_to_the_eye() -> None:
+    # The agent reads the print: the brief never names the wave, the mountain or the boats' number.
+    prompt = SCENE.steps[0].prompt.lower()
+    assert not any(word in prompt for word in ("wave", "fuji", "hokusai", "three boats", "3 boats"))
+
+
+@pytest.mark.parametrize("edit,failed", [
+    (lambda page: page.replace("0x1f3a6b", "#1f3a6b"), []),
+    (lambda page: page.replace("renderer.setAnimationLoop", 'new THREE.TextureLoader().load("../print.jpg");'
+                               "\nrenderer.setAnimationLoop"), [ASSET_CHECK]),
+    (lambda page: page.replace("0x1f3a6b", "0x55aa55").replace("0x2b4c7e", "0x55aa55").replace("0x3f6e9e", "0x55aa55"), ["keeps the print's deep blue"]),
+    (lambda page: page.replace("#efe3c6", "#ffffff").replace("0xefe3c6", "0xffffff").replace("0xe8c9a0", "0x999999")
+     .replace("0xfff6e0", "0xffffff"),
+     ["keeps the print's cream paper"]),
+])
+def test_the_homage_keeps_the_print_palette_and_builds_it_in_code(
+        tmp_path: Path, edit: Callable[[str], str], failed: list[str]) -> None:
+    answers = SCENE.reference(tmp_path)
+    page = tmp_path / visual_tasks.SCENE
+    page.write_text(edit(page.read_text(encoding="utf-8")), encoding="utf-8")
+    assert SCENE.check(tmp_path, answers).failed() == failed
+
+
+@pytest.mark.parametrize("fields,failed", [
+    ({"boats": "3 boats", "mountain": "Mt. Fuji (Fujisan)"}, []),
+    ({"boats": 2}, ["counted the boats in the print"]),
+    ({"boats": "2 or 3"}, ["counted the boats in the print"]),
+    ({"mountain": "Kilimanjaro"}, ["named the mountain"]),
+])
+def test_the_homage_reads_the_print(tmp_path: Path, fields: dict[str, object], failed: list[str]) -> None:
+    answers = SCENE.reference(tmp_path)
+    result_path = tmp_path / "result.json"
+    result_path.write_text(json.dumps({**json.loads(result_path.read_text(encoding="utf-8")), **fields}), encoding="utf-8")
+    assert SCENE.check(tmp_path, answers).failed() == failed

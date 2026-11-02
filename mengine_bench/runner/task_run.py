@@ -128,11 +128,14 @@ def render_prompt(task: EvalTask, index: int, workspace: Path, hidden: Path) -> 
 
 
 def snapshot(workspace: Path) -> dict[str, bytes]:
-    """Readable workspace files; unreadable (locked) ones, browser profiles and cargo output are skipped."""
+    """Readable workspace files; unreadable (locked) ones, browser profiles, cargo output and git objects are skipped.
+
+    #124: git-merge-conflict ships a repo; its object store is binary noise in the judge diff, the work tree is not.
+    """
     files: dict[str, bytes] = {}
     for path in sorted(workspace.rglob("*")):
         rel = path.relative_to(workspace)
-        if any(part in BROWSER_PROFILE_DIRS or part in ("__pycache__", "target") for part in rel.parts) or not path.is_file():
+        if any(part in BROWSER_PROFILE_DIRS or part in ("__pycache__", "target", ".git") for part in rel.parts) or not path.is_file():
             continue
         try:
             files[rel.as_posix()] = path.read_bytes()

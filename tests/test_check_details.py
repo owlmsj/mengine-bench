@@ -51,15 +51,9 @@ def test_a_wrong_value_in_a_file_is_named(tmp_path: Path, task_id: str, edit: di
     assert check in result.failed() and "expected" in result.details[check] and shown in result.details[check]
 
 
-def test_a_wrong_answer_read_from_the_chart_is_named(tmp_path: Path) -> None:
-    write(tmp_path, "result.json", json.dumps({"top_gpu": "4090", "top_tps": 180, "bottom_gpu": "4090", "ratio": 6.0}))
-    result = _by_id("vis-chart").check(tmp_path, ["any reply"])
-    assert "received '4090'" in result.details["GPU with the highest TPS at 256k"]
-
-
 def test_every_failed_check_of_the_data_tasks_explains_itself(tmp_path: Path) -> None:
     for task_id in ("ds-ab-playtest", "bo-pnl-runway", "bo-reconcile", "ds-sql-funnel", "ir-server-logs",
-                    "ir-studio-wiki", "lc-changelog", "vis-chart", "cmp-handoff"):
+                    "cmp-handoff", "infra-gpu-fit", "hw-stutter-tuning", "doc-lab-pdf", "web-plan-ranking"):
         ws = tmp_path / task_id
         ws.mkdir()
         task = _by_id(task_id)
@@ -115,7 +109,7 @@ def test_result_json_keeps_the_detail_only_on_the_failure() -> None:
     check = CheckResult()
     check.add("good", True)
     check.add("bad", False, "expected 2, received 3")
-    checks = _detail(_by_id("vis-chart"), TaskRunRecord(task_id="vis-chart", check=check))["checks"]
+    checks = _detail(_by_id("infra-gpu-fit"), TaskRunRecord(task_id="infra-gpu-fit", check=check))["checks"]
     assert checks == [{"name": "good", "ok": True, "mandatory": False},
                       {"name": "bad", "ok": False, "mandatory": False, "detail": "expected 2, received 3"}]
 
@@ -168,7 +162,8 @@ def test_reconcile_catches_a_duplicate_also_listed_as_mismatched(tmp_path: Path)
 
 @pytest.mark.parametrize(("task_id", "hint"), [
     ("rs-lock-bug", "deadlock"),
-    ("lc-changelog", "beware"),
+    ("hw-stutter-tuning", "ASPM"),
+    ("cfg-source-drift", "gen.py"),
 ])
 def test_prompts_do_not_hand_over_the_trap(task_id: str, hint: str) -> None:
     assert hint not in _by_id(task_id).steps[0].prompt

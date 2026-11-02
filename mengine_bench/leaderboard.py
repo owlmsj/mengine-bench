@@ -27,6 +27,11 @@ CONFIG_CELL_CHARS = 60
 # #99: an older run never had these tasks, so it stays complete and its ranking stays in the history.
 # Older runs stay in the history: they match the catalog apart from the tasks that came and went since (#99, #103).
 TASKS_CHANGED_SINCE_1_5 = frozenset({"web-word-universe", "ue-packaged-bug", "rs-lock-bug", "gd-astar-doors", "gd-ecs-collision-bug"})
+# #124: bench 2.0 dropped three saturated evals, rewrote the 3D one and added eight.
+TASKS_CHANGED_IN_2_0 = frozenset({"lc-changelog", "vis-chart", "ir-studio-wiki", "3d-voxel-landscape", "3d-print-homage",
+                                  "cfg-source-drift", "git-merge-conflict", "ts-plugin-bug", "sec-leak-fix", "infra-gpu-fit",
+                                  "hw-stutter-tuning", "doc-lab-pdf", "web-plan-ranking"})
+TASKS_THAT_CAME_AND_WENT = TASKS_CHANGED_SINCE_1_5 | TASKS_CHANGED_IN_2_0
 COLUMNS = ("#", "Score", "Correct %", "Solved", "Judge", "Speed", "Time", "Timeouts", "Cost", "Est. price", "Tokens", "Generated",
            "Turns",
            "Agent", "Model", "Effort",
@@ -82,7 +87,7 @@ def is_complete_run(result: dict[str, object]) -> bool:
     ids = [str(task["id"]) for task in tasks]
     expected = {task.id for task in catalog.all_tasks()}
     if major_minor(result.get("bench_version")) != major_minor(__version__):
-        return len(ids) == len(set(ids)) and set(ids) - TASKS_CHANGED_SINCE_1_5 == expected - TASKS_CHANGED_SINCE_1_5
+        return len(ids) == len(set(ids)) and set(ids) - TASKS_THAT_CAME_AND_WENT == expected - TASKS_THAT_CAME_AND_WENT
     return len(ids) == len(set(ids)) and set(ids) == expected
 
 

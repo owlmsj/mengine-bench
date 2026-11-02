@@ -14,7 +14,7 @@ from mengine_bench.core import Checkpoint, is_no, is_yes, near, near_share, numb
 from mengine_bench.judge import JUDGE_SYSTEM_PROMPT
 from mengine_bench.report import _checkpoint_lines
 from mengine_bench.runner.task_run import TIME_LIMIT_NOTE
-from mengine_bench.tasks import business, context, funnel, ir
+from mengine_bench.tasks import business, funnel, ir
 
 
 @pytest.mark.parametrize(("text", "expected"), [
@@ -158,13 +158,6 @@ def test_the_outage_length_takes_common_writings(tmp_path: Path, value: object, 
     good = {**ir._logs_expected(), "root_cause": "/data disk full"}
     _deliver(tmp_path, {**good, "minutes_down": value})
     assert ir._logs_check(tmp_path, [""]).passed is ok
-
-
-def test_the_changelog_takes_a_full_timestamp_and_a_titled_approver(tmp_path: Path) -> None:
-    gold = context._changelog()[1]
-    context_ws = tmp_path
-    _deliver(context_ws, {**gold, "builds_between": 162, "revert_date": f"{gold['revert_date']}T00:00:00", "revert_approver": f"{gold['revert_approver']} (producer)"})
-    assert context._changelog_check(context_ws, [""]).passed
 
 
 def test_every_prompt_caps_the_revisions_and_says_time_counts() -> None:
