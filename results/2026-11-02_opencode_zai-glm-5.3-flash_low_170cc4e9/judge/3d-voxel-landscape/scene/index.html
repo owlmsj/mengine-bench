@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Chureito Pagoda — Mount Fuji at Dusk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@300;500&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1a1030; }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+  .vignette {
+    position: fixed; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at 50% 42%, rgba(0,0,0,0) 55%, rgba(10,4,24,0.55) 100%);
+  }
+  .title {
+    position: fixed; left: 50%; bottom: 4.5vh; transform: translateX(-50%);
+    text-align: center; pointer-events: none; user-select: none;
+    color: #f8e7d8; font-family: 'Noto Serif JP', serif;
+    text-shadow: 0 2px 18px rgba(20,8,40,.8);
+  }
+  .title .jp { display: block; font-size: clamp(22px, 4vw, 42px); font-weight: 300; letter-spacing: .35em; text-indent:.35em; }
+  .title .en { display: block; margin-top: .5em; font-size: clamp(10px, 1.4vw, 14px); font-weight: 500; letter-spacing: .5em; text-indent:.5em; opacity: .75; text-transform: uppercase; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="vignette"></div>
+<div class="title">
+  <span class="jp">富士山と忠霊塔</span>
+  <span class="en">Chureito Pagoda · Mount Fuji at Dusk</span>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+/* ============================================================
+   Low-poly dusk scene: Mt. Fuji, Chureito pagoda, sakura.
+   Everything procedural — no models, no textures.
+   ============================================================ */
+
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+app.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x4a2a58, 0.0028);
+
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.5, 3000);
+const CAM_BASE = new THREE.Vector3(38, 26, 92);
+camera.position.copy(CAM_BASE);
+
+/* ---------- Lights ---------- */
+const hemi = new THREE.HemisphereLight(0xff9a6a, 0x35204d, 0.9);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffb27a, 1.6);
+sun.position.set(-260, 90, -420);
+scene.add(sun);
+const fill = new THREE.DirectionalLight(0x7a6bd8, 0.35);
+fill.position.set(180, 120, 260);
+scene.add(fill);
+
+/* ---------- Sky dome (gradient shader) ---------- */
+const skyGeo = new THREE.SphereGeometry(1400, 24, 16);
+const skyMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, fog: false,
+  uniforms: {
+    top:     { value: new THREE.Color(0x1c1240) },
+    mid:     { value: new THREE.Color(0x7a3d78) },
+    horizon: { value: new THREE.Color(0xff9455) },
+    sunDir:  { value: sun.position.clone().normalize() },
+    time:    { value: 0 },
+  },
+  vertexShader: `
+    varying vec3 vDir;
+    void main() {
+      vDir = normalize(position);
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }`,
+  fragmentShader: `
+    varying vec3 vDir;
+    uniform vec3 top, mid, horizon, sunDir;
+    uniform float time;
+    float hash(vec3 p){ return fract(sin(dot(p, vec3(12.9898,78.233,45.164))) * 43758.5453); }
+    void main() {
+      float h = clamp(vDir.y, -0.1, 1.0);
+      vec3 col = mix(horizon, mid, smoothstep(0.0, 0.28, h));
+      col = mix(col, top, smoothstep(0.22, 0.75, h));
+      float sd = max(dot(normalize(vDir), normalize(sunDir)), 0.0);
+      col += vec3(1.0, 0.55, 0.25) * pow(sd, 5.0) * 0.55;   // wide glow
+      col += vec3(1.0, 0.85, 0.6)  * pow(sd, 60.0) * 0.9;   // sun core
+      // faint stars near zenith
+      vec3 g = floor(vDir * 220.0);
+      float star = step(0.9985, hash(g)) * smoothstep(0.25, 0.7, h);
+      float tw = 0.6 + 0.4 * sin(time * 1.5 + hash(g + 1.0) * 40.0);
+      col += vec3(0.9, 0.92, 1.0) * star * tw * 0.8;
+      gl_FragColor = vec4(col, 1.0);
+    }`
+});
+scene.add(new THREE.Mesh(skyGeo, skyMat));
+
+/* ---------- Shared helpers ---------- */
+const rand = (a, b) => a + Math.random() * (b - a);
+function jitter(geo, amt) {
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    p.setXYZ(i, p.getX(i) + rand(-amt, amt), p.getY(i) + rand(-amt, amt), p.getZ(i) + rand(-amt, amt));
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+const flatMat = (c, o = {}) => new THREE.MeshLambertMaterial({ color: c, flatShading: true, ...o });
+
+/* ---------- Ground: rolling low-poly hillside ---------- */
+const groundGeo = new THREE.PlaneGeometry(1200, 900, 60, 45);
+groundGeo.rotateX(-Math.PI / 2);
+{
+  const p = groundGeo.attributes.position;
+  const col = [];
+  const dark = new THREE.Color(0x2e4a35), light = new THREE.Color(0x4f7a4a), warm = new THREE.Color(0x6b6a48);
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), z = p.getZ(i);
+    let y = Math.sin(x * 0.012) * 6 + Math.cos(z * 0.015) * 5 + Math.sin((x + z) * 0.03) * 2.2 + rand(-0.8, 0.8);
+    // hill rising toward Fuji's base (behind)
+    y += Math.max(0, (-z - 120) * 0.09);
+    // gentle slope where pagoda sits, slightly elevated viewpoint
+    y += Math.max(0, 26 - Math.hypot(x - 30, z + 10) * 0.16);
+    p.setY(i, y);
+    const t = THREE.MathUtils.clamp(0.5 + y * 0.035 + rand(-0.12, 0.12), 0, 1);
+    const c = dark.clone().lerp(light, t).lerp(warm, Math.max(0, y * 0.004));
+    col.push(c.r, c.g, c.b);
+  }
+  groundGeo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  groundGeo.computeVertexNormals();
+}
+scene.add(new THREE.Mesh(groundGeo, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true })));
+
+/* ---------- Lake strip in the mid-ground ---------- */
+const waterGeo = new THREE.PlaneGeometry(1200, 260, 48, 12);
+waterGeo.rotateX(-Math.PI / 2);
+const waterPos = waterGeo.attributes.position;
+const waterBase = waterPos.array.slice();
+const water = new THREE.Mesh(waterGeo, new THREE.MeshLambertMaterial({ color: 0x2a2f66, flatShading: true, transparent: true, opacity: 0.92 }));
+water.position.set(0, 1.5, -150);
+scene.add(water);
+
+/* ---------- Mount Fuji ---------- */
+const fuji = new THREE.Group();
+{
+  const geo = new THREE.ConeGeometry(340, 300, 56, 10, true);
+  const p = geo.attributes.position;
+  const col = [];
+  const rock = new THREE.Color(0x3d3550), rockLit = new THREE.Color(0x5a4a68);
+  const snowA = new THREE.Color(0xf6f0ff), snowB = new THREE.Color(0xd8c9f0);
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const ang = Math.atan2(z, x);
+    const ridge = 1 + 0.05 * Math.sin(ang * 7) + 0.03 * Math.sin(ang * 13 + 2);
+    const r = Math.hypot(x, z);
+    p.setX(i, x * ridge + rand(-4, 4));
+    p.setZ(i, z * ridge + rand(-4, 4));
+    p.setY(i, y + rand(-3, 3));
+    const hN = (y + 150) / 300;                       // 0 base → 1 peak
+    const snowLine = 0.62 + 0.05 * Math.sin(ang * 9); // irregular snowline
+    let c;
+    if (hN > snowLine) {
+      c = snowA.clone().lerp(snowB, rand(0, 0.5));
+    } else {
+      c = rock.clone().lerp(rockLit, rand(0, 0.6));
+    }
+    col.push(c.r, c.g, c.b);
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
+  m.position.set(-60, 108, -520);
+  fuji.add(m);
+}
+scene.add(fuji);
+
+/* ---------- Chureito-style five-tier pagoda ---------- */
+function pagoda(x, y, z, s = 1) {
+  const g = new THREE.Group();
+  const RED = flatMat(0xb03a2e), REDD = flatMat(0x8e2b22), ROOF = flatMat(0x2b2433);
+  const WOOD = flatMat(0x5a3a2a), GOLD = flatMat(0xd8a24a), WHITE = flatMat(0xe8e2da);
+
+  const tiers = 5;
+  let w = 5.2 * s, tw = w;
+  let cy = 0;
+  const roofMeshes = [];
+
+  for (let t = 0; t < tiers; t++) {
+    const h = 2.0 * s;
+    // body
+    const body = new THREE.Mesh(new THREE.BoxGeometry(w, h, w), t === 0 ? RED : RED);
+    body.position.y = cy + h / 2;
+    g.add(body);
+    // corner pillars slightly darker
+    for (const [px, pz] of [[1,1],[1,-1],[-1,1],[-1,-1]]) {
+      const pil = new THREE.Mesh(new THREE.BoxGeometry(0.28 * s, h * 1.02, 0.28 * s), REDD);
+      pil.position.set(px * w / 2, cy + h / 2, pz * w / 2);
+      g.add(pil);
+    }
+    // white balcony band
+    const band = new THREE.Mesh(new THREE.BoxGeometry(w * 1.06, 0.28 * s, w * 1.06), WHITE);
+    band.position.y = cy + h;
+    g.add(band);
+
+    // roof: two stacked squashed cones give a flared, curved silhouette
+    const roofW = w * 1.75;
+    const roof = new THREE.Group();
+    const r1 = new THREE.Mesh(new THREE.ConeGeometry(roofW * 0.5, 1.05 * s, 4), ROOF);
+    r1.scale.z = 1.0; r1.rotation.y = Math.PI / 4;
+    const r2 = new THREE.Mesh(new THREE.CylinderGeometry(roofW * 0.36, roofW * 0.5, 0.55 * s, 4), ROOF);
+    r2.rotation.y = Math.PI / 4;
+    r2.position.y = -0.72 * s;
+    roof.add(r1, r2);
+    // gold ridge ornament
+    const orn = new THREE.Mesh(new THREE.SphereGeometry(0.22 * s, 8, 6), GOLD);
+    orn.position.y = 0.62 * s;
+    roof.add(orn);
+    roof.position.y = cy + h + 0.5 * s;
+    g.add(roof);
+    roofMeshes.push(roof);
+
+    cy += h + 1.05 * s;
+    tw = w;
+    w *= 0.84;
+  }
+  // spire (sorin)
+  const spire = new THREE.Group();
+  for (let i = 0; i < 5; i++) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.28 * s - i * 0.035 * s, 0.045 * s, 6, 12), GOLD);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = i * 0.32 * s;
+    spire.add(ring);
+  }
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.1 * s, 0.5 * s, 6), GOLD);
+  tip.position.y = 5 * 0.32 * s + 0.2 * s;
+  spire.add(tip);
+  spire.position.y = cy + 0.4 * s;
+  g.add(spire);
+
+  // stone base
+  const base = new THREE.Mesh(jitter(new THREE.BoxGeometry(tw * 1.5, 1.4 * s, tw * 1.5), 0.08 * s), flatMat(0x6a6472));
+  base.position.y = -0.7 * s;
+  g.add(base);
+
+  g.position.set(x, y, z);
+  g.rotation.y = 0.35;
+  g.userData.roofs = roofMeshes;
+  return g;
+}
+const pagodaGroup = pagoda(26, 24.5, 4, 1.35);
+scene.add(pagodaGroup);
+
+/* ---------- Cherry trees ---------- */
+const TRUNK = flatMat(0x4a3040);
+const BLOSSOMS = [0xffc0cb, 0xffb3c8, 0xf7a8c0, 0xffd3de, 0xf2a0b8];
+const treeTops = []; // for sway animation
+
+function cherryTree(x, y, z, s = 1) {
+  const g = new THREE.Group();
+  const trunkH = 2.6 * s;
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.14 * s, 0.26 * s, trunkH, 5), TRUNK);
+  trunk.position.y = trunkH / 2;
+  trunk.rotation.z = rand(-0.08, 0.08);
+  g.add(trunk);
+  // branches
+  for (let i = 0; i < 3; i++) {
+    const br = new THREE.Mesh(new THREE.CylinderGeometry(0.06 * s, 0.12 * s, 1.4 * s, 4), TRUNK);
+    br.position.y = trunkH * 0.85;
+    br.rotation.z = rand(0.5, 1.0) * (i % 2 ? 1 : -1);
+    br.rotation.y = rand(0, Math.PI * 2);
+    br.translateY(0.6 * s);
+    g.add(br);
+  }
+  // blossom clusters
+  const top = new THREE.Group();
+  top.position.y = trunkH * 1.15;
+  const n = 5 + (Math.random() * 4 | 0);
+  for (let i = 0; i < n; i++) {
+    const r = rand(0.7, 1.5) * s;
+    const geo = new THREE.IcosahedronGeometry(r, 0);
+    const p = geo.attributes.position;
+    for (let k = 0; k < p.count; k++) {
+      p.setXYZ(k, p.getX(k) * rand(0.85, 1.15), p.getY(k) * rand(0.6, 0.9), p.getZ(k) * rand(0.85, 1.15));
+    }
+    geo.computeVertexNormals();
+    const c = BLOSSOMS[Math.random() * BLOSSOMS.length | 0];
+    const blob = new THREE.Mesh(geo, flatMat(c));
+    blob.position.set(rand(-1.3, 1.3) * s, rand(-0.2, 0.8) * s, rand(-1.3, 1.3) * s);
+    top.add(blob);
+  }
+  g.add(top);
+  treeTops.push({ obj: top, phase: rand(0, Math.PI * 2), amp: rand(0.02, 0.05) });
+  g.position.set(x, y, z);
+  g.rotation.y = rand(0, Math.PI * 2);
+  return g;
+}
+
+// trees framing the pagoda and on the foreground slope
+const treeSpots = [
+  [12, 30, 16, 1.5], [40, 27, 14, 1.2], [48, 25, 24, 1.6],
+  [-6, 28, 26, 1.3], [0, 29, 2, 1.7], [58, 20, 34, 1.4],
+  [-18, 24, 30, 1.1], [70, 12, 20, 1.3], [-34, 18, 44, 1.2],
+  [86, 4, 44, 1.5], [-52, 12, 54, 1.4], [30, 31, -6, 1.1],
+];
+for (const [x, y, z, s] of treeSpots) scene.add(cherryTree(x, y, z, s));
+
+/* ---------- Clouds ---------- */
+const clouds = [];
+function cloud(x, y, z, s) {
+  const g = new THREE.Group();
+  for (let i = 0; i < 5; i++) {
+    const m = new THREE.Mesh(jitter(new THREE.IcosahedronGeometry(rand(6, 12) * s, 0), 1.2 * s),
+      new THREE.MeshLambertMaterial({ color: 0xc9a8cc, flatShading: true, transparent: true, opacity: 0.85 }));
+    m.position.set(rand(-14, 14) * s, rand(-2, 3) * s, rand(-5, 5) * s);
+    m.scale.y = 0.45;
+    g.add(m);
+  }
+  g.position.set(x, y, z);
+  scene.add(g);
+  clouds.push({ obj: g, speed: rand(0.4, 1.0) });
+}
+cloud(-320, 170, -420, 1.4);
+cloud(220, 200, -520, 1.8);
+cloud(80, 140, -300, 1.0);
+cloud(-150, 230, -600, 2.0);
+cloud(380, 120, -260, 1.1);
+
+/* ---------- Falling sakura petals ---------- */
+const PETALS = 450;
+const petGeo = new THREE.BufferGeometry();
+const petPos = new Float32Array(PETALS * 3);
+const petSeed = new Float32Array(PETALS);
+for (let i = 0; i < PETALS; i++) {
+  petPos[i * 3] = rand(-90, 120);
+  petPos[i * 3 + 1] = rand(2, 70);
+  petPos[i * 3 + 2] = rand(-60, 80);
+  petSeed[i] = rand(0, Math.PI * 2);
+}
+petGeo.setAttribute('position', new THREE.BufferAttribute(petPos, 3));
+const petals = new THREE.Points(petGeo, new THREE.PointsMaterial({
+  color: 0xffc4d0, size: 0.55, sizeAttenuation: true, transparent: true, opacity: 0.9, fog: true
+}));
+scene.add(petals);
+
+/* ---------- Animation ---------- */
+const clock = new THREE.Clock();
+const skyMatU = skyMat.uniforms;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
+
+  // gentle camera breathing (fixed wallpaper feel, slight drift)
+  camera.position.x = CAM_BASE.x + Math.sin(t * 0.11) * 2.2;
+  camera.position.y = CAM_BASE.y + Math.sin(t * 0.07 + 1.2) * 1.1;
+  camera.position.z = CAM_BASE.z + Math.cos(t * 0.09) * 1.6;
+  camera.lookAt(-14, 34, -140);
+
+  // trees sway
+  for (const tr of treeTops) {
+    tr.obj.rotation.z = Math.sin(t * 0.9 + tr.phase) * tr.amp;
+    tr.obj.rotation.x = Math.cos(t * 0.7 + tr.phase) * tr.amp * 0.7;
+  }
+  // pagoda roofs breathe very slightly
+  for (let i = 0; i < pagodaGroup.userData.roofs.length; i++) {
+    const r = pagodaGroup.userData.roofs[i];
+    r.rotation.y = 0.02 * Math.sin(t * 0.6 + i);
+  }
+  // clouds drift
+  for (const c of clouds) {
+    c.obj.position.x += c.speed * dt * 2.4;
+    if (c.obj.position.x > 520) c.obj.position.x = -520;
+  }
+  // water shimmer
+  const wp = waterGeo.attributes.position;
+  for (let i = 0; i < wp.count; i++) {
+    const x = waterBase[i * 3], z = waterBase[i * 3 + 2];
+    wp.setY(i, Math.sin(x * 0.06 + t * 1.4) * 0.5 + Math.cos(z * 0.09 + t) * 0.35);
+  }
+  wp.needsUpdate = true;
+  waterGeo.computeVertexNormals();
+
+  // petals fall + swirl
+  const pp = petGeo.attributes.position;
+  for (let i = 0; i < PETALS; i++) {
+    let y = pp.getY(i) - dt * (1.6 + Math.sin(petSeed[i]) * 0.5);
+    let x = pp.getX(i) + Math.sin(t * 0.8 + petSeed[i]) * dt * 1.8;
+    let z = pp.getZ(i) + Math.cos(t * 0.6 + petSeed[i] * 2) * dt * 1.2;
+    if (y < 0) { y = rand(55, 75); x = rand(-90, 120); z = rand(-60, 80); }
+    pp.setXYZ(i, x, y, z);
+  }
+  pp.needsUpdate = true;
+
+  skyMatU.time.value = t;
+  renderer.render(scene, camera);
+}
+animate();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
