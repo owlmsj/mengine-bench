@@ -6,7 +6,7 @@ contamination), so a run refuses to start while any is left on disk.
 Agent harnesses also load instruction files on their own: Claude Code reads
 ~/.claude/CLAUDE.md and every CLAUDE.md above its cwd, Codex reads
 ~/.codex/AGENTS.md, opencode reads ~/.config/opencode/AGENTS.md and
-~/.claude/CLAUDE.md, and they read AGENTS.md above the cwd. Since #23 those
+the project's AGENTS.md. Since #23 those
 are part of the configuration under test: they are warnings, recorded by file
 name only in result.json `config.personal_instructions`, never a block.
 """
@@ -29,7 +29,7 @@ def global_instruction_files(agent: str, home: Path, env: Mapping[str, str]) -> 
     candidates = {
         "claude": [claude_home / "CLAUDE.md"],
         "codex": [codex_home / "AGENTS.md", codex_home / "AGENTS.override.md"],
-        "opencode": [config_home / "opencode" / "AGENTS.md", claude_home / "CLAUDE.md"],
+        "opencode": [config_home / "opencode" / "AGENTS.md"],
         "agy": [home / ".gemini" / "GEMINI.md"],
     }.get(agent, [])
     return [path for path in candidates if path.is_file()]
