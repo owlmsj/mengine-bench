@@ -7,7 +7,9 @@ by the maintainer on review; the transcripts are in each bundle. Only complete,
 judged runs of the current bench version are ranked. Older rankings stay below as history:
 their Scores use that version's formula and do not compare with the table above.
 
-No results yet.
+| # | Score | Correct % | Solved | Judge | Speed | Time | Timeouts | Cost | Est. price | Tokens | Generated | Turns | Agent | Model | Effort | Hardware | Config | Submitter | Date | Run |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | **90.6** | 100.0 | 20/20 | 81.0 | 73.8 | 11 min 32 s | 0 | $2.54 (harness) | ~$2.49 | 3.73M | 50.2k | 103 | claude 2.1.316 (Claude Code) | claude-sonnet-5-5 | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=claude-code, tier=0, role=default, instructions=~... | owlmsj | 2026-11-02 | [run](results/2026-11-02_claude_claude-sonnet-5-5_low_228a1e76/summary.md) |
 
 ## Bench 1.7 (history)
 
