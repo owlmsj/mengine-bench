@@ -8,6 +8,10 @@ own command) + the model + its effort + your hardware + your configuration. Chan
 any of them and you have a different agent. It is an educational benchmark, not an
 official one: use it to learn how your setup behaves and to compare it with others.
 
+It is short on purpose. The jobs are basic and easy to check by hand, so a good setup gets them right; the Score then
+separates setups on the quality of the work and on speed, and a rerun shows when a setup got slower or worse.
+Long-horizon work is out of scope.
+
 Results: [LEADERBOARD.md](LEADERBOARD.md).
 
 ## How a run is graded
@@ -136,6 +140,8 @@ projects, so skim `results/<run>/` before you submit.
 - The task folder is an instruction, not a sandbox: an agent with full permissions can read the rest of your disk.
 - A timeout or a crash with nothing written has nothing to grade. There are no retries.
 - Time depends on your machine and network, and Cost is an estimate.
+- A machine without Rust, Node.js or git fails the checks of the tasks that need them, and a harness without web
+  search or fetch scores only what it delivers on `web-plan-ranking`.
 
 ## Develop
 
@@ -148,3 +154,5 @@ uv run mengine-bench judge-anchors # after a rubric change: four judge votes
 ```
 
 Add a task or review a result: [CONTRIBUTING.md](CONTRIBUTING.md). MIT license, see [LICENSE](LICENSE).
+`3d-print-homage` ships Hokusai's The Great Wave off Kanagawa (c. 1831, public domain), the Metropolitan Museum of
+Art scan from [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Tsunami_by_hokusai_19th_century.jpg).
