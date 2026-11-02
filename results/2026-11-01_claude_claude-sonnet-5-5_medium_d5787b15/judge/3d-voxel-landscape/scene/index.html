@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fuji at Dusk — Chureito</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;background:#120f2a;overflow:hidden}
+  canvas{display:block}
+  #cap{position:fixed;left:28px;bottom:22px;color:#ffe6ef;font:500 20px/1.3 'Shippori Mincho',serif;letter-spacing:.3em;
+       text-shadow:0 1px 12px rgba(40,10,60,.7);opacity:.8;pointer-events:none;transition:opacity .6s}
+  #cap small{display:block;font-size:11px;letter-spacing:.35em;opacity:.7;margin-top:4px}
+  #msg{position:fixed;inset:0;display:none;align-items:center;justify-content:center;color:#fcd;font:16px sans-serif;text-align:center;padding:2em}
+</style>
+</head>
+<body>
+<div id="cap">富士山 · 忠霊塔<small>FUJI AT DUSK — PRESS H TO HIDE</small></div>
+<div id="msg"></div>
+<script type="module">
+let THREE;
+try { THREE = await import('https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js'); }
+catch (e) { const m=document.getElementById('msg'); m.style.display='flex'; m.textContent='Could not load three.js from cdn.jsdelivr.net.'; throw e; }
+
+// ---------- helpers ----------
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+const rand = mulberry32(20240401);
+const rr = (a,b)=>a+(b-a)*rand();
+function hash(i,j,k){let h=Math.imul(i,374761393)^Math.imul(j,668265263)^Math.imul(k,1274126177);h=Math.imul(h^(h>>>13),1103515245);h^=h>>>16;return(h>>>0)/4294967295}
+function noise(x,y=0,z=0){
+  const ix=Math.floor(x),iy=Math.floor(y),iz=Math.floor(z);
+  const fx=x-ix,fy=y-iy,fz=z-iz;
+  const u=fx*fx*(3-2*fx),v=fy*fy*(3-2*fy),w=fz*fz*(3-2*fz);
+  const L=(a,b,t)=>a+(b-a)*t;
+  return L(L(L(hash(ix,iy,iz),hash(ix+1,iy,iz),u),L(hash(ix,iy+1,iz),hash(ix+1,iy+1,iz),u),v),
+           L(L(hash(ix,iy,iz+1),hash(ix+1,iy,iz+1),u),L(hash(ix,iy+1,iz+1),hash(ix+1,iy+1,iz+1),u),v),w);
+}
+const smooth=(a,b,x)=>{const t=Math.min(1,Math.max(0,(x-a)/(b-a)));return t*t*(3-2*t)};
+const C=(h)=>new THREE.Color(h);
+
+// ---------- renderer / scene ----------
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x8d6a9a, 0.0052);
+const camera = new THREE.PerspectiveCamera(46, innerWidth/innerHeight, 0.5, 1200);
+const camBase = new THREE.Vector3(4,21,34), lookAt = new THREE.Vector3(-2,14,-100);
+
+// ---------- sky ----------
+const sky = new THREE.Mesh(new THREE.SphereGeometry(900,32,20), new THREE.ShaderMaterial({
+  side:THREE.BackSide, depthWrite:false,
+  uniforms:{cH:{value:C(0xffa384)},cP:{value:C(0xd8709c)},cM:{value:C(0x6d4c94)},cI:{value:C(0x211f55)},cT:{value:C(0x0a0b26)}},
+  vertexShader:`varying vec3 vP; void main(){vP=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
+  fragmentShader:`varying vec3 vP; uniform vec3 cH,cP,cM,cI,cT;
+   void main(){ vec3 d=normalize(vP); float h=max(d.y,0.);
+    vec3 c=mix(cH,cP,smoothstep(0.,.09,h)); c=mix(c,cM,smoothstep(.07,.28,h)); c=mix(c,cI,smoothstep(.25,.6,h)); c=mix(c,cT,smoothstep(.55,1.,h));
+    float g=pow(max(0.,-d.z),4.)*exp(-h*7.); c+=vec3(.55,.22,.1)*g*.6;
+    if(d.y<0.) c=mix(cH*.8,vec3(.35,.25,.45),clamp(-d.y*6.,0.,1.));
+    gl_FragColor=vec4(c,1.);
+    #include <colorspace_fragment>
+   }`}));
+sky.renderOrder=-2; scene.add(sky);
+
+// stars
+let stars;
+{ const n=900, p=new Float32Array(n*3);
+  for(let i=0;i<n;i++){ let v; do{ v=new THREE.Vector3(rr(-1,1),rr(0.08,1),rr(-1,1)); }while(v.lengthSq()>1||v.lengthSq()<.1);
+    v.normalize().multiplyScalar(800); p.set([v.x,v.y,v.z],i*3); }
+  const g=new THREE.BufferGeometry(); g.setAttribute('position',new THREE.BufferAttribute(p,3));
+  stars=new THREE.Points(g,new THREE.PointsMaterial({color:0xfff2ff,size:1.8,sizeAttenuation:false,fog:false,transparent:true,opacity:.8,depthWrite:false}));
+  stars.renderOrder=-1; scene.add(stars); }
+// moon
+const moon=new THREE.Mesh(new THREE.IcosahedronGeometry(14,1),new THREE.MeshBasicMaterial({color:0xfff1d6,fog:false}));
+moon.position.set(280,300,-600); scene.add(moon);
+
+// ---------- lights ----------
+scene.add(new THREE.HemisphereLight(0xa59be0,0x4a3258,1.35));
+const fill=new THREE.DirectionalLight(0xffc9b8,1.6); fill.position.set(-40,30,50); scene.add(fill);
+const rim=new THREE.DirectionalLight(0xff8f8a,0.7); rim.position.set(60,12,-40); scene.add(rim);
+
+// ---------- Fuji ----------
+function paintFaces(geo, fn){
+  const g=geo.toNonIndexed(); g.computeVertexNormals();
+  const p=g.attributes.position, col=new Float32Array(p.count*3);
+  for(let i=0;i<p.count;i+=3){
+    const cx=(p.getX(i)+p.getX(i+1)+p.getX(i+2))/3, cy=(p.getY(i)+p.getY(i+1)+p.getY(i+2))/3, cz=(p.getZ(i)+p.getZ(i+1)+p.getZ(i+2))/3;
+    const c=fn(cx,cy,cz); for(let k=0;k<3;k++) col.set([c.r,c.g,c.b],(i+k)*3);
+  }
+  g.setAttribute('color',new THREE.BufferAttribute(col,3)); return g;
+}
+const FH=82, FR=96;
+const fujiPts=[new THREE.Vector2(0,FH-3)];
+for(let i=18;i>=0;i--){const t=i/18; fujiPts.push(new THREE.Vector2(4+(FR-4)*Math.pow(1-t,1.75),t*FH));}
+fujiPts.reverse(); // ascending y
+let fg=new THREE.LatheGeometry(fujiPts,44);
+{ const p=fg.attributes.position;
+  for(let i=0;i<p.count;i++){
+    let x=p.getX(i),y=p.getY(i),z=p.getZ(i); const r=Math.hypot(x,z), t=y/FH, ang=Math.atan2(z,x);
+    const d=(noise(x*.05,y*.06,z*.05)-.5)*11*(1-t*.3) + Math.sin(ang*11+noise(x*.03,0,z*.03)*4)*2.4*t*(1-t)*4;
+    const f=1+d/Math.max(r,12); p.setXYZ(i,x*f,y+(noise(x*.1,y*.1,z*.1)-.5)*2.2,z*f);
+  } }
+fg=paintFaces(fg,(x,y,z)=>{
+  const t=y/FH, ang=Math.atan2(z,x);
+  const sl=0.60+(noise(x*.08,0,z*.08)-.5)*.16+Math.sin(ang*13+noise(x*.05,0,z*.05)*5)*0.08;
+  const n=noise(x*.2,y*.2,z*.2);
+  if(t>sl) return C(0xf7dbe8).lerp(C(0xcfc6ec),n*.8);
+  return C(0x4b4a82).lerp(C(0x735a8c),n).lerp(C(0x2e3a5e),Math.max(0,.3-t)*2.2);
+});
+const fuji=new THREE.Mesh(fg,new THREE.MeshLambertMaterial({vertexColors:true,flatShading:true,side:THREE.DoubleSide}));
+fuji.position.set(-6,-4,-175); scene.add(fuji);
+
+// ---------- terrain ----------
+const PAG=new THREE.Vector2(-9,-3);
+function groundH(x,z){
+  const t=smooth(-34,-6,z);
+  let h=-3.2+t*8.6;
+  h+=9.5*Math.exp(-Math.pow((z+98)/15,2));
+  h+=smooth(55,115,Math.abs(x))*11*(0.4+0.6*smooth(-120,-20,z)) + Math.max(0,Math.abs(x)-28)*0.12*t;
+  h+=(noise(x*.06,0,z*.06)-.5)*(2+5*t)+(noise(x*.2,0,z*.2)-.5)*1.2*t;
+  const d=Math.hypot(x-PAG.x,z-PAG.y);
+  return d<10 ? h+(5.6-h)*smooth(10,5.5,d) : h;
+}
+let tg=new THREE.PlaneGeometry(300,240,80,64); tg.rotateX(-Math.PI/2); tg.translate(0,0,-55);
+{ const p=tg.attributes.position; for(let i=0;i<p.count;i++) p.setY(i,groundH(p.getX(i),p.getZ(i))); }
+tg=paintFaces(tg,(x,y,z)=>{
+  const n=noise(x*.15,0,z*.15), pet=noise(x*.12+40,0,z*.12+9);
+  if(y<-0.6) return C(0x2c3a45).lerp(C(0x3c4a4a),n);
+  if(pet>.64 && y>1.5 && z>-30) return C(0xe2a9c0).lerp(C(0xc98aa9),n);
+  const c=C(0x34553f).lerp(C(0x5a7a48),n).lerp(C(0x43375a),smooth(-40,-110,z)*.7);
+  return c.lerp(C(0x3a2f48),smooth(55,100,Math.abs(x))*.5);
+});
+scene.add(new THREE.Mesh(tg,new THREE.MeshLambertMaterial({vertexColors:true,flatShading:true})));
+
+// water
+const wg=new THREE.PlaneGeometry(300,150,50,30); wg.rotateX(-Math.PI/2);
+const water=new THREE.Mesh(wg,new THREE.MeshPhongMaterial({color:0x34478a,specular:0xffb4c8,shininess:70,flatShading:true,transparent:true,opacity:.93}));
+water.position.set(0,-1.6,-75); scene.add(water);
+const wBase=Float32Array.from(wg.attributes.position.array);
+
+// ---------- Chureito pagoda ----------
+function makePagoda(){
+  const g=new THREE.Group();
+  const M=(c,e)=>new THREE.MeshLambertMaterial({color:c,flatShading:true,emissive:e||0x000000});
+  const red=M(0xc6281f,0x2a0504), roof=M(0x4b3b4c,0x120a14), stone=M(0x9a93a2), gold=M(0xd9a441,0x4a3000), trim=M(0x2a1a1c);
+  const glow=new THREE.MeshBasicMaterial({color:0xffc470});
+  const add=(geo,mat,x,y,z)=>{const m=new THREE.Mesh(geo,mat);m.position.set(x,y,z);g.add(m);return m};
+  add(new THREE.BoxGeometry(7.4,.8,7.4),stone,0,.4,0);
+  let y=.8;
+  for(let i=0;i<5;i++){
+    const w=4.5-.55*i, bw=w*.74, bh=1.2;
+    add(new THREE.BoxGeometry(bw,bh,bw),red,0,y+bh/2,0);
+    add(new THREE.BoxGeometry(bw+.18,.14,bw+.18),trim,0,y+.07,0);
+    add(new THREE.BoxGeometry(bw+.18,.14,bw+.18),trim,0,y+bh-.07,0);
+    for(let s=0;s<4;s++){
+      const a=s*Math.PI/2, ox=Math.sin(a)*(bw/2+.02), oz=Math.cos(a)*(bw/2+.02);
+      const win=add(new THREE.BoxGeometry(.34,.5,.06),glow,ox,y+bh/2,oz); win.rotation.y=a;
+    }
+    const half=w/2+.75, r=half*Math.SQRT2;
+    const rf=add(new THREE.ConeGeometry(r,1.0,4),roof,0,y+bh+.5,0); rf.rotation.y=Math.PI/4;
+    add(new THREE.BoxGeometry(half*2+.2,.12,half*2+.2),trim,0,y+bh+.02,0);
+    for(const sx of[-1,1])for(const sz of[-1,1]){
+      add(new THREE.ConeGeometry(.15,.55,4),roof,sx*(half-.05),y+bh+.12,sz*(half-.05));
+    }
+    y+=bh+.75;
+  }
+  add(new THREE.CylinderGeometry(.07,.1,3.4,6),gold,0,y+1.3,0);
+  for(let i=0;i<6;i++) { const t=add(new THREE.TorusGeometry(.24-i*.02,.04,4,8),gold,0,y+.1+i*.42,0); t.rotation.x=Math.PI/2; }
+  add(new THREE.IcosahedronGeometry(.18,0),gold,0,y+3.05,0);
+  return g;
+}
+const pagoda=makePagoda(); pagoda.scale.setScalar(1.15);
+pagoda.position.set(PAG.x,groundH(PAG.x,PAG.y)+0.02,PAG.y); pagoda.rotation.y=0.25; scene.add(pagoda);
+const lantern=new THREE.PointLight(0xffa860,60,28,1.6); lantern.position.set(PAG.x,pagoda.position.y+5,PAG.y+4); scene.add(lantern);
+// stone steps toward the pagoda
+for(let i=0;i<12;i++){
+  const z=PAG.y+5.5+i*1.1, x=PAG.x+Math.sin(i*.5)*.6+i*.15;
+  const s=new THREE.Mesh(new THREE.BoxGeometry(2.4,.25,.9),new THREE.MeshLambertMaterial({color:0x8d8795,flatShading:true}));
+  s.position.set(x,groundH(x,z)+.08,z); scene.add(s);
+}
+
+// ---------- trees ----------
+const sway=[];
+const trunkM=new THREE.MeshLambertMaterial({color:0x4a3036,flatShading:true});
+const pinkCols=[0xffb7cf,0xf79fbd,0xffcfe0,0xe98cb0,0xffdce8].map(c=>new THREE.MeshLambertMaterial({color:c,emissive:0x3a1226,flatShading:true}));
+const blobG=new THREE.IcosahedronGeometry(1,1);
+function cherry(x,z,s){
+  const g=new THREE.Group(), y=groundH(x,z);
+  const h=rr(2.2,3.2);
+  const tr=new THREE.Mesh(new THREE.CylinderGeometry(.2,.38,h,5),trunkM); tr.position.y=h/2-.1; g.add(tr);
+  const crown=new THREE.Group(); crown.position.y=h; g.add(crown);
+  const nb=rr(4,6)|0;
+  for(let i=0;i<nb;i++){
+    const m=new THREE.Mesh(blobG,pinkCols[(rand()*pinkCols.length)|0]);
+    const rad=rr(1.3,2.2); m.scale.set(rad,rad*.8,rad);
+    m.position.set(rr(-1.6,1.6),rr(-.2,1.4),rr(-1.6,1.6)); m.rotation.set(rand()*3,rand()*3,rand()*3); crown.add(m);
+  }
+  g.position.set(x,y-.15,z); g.scale.setScalar(s); scene.add(g);
+  sway.push({o:crown,ph:rand()*6.28,a:rr(.008,.02)}); return g;
+}
+function cedar(x,z,s){
+  const g=new THREE.Group(), y=groundH(x,z);
+  const m=new THREE.MeshLambertMaterial({color:new THREE.Color(0x1f3a35).lerp(C(0x2c4a3c),rand()),flatShading:true});
+  const t=new THREE.Mesh(new THREE.CylinderGeometry(.2,.3,2,5),trunkM); t.position.y=1; g.add(t);
+  for(let i=0;i<3;i++){ const c=new THREE.Mesh(new THREE.ConeGeometry(2.2-i*.55,3.4,6),m); c.position.y=3+i*1.8; g.add(c); }
+  g.position.set(x,y-.1,z); g.scale.setScalar(s); scene.add(g);
+}
+const used=[];
+function place(n,fn,xr,zr,minD,pred){
+  let tries=0;
+  while(n>0&&tries++<4000){
+    const x=rr(...xr), z=rr(...zr), h=groundH(x,z);
+    if(h<1.4||Math.hypot(x-PAG.x,z-PAG.y)<8.5||(pred&&!pred(x,z))) continue;
+    if(used.some(u=>Math.hypot(u[0]-x,u[1]-z)<minD)) continue;
+    used.push([x,z]); fn(x,z); n--;
+  }
+}
+cherry(-30,10,1.5); cherry(26,9,1.6); cherry(14,16,1.0); used.push([-30,10],[26,9],[14,16]);
+place(22,(x,z)=>cedar(x,z,rr(1,1.8)),[-60,60],[-28,2],4,(x,z)=>(Math.abs(x)>14||z<-8)&&!(Math.abs(x-PAG.x)<9&&z>PAG.y-1));
+place(40,(x,z)=>cherry(x,z,rr(.9,1.5)),[-55,55],[-30,8],5,(x,z)=>!(Math.abs(x-PAG.x)<9&&z>PAG.y)&&!(Math.abs(x)<14&&z>-4));
+
+// ---------- clouds ----------
+const clouds=[];
+const cloudMat=new THREE.MeshLambertMaterial({color:0xe6b0c8,emissive:0x4a2048,flatShading:true,transparent:true,opacity:.88});
+for(let i=0;i<9;i++){
+  const g=new THREE.Group(), n=(rr(4,7))|0;
+  for(let k=0;k<n;k++){ const m=new THREE.Mesh(new THREE.IcosahedronGeometry(1,1),cloudMat);
+    m.scale.set(rr(6,12),rr(2,3.5),rr(4,6)); m.position.set(k*7-n*3.5+rr(-2,2),rr(-1,1.5),rr(-2,2)); g.add(m); }
+  g.position.set(rr(-200,200),rr(30,60),rr(-150,-100)); g.userData.v=rr(.5,1.3); scene.add(g); clouds.push(g);
+}
+
+// ---------- petals ----------
+const NP=420, pp=new Float32Array(NP*3), pph=new Float32Array(NP), psp=new Float32Array(NP);
+const BOX={x:70,y:26,zmin:-20,zmax:42};
+for(let i=0;i<NP;i++){ pp.set([rr(-BOX.x,BOX.x),rr(0,BOX.y),rr(BOX.zmin,BOX.zmax)],i*3); pph[i]=rand()*6.28; psp[i]=rr(.6,1.5); }
+const pg=new THREE.BufferGeometry(); pg.setAttribute('position',new THREE.BufferAttribute(pp,3));
+const dot=document.createElement('canvas'); dot.width=dot.height=32; { const c=dot.getContext('2d'); const gr=c.createRadialGradient(16,16,1,16,16,15);
+  gr.addColorStop(0,'#fff'); gr.addColorStop(.6,'#ffd0e0'); gr.addColorStop(1,'rgba(255,200,220,0)'); c.fillStyle=gr; c.fillRect(0,0,32,32); }
+const petals=new THREE.Points(pg,new THREE.PointsMaterial({map:new THREE.CanvasTexture(dot),size:.55,transparent:true,depthWrite:false,color:0xffc6dc,opacity:.95}));
+petals.frustumCulled=false; scene.add(petals);
+
+// ---------- interaction / loop ----------
+let mx=0,my=0; addEventListener('pointermove',e=>{mx=e.clientX/innerWidth-.5;my=e.clientY/innerHeight-.5});
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight)});
+addEventListener('keydown',e=>{if(e.key==='h'||e.key==='H'){const c=document.getElementById('cap');c.style.opacity=c.style.opacity==='0'?'.8':'0'}});
+const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches, mo=reduce?.25:1;
+const clock=new THREE.Clock();
+function frame(){
+  const dt=Math.min(clock.getDelta(),.05), t=clock.elapsedTime*mo;
+  camera.position.set(camBase.x+Math.sin(t*.1)*3+mx*4, camBase.y+Math.sin(t*.13)*.7-my*1.5, camBase.z+Math.sin(t*.07)*2);
+  camera.lookAt(lookAt);
+  for(const s of sway){ s.o.rotation.z=Math.sin(t*.6+s.ph)*s.a; s.o.rotation.x=Math.cos(t*.5+s.ph)*s.a; }
+  for(const c of clouds){ c.position.x+=c.userData.v*dt*mo; if(c.position.x>230) c.position.x=-230; }
+  const wp=wg.attributes.position;
+  for(let i=0;i<wp.count;i++){ const x=wBase[i*3],z=wBase[i*3+2]; wp.setY(i,Math.sin(x*.15+t*.8)*.06+Math.cos(z*.2+t*.6)*.06); }
+  wp.needsUpdate=true;
+  for(let i=0;i<NP;i++){
+    let x=pp[i*3],y=pp[i*3+1],z=pp[i*3+2];
+    y-=psp[i]*dt*mo; x+=(Math.sin(t*.8+pph[i])*.7+.9)*dt*mo; z+=Math.cos(t*.6+pph[i])*.4*dt*mo;
+    if(y<0){y=BOX.y;x=rr(-BOX.x,BOX.x);z=rr(BOX.zmin,BOX.zmax)} if(x>BOX.x)x=-BOX.x;
+    pp[i*3]=x;pp[i*3+1]=y;pp[i*3+2]=z;
+  }
+  pg.attributes.position.needsUpdate=true;
+  lantern.intensity=55+Math.sin(t*3.1)*4+Math.sin(t*7.3)*2;
+  stars.material.opacity=.7+Math.sin(t*1.3)*.12;
+  renderer.render(scene,camera); requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>
