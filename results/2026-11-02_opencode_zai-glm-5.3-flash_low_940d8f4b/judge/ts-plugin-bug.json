@@ -1,0 +1,57 @@
+{
+ "task_id": "ts-plugin-bug",
+ "prompts": [
+  "Users of our harness plugins report that tool.after hooks run out of order, that sometimes a hook never runs, and that a failing hook is silently ignored. The hook bus and the plugin are in {WS}; the README there says how the bus must behave. Fix the bus. Its public API stays as it is, the tests in {WS}/test stay as they are, and package.json takes no dependencies."
+ ],
+ "answers": [
+  "**[goal]** Fix the hook bus so `tool.after` hooks run in order, always run, and propagate errors, per README.md; public API, tests and deps untouched.\n\n**[action]** Rewrote `emit` in `src/bus.ts` (only change):\n- Sequential loop instead of `forEach(async ...)`, so each handler's promise settles before the next starts and `emit` awaits them all.\n- Error propagation: an `async` loop body now rethrows the handler's error, so `emit` rejects with that same error and later handlers are skipped.\n- Snapshot (`[...list]`) before iterating: a handler unsubscribing itself mid-emit (the plugin's one-time notice does) runs in the current emit and only takes effect next time.\n\n**[result]** `npm test`: 2/2 pass unchanged. Contract verification (`tmp/verify.mjs`) passes: order `[1,2,3]` with async first handler, `emit` rejects with the handler's exact error and later handlers skipped, mid-emit unsubscribe doesn't stop others, and the audit plugin produces `notice → redacted → log` correctly on both emits (first-emit notice only).\n\n**[next / assumptions]**\n- Assumed handlers stay async-sequential and `emit` awaits all — README lines 9–11 say so.\n- Assumed README line 14 fixes snapshot semantics; the plugin's self-unsubscribing notice is what triggered the \"hook never runs\" report under the old live-iteration splice bug (splice shifted indexes, skipping the next handler).\n- Old `forEach(async)` ignored rejections entirely — the \"silently ignored\" failing-hook report.\n\nHow I know it's right: the shipped tests pass unmodified, and `node tmp/verify.mjs` asserts every README rule plus the plugin's documented notice→redaction→log order, all green."
+ ],
+ "diff": "M src/bus.ts\nA tmp/verify.mjs\n\n--- src/bus.ts ---\n/**\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\n * handlers run one after another in subscription order, emit resolves after all of them,\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\n */\n\nexport type Handler<T> = (payload: T) => void | Promise<void>;\n\nexport class HookBus {\n  private handlers: Map<string, Handler<unknown>[]> = new Map();\n\n  /** Subscribes a handler to an event; returns the function that unsubscribes it. */\n  on<T>(event: string, handler: Handler<T>): () => void {\n    const list = this.handlers.get(event) ?? [];\n    list.push(handler as Handler<unknown>);\n    this.handlers.set(event, list);\n    return () => {\n      const index = list.indexOf(handler as Handler<unknown>);\n      if (index >= 0) {\n        list.splice(index, 1);\n      }\n    };\n  }\n\n  /** Runs the handlers of an event with the payload. */\n  async emit<T>(event: string, payload: T): Promise<void> {\n    // Snapshot: handlers subscribed when emit starts run, even if unsubscribed mid-emit (README).\n    const list = [...(this.handlers.get(event) ?? [])];\n    for (const handler of list) {\n      await handler(payload);\n    }\n  }\n\n  /** How many handlers an event has. */\n  count(event: string): number {\n    return (this.handlers.get(event) ?? []).length;\n  }\n}\n\n\n--- tmp/verify.mjs ---\nimport { HookBus } from \"../src/bus.ts\";\nimport assert from \"node:assert/strict\";\nimport { registerAuditPlugin } from \"../src/plugin.ts\";\n\nconst bus = new HookBus();\nconst order = [];\nconst off = bus.on(\"tool.after\", async () => { await new Promise(r => setTimeout(r, 10)); order.push(1); });\nbus.on(\"tool.after\", async () => { order.push(2); });\nbus.on(\"tool.after\", () => { order.push(3); });\nawait bus.emit(\"tool.after\", {});\nassert.deepEqual(order, [1, 2, 3]);\n\n// error propagation, later handlers skipped\nconst bus2 = new HookBus();\nconst err = new Error(\"boom\");\nbus2.on(\"e\", () => { throw err; });\nlet after = false;\nbus2.on(\"e\", () => { after = true; });\nawait assert.rejects(bus2.emit(\"e\", {}), e => e === err);\nassert.equal(after, false);\n\n// unsubscribe during emit does not stop others\nconst bus3 = new HookBus();\nconst seen = [];\nconst off3 = bus3.on(\"t\", () => { off3(); seen.push(\"a\"); });\nbus3.on(\"t\", () => seen.push(\"b\"));\nawait bus3.emit(\"t\", {});\nassert.deepEqual(seen, [\"a\", \"b\"]);\nassert.equal(bus3.count(\"t\"), 1);\n\n// plugin: notice once, redaction before log, audit correct\nconst audit = [];\nconst pluginBus = new HookBus();\nregisterAuditPlugin(pluginBus, audit);\nconst res = { tool: \"read\", output: \"password=hunter2 ok\" };\nawait pluginBus.emit(\"tool.after\", res);\nconst res2 = { tool: \"write\", output: \"password=abc\" };\nawait pluginBus.emit(\"tool.after\", res2);\nassert.deepEqual(audit, [\n  \"notice: tool output is audited\",\n  \"read: password=[redacted] ok\",\n  \"write: password=[redacted]\",\n]);\nconsole.log(\"all contract checks pass\");\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ Get-ChildItem -Recurse -File | Select-Object FullName; Get-Content package.json -ErrorAction SilentlyContinue\n$ npm test 2>&1\n$ node tmp/verify.mjs\n\nStream tail:\n\"messageID\":\"msg_19de3e3e5001z19xD40SBhfemv\",\"type\":\"step-start\"}}\n\n{\"type\":\"tool_use\",\"timestamp\":1793650325567,\"sessionID\":\"ses_e621c7c28ffeROIGXSMj1JdsgP\",\"part\":{\"partID\":\"prt_19de3f56b001aY3YnR0j6Be65p\",\"sessionID\":\"ses_e621c7c28ffeROIGXSMj1JdsgP\",\"messageID\":\"msg_19de3e3e5001z19xD40SBhfemv\",\"type\":\"tool\",\"id\":\"call_9b62c6c39ea64235b096f931\",\"tool\":\"shell\",\"state\":{\"status\":\"completed\",\"input\":{\"command\":\"node tmp/verify.mjs\",\"workdir\":\"<WORKSPACE>\"},\"output\":\"all contract checks pass\\n\",\"title\":\"shell\",\"metadata\":{\"metadata\":{\"status\":\"completed\",\"truncated\":false,\"exit\":0},\"content\":[{\"type\":\"text\",\"text\":\"all contract checks pass\\n\"}],\"providerCall\":{\"executed\":false},\"providerResult\":{\"executed\":false},\"rawInput\":\"{\\\"command\\\":\\\"node tmp/verify.mjs\\\",\\\"workdir\\\":\\\"<WORKSPACE>\\\"}\"},\"time\":{\"start\":1793650324843,\"end\":1793650325567}}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793650325569,\"sessionID\":\"ses_e621c7c28ffeROIGXSMj1JdsgP\",\"part\":{\"id\":\"prt_19de3f841001AKkBiklMAMYaaw\",\"sessionID\":\"ses_e621c7c28ffeROIGXSMj1JdsgP\",\"messageID\":\"msg_19de3e3e5001z19xD40SBhfemv\",\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"cost\":0.00034137,\"tokens\":{\"input\":493,\"output\":51,\"reasoning\":0,\"cache\":{\"read\":8064,\"write\":0}}}}\n\n{\"type\":\"step_start\",\"timestamp\":1793650326706,\"sessionID\":\"ses_e621c7c28ffeROIGXSMj1JdsgP\",\"part\":{\"id\":\"prt_19de3fcb2001S4rSP3xtWxAs7o\",\"sessionID\":\"ses_e621c7c28ffeROIGXSMj1JdsgP\",\"messageID\":\"msg_19de3f849001ZJ8iVEUt2s80bm\",\"type\":\"step-start\"}}\n\n{\"type\":\"text\",\"timestamp\":1793650337044,\"sessionID\":\"ses_e621c7c28ffeROIGXSMj1JdsgP\",\"part\":{\"id\":\"prt_19de3f849001ZJ8iVEUt2s80bm_text-0\",\"sessionID\":\"ses_e621c7c28ffeROIGXSMj1JdsgP\",\"messageID\":\"msg_19de3f849001ZJ8iVEUt2s80bm\",\"type\":\"text\",\"text\":\"**[goal]** Fix the hook bus so `tool.after` hooks run in order, always run, and propagate errors, per README.md; public API, tests and deps untouched.\\n\\n**[action]** Rewrote `emit` in `src/bus.ts` (only change):\\n- Sequential loop instead of `forEach(async ...)`, so each handler's promise settles before the next starts and `emit` awaits them all.\\n- Error propagation: an `async` loop body now rethrows the handler's error, so `emit` rejects with that same error and later handlers are skipped.\\n- Snapshot (`[...list]`) before iterating: a handler unsubscribing itself mid-emit (the plugin's one-time notice does) runs in the current emit and only takes effect next time.\\n\\n**[result]** `npm test`: 2/2 pass unchanged. Contract verification (`tmp/verify.mjs`) passes: order `[1,2,3]` with async first handler, `emit` rejects with the handler's exact error and later handlers skipped, mid-emit unsubscribe doesn't stop others, and the audit plugin produces `notice → redacted → log` correctly on both emits (first-emit notice only).\\n\\n**[next / assumptions]**\\n- Assumed handlers stay async-sequential and `emit` awaits all — README lines 9–11 say so.\\n- Assumed README line 14 fixes snapshot semantics; the plugin's self-unsubscribing notice is what triggered the \\\"hook never runs\\\" report under the old live-iteration splice bug (splice shifted indexes, skipping the next handler).\\n- Old `forEach(async)` ignored rejections entirely — the \\\"silently ignored\\\" failing-hook report.\\n\\nHow I know it's right: the shipped tests pass unmodified, and `node tmp/verify.mjs` asserts every README rule plus the plugin's documented notice→redaction→log order, all green.\",\"time\":{\"start\":1793650325590,\"end\":1793650337044}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793650337044,\"sessionID\":\"ses_e621c7c28ffeROIGXSMj1JdsgP\",\"part\":{\"id\":\"prt_19de3f849001ZJ8iVEUt2s80bm_step-finish\",\"sessionID\":\"ses_e621c7c28ffeROIGXSMj1JdsgP\",\"messageID\":\"msg_19de3f849001ZJ8iVEUt2s80bm\",\"type\":\"step-finish\",\"reason\":\"stop\",\"cost\":0.00049661,\"tokens\":{\"input\":105,\"output\":391,\"reasoning\":60,\"cache\":{\"read\":8512,\"write\":0}}}}\n\n",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "package.json takes no dependencies",
+   true
+  ],
+  [
+   "hidden handlers run in subscription order",
+   true
+  ],
+  [
+   "hidden emit resolves after every handler",
+   true
+  ],
+  [
+   "hidden a failing handler rejects emit",
+   true
+  ],
+  [
+   "hidden a handler that unsubscribes itself does not stop the others",
+   true
+  ],
+  [
+   "hidden the audit plugin redacts before it logs",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 7,
+  "tool_calls": 9,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1240,
+  "reasoning_tokens": 108,
+  "largest_turn_tokens": 468
+ },
+ "deliverables": [],
+ "render": null
+}

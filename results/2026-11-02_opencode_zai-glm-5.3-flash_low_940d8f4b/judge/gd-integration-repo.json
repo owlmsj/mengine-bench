@@ -1,0 +1,61 @@
+{
+ "task_id": "gd-integration-repo",
+ "prompts": [
+  "An integration test of the Pixel Arena backend in {WS} fails while the unit tests pass. Make the backend behave as {WS}/docs says: fix every cause, not just the symptom this test shows. Existing tests stay as they are, and the project takes no new dependencies."
+ ],
+ "answers": [
+  "**[goal]** Make the failing integration test pass by fixing the backend to match `docs/` (CONFIG.md and ECONOMY.md), keeping all unit tests intact, no new dependencies.\n\n**[action]** Two root-cause fixes:\n1. `arena_server/config/loader.py`: env vars were applied *before* the JSON file, so the file overrode env. CONFIG.md says precedence is DEFAULTS < file < env (\"the environment always wins\"). Reordered so env is applied last.\n2. `arena_server/persistence/codec.py`: `decode()` dropped `credits` when loading a profile, violating ECONOMY.md (\"Credits persist in the profile and survive save/load\"). Now restores `credits` (default 0 for old blobs).\n\n`match_payout` already matched ECONOMY.md (I verified the doc examples 1425→1430, 1585→1590 and the integration case (900+5×75)×1.25=1593.75→1590), so it was left untouched.\n\n**[result]** `python -m unittest discover -s tests -t .` → `Ran 13 tests ... OK`, including `tests/integration/test_match_flow.py.test_event_weekend_win_is_paid_and_persisted ... ok`.\n\n**[next]** Assumptions stated: docs are the source of truth; `_coerce` string→int/float behavior is intentional and kept; `legacy_payout` stays deprecated and unused. Fixes are minimal, dependency-free, and no test was modified."
+ ],
+ "diff": "M arena_server/config/loader.py\nM arena_server/persistence/codec.py\n\n--- arena_server/config/loader.py ---\n\"\"\"Runtime config. Precedence, lowest to highest: DEFAULTS < JSON file < env (docs/CONFIG.md).\"\"\"\n\nimport json\nimport os\n\nfrom arena_server.config.defaults import DEFAULTS\n\n\ndef _coerce(raw, like):\n    return type(like)(raw)\n\n\ndef load_config(file_path=None, env=None):\n    cfg = dict(DEFAULTS)\n    env = os.environ if env is None else env\n    if file_path:\n        with open(file_path, encoding=\"utf-8\") as fh:\n            cfg.update(json.load(fh))\n    # env must win over the JSON file (docs/CONFIG.md)\n    for key, default in DEFAULTS.items():\n        value = env.get(f\"ARENA_{key.upper()}\")\n        if value is not None:\n            cfg[key] = _coerce(value, default)\n    return cfg\n\n\n--- arena_server/persistence/codec.py ---\nimport json\n\nfrom arena_server.models.profile import Profile\n\n\ndef encode(profile):\n    return json.dumps({\"name\": profile.name, \"level\": profile.level,\n                       \"credits\": profile.credits, \"cosmetics\": profile.cosmetics})\n\n\ndef decode(blob):\n    data = json.loads(blob)\n    return Profile(name=data[\"name\"], level=data.get(\"level\", 1),\n                   credits=data.get(\"credits\", 0), cosmetics=data.get(\"cosmetics\", []))\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ Get-ChildItem -Recurse -File | Select-Object -ExpandProperty FullName\n$ python -m unittest discover -s tests -t . -v 2>&1\n\nStream tail:\ntest_core_units.CoreUnits.test_profile_defaults) ... ok\\u001b[0m\\r\\n\\u001b[31;1mtest_describe (tests.unit.test_cosmetics.CosmeticsTest.test_describe) ... ok\\u001b[0m\\r\\n\\u001b[31;1mtest_describe (tests.unit.test_leaderboard.LeaderboardTest.test_describe) ... ok\\u001b[0m\\r\\n\\u001b[31;1mtest_describe (tests.unit.test_locales.LocalesTest.test_describe) ... ok\\u001b[0m\\r\\n\\u001b[31;1mtest_describe (tests.unit.test_matchmaking.MatchmakingTest.test_describe) ... ok\\u001b[0m\\r\\n\\u001b[31;1mtest_describe (tests.unit.test_notifications.NotificationsTest.test_describe) ... ok\\u001b[0m\\r\\n\\u001b[31;1mtest_describe (tests.unit.test_quests.QuestsTest.test_describe) ... ok\\u001b[0m\\r\\n\\u001b[31;1mtest_describe (tests.unit.test_store.StoreTest.test_describe) ... ok\\u001b[0m\\r\\n\\u001b[31;1mtest_describe (tests.unit.test_telemetry.TelemetryTest.test_describe) ... ok\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[0m\\r\\n\\u001b[31;1m----------------------------------------------------------------------\\u001b[0m\\r\\n\\u001b[31;1mRan 13 tests in 0.009s\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[0m\\r\\n\\u001b[31;1mOK\\u001b[0m\\r\\n\"}],\"providerCall\":{\"executed\":false},\"providerResult\":{\"executed\":false},\"rawInput\":\"{\\\"command\\\":\\\"python -m unittest discover -s tests -t . -v 2>&1\\\",\\\"workdir\\\":\\\"<WORKSPACE>\\\"}\"},\"time\":{\"start\":1793650102171,\"end\":1793650103308}}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793650103310,\"sessionID\":\"ses_e622012a1ffevCGujeqL0nmS6C\",\"part\":{\"id\":\"prt_19de0940e001QoBWUn7Bfr1gbs\",\"sessionID\":\"ses_e622012a1ffevCGujeqL0nmS6C\",\"messageID\":\"msg_19de07f0e001pLARMzleXl6Fii\",\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"cost\":0.00049182,\"tokens\":{\"input\":368,\"output\":63,\"reasoning\":0,\"cache\":{\"read\":13504,\"write\":0}}}}\n\n{\"type\":\"step_start\",\"timestamp\":1793650107449,\"sessionID\":\"ses_e622012a1ffevCGujeqL0nmS6C\",\"part\":{\"id\":\"prt_19de0a439001O46vvJyMpZOarW\",\"sessionID\":\"ses_e622012a1ffevCGujeqL0nmS6C\",\"messageID\":\"msg_19de09414001HGn2eFqyBVf66N\",\"type\":\"step-start\"}}\n\n{\"type\":\"text\",\"timestamp\":1793650113042,\"sessionID\":\"ses_e622012a1ffevCGujeqL0nmS6C\",\"part\":{\"id\":\"prt_19de09414001HGn2eFqyBVf66N_text-0\",\"sessionID\":\"ses_e622012a1ffevCGujeqL0nmS6C\",\"messageID\":\"msg_19de09414001HGn2eFqyBVf66N\",\"type\":\"text\",\"text\":\"**[goal]** Make the failing integration test pass by fixing the backend to match `docs/` (CONFIG.md and ECONOMY.md), keeping all unit tests intact, no new dependencies.\\n\\n**[action]** Two root-cause fixes:\\n1. `arena_server/config/loader.py`: env vars were applied *before* the JSON file, so the file overrode env. CONFIG.md says precedence is DEFAULTS < file < env (\\\"the environment always wins\\\"). Reordered so env is applied last.\\n2. `arena_server/persistence/codec.py`: `decode()` dropped `credits` when loading a profile, violating ECONOMY.md (\\\"Credits persist in the profile and survive save/load\\\"). Now restores `credits` (default 0 for old blobs).\\n\\n`match_payout` already matched ECONOMY.md (I verified the doc examples 1425→1430, 1585→1590 and the integration case (900+5×75)×1.25=1593.75→1590), so it was left untouched.\\n\\n**[result]** `python -m unittest discover -s tests -t .` → `Ran 13 tests ... OK`, including `tests/integration/test_match_flow.py.test_event_weekend_win_is_paid_and_persisted ... ok`.\\n\\n**[next]** Assumptions stated: docs are the source of truth; `_coerce` string→int/float behavior is intentional and kept; `legacy_payout` stays deprecated and unused. Fixes are minimal, dependency-free, and no test was modified.\",\"time\":{\"start\":1793650103328,\"end\":1793650113042}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793650113042,\"sessionID\":\"ses_e622012a1ffevCGujeqL0nmS6C\",\"part\":{\"id\":\"prt_19de09414001HGn2eFqyBVf66N_step-finish\",\"sessionID\":\"ses_e622012a1ffevCGujeqL0nmS6C\",\"messageID\":\"msg_19de09414001HGn2eFqyBVf66N\",\"type\":\"step-finish\",\"reason\":\"stop\",\"cost\":0.0006693699999999999,\"tokens\":{\"input\":541,\"output\":323,\"reasoning\":24,\"cache\":{\"read\":13824,\"write\":0}}}}\n\n",
+ "checks": [
+  [
+   "existing tests untouched",
+   true
+  ],
+  [
+   "hidden config override and persistence",
+   true
+  ],
+  [
+   "hidden env float wins over file",
+   true
+  ],
+  [
+   "hidden round trip keeps everything",
+   true
+  ],
+  [
+   "hidden half up tie rounds up",
+   true
+  ],
+  [
+   "hidden persisted name survives",
+   true
+  ],
+  [
+   "hidden real environment when env is none",
+   true
+  ],
+  [
+   "existing test suite passes",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 17,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1219,
+  "reasoning_tokens": 324,
+  "largest_turn_tokens": 347
+ },
+ "deliverables": [],
+ "render": null
+}
