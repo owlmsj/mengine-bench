@@ -391,3 +391,9 @@ def test_step_env_drops_parent_session_and_keeps_credentials(monkeypatch, tmp_pa
     assert env["CLAUDE_CONFIG_DIR"] == "test-config"
     assert env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "1"
     assert env["PWD"] == str(tmp_path.resolve())
+
+
+def test_the_workspace_rules_say_to_stop_only_your_own_processes() -> None:
+    # #107: stopping every python process by name killed the runner in the middle of a run.
+    from mengine_bench.runner.task_run import WORKSPACE_RULES
+    assert "stop only the processes you started" in WORKSPACE_RULES
