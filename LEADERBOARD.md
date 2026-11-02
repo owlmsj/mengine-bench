@@ -13,8 +13,9 @@ their Scores use that version's formula and do not compare with the table above.
 | 2 | **86.3** | 99.4 | 19/20 | 85.2 | 56.0 | 16 min 00 s | 0 | n/a | ~$3.30 | 3.84M | 55.4k | 21 | codex codex-cli 0.165.0 | gpt-6.1-sol | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=codex, tier=0, role=default, service_tier=fast, i... | owlmsj | 2026-11-02 | [run](results/2026-11-02_codex_gpt-6.1-sol_low_6a53654b/summary.md) |
 | 3 | **78.1** | 95.0 | 18/20 | 81.2 | 37.7 | 20 min 34 s | 1 | $0.00 (price) | $0.00 (local) | 4.02M | 129.9k | 267 | opencode opencode v2.2.5 | home/qwen38-flash-next-exl3-605-256k | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=local, server_gpu=2x RTX 5090 + 2x RTX 4090, ser... | owlmsj | 2026-11-02 | [run](results/2026-11-02_opencode_home-qwen38-flash-next-exl3-605-256k_low_ace9ae19/summary.md) |
 | 4 | **72.1** | 94.7 | 17/20 | 72.3 | 18.9 | 25 min 17 s | 1 | >= $0.09 (harness) | ~$0.09 | 1.53M | 51.5k | 186 | opencode opencode v2.2.5 | zai/glm-5.3-flash | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=opencode, tier=1, role=default, instructions=~/.c... | owlmsj | 2026-11-02 | [run](results/2026-11-02_opencode_zai-glm-5.3-flash_low_940d8f4b/summary.md) |
+| 5 | **70.4** | 94.5 | 17/20 | 85.0 | 3.9 | 29 min 01 s | 1 | >= $0.18 (harness) | ~$0.20 | 7.43M | 223.1k | 348 | opencode opencode v2.2.5 | deepseek/deepseek-flash | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=opencode, tier=1, role=default, instructions=~/.c... | owlmsj | 2026-11-02 | [run](results/2026-11-02_opencode_deepseek-deepseek-flash_low_9f0de396/summary.md) |
 
-Read as ties, because the higher run keeps its lead in under 80% of 2000 draws of the tasks: #3 and #4 (79%). `mengine-bench analyze` shows the rest.
+Read as ties, because the higher run keeps its lead in under 80% of 2000 draws of the tasks: #3 and #4 (79%), #4 and #5 (47%). `mengine-bench analyze` shows the rest.
 
 ## Bench 1.7 (history)
 

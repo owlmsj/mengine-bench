@@ -1,0 +1,61 @@
+{
+ "task_id": "gd-integration-repo",
+ "prompts": [
+  "An integration test of the Pixel Arena backend in {WS} fails while the unit tests pass. Make the backend behave as {WS}/docs says: fix every cause, not just the symptom this test shows. Existing tests stay as they are, and the project takes no new dependencies."
+ ],
+ "answers": [
+  "[goal] Make the Pixel Arena backend match `docs/CONFIG.md` and `docs/ECONOMY.md` so the failing integration test passes for the right reasons, without touching existing tests or adding dependencies.\n\n[action] Ran the suite first: 13 tests, 1 failure (`AssertionError: 0 != 1690`). Traced the flow and found two independent bugs:\n1. `arena_server/config/loader.py` applied environment variables *before* the JSON file, so the file overrode `ARENA_KILL_BONUS=75` with `50`. Docs put env highest. Env overrides now apply after the file, and they also cover keys that only the file introduces.\n2. `arena_server/persistence/codec.py` decoded `name/level/cosmetics` but silently dropped `credits`, so every loaded profile had 0 credits. Decode now reads `credits`, defaulting to 0 for old saves.\n\nChecked payout against the documented examples: `match_payout` already rounds to the nearest ten with halves up (`1425 -> 1430`, `1585 -> 1590`), and the expected 1590 follows from `(900 + 5*75) * 1.25 = 1593.75`. Left it unchanged. Added `tests/unit/test_config_persistence.py` covering precedence (file>defaults, env>file, env on file-only keys), rounding, and save/load round-trip including the legacy-save case.\n\n[result] `python -m unittest discover -s tests -t . -v` now reports:\n```\ntest_event_weekend_win_is_paid_and_persisted ... ok\n...\nRan 20 tests in 0.025s\n\nOK\n```\nExisting test files are byte-for-byte untouched; no dependencies added.\n\nAssumptions: `ARENA_<KEY>` overrides are limited to keys known from `DEFAULTS` or the loaded file (there is no type information for unknown keys); a missing `credits` field in an old save means 0. I know it is right because the originally failing assertion now passes with the documented 1590, and the new regression tests exercise each root cause separately rather than only the end-to-end symptom.\n\n[next] None required. If more live-ops knobs are added later, add them to `DEFAULTS` so their env overrides are typed."
+ ],
+ "diff": "M arena_server/config/loader.py\nM arena_server/persistence/codec.py\nA tests/unit/test_config_persistence.py\n\n--- arena_server/config/loader.py ---\n\"\"\"Runtime config. Precedence, lowest to highest: DEFAULTS < JSON file < env (docs/CONFIG.md).\"\"\"\n\nimport json\nimport os\n\nfrom arena_server.config.defaults import DEFAULTS\n\n\ndef _coerce(raw, like):\n    return type(like)(raw)\n\n\ndef load_config(file_path=None, env=None):\n    cfg = dict(DEFAULTS)\n    if file_path:\n        with open(file_path, encoding=\"utf-8\") as fh:\n            cfg.update(json.load(fh))\n    env = os.environ if env is None else env\n    for key, current in cfg.items():\n        value = env.get(f\"ARENA_{key.upper()}\")\n        if value is not None:\n            cfg[key] = _coerce(value, current)\n    return cfg\n\n\n--- arena_server/persistence/codec.py ---\nimport json\n\nfrom arena_server.models.profile import Profile\n\n\ndef encode(profile):\n    return json.dumps({\"name\": profile.name, \"level\": profile.level,\n                       \"credits\": profile.credits, \"cosmetics\": profile.cosmetics})\n\n\ndef decode(blob):\n    data = json.loads(blob)\n    return Profile(name=data[\"name\"], level=data.get(\"level\", 1),\n                   credits=data.get(\"credits\", 0), cosmetics=data.get(\"cosmetics\", []))\n\n\n--- tests/unit/test_config_persistence.py ---\nimport json\nimport tempfile\nimport unittest\nfrom pathlib import Path\n\nfrom arena_server.config.loader import load_config\nfrom arena_server.economy.payout import match_payout\nfrom arena_server.models.profile import Profile\nfrom arena_server.persistence.codec import decode\nfrom arena_server.persistence.store import load, save\n\n\nclass ConfigPrecedence(unittest.TestCase):\n    def setUp(self):\n        self._tmp = tempfile.TemporaryDirectory()\n        self.addCleanup(self._tmp.cleanup)\n        self.path = Path(self._tmp.name) / \"live.json\"\n\n    def test_file_overrides_defaults(self):\n        self.path.write_text(json.dumps({\"event_multiplier\": 1.25}))\n        cfg = load_config(self.path, env={})\n        self.assertEqual(cfg[\"event_multiplier\"], 1.25)\n        self.assertEqual(cfg[\"win_base\"], 900)\n\n    def test_env_overrides_file(self):\n        self.path.write_text(json.dumps({\"kill_bonus\": 50}))\n        cfg = load_config(self.path, env={\"ARENA_KILL_BONUS\": \"75\"})\n        self.assertEqual(cfg[\"kill_bonus\"], 75)\n\n    def test_env_can_override_a_key_only_the_file_defines(self):\n        self.path.write_text(json.dumps({\"season\": 1}))\n        cfg = load_config(self.path, env={\"ARENA_SEASON\": \"2\"})\n        self.assertEqual(cfg[\"season\"], 2)\n\n\nclass PayoutRounding(unittest.TestCase):\n    cfg = {\"win_base\": 900, \"loss_base\": 600, \"kill_bonus\": 50,\n           \"event_multiplier\": 1.0}\n\n    def test_rounds_halves_up(self):\n        self.assertEqual(match_payout(True, 10, self.cfg), 1400)  # 1400 exact\n        cfg = dict(self.cfg, win_base=1425)\n        self.assertEqual(match_payout(True, 0, cfg), 1430)\n        cfg = dict(self.cfg, win_base=1585)\n        self.assertEqual(match_payout(True, 0, cfg), 1590)\n\n    def test_rounds_to_nearest_ten(self):\n        cfg = dict(self.cfg, event_multiplier=1.25)\n        # (900 + 5 * 50) * 1.25 = 1437.5 -> 1440\n        self.assertEqual(match_payout(True, 5, cfg), 1440)\n\n\nclass Persistence(unittest.TestCase):\n    def test_credits_survive_save_and_load(self):\n        with tempfile.TemporaryDirectory() as tmp:\n            path = Path(tmp) / \"player.json\"\n            profile = Profile(\"player1\", level=12, credits=1690,\n                              cosmetics=[\"neoplastic_skin\"])\n            save(profile, path)\n            self.assertEqual(load(path), profile)\n\n    def test_old_save_without_credits_loads_zero(self):\n        blob = json.dumps({\"name\": \"old\", \"level\": 3})\n        self.assertEqual(decode(blob).credits, 0)\n\n\nif __name__ == \"__main__\":\n    unittest.main()\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ ls -la\n$ python -m unittest discover -s tests -t . 2>&1 | Select-Object -Last 40\n$ python -m unittest discover -s tests -t . 2>&1 | Select-Object -Last 15\n$ python -m unittest discover -s tests -t . -v 2>&1 | Select-Object -Last 30\n\nStream tail:\ndescribe) ... ok\\u001b[0m\\r\\n\\u001b[31;1mtest_describe (tests.unit.test_store.StoreTest.test_describe) ... ok\\u001b[0m\\r\\n\\u001b[31;1mtest_describe (tests.unit.test_telemetry.TelemetryTest.test_describe) ... ok\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[0m\\r\\n\\u001b[31;1m----------------------------------------------------------------------\\u001b[0m\\r\\n\\u001b[31;1mRan 20 tests in 0.025s\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[0m\\r\\n\\u001b[31;1mOK\\u001b[0m\\r\\n\"}],\"providerCall\":{\"executed\":false},\"providerResult\":{\"executed\":false},\"rawInput\":\"{\\\"command\\\": \\\"python -m unittest discover -s tests -t . -v 2>&1 | Select-Object -Last 30\\\"}\"},\"time\":{\"start\":1793651919806,\"end\":1793651920461}}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793651920463,\"sessionID\":\"ses_e620448d7ffekrR1cPd70xjXYd\",\"part\":{\"id\":\"prt_19dfc4e4f0017kQov0rxheJwL8\",\"sessionID\":\"ses_e620448d7ffekrR1cPd70xjXYd\",\"messageID\":\"msg_19dfc47200015ka6adf4cYREcq\",\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"cost\":0.00017902199999999998,\"tokens\":{\"input\":237,\"output\":61,\"reasoning\":77,\"cache\":{\"read\":20224,\"write\":0}}}}\n\n{\"type\":\"step_start\",\"timestamp\":1793651921348,\"sessionID\":\"ses_e620448d7ffekrR1cPd70xjXYd\",\"part\":{\"id\":\"prt_19dfc51c4001OE4uxEdpm9cECg\",\"sessionID\":\"ses_e620448d7ffekrR1cPd70xjXYd\",\"messageID\":\"msg_19dfc4e56001GWM3Oqb17MLl11\",\"type\":\"step-start\"}}\n\n{\"type\":\"text\",\"timestamp\":1793651927574,\"sessionID\":\"ses_e620448d7ffekrR1cPd70xjXYd\",\"part\":{\"id\":\"prt_19dfc4e56001GWM3Oqb17MLl11_text-0\",\"sessionID\":\"ses_e620448d7ffekrR1cPd70xjXYd\",\"messageID\":\"msg_19dfc4e56001GWM3Oqb17MLl11\",\"type\":\"text\",\"text\":\"[goal] Make the Pixel Arena backend match `docs/CONFIG.md` and `docs/ECONOMY.md` so the failing integration test passes for the right reasons, without touching existing tests or adding dependencies.\\n\\n[action] Ran the suite first: 13 tests, 1 failure (`AssertionError: 0 != 1690`). Traced the flow and found two independent bugs:\\n1. `arena_server/config/loader.py` applied environment variables *before* the JSON file, so the file overrode `ARENA_KILL_BONUS=75` with `50`. Docs put env highest. Env overrides now apply after the file, and they also cover keys that only the file introduces.\\n2. `arena_server/persistence/codec.py` decoded `name/level/cosmetics` but silently dropped `credits`, so every loaded profile had 0 credits. Decode now reads `credits`, defaulting to 0 for old saves.\\n\\nChecked payout against the documented examples: `match_payout` already rounds to the nearest ten with halves up (`1425 -> 1430`, `1585 -> 1590`), and the expected 1590 follows from `(900 + 5*75) * 1.25 = 1593.75`. Left it unchanged. Added `tests/unit/test_config_persistence.py` covering precedence (file>defaults, env>file, env on file-only keys), rounding, and save/load round-trip including the legacy-save case.\\n\\n[result] `python -m unittest discover -s tests -t . -v` now reports:\\n```\\ntest_event_weekend_win_is_paid_and_persisted ... ok\\n...\\nRan 20 tests in 0.025s\\n\\nOK\\n```\\nExisting test files are byte-for-byte untouched; no dependencies added.\\n\\nAssumptions: `ARENA_<KEY>` overrides are limited to keys known from `DEFAULTS` or the loaded file (there is no type information for unknown keys); a missing `credits` field in an old save means 0. I know it is right because the originally failing assertion now passes with the documented 1590, and the new regression tests exercise each root cause separately rather than only the end-to-end symptom.\\n\\n[next] None required. If more live-ops knobs are added later, add them to `DEFAULTS` so their env overrides are typed.\",\"time\":{\"start\":1793651920481,\"end\":1793651927574}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793651927574,\"sessionID\":\"ses_e620448d7ffekrR1cPd70xjXYd\",\"part\":{\"id\":\"prt_19dfc4e56001GWM3Oqb17MLl11_step-finish\",\"sessionID\":\"ses_e620448d7ffekrR1cPd70xjXYd\",\"messageID\":\"msg_19dfc4e56001GWM3Oqb17MLl11\",\"type\":\"step-finish\",\"reason\":\"stop\",\"cost\":0.0008336400000000001,\"tokens\":{\"input\":984,\"output\":509,\"reasoning\":532,\"cache\":{\"read\":20480,\"write\":0}}}}\n\n",
+ "checks": [
+  [
+   "existing tests untouched",
+   true
+  ],
+  [
+   "hidden config override and persistence",
+   true
+  ],
+  [
+   "hidden env float wins over file",
+   true
+  ],
+  [
+   "hidden round trip keeps everything",
+   true
+  ],
+  [
+   "hidden half up tie rounds up",
+   true
+  ],
+  [
+   "hidden persisted name survives",
+   true
+  ],
+  [
+   "hidden real environment when env is none",
+   true
+  ],
+  [
+   "existing test suite passes",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 11,
+  "tool_calls": 26,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 2,
+  "file_writes": 3,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 6603,
+  "reasoning_tokens": 3353,
+  "largest_turn_tokens": 1641
+ },
+ "deliverables": [],
+ "render": null
+}

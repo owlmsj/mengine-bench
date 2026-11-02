@@ -1,0 +1,53 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "[goal] Find the repeated hitching in the one-minute capture and the setting changes that remove it inside the owner's constraints.\n\n[action] Parsed `capture/presentmon.csv` (8238 frames, 60 s) and `capture/sensors.csv`, computed avg/p99 from `MsBetweenPresents`, and cross-tabbed every stall against every sensor column and `settings.json`. Wrote `result.json`.\n\n[result]\n- avg_fps 137.3 (1000 / 7.284 ms), 1% low 45.4 FPS (p99 frame time 22.05 ms).\n- 180 frames >15 ms, in 15 blocks of 12 frames, each block 22 ms/frame (~260 ms of lost smoothness) starting at 2.4, 6.4, 10.4 ... 58.4 s: a strict 4.000 s period.\n- Sensor log: `gpu_pcie_link_state` is L1 in exactly those 15 seconds and L0 in all other 45; each L1 sample is 0.4 s *before* its stall starts, so the low-power state leads the hitch. CPU clock (~5.28 GHz), GPU clock (~2.74 GHz) and DPC (~65 us) are normal during stalls.\n- The 43-45 s Defender quick scan (MsMpEng, DPC 420-455 us, disk 80-94%) is a decoy: those seconds hold 144/144/143 frames at ~7 ms, no stall.\n- `result.json`: cause = ASPM L1 on the GPU root port; change = `pcie_aspm_rp1_gpu` from `L1` to `disabled`.\n\n[assumptions] The 1 Hz sensor row is an instantaneous sample for its timestamp; \"disabled\" is the correct ASPM value (not L0s) since any L1 entry is the trigger; the GPU's Gen5 x4 link speed/width is untouched by ASPM, and no BIOS overclock or XMP value is changed, so both fixed constraints hold.\n\n[next] None. Two revisions already done: cross-checked L1 against all 15 event seconds and left `defender_*` untouched because frames show it causes no hitch.\n\nWhat I found and how I know it is right: the hitches are the GPU's PCIe link dropping into ASPM L1 every 4 seconds, and waking it costs ~15 ms across 12 frames. I know it because the event seconds and the L1 seconds are the same 15 values with zero mismatch, the link state is sampled 0.4 s before each stall begins (cause direction), and no other sensor or setting lines up with the 4 s cadence."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"avg_fps\": 137.3,\n  \"low_1pct_fps\": 45.4,\n  \"cause\": \"GPU PCIe ASPM L1 on the GPU root port (pcie_aspm_rp1_gpu = L1) parks the Gen5 x4 link in the low-power L1 state; every 4 s it re-enters L1 and the link retrain on wake adds ~15 ms to 12 consecutive frames (about 22 ms instead of 7 ms, a ~260 ms stall). This happens 15 times in the 60 s capture, at t = 2.4, 6.4, ... 58.4 s. Average FPS stays ~137, but the p99 frame time jumps to ~22 ms, so the 1% low collapses to ~45 FPS. The 1 Hz sensor log confirms it: gpu_pcie_link_state is L1 in exactly the 15 seconds that contain a stall and L0 in the other 45, and each L1 sample is taken 0.4 s before its stall begins, so the low-power state precedes the hitch rather than following it. CPU/GPU clocks, utilisation and DPC latency are normal during those stalls (CPU ~5.28 GHz, GPU ~2.74 GHz, DPC ~65 us); the separate Defender quick-scan at 43-45 s raises DPC to 420-455 us and disk to 80-94%, but those seconds have no dropped frames, so it is not the cause. Disabling ASPM L1 on the GPU root port keeps the link at Gen5 x4 and changes no clock or voltage, so it respects the owner's constraints.\",\n  \"changes\": [\n    {\n      \"setting\": \"pcie_aspm_rp1_gpu\",\n      \"from\": \"L1\",\n      \"to\": \"disabled\"\n    }\n  ]\n}\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ Get-ChildItem -Force -Recurse | Select-Object FullName, Length | Format-Table -AutoSize\n$ Get-Content capture\\presentmon.csv -TotalCount 3; (Get-Content capture\\presentmon.csv | Measure-Object -Line).Lines\n$ python -c \"\nimport csv,statistics\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\nt=[float(r['MsBetweenPresents']) for r in rows]\nprint(len(t),'frames, span',rows[-1]['TimeInSeconds'],'first',rows[0]['TimeInSeconds'])\nimport numpy as np\na=np.array(t)\nprint('mean',a.mean(),'avg_fps',1000/a.\n$ python -c \"\nimport csv,numpy as np\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\nts=np.array([float(r['TimeInSeconds']) for r in rows]); ms=np.array([float(r['MsBetweenPresents']) for r in rows])\nidx=np.where(ms>15)[0]\nprint('hitches',len(idx))\nfor i in idx: print(round(ts[i],3), ms[i])\n\n$ python -c \"\nimport csv,numpy as np\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\nts=np.array([float(r['TimeInSeconds']) for r in rows]); ms=np.array([float(r['MsBetweenPresents']) for r in rows])\nprint('frames',len(ms),'span',ts[-1])\nprint('avg_fps_mean',1000/ms.mean(),'frames/span',len(\n$ python -c \"\nimport json\nd=json.load(open('result.json'))\nprint(sorted(d)); print(d['changes'])\nimport csv,numpy as np\nms=np.array([float(r['MsBetweenPresents']) for r in csv.DictReader(open('capture/presentmon.csv'))])\nprint('avg',round(1000/ms.mean(),1),'p99',round(1000/np.percentile(ms,99),1))\npri\n\nStream tail:\nges', 'low_1pct_fps']\\r\\n[{'setting': 'pcie_aspm_rp1_gpu', 'from': 'L1', 'to': 'disabled'}]\\r\\navg 137.3 p99 45.4\\r\\nperiodic stalls 15\\r\\n\"}],\"providerCall\":{\"executed\":false},\"providerResult\":{\"executed\":false},\"rawInput\":\"{\\\"command\\\": \\\"python -c \\\\\\\"\\\\nimport json\\\\nd=json.load(open('result.json'))\\\\nprint(sorted(d)); print(d['changes'])\\\\nimport csv,numpy as np\\\\nms=np.array([float(r['MsBetweenPresents']) for r in csv.DictReader(open('capture/presentmon.csv'))])\\\\nprint('avg',round(1000/ms.mean(),1),'p99',round(1000/np.percentile(ms,99),1))\\\\nprint('periodic stalls',int((ms>15).sum()//12))\\\\n\\\\\\\"\\\"}\"},\"time\":{\"start\":1793652091342,\"end\":1793652092221}}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793652092222,\"sessionID\":\"ses_e6201c447ffe37TyszQGc8nElX\",\"part\":{\"id\":\"prt_19dfeed3e001pvH1B5HpSpIZV4\",\"sessionID\":\"ses_e6201c447ffe37TyszQGc8nElX\",\"messageID\":\"msg_19dfee41e0012RpeKLJy4MA0Wj\",\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"cost\":0.000218208,\"tokens\":{\"input\":244,\"output\":151,\"reasoning\":48,\"cache\":{\"read\":20736,\"write\":0}}}}\n\n{\"type\":\"step_start\",\"timestamp\":1793652093468,\"sessionID\":\"ses_e6201c447ffe37TyszQGc8nElX\",\"part\":{\"id\":\"prt_19dfef21c001jFi5U2Uv0QHmox\",\"sessionID\":\"ses_e6201c447ffe37TyszQGc8nElX\",\"messageID\":\"msg_19dfeed45001lglHeCsnPcpv2u\",\"type\":\"step-start\"}}\n\n{\"type\":\"text\",\"timestamp\":1793652096768,\"sessionID\":\"ses_e6201c447ffe37TyszQGc8nElX\",\"part\":{\"id\":\"prt_19dfeed45001lglHeCsnPcpv2u_text-0\",\"sessionID\":\"ses_e6201c447ffe37TyszQGc8nElX\",\"messageID\":\"msg_19dfeed45001lglHeCsnPcpv2u\",\"type\":\"text\",\"text\":\"[goal] Find the repeated hitching in the one-minute capture and the setting changes that remove it inside the owner's constraints.\\n\\n[action] Parsed `capture/presentmon.csv` (8238 frames, 60 s) and `capture/sensors.csv`, computed avg/p99 from `MsBetweenPresents`, and cross-tabbed every stall against every sensor column and `settings.json`. Wrote `result.json`.\\n\\n[result]\\n- avg_fps 137.3 (1000 / 7.284 ms), 1% low 45.4 FPS (p99 frame time 22.05 ms).\\n- 180 frames >15 ms, in 15 blocks of 12 frames, each block 22 ms/frame (~260 ms of lost smoothness) starting at 2.4, 6.4, 10.4 ... 58.4 s: a strict 4.000 s period.\\n- Sensor log: `gpu_pcie_link_state` is L1 in exactly those 15 seconds and L0 in all other 45; each L1 sample is 0.4 s *before* its stall starts, so the low-power state leads the hitch. CPU clock (~5.28 GHz), GPU clock (~2.74 GHz) and DPC (~65 us) are normal during stalls.\\n- The 43-45 s Defender quick scan (MsMpEng, DPC 420-455 us, disk 80-94%) is a decoy: those seconds hold 144/144/143 frames at ~7 ms, no stall.\\n- `result.json`: cause = ASPM L1 on the GPU root port; change = `pcie_aspm_rp1_gpu` from `L1` to `disabled`.\\n\\n[assumptions] The 1 Hz sensor row is an instantaneous sample for its timestamp; \\\"disabled\\\" is the correct ASPM value (not L0s) since any L1 entry is the trigger; the GPU's Gen5 x4 link speed/width is untouched by ASPM, and no BIOS overclock or XMP value is changed, so both fixed constraints hold.\\n\\n[next] None. Two revisions already done: cross-checked L1 against all 15 event seconds and left `defender_*` untouched because frames show it causes no hitch.\\n\\nWhat I found and how I know it is right: the hitches are the GPU's PCIe link dropping into ASPM L1 every 4 seconds, and waking it costs ~15 ms across 12 frames. I know it because the event seconds and the L1 seconds are the same 15 values with zero mismatch, the link state is sampled 0.4 s before each stall begins (cause direction), and no other sensor or setting lines up with the 4 s cadence.\",\"time\":{\"start\":1793652092244,\"end\":1793652096768}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793652096768,\"sessionID\":\"ses_e6201c447ffe37TyszQGc8nElX\",\"part\":{\"id\":\"prt_19dfeed45001lglHeCsnPcpv2u_step-finish\",\"sessionID\":\"ses_e6201c447ffe37TyszQGc8nElX\",\"messageID\":\"msg_19dfeed45001lglHeCsnPcpv2u\",\"type\":\"step-finish\",\"reason\":\"stop\",\"cost\":0.00043656,\"tokens\":{\"input\":144,\"output\":586,\"reasoning\":0,\"cache\":{\"read\":21120,\"write\":0}}}}\n\n",
+ "checks": [
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 9,
+  "tool_calls": 10,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 7128,
+  "reasoning_tokens": 4557,
+  "largest_turn_tokens": 2767
+ },
+ "deliverables": [],
+ "render": null
+}
