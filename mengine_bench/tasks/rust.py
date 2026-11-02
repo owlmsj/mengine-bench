@@ -139,7 +139,8 @@ fn opposite_transfers_do_not_hang() {
             .into_iter()
             .map(|(from, to)| {
                 let board = board.clone();
-                thread::spawn(move || (0..20_000).for_each(|_| board.transfer(from, to, 1)))
+                // 20,000 rounds caught the planted deadlock in 3 runs of 8, 200,000 in 8 of 8 (#107).
+                thread::spawn(move || (0..200_000).for_each(|_| board.transfer(from, to, 1)))
             })
             .collect();
         workers.into_iter().for_each(|worker| worker.join().unwrap());
