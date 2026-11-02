@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fuji at Dusk</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;height:100%;background:#1b1633;overflow:hidden}
+canvas{display:block}
+#cap{position:fixed;left:28px;bottom:22px;color:#ffe9ee;font:500 15px "Shippori Mincho",serif;letter-spacing:.3em;opacity:.7;text-shadow:0 1px 8px #2a1a40;pointer-events:none}
+</style>
+</head>
+<body>
+<div id="cap">富士 · 忠霊塔 · 黄昏</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+// deterministic randomness / noise (no Math.random: identical scene every load)
+let seed = 7;
+const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+const hash = (x, y) => { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); };
+const vnoise = (x, y) => {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  return (hash(xi, yi) * (1 - u) + hash(xi + 1, yi) * u) * (1 - v) + (hash(xi, yi + 1) * (1 - u) + hash(xi + 1, yi + 1) * u) * v;
+};
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0xb56a8c, 90, 420);
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.5, 900);
+
+// sky dome
+const sky = new THREE.Mesh(new THREE.SphereGeometry(600, 32, 16), new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, fog: false,
+  vertexShader: 'varying vec3 p; void main(){p=normalize(position);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
+  fragmentShader: `varying vec3 p;
+  void main(){
+    float h=clamp(p.y,-.1,1.);
+    vec3 top=vec3(.10,.09,.28), mid=vec3(.55,.30,.55), low=vec3(1.,.55,.42);
+    vec3 c=mix(low,mid,smoothstep(0.,.18,h)); c=mix(c,top,smoothstep(.15,.7,h));
+    float g=pow(max(dot(p,normalize(vec3(.1,.05,-1.))),0.),12.);
+    c+=vec3(.9,.4,.2)*g*.55;
+    gl_FragColor=vec4(c,1.);
+  }`
+}));
+scene.add(sky);
+
+// stars
+const starMat = new THREE.PointsMaterial({ color: 0xfff2f8, size: 2.2, sizeAttenuation: false, transparent: true, opacity: 0.8, fog: false, depthWrite: false });
+{
+  const n = 400, a = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const th = rnd() * Math.PI * 2, ph = Math.acos(0.15 + rnd() * 0.85);
+    a.set([500 * Math.sin(ph) * Math.cos(th), 500 * Math.cos(ph), 500 * Math.sin(ph) * Math.sin(th)], i * 3);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(a, 3));
+  scene.add(new THREE.Points(g, starMat));
+}
+
+// lights
+scene.add(new THREE.HemisphereLight(0xc9a0e0, 0x5a3a6a, 1.5));
+const sun = new THREE.DirectionalLight(0xffa070, 2.2);
+sun.position.set(-40, 25, -60); scene.add(sun);
+const fill = new THREE.DirectionalLight(0xffc0d8, 1.0);
+fill.position.set(20, 30, 50); scene.add(fill);
+
+// flat-shaded helper: per-triangle colour from centroid
+function lowPoly(geo, colorFn) {
+  const g = geo.index ? geo.toNonIndexed() : geo;
+  const pos = g.attributes.position, col = new Float32Array(pos.count * 3), c = new THREE.Color();
+  for (let i = 0; i < pos.count; i += 3) {
+    const cx = (pos.getX(i) + pos.getX(i + 1) + pos.getX(i + 2)) / 3, cy = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3, cz = (pos.getZ(i) + pos.getZ(i + 1) + pos.getZ(i + 2)) / 3;
+    colorFn(c, cx, cy, cz);
+    for (let k = 0; k < 3; k++) c.toArray(col, (i + k) * 3);
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.computeVertexNormals();
+  return g;
+}
+const vcMat = new THREE.MeshStandardMaterial({ vertexColors: true, flatShading: true, roughness: 1 });
+
+// Mount Fuji
+const FUJI_H = 62;
+function buildFuji() {
+  const geo = new THREE.CylinderGeometry(3.5, 62, FUJI_H, 56, 18, true);
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const t = (y + FUJI_H / 2) / FUJI_H;
+    const ang = Math.atan2(z, x), r = Math.hypot(x, z);
+    const ridgeN = (vnoise(ang * 5, t * 6) - 0.5) * 24 * t * (1 - t) + (vnoise(ang * 11 + 3, t * 14) - 0.5) * 2.2;
+    const rr = r * (1 - 0.12 * Math.sin(t * Math.PI)) + ridgeN;
+    p.setXYZ(i, Math.cos(ang) * rr, y, Math.sin(ang) * rr);
+  }
+  const g = lowPoly(geo, (c, x, y, z) => {
+    const t = (y + FUJI_H / 2) / FUJI_H;
+    const snowLine = 0.62 + (vnoise(Math.atan2(z, x) * 7 + 1, 2) - 0.5) * 0.22 + (vnoise(x * 0.3, z * 0.3) - 0.5) * 0.06;
+    if (t > snowLine) c.setHSL(0.93, 0.35, 0.82 + (vnoise(x, z) - 0.5) * 0.08);
+    else c.setHSL(0.72 - t * 0.05, 0.28, 0.30 + t * 0.12 + (vnoise(x * 0.4, z * 0.4) - 0.5) * 0.07);
+  });
+  return new THREE.Mesh(g, vcMat);
+}
+const fuji = buildFuji();
+fuji.position.set(10, -3 + FUJI_H / 2, -105);
+scene.add(fuji);
+const fujiMirror = fuji.clone();
+fujiMirror.scale.y = -1; fujiMirror.position.y = -4 - fuji.position.y;
+scene.add(fujiMirror);
+
+// distant dark ridges
+function ridge(x, z, w, h, hue, l) {
+  const geo = new THREE.ConeGeometry(w, h, 7, 3);
+  const m = new THREE.Mesh(lowPoly(geo, (c, a, b, d) => c.setHSL(hue, .3, l + (vnoise(a, d) - .5) * .05)), vcMat);
+  m.position.set(x, -3 + h / 2 - 0.5, z); scene.add(m);
+}
+for (let i = 0; i < 9; i++) {
+  const s = i % 2 ? 1 : -1;
+  ridge(s * (60 + i * 18) + rnd() * 10, -105 - rnd() * 25, 26 + rnd() * 14, 16 + rnd() * 14, 0.76, 0.2);
+}
+
+// lake
+const lake = new THREE.Mesh(new THREE.PlaneGeometry(900, 500),
+  new THREE.MeshBasicMaterial({ color: 0x7a4f86, transparent: true, opacity: 0.72 }));
+lake.rotation.x = -Math.PI / 2; lake.position.set(0, -2, -250);
+scene.add(lake);
+const glint = [];
+for (let i = 0; i < 26; i++) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(2 + rnd() * 5, 0.25), new THREE.MeshBasicMaterial({ color: 0xffc9a0, transparent: true, opacity: 0.4 }));
+  m.rotation.x = -Math.PI / 2; m.position.set(-40 + rnd() * 80, -1.95, -40 - rnd() * 90); m.userData.ph = rnd() * 6; scene.add(m); glint.push(m);
+}
+
+// terrain: foreground shore falling to the lake
+const terrH = (x, z) => -3 + smooth(-36, -8, z) * 4.2 + smooth(-8, 20, z) * 1.5 + (vnoise(x * .08, z * .08) - .5) * 2.2 * smooth(-30, -5, z)
+  + smooth(14, 40, Math.abs(x)) * 5 * smooth(-30, 10, z);
+{
+  const geo = new THREE.PlaneGeometry(260, 140, 70, 38);
+  geo.rotateX(-Math.PI / 2);
+  const p = geo.attributes.position;
+  for (let i = 0; i < p.count; i++) p.setY(i, terrH(p.getX(i), p.getZ(i) - 10));
+  const g = lowPoly(geo, (c, x, y, z) => c.setHSL(0.27 + (vnoise(x * .2, z * .2) - .5) * .06, 0.25, 0.22 + (vnoise(x * .5, z * .5) - .5) * .06 + smooth(-3, 3, y) * .03));
+  const t = new THREE.Mesh(g, vcMat); t.position.z = -10; scene.add(t);
+}
+
+// Chureito pagoda, five tiers
+const redMat = new THREE.MeshStandardMaterial({ color: 0xc8302c, flatShading: true, roughness: .8 });
+const darkMat = new THREE.MeshStandardMaterial({ color: 0x3a3441, flatShading: true, roughness: .9 });
+const woodMat = new THREE.MeshStandardMaterial({ color: 0x4b2e2a, flatShading: true, roughness: .9 });
+const stoneMat = new THREE.MeshStandardMaterial({ color: 0x8a8296, flatShading: true, roughness: 1 });
+const goldMat = new THREE.MeshStandardMaterial({ color: 0xe8b84a, flatShading: true, roughness: .5, emissive: 0x4a3000 });
+const pagoda = new THREE.Group();
+{
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(5.2, 6.4, 1.6, 4), stoneMat);
+  base.rotation.y = Math.PI / 4; base.position.y = 0.8; pagoda.add(base);
+  let y = 1.6, w = 3.5;
+  for (let i = 0; i < 5; i++) {
+    const bh = 1.15 - i * 0.04;
+    const body = new THREE.Mesh(new THREE.BoxGeometry(w, bh, w), redMat); body.position.y = y + bh / 2; pagoda.add(body);
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(w + .15, .12, w + .15), woodMat); rail.position.y = y + .06; pagoda.add(rail);
+    const door = new THREE.Mesh(new THREE.BoxGeometry(w * .28, bh * .6, w + .05), woodMat); door.position.y = y + bh * .45; pagoda.add(door);
+    y += bh;
+    const rw = w * 1.55, rh = 0.8;
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(rw / Math.SQRT2, rh, 4), darkMat);
+    roof.rotation.y = Math.PI / 4; roof.position.y = y + rh / 2; pagoda.add(roof);
+    for (let k = 0; k < 4; k++) {
+      const a = Math.PI / 4 + k * Math.PI / 2, tip = new THREE.Mesh(new THREE.ConeGeometry(.13, .4, 4), darkMat);
+      tip.position.set(Math.cos(a) * rw / 2, y + .08, Math.sin(a) * rw / 2); tip.rotation.z = Math.PI; pagoda.add(tip);
+    }
+    y += rh * 0.55; w *= 0.84;
+  }
+  const spire = new THREE.Mesh(new THREE.CylinderGeometry(.04, .09, 2.2, 5), goldMat); spire.position.y = y + 1.1; pagoda.add(spire);
+  for (let k = 0; k < 5; k++) { const r = new THREE.Mesh(new THREE.TorusGeometry(.22 - k * .03, .04, 4, 6), goldMat); r.rotation.x = Math.PI / 2; r.position.y = y + .5 + k * .35; pagoda.add(r); }
+  const lg = new THREE.PointLight(0xffa860, 8, 12); lg.position.set(0, 2, 3); pagoda.add(lg);
+  for (let i = 0; i < 9; i++) { const s = new THREE.Mesh(new THREE.BoxGeometry(3, .25, 1), stoneMat); s.position.set(0, 1.5 - i * 0.2, 5 + i * 0.9); pagoda.add(s); }
+}
+pagoda.position.set(-5, terrH(-5, 0), 0);
+pagoda.scale.setScalar(1.15);
+scene.add(pagoda);
+
+// cherry trees
+const trunkMat = new THREE.MeshStandardMaterial({ color: 0x4a3340, flatShading: true, roughness: 1 });
+const blossoms = [];
+function cherry(x, z, s) {
+  const g = new THREE.Group();
+  const tr = new THREE.Mesh(new THREE.CylinderGeometry(.18 * s, .32 * s, 3.2 * s, 6), trunkMat); tr.position.y = 1.6 * s; g.add(tr);
+  for (let b = 0; b < 2; b++) {
+    const br = new THREE.Mesh(new THREE.CylinderGeometry(.08 * s, .14 * s, 2 * s, 5), trunkMat);
+    br.position.set((b ? 1 : -1) * .6 * s, 3.4 * s, 0); br.rotation.z = (b ? -1 : 1) * .6; g.add(br);
+  }
+  const crown = new THREE.Group(); crown.position.y = 3.6 * s;
+  const n = 7 + Math.floor(rnd() * 3);
+  for (let i = 0; i < n; i++) {
+    const geo = new THREE.IcosahedronGeometry((1.3 + rnd() * .9) * s, 0);
+    const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: new THREE.Color().setHSL(0.94 + rnd() * .04, .75, .78 + rnd() * .1), flatShading: true, roughness: .9, emissive: 0x3a1020 }));
+    const a = rnd() * 6.28, rr = rnd() * 1.9 * s;
+    m.position.set(Math.cos(a) * rr, (rnd() * 1.6 - .2) * s, Math.sin(a) * rr);
+    m.rotation.set(rnd() * 3, rnd() * 3, rnd() * 3); crown.add(m);
+  }
+  g.add(crown); g.position.set(x, terrH(x, z), z); g.rotation.y = rnd() * 6;
+  g.userData.ph = rnd() * 6; g.userData.crown = crown;
+  scene.add(g); blossoms.push(g);
+}
+[[-14, 3, 1.1], [-19, 8, 1.2], [-11, 14, 1.0], [9, 5, 1.1], [14, 9, 1.2], [19, 2, 1.1], [24, 11, 1.2], [-24, 0, 1.0], [-2, -9, 0.9], [5, -12, 0.9]].forEach(a => cherry(a[0], a[1], a[2]));
+for (let i = 0; i < 10; i++) cherry(-34 + rnd() * 68, -16 + rnd() * 6, 0.6 + rnd() * .4);
+
+// low poly clouds
+const clouds = [];
+for (let i = 0; i < 7; i++) {
+  const g = new THREE.Group();
+  for (let k = 0; k < 4; k++) {
+    const m = new THREE.Mesh(new THREE.IcosahedronGeometry(4 + rnd() * 4, 0), new THREE.MeshBasicMaterial({ color: new THREE.Color().setHSL(rnd() * .05, .6, .75), flatShading: true, transparent: true, opacity: .75 }));
+    m.scale.set(2.2, .5, 1); m.position.set(k * 7 - 10, rnd() * 1.5, rnd() * 3); g.add(m);
+  }
+  g.position.set(-160 + i * 55, 38 + rnd() * 25, -190 - rnd() * 40); g.userData.sp = 0.5 + rnd() * .5;
+  scene.add(g); clouds.push(g);
+}
+
+// falling petals
+const PN = 500, pPos = new Float32Array(PN * 3), pVel = [];
+for (let i = 0; i < PN; i++) { pPos.set([-40 + rnd() * 80, rnd() * 25, -10 + rnd() * 40], i * 3); pVel.push([rnd() * 6, 0.5 + rnd() * .7, rnd() * 6]); }
+const petalGeo = new THREE.BufferGeometry(); petalGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+scene.add(new THREE.Points(petalGeo, new THREE.PointsMaterial({ color: 0xffc4d8, size: 0.12, transparent: true, opacity: .9, depthWrite: false })));
+
+// loop
+const clock = new THREE.Clock();
+let last = 0;
+function frame() {
+  const t = clock.getElapsedTime(), dt = Math.min(t - last, 0.05); last = t;
+  const m = reduceMotion ? 0 : 1;
+  camera.position.set(4 + Math.sin(t * 0.07 * m) * 4, 8 + Math.sin(t * 0.11 * m) * 0.5, 30);
+  camera.lookAt(2, 14, -100);
+  clouds.forEach(c => { c.position.x += 0.02 * c.userData.sp * m; if (c.position.x > 220) c.position.x = -220; });
+  blossoms.forEach(b => { b.userData.crown.rotation.z = Math.sin(t * .6 + b.userData.ph) * .02 * m; b.userData.crown.rotation.x = Math.cos(t * .5 + b.userData.ph) * .02 * m; });
+  glint.forEach(g => g.material.opacity = 0.15 + 0.3 * Math.abs(Math.sin(t * .8 * m + g.userData.ph)));
+  starMat.opacity = 0.65 + 0.2 * Math.sin(t * 1.3 * m);
+  if (m) {
+    for (let i = 0; i < PN; i++) {
+      const v = pVel[i];
+      pPos[i * 3] += (0.5 + Math.sin(t + v[0]) * .6) * dt * 1.5;
+      pPos[i * 3 + 1] -= v[1] * dt;
+      pPos[i * 3 + 2] += Math.cos(t * .7 + v[2]) * dt * .5;
+      if (pPos[i * 3 + 1] < terrH(pPos[i * 3], pPos[i * 3 + 2])) { pPos[i * 3 + 1] = 22 + v[0]; pPos[i * 3] = -40 + (v[2] / 6) * 80; }
+    }
+    petalGeo.attributes.position.needsUpdate = true;
+  }
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+addEventListener('resize', () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
+frame();
+</script>
+</body>
+</html>
