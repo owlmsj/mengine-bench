@@ -1,0 +1,61 @@
+{
+ "task_id": "gd-integration-repo",
+ "prompts": [
+  "An integration test of the Pixel Arena backend in {WS} fails while the unit tests pass. Make the backend behave as {WS}/docs says: fix every cause, not just the symptom this test shows. Existing tests stay as they are, and the project takes no new dependencies."
+ ],
+ "answers": [
+  "Three causes identified. Applying fixes:\n\nDone. Everything is green and verified.\n\n## What I found\n\nThe integration test computes `(900 + 5×75) × 1.25 = 1593.75 → 1590` credits on top of 100, persisted across save/load. Three separate causes each broke that flow — the test only surfaced their combined effect:\n\n1. **Config precedence inverted** (`arena_server/config/loader.py`) — env vars were applied *before* the JSON file, so the file clobbered `ARENA_KILL_BONUS` (75 became 50 → payout 1440). `docs/CONFIG.md` says env always wins. Fix: apply file first, then env on top. I also widened the env scan from `DEFAULTS` keys to merged `cfg` keys and coerce against the current value, so a key introduced only by the file still gets its env override and the right type.\n\n2. **Credits dropped on load** (`arena_server/persistence/codec.py`) — `encode` wrote `credits` but `decode` never read it back, so profiles silently reset to 0, violating \"credits … survive save/load\". Fix: restore `credits` in `decode`.\n\n3. **Rounding was float-fragile** (`arena_server/economy/payout.py`) — `math.floor(raw/10 + 0.5)` happens to work for exactly-representable halves but binary float drift (e.g. a raw of `…4.4999999` from a percentage multiplier) rounds halves the wrong way, violating \"halves always rounding up\". Fix: `Decimal` with `ROUND_HALF_UP` to the nearest ten. (Stdlib only — no new dependencies; `legacy_payout.py` is documented as unused by live economy, so I left it.)\n\n## How I know it's right\n\n- `python -m unittest discover -s tests -t .` → **13 tests, OK** (integration included); tests were not modified.\n- Direct checks against the docs: env beats file with file supplying `event_multiplier` (`kill_bonus=75` in merged cfg), doc example `1585 → 1590`, exact-half and float-drift edge inputs round up correctly, and the integration test passes run in isolation.\n\n**Assumptions:** the failing test is the match flow above; \"fix every cause\" means all deviations from `docs/` on this path, not speculative modules (untouched per-module files like `store/`, `telemetry/` have their own passing unit tests)."
+ ],
+ "diff": "M arena_server/config/loader.py\nM arena_server/economy/payout.py\nM arena_server/persistence/codec.py\n\n--- arena_server/config/loader.py ---\n\"\"\"Runtime config. Precedence, lowest to highest: DEFAULTS < JSON file < env (docs/CONFIG.md).\"\"\"\n\nimport json\nimport os\n\nfrom arena_server.config.defaults import DEFAULTS\n\n\ndef _coerce(raw, like):\n    return type(like)(raw)\n\n\ndef load_config(file_path=None, env=None):\n    cfg = dict(DEFAULTS)\n    if file_path:\n        with open(file_path, encoding=\"utf-8\") as fh:\n            cfg.update(json.load(fh))\n    env = os.environ if env is None else env\n    for key in cfg:\n        value = env.get(f\"ARENA_{key.upper()}\")\n        if value is not None:\n            cfg[key] = _coerce(value, cfg[key])\n    return cfg\n\n\n--- arena_server/economy/payout.py ---\n\"\"\"Match payout. Rules live in docs/ECONOMY.md.\"\"\"\n\nfrom decimal import ROUND_HALF_UP, Decimal\n\n\ndef match_payout(won, kills, cfg):\n    base = cfg[\"win_base\"] if won else cfg[\"loss_base\"]\n    raw = (base + kills * cfg[\"kill_bonus\"]) * cfg[\"event_multiplier\"]\n    # Round to the nearest ten, halves always up (docs/ECONOMY.md). Decimal\n    # avoids binary-float drift, e.g. 1437.5*... landing just under a half.\n    rounded = (Decimal(str(raw)) / 10).quantize(Decimal(\"1\"), rounding=ROUND_HALF_UP)\n    return int(rounded) * 10\n\n\n--- arena_server/persistence/codec.py ---\nimport json\n\nfrom arena_server.models.profile import Profile\n\n\ndef encode(profile):\n    return json.dumps({\"name\": profile.name, \"level\": profile.level,\n                       \"credits\": profile.credits, \"cosmetics\": profile.cosmetics})\n\n\ndef decode(blob):\n    data = json.loads(blob)\n    return Profile(name=data[\"name\"], level=data.get(\"level\", 1),\n                   credits=data.get(\"credits\", 0), cosmetics=data.get(\"cosmetics\", []))\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ ls; echo ---; ls docs 2>/dev/null\n$ python -m unittest discover -s tests -t . 2>&1\n$ python -m unittest tests.integration.test_match_flow -v 2>&1\npython -c \"import json,tempfile;from pathlib import Path\nfrom arena_server.economy.payout import match_payout\nfrom arena_server.config.loader import load_config\ncfg={'win_base':900,'loss_base':600,'kill_bonus':50,'event_multiplier':1.0}\npr\n\nStream tail:\nnput\":\"{\\\"command\\\": \\\"python -m unittest tests.integration.test_match_flow -v 2>&1\\\\npython -c \\\\\\\"import json,tempfile;from pathlib import Path\\\\nfrom arena_server.economy.payout import match_payout\\\\nfrom arena_server.config.loader import load_config\\\\ncfg={'win_base':900,'loss_base':600,'kill_bonus':50,'event_multiplier':1.0}\\\\nprint('1425->',match_payout(True,5,{**cfg,'event_multiplier':1.14}))  # (900+250)*1.14=1311 hmm\\\\nprint('doc 1585->',match_payout(True,0,{**cfg,'win_base':1268,'event_multiplier':1.25}))\\\\nprint('float-edge 285*1.05=',match_payout(True,0,{**cfg,'win_base':285.7142857142857,'event_multiplier':1.0}))\\\\nwith tempfile.TemporaryDirectory() as t:\\\\n    f=Path(t)/'c.json'; f.write_text(json.dumps({'kill_bonus':50,'event_multiplier':1.25}))\\\\n    c=load_config(f,env={'ARENA_KILL_BONUS':'75'}); print('cfg',c)\\\\n    assert c['kill_bonus']==75 and c['event_multiplier']==1.25\\\\\\\"\\\"}\"},\"time\":{\"start\":1793589435510,\"end\":1793589441415}}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793589441416,\"sessionID\":\"ses_e65be63cdffe7X56IjpBNFOOkc\",\"part\":{\"id\":\"prt_19a42f3880015sd03xCvt3svex\",\"sessionID\":\"ses_e65be63cdffe7X56IjpBNFOOkc\",\"messageID\":\"msg_19a42c9e4001ObFFZA4QxDjQf6\",\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"cost\":0.00050758,\"tokens\":{\"input\":6,\"output\":334,\"reasoning\":146,\"cache\":{\"read\":14880,\"write\":215}}}}\n\n{\"type\":\"step_start\",\"timestamp\":1793589443178,\"sessionID\":\"ses_e65be63cdffe7X56IjpBNFOOkc\",\"part\":{\"id\":\"prt_19a42fa6a001cKjQkXN3IjkQUE\",\"sessionID\":\"ses_e65be63cdffe7X56IjpBNFOOkc\",\"messageID\":\"msg_19a42f38d001v4iEFxxgRmRrKt\",\"type\":\"step-start\"}}\n\n{\"type\":\"text\",\"timestamp\":1793589462477,\"sessionID\":\"ses_e65be63cdffe7X56IjpBNFOOkc\",\"part\":{\"id\":\"prt_19a42f38d001v4iEFxxgRmRrKt_text-0\",\"sessionID\":\"ses_e65be63cdffe7X56IjpBNFOOkc\",\"messageID\":\"msg_19a42f38d001v4iEFxxgRmRrKt\",\"type\":\"text\",\"text\":\"Done. Everything is green and verified.\\n\\n## What I found\\n\\nThe integration test computes `(900 + 5×75) × 1.25 = 1593.75 → 1590` credits on top of 100, persisted across save/load. Three separate causes each broke that flow — the test only surfaced their combined effect:\\n\\n1. **Config precedence inverted** (`arena_server/config/loader.py`) — env vars were applied *before* the JSON file, so the file clobbered `ARENA_KILL_BONUS` (75 became 50 → payout 1440). `docs/CONFIG.md` says env always wins. Fix: apply file first, then env on top. I also widened the env scan from `DEFAULTS` keys to merged `cfg` keys and coerce against the current value, so a key introduced only by the file still gets its env override and the right type.\\n\\n2. **Credits dropped on load** (`arena_server/persistence/codec.py`) — `encode` wrote `credits` but `decode` never read it back, so profiles silently reset to 0, violating \\\"credits … survive save/load\\\". Fix: restore `credits` in `decode`.\\n\\n3. **Rounding was float-fragile** (`arena_server/economy/payout.py`) — `math.floor(raw/10 + 0.5)` happens to work for exactly-representable halves but binary float drift (e.g. a raw of `…4.4999999` from a percentage multiplier) rounds halves the wrong way, violating \\\"halves always rounding up\\\". Fix: `Decimal` with `ROUND_HALF_UP` to the nearest ten. (Stdlib only — no new dependencies; `legacy_payout.py` is documented as unused by live economy, so I left it.)\\n\\n## How I know it's right\\n\\n- `python -m unittest discover -s tests -t .` → **13 tests, OK** (integration included); tests were not modified.\\n- Direct checks against the docs: env beats file with file supplying `event_multiplier` (`kill_bonus=75` in merged cfg), doc example `1585 → 1590`, exact-half and float-drift edge inputs round up correctly, and the integration test passes run in isolation.\\n\\n**Assumptions:** the failing test is the match flow above; \\\"fix every cause\\\" means all deviations from `docs/` on this path, not speculative modules (untouched per-module files like `store/`, `telemetry/` have their own passing unit tests).\",\"time\":{\"start\":1793589441424,\"end\":1793589462477}}}\n\n",
+ "checks": [
+  [
+   "existing tests untouched",
+   true
+  ],
+  [
+   "hidden config override and persistence",
+   true
+  ],
+  [
+   "hidden env float wins over file",
+   true
+  ],
+  [
+   "hidden round trip keeps everything",
+   true
+  ],
+  [
+   "hidden half up tie rounds up",
+   true
+  ],
+  [
+   "hidden persisted name survives",
+   true
+  ],
+  [
+   "hidden real environment when env is none",
+   true
+  ],
+  [
+   "existing test suite passes",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 13,
+  "tool_calls": 23,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 1,
+  "file_writes": 3,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 3504,
+  "reasoning_tokens": 1897,
+  "largest_turn_tokens": 877
+ },
+ "deliverables": [],
+ "render": null
+}

@@ -1,0 +1,75 @@
+{
+ "task_id": "cmp-handoff",
+ "prompts": [
+  "You are handing this debugging work to a colleague who will never see {WS}/session/transcript.md. Write {WS}/HANDOFF.md, at most 1000 characters, so they can carry on from where it really stands.",
+  "You just took over this work, and {WS}/HANDOFF.md is all you have. Where was the recipe applied, what are the final decode speed and VRAM, which quantization was discarded, what is still pending, and which command measures it again? Record it in {WS}/result.json: file_line, final_decode, final_vram_mib, discarded_quant, pending, measure_command."
+ ],
+ "answers": [
+  "The transcript is the only artifact here — mostly filler steps with a few substantive ones. I'll distill the real state into HANDOFF.md.\n\n`./HANDOFF.md` is written (994 chars, under the 1000 cap).\n\n**What I found:** The transcript's 225 lines are mostly repeated filler steps; the actual work distills to five substantive entries. The task — measure local-9b Q5 at 128k context — is complete: the initial 37.8 t/s / 7881 MiB reading was invalid because 7881 MiB is the WDDM ceiling and the Shared counter showed 1494 MiB of spill to system RAM. With `--no-mmproj-offload -ub 512` the spill disappears: **7697 MiB, 38.0 t/s (median of 3)**, and that recipe was applied to `scripts/start_server.ps1:165` and `profiles/local/local-9b.json`. Q6_K doesn't fit; Q4_K_M is the fallback. Left open: a stale README reference to deleted `check_vision.ps1`, an unchecked scratchpad temp-file naming note, and post-apply verification.\n\n**How I know it's right:** Every number and pending item in the handoff is a verbatim extraction from the transcript's substantive lines (steps 30, 44–45, 42, 44, 63, 74, 222 — the only entries that aren't duplicated boilerplate); I cross-checked the two candidate \"final\" measurements and kept the one consistent with the spill diagnosis. I also verified the file's character count with PowerShell after each trim, confirming the final 994 ≤ 1000. I assumed the llama.cpp repo referenced there lives elsewhere, since this folder contains only the transcript — the handoff states that explicitly.",
+  "The workspace contains only `HANDOFF.md` (the referenced transcript and repo aren't here), so I'll answer from the handoff document itself.\n\nDone — `result.json` is written. Here's what I found and why I trust it:\n\n**Findings (from `HANDOFF.md`, the only file besides `AGENTS.md` in this workspace):**\n\n- **Where the recipe was applied:** `scripts/start_server.ps1:165` (the local9 block), plus `profiles/local/local-9b.json` — both diffs reviewed per the handoff.\n- **Final decode speed:** **38.0 t/s** (median of 3 consistent runs), replacing the invalid 37.8 t/s baseline.\n- **Final VRAM:** **7697 MiB** dedicated, zero shared-memory spill (baseline's 7881 MiB was invalid due to a WDDM ceiling with 1494 MiB spilling to RAM).\n- **Discarded quantization:** **Q6_K** — at 7.03 GiB it can't fit 128k. Note: the *Q5 baseline run* was dismissed, but Q5 itself ships with the fix (`--no-mmproj-offload -ub 512`), and Q4_K_M was kept as fallback — so Q6_K is the only quant genuinely discarded.\n- **Still pending:** ① evals README cites the deleted `check_vision.ps1`, ② scratchpad temp-file names never reviewed, ③ post-apply re-measurement from a fresh profile start.\n- **Measure command:** `pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`\n\n**How I know it's right / assumptions:**\n- I checked the whole directory tree first: `session/transcript.md` and the repo referenced by the handoff are **not present**, so the primary evidence can't be independently re-verified here — I treated the handoff as the authoritative record, which is the stated situation (\"Full evidence: session/transcript.md\"; \"Repo lives elsewhere\").\n- The numbers are internally consistent: the handoff's \"Why it's right\" section explains the baseline dismissal (spill counter) and the final figures (3 runs, under ceiling, zero shared), and the \"Ship this\" line pins 7697 MiB / 38.0 t/s as final.\n- I disambiguated \"discarded\" carefully rather than taking the first number shown (37.8 t/s Q5), since that quant ships with a fix."
+ ],
+ "diff": "A HANDOFF.md\nA result.json\nD session/transcript.md\n\n--- HANDOFF.md ---\n# HANDOFF: local-9b @ 128k (llama.cpp)\n\nBrief: measure local-9b Q5 at 128k. Done; fix applied. Full evidence: session/transcript.md (outputs elided). Repo lives elsewhere.\n\n## Findings\n- Q5 @128k baseline: 37.8 t/s, 7881 MiB — INVALID: WDDM ceiling; Shared counter showed 1494 MiB spill to RAM.\n- With --no-mmproj-offload -ub 512: spill gone. Final: 7697 MiB, 38.0 t/s (median of 3). Ship this.\n- Q6_K (7.03 GiB) can't fit 128k. Q4_K_M fits (7305 MiB, 40.4 t/s) — fallback only.\n- Repro: pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024\n\n## Applied\nRecipe in scripts/start_server.ps1:165 (local9 block) + profiles/local/local-9b.json; diffs reviewed.\n\n## Left\n1. evals README cites deleted check_vision.ps1.\n2. Scratchpad temp-file names: flagged repeatedly, never reviewed.\n3. Re-measure from a fresh profile start — post-apply verify outstanding.\n\n## Why it's right\nBaseline dismissed via the spill counter; fix = 3 consistent runs, dedicated VRAM under ceiling, zero shared.\n\n\n--- result.json ---\n{\n  \"file_line\": \"scripts/start_server.ps1:165 (local9 block), also mirrored in profiles/local/local-9b.json\",\n  \"final_decode\": \"38.0 t/s (median of 3 runs, Q5 @ 128k with --no-mmproj-offload -ub 512)\",\n  \"final_vram_mib\": 7697,\n  \"discarded_quant\": \"Q6_K (7.03 GiB) — cannot fit a 128k context; Q4_K_M kept only as fallback, the 37.8 t/s Q5 baseline was dismissed for WDDM spill, not discarded as a quant\",\n  \"pending\": [\n    \"evals README cites deleted check_vision.ps1\",\n    \"Scratchpad temp-file names flagged repeatedly, never reviewed\",\n    \"Re-measure from a fresh profile start — post-apply verification outstanding\"\n  ],\n  \"measure_command\": \"pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024\"\n}\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ dir /s /b 2>nul | more; Get-ChildItem -Recurse -Name | Select-Object -First 50\n$ powershell -Command \"(Get-Content -Raw '<WORKSPACE>\\HANDOFF.md').Length\"\n$ powershell -NoProfile -Command \"$s = [IO.File]::ReadAllText('HANDOFF.md'); Write-Output ('LEN=' + $s.Length)\"\n$ (Get-Content -Raw HANDOFF.md).Length; [IO.File]::ReadAllText('HANDOFF.md').Length\n$ [IO.File]::ReadAllText('HANDOFF.md').Length\n\nStream tail:\n\"content\":[{\"type\":\"text\",\"text\":\"Created file successfully: result.json\"}],\"providerCall\":{\"executed\":false},\"providerResult\":{\"executed\":false},\"rawInput\":\"{\\\"path\\\": \\\"<WORKSPACE>\\\\\\\\result.json\\\", \\\"content\\\": \\\"{\\\\n  \\\\\\\"file_line\\\\\\\": \\\\\\\"scripts/start_server.ps1:165 (local9 block), also mirrored in profiles/local/local-9b.json\\\\\\\",\\\\n  \\\\\\\"final_decode\\\\\\\": \\\\\\\"38.0 t/s (median of 3 runs, Q5 @ 128k with --no-mmproj-offload -ub 512)\\\\\\\",\\\\n  \\\\\\\"final_vram_mib\\\\\\\": 7697,\\\\n  \\\\\\\"discarded_quant\\\\\\\": \\\\\\\"Q6_K (7.03 GiB) — cannot fit a 128k context; Q4_K_M kept only as fallback, the 37.8 t/s Q5 baseline was dismissed for WDDM spill, not discarded as a quant\\\\\\\",\\\\n  \\\\\\\"pending\\\\\\\": [\\\\n    \\\\\\\"evals README cites deleted check_vision.ps1\\\\\\\",\\\\n    \\\\\\\"Scratchpad temp-file names flagged repeatedly, never reviewed\\\\\\\",\\\\n    \\\\\\\"Re-measure from a fresh profile start — post-apply verification outstanding\\\\\\\"\\\\n  ],\\\\n  \\\\\\\"measure_command\\\\\\\": \\\\\\\"pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024\\\\\\\"\\\\n}\\\\n\\\"}\"},\"time\":{\"start\":1793589038591,\"end\":1793589043427}}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793589043428,\"sessionID\":\"ses_e65c36935ffetEXBfF1Yas07bo\",\"part\":{\"id\":\"prt_19a3ce0e4001UFWDuxuafxbZH8\",\"sessionID\":\"ses_e65c36935ffetEXBfF1Yas07bo\",\"messageID\":\"msg_19a3cadde001SjS5rHnb29DoRk\",\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"cost\":0.00046220999999999995,\"tokens\":{\"input\":6,\"output\":338,\"reasoning\":363,\"cache\":{\"read\":6815,\"write\":114}}}}\n\n{\"type\":\"step_start\",\"timestamp\":1793589046370,\"sessionID\":\"ses_e65c36935ffetEXBfF1Yas07bo\",\"part\":{\"id\":\"prt_19a3cec620016vQWdoviprS27q\",\"sessionID\":\"ses_e65c36935ffetEXBfF1Yas07bo\",\"messageID\":\"msg_19a3ce0ea001NKNwvuhvD4m842\",\"type\":\"step-start\"}}\n\n{\"type\":\"text\",\"timestamp\":1793589057656,\"sessionID\":\"ses_e65c36935ffetEXBfF1Yas07bo\",\"part\":{\"id\":\"prt_19a3ce0ea001NKNwvuhvD4m842_text-0\",\"sessionID\":\"ses_e65c36935ffetEXBfF1Yas07bo\",\"messageID\":\"msg_19a3ce0ea001NKNwvuhvD4m842\",\"type\":\"text\",\"text\":\"Done — `result.json` is written. Here's what I found and why I trust it:\\n\\n**Findings (from `HANDOFF.md`, the only file besides `AGENTS.md` in this workspace):**\\n\\n- **Where the recipe was applied:** `scripts/start_server.ps1:165` (the local9 block), plus `profiles/local/local-9b.json` — both diffs reviewed per the handoff.\\n- **Final decode speed:** **38.0 t/s** (median of 3 consistent runs), replacing the invalid 37.8 t/s baseline.\\n- **Final VRAM:** **7697 MiB** dedicated, zero shared-memory spill (baseline's 7881 MiB was invalid due to a WDDM ceiling with 1494 MiB spilling to RAM).\\n- **Discarded quantization:** **Q6_K** — at 7.03 GiB it can't fit 128k. Note: the *Q5 baseline run* was dismissed, but Q5 itself ships with the fix (`--no-mmproj-offload -ub 512`), and Q4_K_M was kept as fallback — so Q6_K is the only quant genuinely discarded.\\n- **Still pending:** ① evals README cites the deleted `check_vision.ps1`, ② scratchpad temp-file names never reviewed, ③ post-apply re-measurement from a fresh profile start.\\n- **Measure command:** `pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`\\n\\n**How I know it's right / assumptions:**\\n- I checked the whole directory tree first: `session/transcript.md` and the repo referenced by the handoff are **not present**, so the primary evidence can't be independently re-verified here — I treated the handoff as the authoritative record, which is the stated situation (\\\"Full evidence: session/transcript.md\\\"; \\\"Repo lives elsewhere\\\").\\n- The numbers are internally consistent: the handoff's \\\"Why it's right\\\" section explains the baseline dismissal (spill counter) and the final figures (3 runs, under ceiling, zero shared), and the \\\"Ship this\\\" line pins 7697 MiB / 38.0 t/s as final.\\n- I disambiguated \\\"discarded\\\" carefully rather than taking the first number shown (37.8 t/s Q5), since that quant ships with a fix.\",\"time\":{\"start\":1793589043437,\"end\":1793589057656}}}\n\n",
+ "checks": [
+  [
+   "summary exists and fits in 1000 characters",
+   true
+  ],
+  [
+   "summary keeps `--no-mmproj-offload`",
+   true
+  ],
+  [
+   "summary keeps `-ub 512`",
+   true
+  ],
+  [
+   "summary keeps `7697`",
+   true
+  ],
+  [
+   "answer file_line",
+   true
+  ],
+  [
+   "answer final_decode",
+   true
+  ],
+  [
+   "answer final_vram_mib",
+   true
+  ],
+  [
+   "answer discarded_quant",
+   true
+  ],
+  [
+   "answer pending",
+   true
+  ],
+  [
+   "answer measure_command",
+   true
+  ],
+  [
+   "does not repeat the spilled VRAM as final",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 18,
+  "tool_calls": 17,
+  "tool_errors": 0,
+  "shell_commands": 7,
+  "shell_failures": 1,
+  "file_writes": 6,
+  "repeated_tool_calls": 2,
+  "outside_path_uses": 0,
+  "generated_tokens": 5410,
+  "reasoning_tokens": 2839,
+  "largest_turn_tokens": 1732
+ },
+ "deliverables": [],
+ "render": null
+}
