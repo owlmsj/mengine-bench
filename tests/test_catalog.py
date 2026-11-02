@@ -1,6 +1,7 @@
 """Registry discovery."""
 
 import types
+from pathlib import Path
 
 import pytest
 
@@ -54,3 +55,18 @@ def test_limits_fit_the_measured_times_and_cap_the_worst_case_at_73_minutes() ->
     assert {task: limit for task, limit in limits.items() if limit != 180} == {
         "gd-integration-repo": 300, "web-mondrian-landing": 300, "3d-print-homage": 420, "web-word-universe": 360,
         "web-plan-ranking": 300}
+
+
+def test_a_run_folder_with_read_only_git_objects_is_removed(tmp_path: Path) -> None:
+    # #124: git-merge-conflict leaves .git objects read-only on Windows; rmtree(ignore_errors) kept the run folder.
+    import os
+    import stat
+
+    from mengine_bench.core import remove_tree
+
+    target = tmp_path / "run" / "dropgame" / ".git" / "objects" / "ab"
+    target.mkdir(parents=True)
+    (target / "cdef").write_bytes(b"x")
+    os.chmod(target / "cdef", stat.S_IREAD)
+    remove_tree(tmp_path / "run")
+    assert not (tmp_path / "run").exists()

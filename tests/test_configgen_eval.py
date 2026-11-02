@@ -103,12 +103,24 @@ def test_each_check_fails_its_own_wrong_answer(tmp_path: Path, source: str, chec
     assert check in _cfg_check(ws, [""]).failed()
 
 
-def test_editing_the_generator_fails_the_gate(tmp_path: Path) -> None:
+def test_a_generator_hardcoding_the_value_fails_the_regeneration(tmp_path: Path) -> None:
+    # The source still says 131072, so the fix lives in the generator, not in the source of truth.
+    ws = _fresh(tmp_path)
+    hacked = CFG_GEN.replace('"context": model["context_window"]', '"context": 262144')
+    write(ws, "gen.py", hacked)
+    for rel, text in configgen._cfg_generate(CFG_SOURCE).items():
+        write(ws, rel, text.replace("131072", "262144", 1) if rel.endswith("opencode.json") else text)
+    result = _cfg_check(ws, [""])
+    assert REGENERATED in result.failed() and not result.passed
+
+
+def test_a_refactored_generator_with_the_same_output_passes(tmp_path: Path) -> None:
+    # #124: the Opus 5.5 xhigh probe split gen.py into a RENDERERS table and added a drift test; a valid route.
     ws = _fresh(tmp_path)
     _cfg_reference(ws)
-    write(ws, "gen.py", CFG_GEN.replace('"context": model["context_window"]', '"context": 262144'))
-    result = _cfg_check(ws, [""])
-    assert not result.mandatory_ok and result.score == 0.0
+    write(ws, "gen.py", CFG_GEN + "\n# renderers listed once so a drift test can reuse them\n")
+    write(ws, "test_gen.py", "import unittest\n")
+    assert _cfg_check(ws, [""]).passed
 
 
 def test_the_brief_does_not_hand_over_the_cause() -> None:

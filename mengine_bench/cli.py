@@ -17,7 +17,7 @@ from mengine_bench.analyze import render_analysis
 from mengine_bench.anchors import MIN_GAP, run_anchors
 from mengine_bench.bundle import bundle_leaks, run_scope, write_bundle
 from mengine_bench.bundle_judge import judge_bundle
-from mengine_bench.core import EvalTask, scratch_root
+from mengine_bench.core import EvalTask, remove_tree, scratch_root
 from mengine_bench.leaderboard import build_leaderboard, judged_runs, major_minor
 from mengine_bench.preflight import blocking_problems, personal_instructions
 from mengine_bench.redact import LocalNames, local_names
@@ -228,7 +228,7 @@ def _run(args: argparse.Namespace) -> int:
     print(f"wrote bundle {bundle}")
     if args.work is None:
         # Raw transcripts are unredacted, and a later run's agent could read these solutions.
-        shutil.rmtree(work, ignore_errors=True)
+        remove_tree(work)
         print(f"removed raw run dir {work}" if not work.exists() else f"could not fully remove {work}; delete it")
     else:
         print(f"raw workspaces kept in {work}")

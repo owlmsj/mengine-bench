@@ -7,7 +7,6 @@ running the generator passes, and so does editing the source and patching every 
 
 from __future__ import annotations
 
-import hashlib
 import json
 import subprocess
 import sys
@@ -106,10 +105,6 @@ CFG_GEN_FILE = "gen.py"
 CFG_SOURCE_FILE = "models.json"
 
 
-def _cfg_sha(text: str) -> str:
-    return hashlib.sha256(text.replace("\r\n", "\n").encode("utf-8")).hexdigest()
-
-
 def _cfg_generate(source_text: str) -> dict[str, str]:
     """The original generator run on a source text, in a temp dir: out/ file -> text, or {} when it fails."""
     with tempfile.TemporaryDirectory(prefix="bench-cfg-", dir=scratch_root()) as tmp:
@@ -193,8 +188,9 @@ def _cfg_setup(ws: Path) -> None:
 
 
 def _cfg_check(ws: Path, answers: Sequence[str]) -> CheckResult:
+    # #124: no gate on gen.py. Opus 5.5 xhigh refactored it with identical output and added a drift test, a valid
+    # route; the original generator run on the delivered source still decides whether the fix is in the source.
     result = CheckResult()
-    result.mandatory.append(("the generator is left untouched", _cfg_sha(read(ws, CFG_GEN_FILE) or "") == _cfg_sha(CFG_GEN)))
     source = read(ws, CFG_SOURCE_FILE)
     regenerated = _cfg_generate(source) if source is not None else {}
     contexts = _cfg_fast_coder_contexts(regenerated)
