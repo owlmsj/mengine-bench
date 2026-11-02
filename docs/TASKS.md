@@ -17,6 +17,13 @@ names the source for the record. No step resumes a session, so every harness,
 ignores AGENTS.md could still open an absolute path elsewhere on the disk;
 only an OS sandbox around the agent closes that.
 
+## Inputs
+
+Every fixture is written offline by the task's `setup`. `web-plan-ranking` is the one task whose prompt sends the agent
+to the open web; its anchors are historical, so its checks stay offline. `3d-print-homage` attaches its print as an
+image, so the model must read images. Hidden tests run through `cargo test` (`rs-lock-bug`), `node --test` on
+TypeScript (`ts-plugin-bug`, Node.js 22.18 or later) and Python's unittest; `git-merge-conflict` needs git.
+
 ## Deliverables
 
 A task may declare `deliverables`: workspace files the bundle keeps verbatim

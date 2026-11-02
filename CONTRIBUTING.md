@@ -32,7 +32,26 @@ A task is an `EvalTask` in a module of `mengine_bench/tasks/` listed in its
    (the README TL;DR), `provenance`, `timeout_s`, and `deliverables` for files
    the judge must see verbatim (for example a page it renders).
 
-Keep tasks moderate: one clear job, solvable by a good agent in a few minutes.
+Keep tasks basic: one clear job, easy to understand and to diagnose by hand, that a top agent finishes in under a
+minute. The prompt is an open brief: the context, the problem and the outcome wanted, never the method or the cause.
+Harden a task by removing hints and splitting checks, not by making the job longer or harder, and keep traps few.
+
+**Inputs.** Fixtures are offline. A task that needs the web says so in its prompt (only `web-plan-ranking` today),
+and its checks stay offline. A toolchain beyond Python (cargo, node, git) goes in the README's task section. Images
+and other assets are public domain or your own, credited in the README.
+
+**Probe with the judge model.** Before the pull request, run the new task once with Claude Opus 5.5 xhigh and judge
+that bundle; a run with `--tasks` is never ranked:
+
+```
+uv run mengine-bench run --agent claude --model claude-opus-5-5 --effort xhigh --tasks <id> --out tmp/probe
+uv run mengine-bench judge tmp/probe/<run>
+```
+
+Say in the pull request if Opus refused or failed, as agent or as judge: the maintainer then picks another harness
+and model for that task. A failure that is the check's fault (a valid route scored 0) is fixed with a test. A visual
+task also needs its judge reference, `mengine_bench/assets/references/<id>.png`: the page Opus 5.5 xhigh made in
+that probe, rendered with `mengine_bench.visual.render_headless` at 8 s.
 
 **Gold self-test rule.** Every task has a hermetic test in `tests/` (no network,
 no model) proving the reference **passes** and the untouched folder **fails**;
@@ -49,7 +68,10 @@ Consulting the reference, the hidden tests or a published answer, from this repo
 rejected on transcript review.
 
 Adding, removing or changing a task, prompt or check is a new bench minor
-version (1.4.0): runs of different minor versions are never ranked together.
+version (1.7.0), and a new catalog is a major one (2.0.0): runs of different
+minor versions are never ranked together. Add every id that came or went to
+`TASKS_THAT_CAME_AND_WENT` in `mengine_bench/leaderboard.py`, or the older
+complete runs drop out of the leaderboard history.
 
 **Content rules.** No personal data, company names, secrets, tokens or absolute
 local paths in tasks or fixtures. Use neutral fictional names and public topics.

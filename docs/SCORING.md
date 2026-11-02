@@ -37,7 +37,7 @@ untouched", or the page file exists).
   half of the task; a gate that guards the tests still does. The task shows its status, counts its full time and
   is never Solved. A reply already given when the limit hits counts as the reply. With nothing written or
   said, there is nothing for the checks to credit.
-- Each prompt states the limit, 2 to 8 min per step, and that the folder and the reply are graded as they
+- Each prompt states the limit, 3 to 7 min per step, and that the folder and the reply are graded as they
   stand when time runs out. Load a local model before the run: a cold load counts against the first task.
 - **Solved** = the agent finished, and every gate and every check passed.
 
@@ -88,7 +88,7 @@ The plan is judged from the actions: a written plan earns nothing by itself.
 
 For a visual task the maintainer's machine renders the stored page with headless
 Chromium (Edge, Chrome or Chromium; `MENGINE_BENCH_BROWSER` overrides it) and the
-judge sees three frames, each from a fresh load after about 1, 4 and 8 seconds of page time, next to three fixed
+judge sees three frames, each from a fresh load after about 1, 4 and 8 seconds of page time, next to
 a reference page, made by Opus 5.5 xhigh for the same brief, which sets the bar and stays fixed so a grade does not move when a new run comes out. A frame that fails is
 tried up to 3 times; if it keeps failing, the judge votes on the other frames, or without images when none rendered, and
 the bundle records it. With no browser at all, nothing is judged.
