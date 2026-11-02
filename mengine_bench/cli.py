@@ -30,7 +30,7 @@ from mengine_bench.run_command import JudgeEvidence, RunSettings, run_tasks
 from mengine_bench.judge import OFFICIAL_JUDGE_EFFORT, OFFICIAL_JUDGE_MODEL, RubricJudge
 from mengine_bench.runner.agents import AGENT_NAMES, make_agent
 from mengine_bench.visual import add_page_checks
-from mengine_bench.scoring import parse_price
+from mengine_bench.scoring import CORRECT_SHARE, JUDGE_SHARE, SPEED_SHARE, parse_price
 from mengine_bench.submit import SubmitError, gh_login, submit
 from mengine_bench.safe_runner import relaunch_run
 
@@ -158,8 +158,8 @@ def _judge(args: argparse.Namespace) -> int:
         return 1
     totals = result["totals"]
     assert isinstance(totals, dict)
-    print(f"judged {args.bundle.name}: Score {totals['score']} = 0.6 x correct {totals['correct']} "
-          f"+ 0.25 x judge {totals['judge']} + 0.15 x speed {totals['speed']} x correct / 100")
+    print(f"judged {args.bundle.name}: Score {totals['score']} = {CORRECT_SHARE} x correct {totals['correct']} "
+          f"+ {JUDGE_SHARE} x judge {totals['judge']} + {SPEED_SHARE} x speed {totals['speed']} x correct / 100")
     print("updated result.json and summary.md; commit them with LEADERBOARD.md")
     return 0
 

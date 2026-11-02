@@ -234,3 +234,15 @@ def test_leaderboard_ranks_only_the_claude_adapter_and_current_rubric(tmp_path: 
     (bundle / "result.json").write_text(json.dumps(result), encoding="utf-8")
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 0 and "only claude claude-opus-5-5@xhigh" in board.unranked[0][1]
+
+
+def test_a_complete_1_7_run_stays_complete_in_2_0() -> None:
+    # #124: the 1.7 catalog had lc-changelog, vis-chart, ir-studio-wiki and 3d-voxel-landscape and none of the new eight;
+    # without this, every older ranking vanished from the history when 2.0 shipped.
+    from mengine_bench.leaderboard import is_complete_run
+
+    ids_1_7 = ["ds-ab-playtest", "bo-pnl-runway", "bo-reconcile", "cmp-handoff", "lc-changelog", "vis-chart", "ds-sql-funnel",
+               "ue-packaged-bug", "ir-studio-wiki", "ir-server-logs", "gd-integration-repo", "rs-lock-bug",
+               "web-mondrian-landing", "3d-voxel-landscape", "web-word-universe"]
+    assert is_complete_run({"bench_version": "1.7.3", "tasks": [{"id": task_id} for task_id in ids_1_7]})
+    assert not is_complete_run({"bench_version": "1.7.3", "tasks": [{"id": task_id} for task_id in ids_1_7[1:]]})

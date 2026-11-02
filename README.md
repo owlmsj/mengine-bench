@@ -12,7 +12,7 @@ Results: [LEADERBOARD.md](LEADERBOARD.md).
 
 ## How a run is graded
 
-**Score = 0.6 x Correct % + 0.25 x Judge + 0.15 x Speed x Correct % / 100.** Speed pays only for work that is right.
+**Score = 0.6 x Correct % + 0.15 x Judge + 0.25 x Speed x Correct % / 100.** Speed pays only for work that is right.
 
 | | The question | How it is measured |
 | --- | --- | --- |
@@ -20,9 +20,9 @@ Results: [LEADERBOARD.md](LEADERBOARD.md).
 | **Judge** | Is the work good? | One LLM vote per task (Claude Opus 5.5, xhigh), with subscores, blind to the model and the speed. |
 | **Speed** | Was it quick? | 100 at 5 min of total agent time or less, 0 at 30 min or more, linear in between. |
 
-Example, from the leaderboard: Correct 100, Judge 84.1 and 21 min 44 s (Speed 33.0)
-give 0.6 x 100 + 0.25 x 84.1 + 0.15 x 33.0 x 100 / 100 = **86.0**. It solved all 14 tasks, and
-thinking time cost it about 10 points. Cost and an estimated price at API list prices are shown too, but never count.
+Example: Correct 100, Judge 84.1 and 21 min 44 s (Speed 33.0)
+give 0.6 x 100 + 0.15 x 84.1 + 0.25 x 33.0 x 100 / 100 = **80.9**. It solved every task, and
+thinking time cost it about 17 points. Cost and an estimated price at API list prices are shown too, but never count.
 
 Formulas and edge cases: [docs/SCORING.md](docs/SCORING.md).
 

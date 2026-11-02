@@ -8,7 +8,7 @@ the Score, and a Cost kept apart.
 | **Correct %** | `100 x mean(c_i)` over every task. Deterministic: anyone reproduces it with `run` and `selftest`. |
 | **Judge** | Mean of one rubric vote per task, 0-100. Set by the maintainer with `mengine-bench judge`. |
 | **Speed** | 100 at 5 min of Time or less, 0 at 30 min or more, linear in between: `100 x (1800 - Time) / 1500`. |
-| **Score** | `0.6 x Correct % + 0.25 x Judge + 0.15 x Speed x Correct % / 100`, one decimal, from the published values. Speed pays only for work that is right. Only once judged. |
+| **Score** | `0.6 x Correct % + 0.15 x Judge + 0.25 x Speed x Correct % / 100`, one decimal, from the published values. Speed pays only for work that is right. Only once judged. |
 | **Time** | Total agent wall seconds. Grading and judging are excluded; a timeout counts its full time. On Codex the clock stops at the final event (`turn.completed`); a process still alive 5 s later is ended and flagged, not counted as a timeout. |
 | **Cost** | USD estimate of inference, with its basis. A separate column: no points per dollar. |
 | **Est. price** | The run's tokens at public API list prices, so subscription and API runs compare. No points either. |
@@ -16,6 +16,8 @@ the Score, and a Cost kept apart.
 The formulas live in `mengine_bench/scoring.py`. Runs compare when they ran the
 same bench major.minor (2.0.x). A patch release changes no task or brief; a workspace safety rule may change. When it changes how a run is judged or
 scored, every ranked run is judged again from its bundle (`mengine-bench judge --again`), so none has to run again. Rankings of older versions stay in LEADERBOARD.md as history, with the Scores of their own formula.
+Bench 1.8 changed only the weights (#122): Speed 0.25 and Judge 0.15, from 0.15 and 0.25 in 1.7; tasks and briefs are those of 1.7.
+Bench 2.0 keeps the 1.8 weights and changes the tasks (#124): 20 instead of 15.
 
 A run is one sample and runs are not repeated, so ties come from the published tasks: draw the 20 tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
@@ -191,7 +193,7 @@ Three tasks, Claude Code (harness USD):
 - Judge = (80 + 60 + 30) / 3 = 56.7
 - Time = 120 + 300 + 900 = 1320 s (22 min 00 s)
 - Speed = 100 x (1800 - 1320) / 1500 = 32.0
-- Score = 0.6 x 53.3 + 0.25 x 56.7 + 0.15 x 32.0 x 53.3 / 100 = 48.7
+- Score = 0.6 x 53.3 + 0.15 x 56.7 + 0.25 x 32.0 x 53.3 / 100 = 44.7
 - Cost = 0.40 + 0.90 = >= $1.30 (harness), a lower bound because C has no usage
 
 With `--price input=1.25,cached=0.125,output=10`, a Codex step of 2,000,000
