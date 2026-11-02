@@ -1,0 +1,75 @@
+{
+ "task_id": "cmp-handoff",
+ "prompts": [
+  "You are handing this debugging work to a colleague who will never see {WS}/session/transcript.md. Write {WS}/HANDOFF.md, at most 1000 characters, so they can carry on from where it really stands.",
+  "You just took over this work, and {WS}/HANDOFF.md is all you have. Where was the recipe applied, what are the final decode speed and VRAM, which quantization was discarded, what is still pending, and which command measures it again? Record it in {WS}/result.json: file_line, final_decode, final_vram_mib, discarded_quant, pending, measure_command."
+ ],
+ "answers": [
+  "\n\nDone. `./HANDOFF.md` is 927 chars (under the 1000 limit).\n\n**Goal** [what the transcript's one user ask was]: run local-9b at 128k (131072) without VRAM spill.\n\n**Action**: Read `session/transcript.md` (225 lines), confirmed via glob that none of the files it names (`scripts/`, `profiles/`, evals README) exist in this workspace, then wrote the handoff from the six signal lines, filtering the repeated filler.\n\n**Result**: The handoff captures root cause (WDDM ceiling 7881 MiB; mmproj offload spilled 1494 MiB → baseline 37.8 t/s invalid), the verified fix (`--no-mmproj-offload` + `-ub 512` → 7697 MiB, 38.0 t/s median of 3), quant decisions (Q6_K discarded, Q4_K_M fallback only), where the recipe was applied (`start_server.ps1:165` local9 block + `local-9b.json`), and the two open items (evals README still cites the removed `check_vision.ps1`; scratchpad temp-file names). It states the assumption that the named files aren't in this workspace and to verify on the real repo.\n\n**How I know it's right**: every number and filename was copied byte-for-byte from transcript lines 30, 44, 124, 132, 185, 222 (plus the recurring \"review scratchpad temp files\" note); length confirmed at 927 via `Get-Content -Raw`.\n\n**Next**: on the real repo, fix the evals README citation and verify the two applied files actually carry the fix.",
+  "\n\n**Goal** — record the handoff facts in `result.json`.\n\n**Action** — read `HANDOFF.md`, verified workspace contents (recursive listing: only `AGENTS.md` + `HANDOFF.md`, no `session/` or repo files, confirming the handoff's own assumption at line 15), wrote `result.json`, validated JSON parse, and grepped every cited value against the original handoff lines.\n\n**Result** — `result.json` is valid JSON; every field cross-checked against source lines:\n- `file_line`: `scripts/start_server.ps1:165` (local9 block) + `profiles/local/local-9b.json` (HANDOFF.md:11)\n- `final_decode`: `38.0` t/s, median of 3 (HANDOFF.md:7)\n- `final_vram_mib`: `7697` (HANDOFF.md:7)\n- `discarded_quant`: `Q6_K` (7.03 GiB, no fit; Q4_K_M was fallback only, not discarded) (HANDOFF.md:9)\n- `pending`: evals README still cites `check_vision.ps1` (gone); scratchpad temp file names review (HANDOFF.md:13)\n- `measure_command`: the handoff names no explicit benchmark command, so I recorded the measurable recipe: start the local9 block of `scripts/start_server.ps1` with `--no-mmproj-offload` and `-ub 512`, decode-bench, median of 3.\n\n**Assumptions** — (1) the referenced repo files (`scripts/`, `profiles/`, `evals`, `session/transcript.md`) are not in this workspace, so `HANDOFF.md` is the sole source of truth; (2) `file_line` is the flagged script line plus the sibling profile file, since both were applied; (3) `measure_command` is a reconstruction from the handoff's fix flags, not a verbatim harness command, since none is recorded.\n\n**Next** — on the real repo, run that local9 block and confirm the 7697 MiB / 38.0 t/s reproduce, then fix the two pending items.\n\nI found the facts entirely in `HANDOFF.md` lines 7, 9, 11, 13 (quoted above, matched by grep), and I know it is right because each value in `result.json` is byte-for-byte from those lines, the JSON parses, and the workspace audit shows no conflicting source exists here."
+ ],
+ "diff": "A HANDOFF.md\nA result.json\nD session/transcript.md\n\n--- HANDOFF.md ---\n# HANDOFF: local-9b @ 128k\n\nGoal: run local-9b at 128k (131072) without VRAM spill.\n\nRoot cause: at 128k the WDDM ceiling (7881 MiB) is hit; the mmproj offload spilled 1494 MiB to Shared Usage, contaminating decode (baseline 37.8 t/s invalid).\n\nFix: `--no-mmproj-offload` + `-ub 512` -> spill gone, 7697 MiB, 38.0 t/s (median of 3).\n\nQuant: Q6_K (7.03 GiB) no fit -> discarded. Q4_K_M (7305 MiB, 40.4 t/s) -> fallback only.\n\nApplied to scripts/start_server.ps1:165 (local9 block) + profiles/local/local-9b.json.\n\nLeft to do: (1) evals README still cites check_vision.ps1, now gone; (2) review the scratchpad temp file names.\n\nAssumption: those files (scripts/, profiles/, evals README) are not in this workspace; only session/transcript.md + AGENTS.md are. Verify on the real repo first.\n\nFound: the spill = mmproj offload; the fix removes it. From signal lines 30, 44, 124, 132, 185, 222; every other line is repeated filler.\n\n\n--- result.json ---\n{\n  \"file_line\": \"scripts/start_server.ps1:165 (local9 block) + profiles/local/local-9b.json\",\n  \"final_decode\": 38.0,\n  \"final_vram_mib\": 7697,\n  \"discarded_quant\": \"Q6_K\",\n  \"pending\": [\n    \"evals README still cites check_vision.ps1, now gone\",\n    \"review the scratchpad temp file names\"\n  ],\n  \"measure_command\": \"scripts/start_server.ps1 (local9 block) with --no-mmproj-offload and -ub 512; decode benchmark, median of 3 runs\"\n}\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ pwsh -NoProfile -Command \"(Get-Content -Raw '<WORKSPACE>\\HANDOFF.md').Length\"\n$ Get-ChildItem -Force -Recurse <WORKSPACE> | Select-Object FullName | Format-Table -AutoSize\n$ Get-Content <WORKSPACE>\\result.json -Raw | ConvertFrom-Json | ConvertTo-Json; Write-Host \"---\"; Select-String -Path <WORKSPACE>\\HANDOFF.md -Pattern '7697','38\\.0','Q6_K\n\nStream tail:\n[0m\\u001b[7m\\u001b[0mreview \\u001b[0m\\u001b[7m\\u001b[0mthe \\u001b[0m\\u001b[7m\\u001b[0mscratchpad \\u001b[0m\\u001b[7m\\u001b[0mtemp \\u001b[0m\\u001b[7m\\u001b[0mfile \\u001b[0m\\r\\n\\u001b[7m\\u001b[0mnames.\\u001b[0m\\r\\n\\r\\n\"}],\"providerCall\":{\"executed\":false},\"providerResult\":{\"executed\":false},\"rawInput\":\"{\\\"command\\\": \\\"Get-Content <WORKSPACE>\\\\\\\\result.json -Raw | ConvertFrom-Json | ConvertTo-Json; Write-Host \\\\\\\"---\\\\\\\"; Select-String -Path <WORKSPACE>\\\\\\\\HANDOFF.md -Pattern '7697','38\\\\\\\\.0','Q6_K','165','check_vision','scratchpad'\\\"}\"},\"time\":{\"start\":1793660507723,\"end\":1793660508404}}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793660508406,\"sessionID\":\"ses_e6180d2c3ffeaJs8Em2xOZVXyV\",\"part\":{\"id\":\"prt_19e7f58f6001Z4gaV4TxAjf2HW\",\"sessionID\":\"ses_e6180d2c3ffeaJs8Em2xOZVXyV\",\"messageID\":\"msg_19e7f54380015P2L0z7ON5575v\",\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"cost\":0,\"tokens\":{\"input\":10611,\"output\":174,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}}}}\n\n{\"type\":\"step_start\",\"timestamp\":1793660508875,\"sessionID\":\"ses_e6180d2c3ffeaJs8Em2xOZVXyV\",\"part\":{\"id\":\"prt_19e7f5aca0011G4k1lo3F6cjb7\",\"sessionID\":\"ses_e6180d2c3ffeaJs8Em2xOZVXyV\",\"messageID\":\"msg_19e7f58fc001HT6RE1gRufVOuO\",\"type\":\"step-start\"}}\n\n{\"type\":\"text\",\"timestamp\":1793660510185,\"sessionID\":\"ses_e6180d2c3ffeaJs8Em2xOZVXyV\",\"part\":{\"id\":\"prt_19e7f58fc001HT6RE1gRufVOuO_text-0\",\"sessionID\":\"ses_e6180d2c3ffeaJs8Em2xOZVXyV\",\"messageID\":\"msg_19e7f58fc001HT6RE1gRufVOuO\",\"type\":\"text\",\"text\":\"\\n\\n**Goal** — record the handoff facts in `result.json`.\\n\\n**Action** — read `HANDOFF.md`, verified workspace contents (recursive listing: only `AGENTS.md` + `HANDOFF.md`, no `session/` or repo files, confirming the handoff's own assumption at line 15), wrote `result.json`, validated JSON parse, and grepped every cited value against the original handoff lines.\\n\\n**Result** — `result.json` is valid JSON; every field cross-checked against source lines:\\n- `file_line`: `scripts/start_server.ps1:165` (local9 block) + `profiles/local/local-9b.json` (HANDOFF.md:11)\\n- `final_decode`: `38.0` t/s, median of 3 (HANDOFF.md:7)\\n- `final_vram_mib`: `7697` (HANDOFF.md:7)\\n- `discarded_quant`: `Q6_K` (7.03 GiB, no fit; Q4_K_M was fallback only, not discarded) (HANDOFF.md:9)\\n- `pending`: evals README still cites `check_vision.ps1` (gone); scratchpad temp file names review (HANDOFF.md:13)\\n- `measure_command`: the handoff names no explicit benchmark command, so I recorded the measurable recipe: start the local9 block of `scripts/start_server.ps1` with `--no-mmproj-offload` and `-ub 512`, decode-bench, median of 3.\\n\\n**Assumptions** — (1) the referenced repo files (`scripts/`, `profiles/`, `evals`, `session/transcript.md`) are not in this workspace, so `HANDOFF.md` is the sole source of truth; (2) `file_line` is the flagged script line plus the sibling profile file, since both were applied; (3) `measure_command` is a reconstruction from the handoff's fix flags, not a verbatim harness command, since none is recorded.\\n\\n**Next** — on the real repo, run that local9 block and confirm the 7697 MiB / 38.0 t/s reproduce, then fix the two pending items.\\n\\nI found the facts entirely in `HANDOFF.md` lines 7, 9, 11, 13 (quoted above, matched by grep), and I know it is right because each value in `result.json` is byte-for-byte from those lines, the JSON parses, and the workspace audit shows no conflicting source exists here.\",\"time\":{\"start\":1793660508583,\"end\":1793660510185}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793660510185,\"sessionID\":\"ses_e6180d2c3ffeaJs8Em2xOZVXyV\",\"part\":{\"id\":\"prt_19e7f58fc001HT6RE1gRufVOuO_step-finish\",\"sessionID\":\"ses_e6180d2c3ffeaJs8Em2xOZVXyV\",\"messageID\":\"msg_19e7f58fc001HT6RE1gRufVOuO\",\"type\":\"step-finish\",\"reason\":\"stop\",\"cost\":0,\"tokens\":{\"input\":11244,\"output\":586,\"reasoning\":0,\"cache\":{\"read\":0,\"write\":0}}}}\n\n",
+ "checks": [
+  [
+   "summary exists and fits in 1000 characters",
+   true
+  ],
+  [
+   "summary keeps `--no-mmproj-offload`",
+   true
+  ],
+  [
+   "summary keeps `-ub 512`",
+   true
+  ],
+  [
+   "summary keeps `7697`",
+   true
+  ],
+  [
+   "answer file_line",
+   true
+  ],
+  [
+   "answer final_decode",
+   true
+  ],
+  [
+   "answer final_vram_mib",
+   true
+  ],
+  [
+   "answer discarded_quant",
+   true
+  ],
+  [
+   "answer pending",
+   true
+  ],
+  [
+   "answer measure_command",
+   false
+  ],
+  [
+   "does not repeat the spilled VRAM as final",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 12,
+  "tool_calls": 15,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 3,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 8592,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 2410
+ },
+ "deliverables": [],
+ "render": null
+}
