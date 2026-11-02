@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Universo de Palavras — Dicionário Criativo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,700;1,500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#12151d; --line:#232838; --ink:#e8e6df; --dim:#8b90a0;
+    --accent:#e8b44a;
+  }
+  *{box-sizing:border-box; margin:0}
+  html,body{height:100%}
+  body{background:var(--bg); color:var(--ink); font-family:'IBM Plex Sans',sans-serif; overflow:hidden}
+  header{position:fixed; top:0; left:0; right:0; z-index:10; display:flex; align-items:center; gap:16px;
+    padding:14px 20px; background:linear-gradient(#0b0d12f0,#0b0d1200); pointer-events:none}
+  header *{pointer-events:auto}
+  header h1{font-family:'Cormorant Garamond',serif; font-weight:700; font-size:22px; letter-spacing:.5px}
+  header h1 em{color:var(--accent); font-style:normal}
+  header .sub{font-size:12px; color:var(--dim)}
+  #searchwrap{position:relative; margin-left:auto; width:min(340px,45vw)}
+  #search{width:100%; padding:9px 14px; border-radius:999px; border:1px solid var(--line);
+    background:var(--panel); color:var(--ink); font:inherit; font-size:14px; outline:none}
+  #search:focus{border-color:var(--accent)}
+  #suggest{position:absolute; top:110%; left:0; right:0; max-height:300px; overflow:auto; display:none;
+    background:var(--panel); border:1px solid var(--line); border-radius:12px; box-shadow:0 12px 32px #0009}
+  #suggest div{padding:8px 14px; cursor:pointer; font-size:14px; display:flex; justify-content:space-between; gap:8px}
+  #suggest div span.deg{color:var(--dim); font-size:12px}
+  #suggest div:hover,#suggest div.active{background:#1c2230}
+  #canvas{position:fixed; inset:0}
+  #panel{position:fixed; top:64px; right:16px; bottom:16px; width:min(360px,86vw); z-index:9;
+    background:#12151df2; border:1px solid var(--line); border-radius:16px; padding:22px;
+    overflow:auto; backdrop-filter:blur(6px); display:none}
+  #panel h2{font-family:'Cormorant Garamond',serif; font-size:40px; line-height:1.05; font-weight:700; word-break:break-word}
+  #panel .tema{display:inline-block; margin:8px 0 4px; font-size:12px; letter-spacing:1.5px; text-transform:uppercase;
+    color:var(--accent); border:1px solid #e8b44a55; border-radius:999px; padding:3px 10px}
+  #panel .close{position:absolute; top:10px; right:12px; background:none; border:none; color:var(--dim);
+    font-size:20px; cursor:pointer}
+  #panel .close:hover{color:var(--ink)}
+  .relgroup{margin-top:18px}
+  .relgroup h3{font-size:11px; text-transform:uppercase; letter-spacing:1.5px; color:var(--dim); margin-bottom:8px}
+  .chips{display:flex; flex-wrap:wrap; gap:8px}
+  .chip{border:1px solid var(--line); background:#1a1f2c; color:var(--ink); border-radius:999px;
+    padding:5px 12px; font-size:13px; cursor:pointer; transition:.15s}
+  .chip:hover{border-color:var(--accent); color:var(--accent)}
+  #panel .note{margin-top:20px; font-size:12px; color:var(--dim); line-height:1.6}
+  #hint{position:fixed; left:20px; bottom:16px; z-index:9; color:var(--dim); font-size:12px; line-height:1.7}
+  #stats{position:fixed; left:20px; top:64px; z-index:9; color:var(--dim); font-size:12px}
+  #loading{position:fixed; inset:0; display:flex; align-items:center; justify-content:center; color:var(--dim)}
+  @media (max-width:640px){ #panel{top:auto; height:55vh} #stats{display:none} }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<header>
+  <div>
+    <h1>Universo <em>de</em> Palavras</h1>
+    <div class="sub">Dicionário Criativo — as palavras e os laços entre elas</div>
+  </div>
+  <div id="searchwrap">
+    <input id="search" type="text" placeholder="Procurar uma palavra…" autocomplete="off" spellcheck="false">
+    <div id="suggest"></div>
+  </div>
+</header>
+<div id="stats"></div>
+<div id="hint">arraste para girar · role para aproximar · clique numa palavra</div>
+<div id="loading">a carregar o universo…</div>
+<aside id="panel">
+  <button class="close" id="close" title="fechar">✕</button>
+  <h2 id="p-word"></h2>
+  <span class="tema" id="p-tema"></span>
+  <div id="p-rels"></div>
+  <div class="note" id="p-note"></div>
+</aside>
+
+<script type="module">
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js";
+
+const DATA = {"acento":{"tema":"linguagem","links":{"Sinônimos":["pergunta","sílaba"],"Palavras análogas":["apelido","fala","lago","prazer","sotaque"]}},"advogado":{"tema":"ofícios","links":{"Sinônimos":["juiz","professor"],"Palavras análogas":["cachoeira","coração","eternidade","fala","hora","juiz","marinheiro","palavra"]}},"afeto":{"tema":"sentimentos","links":{"Sinônimos":["amor","carinho"],"Palavras análogas":["angústia","voz"]}},"aflição":{"tema":"sentimentos","links":{"Sinônimos":["angústia","ansiedade"],"Palavras análogas":["ansiedade","escultura","felicidade","pavor","água"]}},"aldeia":{"tema":"lugares","links":{"Sinônimos":["bairro","vila"],"Palavras análogas":["capital","trabalho"]}},"alegria":{"tema":"sentimentos","links":{"Sinônimos":["felicidade","surpresa"],"Palavras análogas":["queijo","ternura"]}},"alfaiate":{"tema":"ofícios","links":{"Palavras análogas":["açougueiro","boca","emprego","profissão","rua","susto"],"Sinônimos":["padeiro","sapateiro"]}},"alma":{"tema":"corpo","links":{"Sinônimos":["corpo","pé"],"Palavras análogas":["amor","dente","fígado","gíria","memória","palavra","pátria"]}},"almoço":{"tema":"comida","links":{"Sinônimos":["jantar","refeição"],"Palavras análogas":["carne","dor","frase","instante","manteiga","patrão","pimenta"]}},"amanhã":{"tema":"tempo","links":{"Sinônimos":["eternidade","hoje"],"Palavras análogas":["hoje","hora","perna","pescador","porta"]}},"amor":{"tema":"sentimentos","links":{"Sinônimos":["afeto","paixão"],"Palavras análogas":["alma","susto","tristeza","árvore"]}},"angústia":{"tema":"sentimentos","links":{"Palavras análogas":["afeto","compaixão","medo","riacho"],"Sinônimos":["aflição","dor"]}},"ano":{"tema":"tempo","links":{"Sinônimos":["mês","século"],"Palavras análogas":["crepúsculo","manhã","música"]}},"ansiedade":{"tema":"sentimentos","links":{"Sinônimos":["aflição","medo"],"Palavras análogas":["aflição","manteiga","paixão","rua","saudade"]}},"apelido":{"tema":"linguagem","links":{"Sinônimos":["letra","nome"],"Palavras análogas":["acento","história","idioma","irmã"]}},"areia":{"tema":"natureza","links":{"Sinônimos":["natureza","praia"],"Palavras análogas":["montanha","ofício","rima"]}},"arroz":{"tema":"comida","links":{"Sinônimos":["feijão","trigo"],"Palavras análogas":["carne","chá","feijão","madrugada","neta"]}},"arte":{"tema":"artes","links":{"Sinônimos":["fotografia","música"],"Palavras análogas":["cachoeira","dicionário","romance","samba"]}},"ator":{"tema":"artes","links":{"Sinônimos":["cena","poesia"],"Palavras análogas":["canção","primo"]}},"aurora":{"tema":"tempo","links":{"Sinônimos":["crepúsculo","madrugada"],"Palavras análogas":["instante","prazer","professor"]}},"avenida":{"tema":"lugares","links":{"Sinônimos":["praça","rua"],"Palavras análogas":["casa","feijão","quarto"]}},"avó":{"tema":"família","links":{"Sinônimos":["avô","neto"],"Palavras análogas":["genro","idioma","mãe","pai"]}},"avô":{"tema":"família","links":{"Sinônimos":["avó","irmã"],"Palavras análogas":["coração","pais","pescoço","pulmão","semana"]}},"açougueiro":{"tema":"ofícios","links":{"Sinônimos":["padeiro","pescador"],"Palavras análogas":["alfaiate","boca","enfermeira","tarde"]}},"açúcar":{"tema":"comida","links":{"Sinônimos":["manteiga","mel"],"Palavras análogas":["pimenta","tempo","unha"]}},"bairro":{"tema":"lugares","links":{"Sinônimos":["aldeia","rua"],"Palavras análogas":["igreja","porta","refeição","rua"]}},"boca":{"tema":"corpo","links":{"Palavras análogas":["alfaiate","açougueiro","livro","ombro","rosto"],"Sinônimos":["língua","olho"]}},"braço":{"tema":"corpo","links":{"Sinônimos":["mão","ombro"],"Palavras análogas":["janela","língua","surpresa"]}},"cabeça":{"tema":"corpo","links":{"Sinônimos":["corpo","rosto"],"Palavras análogas":["corpo","enfermeira","mão","palavra"]}},"cachoeira":{"tema":"natureza","links":{"Palavras análogas":["advogado","arte","linguagem","pétala","semente"],"Sinônimos":["lago","riacho"]}},"café":{"tema":"comida","links":{"Palavras análogas":["momento","trabalho","água"],"Sinônimos":["chá","pimenta"]}},"campo":{"tema":"natureza","links":{"Sinônimos":["jardim","prado"],"Palavras análogas":["milho","onda","ponte","selva"]}},"canção":{"tema":"artes","links":{"Palavras análogas":["ator","cena","idioma","pai","tela"],"Sinônimos":["melodia","música"]}},"capital":{"tema":"lugares","links":{"Palavras análogas":["aldeia","cozinha","estação","padeiro","riacho","tempo","voz"],"Sinônimos":["cidade","vila"]}},"carinho":{"tema":"sentimentos","links":{"Sinônimos":["afeto","ternura"],"Palavras análogas":["compaixão","esperança","melancolia","prado","saudade"]}},"carne":{"tema":"comida","links":{"Palavras análogas":["almoço","arroz","filho","nação","ovo","salário"],"Sinônimos":["mandioca","peixe"]}},"carpinteiro":{"tema":"ofícios","links":{"Sinônimos":["ferreiro","pedreiro"],"Palavras análogas":["patrão","trabalho","vila"]}},"casa":{"tema":"lugares","links":{"Palavras análogas":["avenida","dia","igreja","poesia"],"Sinônimos":["escola","lar"]}},"cena":{"tema":"artes","links":{"Sinônimos":["ator","teatro"],"Palavras análogas":["canção","livro","melodia","mãe","ponte"]}},"chá":{"tema":"comida","links":{"Palavras análogas":["arroz","dente","peixe","queijo"],"Sinônimos":["café","vinho"]}},"cidade":{"tema":"lugares","links":{"Sinônimos":["capital","estado"],"Palavras análogas":["estação","jardim","país","prima"]}},"cinema":{"tema":"artes","links":{"Sinônimos":["escultura","fotografia"],"Palavras análogas":["fotografia","pergunta","tela"]}},"comida":{"tema":"comida","links":{"Sinônimos":["refeição","água"],"Palavras análogas":["farinha","história","peito"]}},"compaixão":{"tema":"sentimentos","links":{"Palavras análogas":["angústia","carinho","contentamento","felicidade","ovo","sílaba"],"Sinônimos":["esperança","ternura"]}},"contentamento":{"tema":"sentimentos","links":{"Palavras análogas":["compaixão","pais","prazer"],"Sinônimos":["felicidade","prazer"]}},"conto":{"tema":"artes","links":{"Sinônimos":["livro","romance"],"Palavras análogas":["folha","herança","lar","paixão","palavra","verso"]}},"conversa":{"tema":"linguagem","links":{"Sinônimos":["fala","silêncio"],"Palavras análogas":["felicidade","grito"]}},"coração":{"tema":"corpo","links":{"Sinônimos":["peito","pulmão"],"Palavras análogas":["advogado","avô","jantar","joelho","rosto"]}},"corpo":{"tema":"corpo","links":{"Sinônimos":["alma","cabeça"],"Palavras análogas":["cabeça","peixe","pescoço"]}},"cozinha":{"tema":"lugares","links":{"Sinônimos":["janela","quarto"],"Palavras análogas":["capital","esquina","fígado","pai","voz"]}},"crepúsculo":{"tema":"tempo","links":{"Palavras análogas":["ano","cunhado","gíria","hoje","ontem","segundo","época"],"Sinônimos":["aurora","ontem"]}},"cunhado":{"tema":"família","links":{"Palavras análogas":["crepúsculo","pais"],"Sinônimos":["sobrinho","sogra"]}},"dança":{"tema":"artes","links":{"Sinônimos":["tambor","teatro"],"Palavras análogas":["desenho","piano","rima","voz"]}},"dedo":{"tema":"corpo","links":{"Sinônimos":["mão","unha"],"Palavras análogas":["palavra","pé","sapateiro","unha"]}},"dente":{"tema":"corpo","links":{"Palavras análogas":["alma","chá","hoje","pulmão","sogra"],"Sinônimos":["língua","pescoço"]}},"desenho":{"tema":"artes","links":{"Palavras análogas":["dança","noite","prima"],"Sinônimos":["escultura","tela"]}},"dia":{"tema":"tempo","links":{"Sinônimos":["manhã","semana"],"Palavras análogas":["casa","letra","tarde"]}},"dicionário":{"tema":"linguagem","links":{"Sinônimos":["significado","sinônimo"],"Palavras análogas":["arte","voz"]}},"dor":{"tema":"sentimentos","links":{"Sinônimos":["angústia","mágoa"],"Palavras análogas":["almoço","saudade"]}},"emprego":{"tema":"ofícios","links":{"Palavras análogas":["alfaiate","esperança","eternidade","jantar","mercado"],"Sinônimos":["profissão","salário"]}},"enfermeira":{"tema":"ofícios","links":{"Palavras análogas":["açougueiro","cabeça","violão","época"],"Sinônimos":["médico","professor"]}},"engenheiro":{"tema":"ofícios","links":{"Sinônimos":["marinheiro","trabalho"],"Palavras análogas":["irmão","juiz","lavrador","ternura"]}},"era":{"tema":"tempo","links":{"Sinônimos":["século","época"],"Palavras análogas":["mês","palavra","século","teatro","época"]}},"escola":{"tema":"lugares","links":{"Sinônimos":["casa","igreja"],"Palavras análogas":["esperança","esquina"]}},"escultura":{"tema":"artes","links":{"Palavras análogas":["aflição","jardim","olho","sobrinho","violão"],"Sinônimos":["cinema","desenho"]}},"espanto":{"tema":"sentimentos","links":{"Sinônimos":["surpresa","susto"],"Palavras análogas":["esperança","país","surpresa"]}},"esperança":{"tema":"sentimentos","links":{"Palavras análogas":["carinho","emprego","escola","espanto","nostalgia"],"Sinônimos":["compaixão","saudade"]}},"esquina":{"tema":"lugares","links":{"Palavras análogas":["cozinha","escola","pescador"],"Sinônimos":["ponte","praça"]}},"estado":{"tema":"lugares","links":{"Sinônimos":["cidade","pátria"],"Palavras análogas":["mão","médico","poesia","praça"]}},"estação":{"tema":"lugares","links":{"Palavras análogas":["capital","cidade","mercado","susto","tia"],"Sinônimos":["mercado","porto"]}},"estômago":{"tema":"corpo","links":{"Sinônimos":["fígado","pulmão"],"Palavras análogas":["irmão","língua"]}},"eternidade":{"tema":"tempo","links":{"Palavras análogas":["advogado","emprego","instante","madrugada","peixe"],"Sinônimos":["amanhã","passado"]}},"fala":{"tema":"linguagem","links":{"Palavras análogas":["acento","advogado"],"Sinônimos":["conversa","voz"]}},"família":{"tema":"família","links":{"Sinônimos":["herança","parentesco"],"Palavras análogas":["nora","susto"]}},"farinha":{"tema":"comida","links":{"Palavras análogas":["comida","osso","pescador","vinho"],"Sinônimos":["pão","trigo"]}},"feijão":{"tema":"comida","links":{"Sinônimos":["arroz","milho"],"Palavras análogas":["arroz","avenida","mandioca","palavra","vinho"]}},"felicidade":{"tema":"sentimentos","links":{"Palavras análogas":["aflição","compaixão","conversa","trigo"],"Sinônimos":["alegria","contentamento"]}},"ferreiro":{"tema":"ofícios","links":{"Sinônimos":["carpinteiro","sapateiro"],"Palavras análogas":["mês","onda","pastor","sapateiro","segundo"]}},"filha":{"tema":"família","links":{"Sinônimos":["filho","irmão"],"Palavras análogas":["manteiga","nora","parentesco","primo","tia"]}},"filho":{"tema":"família","links":{"Palavras análogas":["carne","genro","neto"],"Sinônimos":["filha","pai"]}},"flor":{"tema":"natureza","links":{"Sinônimos":["folha","pétala"],"Palavras análogas":["mar","samba","semente"]}},"floresta":{"tema":"natureza","links":{"Sinônimos":["mata","natureza"],"Palavras análogas":["mar","medo","tempo"]}},"folha":{"tema":"natureza","links":{"Palavras análogas":["conto","semente","silêncio","sussurro","tio"],"Sinônimos":["flor","raiz"]}},"fotografia":{"tema":"artes","links":{"Sinônimos":["arte","cinema"],"Palavras análogas":["cinema","refeição","rima","soldado","teatro"]}},"frase":{"tema":"linguagem","links":{"Palavras análogas":["almoço","gíria","letra","sussurro","sílaba","tristeza"],"Sinônimos":["linguagem","sentido"]}},"fruto":{"tema":"natureza","links":{"Sinônimos":["jardim","semente"],"Palavras análogas":["mata","natureza","piano"]}},"futuro":{"tema":"tempo","links":{"Palavras análogas":["fígado","minuto","semana","século"],"Sinônimos":["passado","tempo"]}},"fígado":{"tema":"corpo","links":{"Palavras análogas":["alma","cozinha","futuro"],"Sinônimos":["estômago","pele"]}},"genro":{"tema":"família","links":{"Palavras análogas":["avó","filho","madrinha"],"Sinônimos":["nora","sogra"]}},"grito":{"tema":"linguagem","links":{"Palavras análogas":["conversa","linguagem","pergunta","silêncio","sobrinho"],"Sinônimos":["silêncio","sussurro"]}},"gíria":{"tema":"linguagem","links":{"Palavras análogas":["alma","crepúsculo","frase","idioma","sotaque"],"Sinônimos":["sinônimo","sotaque"]}},"herança":{"tema":"família","links":{"Palavras análogas":["conto","marinheiro","neta","pimenta","prima","sinônimo","tio"],"Sinônimos":["família","madrinha"]}},"história":{"tema":"linguagem","links":{"Palavras análogas":["apelido","comida","sentido","surpresa","tempo"],"Sinônimos":["memória","resposta"]}},"hoje":{"tema":"tempo","links":{"Sinônimos":["amanhã","ontem"],"Palavras análogas":["amanhã","crepúsculo","dente","tristeza"]}},"hora":{"tema":"tempo","links":{"Palavras análogas":["advogado","amanhã","época"],"Sinônimos":["minuto","tempo"]}},"idioma":{"tema":"linguagem","links":{"Palavras análogas":["apelido","avó","canção","gíria","madrinha","tempo"],"Sinônimos":["linguagem","palavra"]}},"igreja":{"tema":"lugares","links":{"Palavras análogas":["bairro","casa","janela","mercado","operário","selva"],"Sinônimos":["escola","mercado"]}},"instante":{"tema":"tempo","links":{"Palavras análogas":["almoço","aurora","eternidade","nação"],"Sinônimos":["momento","segundo"]}},"irmã":{"tema":"família","links":{"Palavras análogas":["apelido","pintura","sal","tia"],"Sinônimos":["avô","irmão"]}},"irmão":{"tema":"família","links":{"Palavras análogas":["engenheiro","estômago","pais","ponte","tia"],"Sinônimos":["filha","irmã"]}},"janela":{"tema":"lugares","links":{"Palavras análogas":["braço","igreja","nação","pintura","profissão"],"Sinônimos":["cozinha","porta"]}},"jantar":{"tema":"comida","links":{"Sinônimos":["almoço","pão"],"Palavras análogas":["coração","emprego","mel"]}},"jardim":{"tema":"natureza","links":{"Sinônimos":["campo","fruto"],"Palavras análogas":["cidade","escultura","montanha","praia","pétala"]}},"joelho":{"tema":"corpo","links":{"Palavras análogas":["coração","pedreiro","perna","tambor"],"Sinônimos":["perna","pé"]}},"juiz":{"tema":"ofícios","links":{"Sinônimos":["advogado","soldado"],"Palavras análogas":["advogado","engenheiro","mão","patrão","porto"]}},"lago":{"tema":"natureza","links":{"Sinônimos":["cachoeira","mar"],"Palavras análogas":["acento","mar","natureza"]}},"lar":{"tema":"lugares","links":{"Sinônimos":["casa","quarto"],"Palavras análogas":["conto","ponte","praça","rua"]}},"lavrador":{"tema":"ofícios","links":{"Palavras análogas":["engenheiro","montanha","ofício","operário","padeiro","selva"],"Sinônimos":["pastor","pescador"]}},"leite":{"tema":"comida","links":{"Palavras análogas":["mandioca","pele","pão","época"],"Sinônimos":["manteiga","queijo"]}},"letra":{"tema":"linguagem","links":{"Sinônimos":["apelido","sílaba"],"Palavras análogas":["dia","frase","resposta","significado"]}},"linguagem":{"tema":"linguagem","links":{"Palavras análogas":["cachoeira","grito","riacho"],"Sinônimos":["frase","idioma"]}},"livro":{"tema":"artes","links":{"Palavras análogas":["boca","cena","ofício"],"Sinônimos":["conto","pintura"]}},"língua":{"tema":"corpo","links":{"Sinônimos":["boca","dente"],"Palavras análogas":["braço","estômago","osso","tarde"]}},"madrinha":{"tema":"família","links":{"Palavras análogas":["genro","idioma","neta"],"Sinônimos":["herança","padrinho"]}},"madrugada":{"tema":"tempo","links":{"Palavras análogas":["arroz","eternidade","manhã","médico","nome","passado","vila"],"Sinônimos":["aurora","noite"]}},"mandioca":{"tema":"comida","links":{"Palavras análogas":["feijão","leite","pimenta","sentido","árvore"],"Sinônimos":["carne","milho"]}},"manhã":{"tema":"tempo","links":{"Sinônimos":["dia","tarde"],"Palavras análogas":["ano","madrugada","profissão"]}},"manteiga":{"tema":"comida","links":{"Sinônimos":["açúcar","leite"],"Palavras análogas":["almoço","ansiedade","filha","milho","queijo"]}},"mar":{"tema":"natureza","links":{"Palavras análogas":["flor","floresta","lago","medo","pétala","vale"],"Sinônimos":["lago","onda"]}},"marinheiro":{"tema":"ofícios","links":{"Sinônimos":["engenheiro","soldado"],"Palavras análogas":["advogado","herança","médico","pedreiro"]}},"mata":{"tema":"natureza","links":{"Palavras análogas":["fruto","mercado","árvore"],"Sinônimos":["floresta","selva"]}},"medo":{"tema":"sentimentos","links":{"Palavras análogas":["angústia","floresta","mar","pavor","ternura"],"Sinônimos":["ansiedade","pavor"]}},"mel":{"tema":"comida","links":{"Sinônimos":["açúcar","sal"],"Palavras análogas":["jantar","melancolia","pastor","pimenta"]}},"melancolia":{"tema":"sentimentos","links":{"Palavras análogas":["carinho","mel","mágoa","médico","pavor"],"Sinônimos":["nostalgia","tristeza"]}},"melodia":{"tema":"artes","links":{"Sinônimos":["canção","ritmo"],"Palavras análogas":["cena","piano","verso"]}},"memória":{"tema":"linguagem","links":{"Sinônimos":["história","palavra"],"Palavras análogas":["alma","sílaba"]}},"mercado":{"tema":"lugares","links":{"Palavras análogas":["emprego","estação","igreja","mata","porta","semente"],"Sinônimos":["estação","igreja"]}},"milho":{"tema":"comida","links":{"Palavras análogas":["campo","manteiga","refeição","tela","trigo"],"Sinônimos":["feijão","mandioca"]}},"minuto":{"tema":"tempo","links":{"Palavras análogas":["futuro","noite","século","tambor"],"Sinônimos":["hora","segundo"]}},"momento":{"tema":"tempo","links":{"Palavras análogas":["café","mês","noite"],"Sinônimos":["instante","época"]}},"montanha":{"tema":"natureza","links":{"Palavras análogas":["areia","jardim","lavrador","palavra","prado"],"Sinônimos":["prado","serra"]}},"mágoa":{"tema":"sentimentos","links":{"Sinônimos":["dor","tristeza"],"Palavras análogas":["melancolia","nostalgia","palavra"]}},"mãe":{"tema":"família","links":{"Palavras análogas":["avó","cena","neto"],"Sinônimos":["pai","pais"]}},"mão":{"tema":"corpo","links":{"Sinônimos":["braço","dedo"],"Palavras análogas":["cabeça","estado","juiz","pele"]}},"médico":{"tema":"ofícios","links":{"Sinônimos":["enfermeira","pastor"],"Palavras análogas":["estado","madrugada","marinheiro","melancolia","parentesco"]}},"mês":{"tema":"tempo","links":{"Sinônimos":["ano","semana"],"Palavras análogas":["era","ferreiro","momento","sinônimo"]}},"música":{"tema":"artes","links":{"Palavras análogas":["ano","nora","pintura","samba","verso"],"Sinônimos":["arte","canção"]}},"natureza":{"tema":"natureza","links":{"Sinônimos":["areia","floresta"],"Palavras análogas":["fruto","lago","raiz","romance"]}},"nação":{"tema":"lugares","links":{"Palavras análogas":["carne","instante","janela","rua","vila"],"Sinônimos":["país","pátria"]}},"neta":{"tema":"família","links":{"Palavras análogas":["arroz","herança","madrinha","pais","quarto"],"Sinônimos":["neto","tio"]}},"neto":{"tema":"família","links":{"Sinônimos":["avó","neta"],"Palavras análogas":["filho","mãe","romance","sílaba"]}},"noite":{"tema":"tempo","links":{"Palavras análogas":["desenho","minuto","momento","tarde"],"Sinônimos":["madrugada","tarde"]}},"nome":{"tema":"linguagem","links":{"Sinônimos":["apelido","sussurro"],"Palavras análogas":["madrugada","ritmo","voz"]}},"nora":{"tema":"família","links":{"Palavras análogas":["família","filha","música","patrão","peixe","rosto"],"Sinônimos":["genro","padrinho"]}},"nostalgia":{"tema":"sentimentos","links":{"Palavras análogas":["esperança","mágoa","sílaba"],"Sinônimos":["melancolia","saudade"]}},"ofício":{"tema":"ofícios","links":{"Palavras análogas":["areia","lavrador","livro","padeiro"],"Sinônimos":["profissão","trabalho"]}},"olho":{"tema":"corpo","links":{"Sinônimos":["boca","rosto"],"Palavras análogas":["escultura","pergunta","pulmão"]}},"ombro":{"tema":"corpo","links":{"Palavras análogas":["boca","água"],"Sinônimos":["braço","pescoço"]}},"onda":{"tema":"natureza","links":{"Palavras análogas":["campo","ferreiro","prado","riacho","tempo"],"Sinônimos":["mar","praia"]}},"ontem":{"tema":"tempo","links":{"Sinônimos":["crepúsculo","hoje"],"Palavras análogas":["crepúsculo","pavor"]}},"operário":{"tema":"ofícios","links":{"Palavras análogas":["igreja","lavrador","passado","profissão","soldado"],"Sinônimos":["patrão","pedreiro"]}},"osso":{"tema":"corpo","links":{"Palavras análogas":["farinha","língua","pedreiro","pescoço"],"Sinônimos":["pele","sangue"]}},"ovo":{"tema":"comida","links":{"Palavras análogas":["carne","compaixão","palavra"],"Sinônimos":["peixe","queijo"]}},"padeiro":{"tema":"ofícios","links":{"Sinônimos":["alfaiate","açougueiro"],"Palavras análogas":["capital","lavrador","ofício"]}},"padrinho":{"tema":"família","links":{"Sinônimos":["madrinha","nora"],"Palavras análogas":["sotaque","tio"]}},"pai":{"tema":"família","links":{"Palavras análogas":["avó","canção","cozinha","teatro"],"Sinônimos":["filho","mãe"]}},"pais":{"tema":"família","links":{"Palavras análogas":["avô","contentamento","cunhado","irmão","neta","pavor","tia"],"Sinônimos":["mãe","parentesco"]}},"paixão":{"tema":"sentimentos","links":{"Sinônimos":["amor","prazer"],"Palavras análogas":["ansiedade","conto","unha"]}},"palavra":{"tema":"linguagem","links":{"Palavras análogas":["advogado","alma","cabeça","conto","dedo","era","feijão","montanha","mágoa","ovo","patrão","pintura","professor","tia"],"Sinônimos":["idioma","memória"]}},"parentesco":{"tema":"família","links":{"Sinônimos":["família","pais"],"Palavras análogas":["filha","médico"]}},"passado":{"tema":"tempo","links":{"Sinônimos":["eternidade","futuro"],"Palavras análogas":["madrugada","operário"]}},"pastor":{"tema":"ofícios","links":{"Palavras análogas":["ferreiro","mel","profissão"],"Sinônimos":["lavrador","médico"]}},"patrão":{"tema":"ofícios","links":{"Palavras análogas":["almoço","carpinteiro","juiz","nora","palavra"],"Sinônimos":["operário","salário"]}},"pavor":{"tema":"sentimentos","links":{"Palavras análogas":["aflição","medo","melancolia","ontem","pais","ritmo"],"Sinônimos":["medo","susto"]}},"país":{"tema":"lugares","links":{"Palavras análogas":["cidade","espanto","violão"],"Sinônimos":["nação","porta"]}},"pedreiro":{"tema":"ofícios","links":{"Sinônimos":["carpinteiro","operário"],"Palavras análogas":["joelho","marinheiro","osso","pescador","rio"]}},"peito":{"tema":"corpo","links":{"Palavras análogas":["comida","pulmão"],"Sinônimos":["coração","unha"]}},"peixe":{"tema":"comida","links":{"Sinônimos":["carne","ovo"],"Palavras análogas":["chá","corpo","eternidade","nora"]}},"pele":{"tema":"corpo","links":{"Sinônimos":["fígado","osso"],"Palavras análogas":["leite","mão","pulmão"]}},"pergunta":{"tema":"linguagem","links":{"Sinônimos":["acento","resposta"],"Palavras análogas":["cinema","grito","olho"]}},"perna":{"tema":"corpo","links":{"Palavras análogas":["amanhã","joelho"],"Sinônimos":["joelho","sangue"]}},"pescador":{"tema":"ofícios","links":{"Sinônimos":["açougueiro","lavrador"],"Palavras análogas":["amanhã","esquina","farinha","pedreiro","praia","tempo","verso"]}},"pescoço":{"tema":"corpo","links":{"Palavras análogas":["avô","corpo","osso","pulmão","sangue"],"Sinônimos":["dente","ombro"]}},"piano":{"tema":"artes","links":{"Palavras análogas":["dança","fruto","melodia","prado","sobrinho"],"Sinônimos":["tambor","violão"]}},"pimenta":{"tema":"comida","links":{"Palavras análogas":["almoço","açúcar","herança","mandioca","mel","sal"],"Sinônimos":["café","sal"]}},"pintura":{"tema":"artes","links":{"Palavras análogas":["irmã","janela","música","palavra"],"Sinônimos":["livro","tela"]}},"poesia":{"tema":"artes","links":{"Sinônimos":["ator","verso"],"Palavras análogas":["casa","estado","queijo","violão"]}},"ponte":{"tema":"lugares","links":{"Palavras análogas":["campo","cena","irmão","lar","vale"],"Sinônimos":["esquina","porto"]}},"porta":{"tema":"lugares","links":{"Palavras análogas":["amanhã","bairro","mercado"],"Sinônimos":["janela","país"]}},"porto":{"tema":"lugares","links":{"Sinônimos":["estação","ponte"],"Palavras análogas":["juiz","pátria","vila"]}},"prado":{"tema":"natureza","links":{"Sinônimos":["campo","montanha"],"Palavras análogas":["carinho","montanha","onda","piano","tempo"]}},"praia":{"tema":"natureza","links":{"Sinônimos":["areia","onda"],"Palavras análogas":["jardim","pescador","rio"]}},"prazer":{"tema":"sentimentos","links":{"Palavras análogas":["acento","aurora","contentamento","ternura"],"Sinônimos":["contentamento","paixão"]}},"praça":{"tema":"lugares","links":{"Sinônimos":["avenida","esquina"],"Palavras análogas":["estado","lar","pátria","ternura","vale","violão"]}},"prima":{"tema":"família","links":{"Palavras análogas":["cidade","desenho","herança"],"Sinônimos":["primo","sobrinho"]}},"primo":{"tema":"família","links":{"Palavras análogas":["ator","filha","professor","sobrinho"],"Sinônimos":["prima","tia"]}},"professor":{"tema":"ofícios","links":{"Sinônimos":["advogado","enfermeira"],"Palavras análogas":["aurora","palavra","primo","salário","sapateiro","água"]}},"profissão":{"tema":"ofícios","links":{"Palavras análogas":["alfaiate","janela","manhã","operário","pastor","serra"],"Sinônimos":["emprego","ofício"]}},"pulmão":{"tema":"corpo","links":{"Sinônimos":["coração","estômago"],"Palavras análogas":["avô","dente","olho","peito","pele","pescoço","unha"]}},"pátria":{"tema":"lugares","links":{"Palavras análogas":["alma","porto","praça","tempo"],"Sinônimos":["estado","nação"]}},"pão":{"tema":"comida","links":{"Sinônimos":["farinha","jantar"],"Palavras análogas":["leite","verso"]}},"pé":{"tema":"corpo","links":{"Sinônimos":["alma","joelho"],"Palavras análogas":["dedo","rosto","tela"]}},"pétala":{"tema":"natureza","links":{"Palavras análogas":["cachoeira","jardim","mar","susto"],"Sinônimos":["flor","semente"]}},"quarto":{"tema":"lugares","links":{"Palavras análogas":["avenida","neta"],"Sinônimos":["cozinha","lar"]}},"queijo":{"tema":"comida","links":{"Palavras análogas":["alegria","chá","manteiga","poesia"],"Sinônimos":["leite","ovo"]}},"raiz":{"tema":"natureza","links":{"Sinônimos":["folha","árvore"],"Palavras análogas":["natureza","serra","vale"]}},"refeição":{"tema":"comida","links":{"Palavras análogas":["bairro","fotografia","milho","água"],"Sinônimos":["almoço","comida"]}},"resposta":{"tema":"linguagem","links":{"Sinônimos":["história","pergunta"],"Palavras análogas":["letra","semana"]}},"riacho":{"tema":"natureza","links":{"Palavras análogas":["angústia","capital","linguagem","onda"],"Sinônimos":["cachoeira","rio"]}},"rima":{"tema":"artes","links":{"Palavras análogas":["areia","dança","fotografia","significado","violão"],"Sinônimos":["romance","verso"]}},"rio":{"tema":"natureza","links":{"Palavras análogas":["pedreiro","praia"],"Sinônimos":["riacho","vale"]}},"ritmo":{"tema":"artes","links":{"Sinônimos":["melodia","samba"],"Palavras análogas":["nome","pavor","teatro"]}},"romance":{"tema":"artes","links":{"Palavras análogas":["arte","natureza","neto","samba","sotaque","teatro"],"Sinônimos":["conto","rima"]}},"rosto":{"tema":"corpo","links":{"Palavras análogas":["boca","coração","nora","pé"],"Sinônimos":["cabeça","olho"]}},"rua":{"tema":"lugares","links":{"Palavras análogas":["alfaiate","ansiedade","bairro","lar","nação","tempo"],"Sinônimos":["avenida","bairro"]}},"sal":{"tema":"comida","links":{"Palavras análogas":["irmã","pimenta"],"Sinônimos":["mel","pimenta"]}},"salário":{"tema":"ofícios","links":{"Palavras análogas":["carne","professor"],"Sinônimos":["emprego","patrão"]}},"samba":{"tema":"artes","links":{"Palavras análogas":["arte","flor","música","romance"],"Sinônimos":["ritmo","violão"]}},"sangue":{"tema":"corpo","links":{"Sinônimos":["osso","perna"],"Palavras análogas":["pescoço","sentido"]}},"sapateiro":{"tema":"ofícios","links":{"Sinônimos":["alfaiate","ferreiro"],"Palavras análogas":["dedo","ferreiro","professor"]}},"saudade":{"tema":"sentimentos","links":{"Sinônimos":["esperança","nostalgia"],"Palavras análogas":["ansiedade","carinho","dor"]}},"segundo":{"tema":"tempo","links":{"Palavras análogas":["crepúsculo","ferreiro"],"Sinônimos":["instante","minuto"]}},"selva":{"tema":"natureza","links":{"Sinônimos":["mata","árvore"],"Palavras análogas":["campo","igreja","lavrador"]}},"semana":{"tema":"tempo","links":{"Palavras análogas":["avô","futuro","resposta"],"Sinônimos":["dia","mês"]}},"semente":{"tema":"natureza","links":{"Palavras análogas":["cachoeira","flor","folha","mercado"],"Sinônimos":["fruto","pétala"]}},"sentido":{"tema":"linguagem","links":{"Sinônimos":["frase","significado"],"Palavras análogas":["história","mandioca","sangue","significado","trabalho"]}},"serra":{"tema":"natureza","links":{"Palavras análogas":["profissão","raiz","árvore"],"Sinônimos":["montanha","vale"]}},"significado":{"tema":"linguagem","links":{"Sinônimos":["dicionário","sentido"],"Palavras análogas":["letra","rima","sentido"]}},"silêncio":{"tema":"linguagem","links":{"Sinônimos":["conversa","grito"],"Palavras análogas":["folha","grito","sussurro"]}},"sinônimo":{"tema":"linguagem","links":{"Sinônimos":["dicionário","gíria"],"Palavras análogas":["herança","mês","sílaba"]}},"sobrinho":{"tema":"família","links":{"Sinônimos":["cunhado","prima"],"Palavras análogas":["escultura","grito","piano","primo","sotaque"]}},"sogra":{"tema":"família","links":{"Sinônimos":["cunhado","genro"],"Palavras análogas":["dente","tempo","tia"]}},"soldado":{"tema":"ofícios","links":{"Palavras análogas":["fotografia","operário"],"Sinônimos":["juiz","marinheiro"]}},"sotaque":{"tema":"linguagem","links":{"Palavras análogas":["acento","gíria","padrinho","romance","sobrinho","vinho"],"Sinônimos":["gíria","voz"]}},"surpresa":{"tema":"sentimentos","links":{"Sinônimos":["alegria","espanto"],"Palavras análogas":["braço","espanto","história"]}},"sussurro":{"tema":"linguagem","links":{"Palavras análogas":["folha","frase","silêncio"],"Sinônimos":["grito","nome"]}},"susto":{"tema":"sentimentos","links":{"Palavras análogas":["alfaiate","amor","estação","família","pétala","tempo"],"Sinônimos":["espanto","pavor"]}},"século":{"tema":"tempo","links":{"Sinônimos":["ano","era"],"Palavras análogas":["era","futuro","minuto"]}},"sílaba":{"tema":"linguagem","links":{"Sinônimos":["acento","letra"],"Palavras análogas":["compaixão","frase","memória","neto","nostalgia","sinônimo"]}},"tambor":{"tema":"artes","links":{"Sinônimos":["dança","piano"],"Palavras análogas":["joelho","minuto","verso"]}},"tarde":{"tema":"tempo","links":{"Palavras análogas":["açougueiro","dia","língua","noite"],"Sinônimos":["manhã","noite"]}},"teatro":{"tema":"artes","links":{"Sinônimos":["cena","dança"],"Palavras análogas":["era","fotografia","pai","ritmo","romance","tempo"]}},"tela":{"tema":"artes","links":{"Palavras análogas":["canção","cinema","milho","pé"],"Sinônimos":["desenho","pintura"]}},"tempo":{"tema":"tempo","links":{"Palavras análogas":["açúcar","capital","floresta","história","idioma","onda","pescador","prado","pátria","rua","sogra","susto","teatro","tio"],"Sinônimos":["futuro","hora"]}},"ternura":{"tema":"sentimentos","links":{"Palavras análogas":["alegria","engenheiro","medo","prazer","praça"],"Sinônimos":["carinho","compaixão"]}},"tia":{"tema":"família","links":{"Palavras análogas":["estação","filha","irmã","irmão","pais","palavra","sogra"],"Sinônimos":["primo","tio"]}},"tio":{"tema":"família","links":{"Palavras análogas":["folha","herança","padrinho","tempo"],"Sinônimos":["neta","tia"]}},"trabalho":{"tema":"ofícios","links":{"Palavras análogas":["aldeia","café","carpinteiro","sentido"],"Sinônimos":["engenheiro","ofício"]}},"trigo":{"tema":"comida","links":{"Sinônimos":["arroz","farinha"],"Palavras análogas":["felicidade","milho","unha"]}},"tristeza":{"tema":"sentimentos","links":{"Palavras análogas":["amor","frase","hoje"],"Sinônimos":["melancolia","mágoa"]}},"unha":{"tema":"corpo","links":{"Palavras análogas":["açúcar","dedo","paixão","pulmão","trigo"],"Sinônimos":["dedo","peito"]}},"vale":{"tema":"natureza","links":{"Palavras análogas":["mar","ponte","praça","raiz"],"Sinônimos":["rio","serra"]}},"verso":{"tema":"artes","links":{"Palavras análogas":["conto","melodia","música","pescador","pão","tambor"],"Sinônimos":["poesia","rima"]}},"vila":{"tema":"lugares","links":{"Sinônimos":["aldeia","capital"],"Palavras análogas":["carpinteiro","madrugada","nação","porto"]}},"vinho":{"tema":"comida","links":{"Sinônimos":["chá","água"],"Palavras análogas":["farinha","feijão","sotaque"]}},"violão":{"tema":"artes","links":{"Palavras análogas":["enfermeira","escultura","país","poesia","praça","rima"],"Sinônimos":["piano","samba"]}},"voz":{"tema":"linguagem","links":{"Palavras análogas":["afeto","capital","cozinha","dança","dicionário","nome"],"Sinônimos":["fala","sotaque"]}},"água":{"tema":"comida","links":{"Palavras análogas":["aflição","café","ombro","professor","refeição"],"Sinônimos":["comida","vinho"]}},"árvore":{"tema":"natureza","links":{"Palavras análogas":["amor","mandioca","mata","serra"],"Sinônimos":["raiz","selva"]}},"época":{"tema":"tempo","links":{"Palavras análogas":["crepúsculo","enfermeira","era","hora","leite"],"Sinônimos":["era","momento"]}}};
+
+/* ---------- build graph ---------- */
+const words = Object.keys(DATA).sort((a,b)=>a.localeCompare(b,"pt"));
+const lower = {}; words.forEach(w=>lower[w.toLowerCase()]=w);
+const relTypes = new Set(); words.forEach(w=>Object.keys(DATA[w].links).forEach(r=>relTypes.add(r)));
+const degree = {}; words.forEach(w=>degree[w]=0);
+const pairSeen = new Set();
+words.forEach(w=>{ for(const r in DATA[w].links) for(const t of DATA[w].links[r]){
+  degree[w]++; const k=[w,t].sort((a,b)=>a.localeCompare(b,"pt")).join("\u0001"); if(!pairSeen.has(k)){pairSeen.add(k); degree[t]++; }
+}});
+const maxDeg = Math.max(...Object.values(degree));
+
+const temas = [...new Set(words.map(w=>DATA[w].tema))].sort();
+const palette = ["#e8b44a","#5fb0e8","#e87a6a","#8fd47a","#c58ae0","#5fd4c4","#e8d05f","#e88ac2","#9aa5e8","#d4a06a","#7ac9a0","#d47a8f"];
+const temaColor = {}; temas.forEach((t,i)=>temaColor[t]=palette[i%palette.length]);
+
+/* layout: deterministic pseudo-random sphere + force relaxation */
+function srand(seed){ let s=seed>>>0; return ()=>{ s=(s*1664525+1013904223)>>>0; return s/4294967296; }; }
+const rnd = srand(42);
+const nodes = words.map(w=>{
+  const r = 34 + Math.sqrt(rnd())*46;
+  const th = rnd()*Math.PI*2, ph = Math.acos(2*rnd()-1);
+  return { w, x:r*Math.sin(ph)*Math.cos(th), y:r*Math.cos(ph)*0.8, z:r*Math.sin(ph)*Math.sin(th),
+    vx:0, vy:0, vz:0, d:degree[w] };
+});
+const idx = {}; nodes.forEach((n,i)=>idx[n.w]=i);
+const edges = [];
+words.forEach(w=>{ for(const r in DATA[w].links) for(const t of DATA[w].links[r]){
+  const a=idx[w], b=idx[t]; if(a===b) return;
+  const k=Math.min(a,b)+"_"+Math.max(a,b);
+  if(!edges.some(e=>e.k===k)) edges.push({a,b,k});
+}});
+
+/* force simulation (pre-run then light live) */
+function step(rep){
+  for(let it=0; it<rep; it++){
+    for(const e of edges){
+      const A=nodes[e.a], B=nodes[e.b];
+      let dx=B.x-A.x, dy=B.y-A.y, dz=B.z-A.z;
+      let dist=Math.sqrt(dx*dx+dy*dy+dz*dz)||0.01;
+      const rest=16; const f=(dist-rest)*0.012;
+      dx/=dist; dy/=dist; dz/=dist;
+      A.vx+=dx*f*dist*0.05; A.vy+=dy*f*dist*0.05; A.vz+=dz*f*dist*0.05;
+      B.vx-=dx*f*dist*0.05; B.vy-=dy*f*dist*0.05; B.vz-=dz*f*dist*0.05;
+    }
+    for(let i=0;i<nodes.length;i++){
+      const A=nodes[i];
+      for(let j=i+1;j<nodes.length;j++){
+        const B=nodes[j];
+        let dx=B.x-A.x, dy=B.y-A.y, dz=B.z-A.z;
+        let d2=dx*dx+dy*dy+dz*dz+0.01;
+        if(d2>2500) continue;
+        const f=140/d2;
+        const d=Math.sqrt(d2); dx/=d; dy/=d; dz/=d;
+        A.vx-=dx*f; A.vy-=dy*f; A.vz-=dz*f;
+        B.vx+=dx*f; B.vy+=dy*f; B.vz+=dz*f;
+      }
+    }
+    for(const n of nodes){
+      n.vx*=0.85; n.vy*=0.85; n.vz*=0.85;
+      n.x+=n.vx; n.y+=n.vy; n.z+=n.vz;
+      const L=Math.sqrt(n.x*n.x+n.y*n.y+n.z*n.z)||1;
+      if(L>95){ n.x*=95/L; n.y*=95/L; n.z*=95/L; }
+    }
+  }
+}
+step(320);
+
+/* ---------- three.js scene ---------- */
+const canvas = document.getElementById("canvas");
+const renderer = new THREE.WebGLRenderer({canvas, antialias:true, alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x0b0d12, 0.006);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 2000);
+camera.position.set(0, 20, 150);
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const l1 = new THREE.DirectionalLight(0xfff4e0, 1.1); l1.position.set(60,80,40); scene.add(l1);
+const l2 = new THREE.DirectionalLight(0x8899ff, 0.4); l2.position.set(-60,-40,-60); scene.add(l2);
+
+/* edges */
+const edgePos = new Float32Array(edges.length*6);
+const edgeGeo = new THREE.BufferGeometry();
+edgeGeo.setAttribute("position", new THREE.BufferAttribute(edgePos,3));
+const edgeMat = new THREE.LineBasicMaterial({color:0x3a4260, transparent:true, opacity:0.42});
+const lineObj = new THREE.LineSegments(edgeGeo, edgeMat); scene.add(lineObj);
+
+/* nodes: sphere + text sprite */
+function labelSprite(text, size, color){
+  const c=document.createElement("canvas"); const s=128; const fs=44;
+  const ctx=c.getContext("2d"); ctx.font=`600 ${fs}px 'IBM Plex Sans',sans-serif`;
+  const w=Math.ceil(ctx.measureText(text).width)+28;
+  c.width=w; c.height=s; const ctx2=c.getContext("2d");
+  ctx2.font=ctx.font; ctx2.textBaseline="middle";
+  ctx2.fillStyle="rgba(8,10,16,0.55)";
+  const r=16; ctx2.beginPath(); ctx2.roundRect(2,8,w-4,s-16,r); ctx2.fill();
+  ctx2.strokeStyle=color+"99"; ctx2.lineWidth=2; ctx2.stroke();
+  ctx2.fillStyle=color; ctx2.textAlign="center"; ctx2.fillText(text,w/2,s/2+2);
+  const tex=new THREE.CanvasTexture(c); tex.colorSpace=THREE.SRGBColorSpace; tex.anisotropy=4;
+  const m=new THREE.SpriteMaterial({map:tex, transparent:true, depthWrite:false});
+  const sp=new THREE.Sprite(m);
+  sp.scale.set(size*(w/s), size, 1);
+  return sp;
+}
+const nodeGroup = new THREE.Group(); scene.add(nodeGroup);
+const meshes = [];
+for(const n of nodes){
+  const col = new THREE.Color(temaColor[DATA[n.w].tema]||"#aaa");
+  const rad = 1.1 + Math.sqrt(n.d/maxDeg)*2.6;
+  const geo = new THREE.SphereGeometry(rad, 20, 16);
+  const mat = new THREE.MeshStandardMaterial({color:col, roughness:0.45, metalness:0.1,
+    emissive:col, emissiveIntensity:0.12});
+  const m = new THREE.Mesh(geo, mat); m.userData.w = n.w;
+  const lab = labelSprite(n.w, 6.5, temaColor[DATA[n.w].tema]||"#aaa");
+  lab.position.y = rad + 3.4;
+  m.add(lab);
+  nodeGroup.add(m); meshes.push(m);
+  n.mesh=m; n.lab=lab;
+}
+function syncEdges(){
+  for(let i=0;i<edges.length;i++){
+    const A=nodes[edges[i].a], B=nodes[edges[i].b];
+    edgePos.set([A.x,A.y,A.z,B.x,B.y,B.z], i*6);
+  }
+  edgeGeo.attributes.position.needsUpdate = true;
+}
+syncEdges();
+
+/* camera orbit (hand-rolled, no addons needed) */
+let theta=0.4, phi=1.25, dist=150, targetDist=150;
+let dragging=false, px=0, py=0, moved=false;
+canvas.addEventListener("pointerdown", e=>{dragging=true; moved=false; px=e.clientX; py=e.clientY; canvas.setPointerCapture(e.pointerId);});
+canvas.addEventListener("pointermove", e=>{
+  if(!dragging) return;
+  const dx=e.clientX-px, dy=e.clientY-py;
+  if(Math.abs(dx)+Math.abs(dy)>3) moved=true;
+  theta-=dx*0.005; phi=Math.min(2.9,Math.max(0.25,phi-dy*0.005));
+  px=e.clientX; py=e.clientY;
+});
+canvas.addEventListener("pointerup", ()=>dragging=false);
+canvas.addEventListener("wheel", e=>{e.preventDefault(); targetDist=Math.min(420,Math.max(40,targetDist*(1+Math.sign(e.deltaY)*0.12)));},{passive:false});
+
+/* picking */
+const ray = new THREE.Raycaster(); const ptr = new THREE.Vector2();
+let hover=null;
+canvas.addEventListener("pointermove", e=>{
+  ptr.x=(e.clientX/innerWidth)*2-1; ptr.y=-(e.clientY/innerHeight)*2+1;
+  ray.setFromCamera(ptr,camera);
+  const hit=ray.intersectObjects(meshes,false)[0];
+  hover=hit?hit.object.userData.w:null;
+  canvas.style.cursor=hover?"pointer":(dragging?"grabbing":"grab");
+});
+canvas.addEventListener("click", ()=>{ if(hover && !moved) select(hover); });
+
+function resize(){
+  renderer.setSize(innerWidth,innerHeight,false);
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize); resize();
+
+/* highlight state */
+let selected=null;
+function applyHighlight(){
+  for(const n of nodes){
+    const m=n.mesh, on=!selected || n.w===selected || linkedTo(selected).has(n.w);
+    m.material.emissiveIntensity = selected ? (n.w===selected?0.75: (on?0.3:0.02)) : 0.12;
+    m.material.opacity = on?1:0.15; m.material.transparent=true;
+    n.lab.material.opacity = on?1:0.12;
+  }
+  if(selected){
+    for(let i=0;i<edges.length;i++){
+      const A=nodes[edges[i].a].w, B=nodes[edges[i].b].w;
+      edgeMat.color.setHex(0x3a4260);
+    }
+  }
+}
+function linkedTo(w){
+  const s=new Set();
+  for(const r in DATA[w].links) for(const t of DATA[w].links[r]) s.add(t);
+  // incoming
+  for(const w2 of words){ if(w2===w) continue; for(const r in DATA[w2].links) if(DATA[w2].links[r].includes(w)) s.add(w2); }
+  return s;
+}
+const linkType = {};
+words.forEach(w=>{ for(const r in DATA[w].links) for(const t of DATA[w].links[r]){
+  const k=[w,t].sort((a,b)=>a.localeCompare(b,"pt")).join("|");
+  if(!linkType[k]) linkType[k]=new Set(); linkType[k].add(r);
+}});
+
+/* ---------- UI ---------- */
+const search=document.getElementById("search"), suggest=document.getElementById("suggest");
+let sugIdx=-1, sugList=[];
+function showSuggest(q){
+  q=q.trim().toLowerCase();
+  if(!q){suggest.style.display="none"; return;}
+  sugList=words.filter(w=>w.toLowerCase().includes(q)).slice(0,12);
+  if(!sugList.length){suggest.style.display="none"; return;}
+  suggest.innerHTML=sugList.map((w,i)=>
+    `<div data-w="${w}" class="${i===sugIdx?'active':''}">${w}<span class="deg">${degree[w]} laços</span></div>`).join("");
+  suggest.style.display="block";
+  suggest.querySelectorAll("div").forEach(d=>d.onclick=()=>select(d.dataset.w));
+}
+search.addEventListener("input", ()=>{sugIdx=-1; showSuggest(search.value);});
+search.addEventListener("keydown", e=>{
+  if(e.key==="ArrowDown"){sugIdx=Math.min(sugIdx+1,sugList.length-1); showSuggest(search.value); e.preventDefault();}
+  else if(e.key==="ArrowUp"){sugIdx=Math.max(sugIdx-1,0); showSuggest(search.value); e.preventDefault();}
+  else if(e.key==="Enter"){
+    const w=sugIdx>=0?sugList[sugIdx]:(lower[search.value.trim().toLowerCase()]||null);
+    if(w) select(w); suggest.style.display="none";
+  } else if(e.key==="Escape"){ suggest.style.display="none"; }
+});
+document.addEventListener("click", e=>{ if(!e.target.closest("#searchwrap")) suggest.style.display="none"; });
+
+const panel=document.getElementById("panel");
+document.getElementById("close").onclick=()=>select(null);
+
+function select(w){
+  selected=w;
+  const url = w ? `${location.pathname}?word=${encodeURIComponent(w)}` : location.pathname;
+  history.replaceState(null,"",url);
+  if(!w){ panel.style.display="none"; applyHighlight(); return; }
+  search.value=w; suggest.style.display="none";
+  document.getElementById("p-word").textContent=w;
+  const t=DATA[w].tema; const te=document.getElementById("p-tema");
+  te.textContent=t||"sem tema"; te.style.display=t?"":"none";
+  const rels=document.getElementById("p-rels"); rels.innerHTML="";
+  const allLinks={}; // merged: rel type -> words (both directions)
+  for(const r in DATA[w].links) for(const t2 of DATA[w].links[r]) (allLinks[r]??=new Set()).add(t2);
+  for(const w2 of words){ if(w2===w) continue;
+    for(const r in DATA[w2].links) if(DATA[w2].links[r].includes(w)) (allLinks[r]??=new Set()).add(w2);
+  }
+  for(const r of Object.keys(allLinks).sort()){
+    const g=document.createElement("div"); g.className="relgroup";
+    g.innerHTML=`<h3>${r} (${allLinks[r].size})</h3>`;
+    const ch=document.createElement("div"); ch.className="chips";
+    for(const t2 of [...allLinks[r]].sort((a,b)=>a.localeCompare(b,"pt"))){
+      const b=document.createElement("button"); b.className="chip"; b.textContent=t2;
+      b.onclick=()=>select(t2); ch.appendChild(b);
+    }
+    g.appendChild(ch); rels.appendChild(g);
+  }
+  document.getElementById("p-note").innerHTML =
+    `${degree[w]} laços no total · ${temas.length} temas no universo · partilha: <code>?word=${encodeURIComponent(w)}</code>`;
+  panel.style.display="block";
+  applyHighlight();
+  // focus camera on node
+  const n=nodes[idx[w]];
+  const L=Math.hypot(n.x,n.y,n.z)||1;
+  targetDist=70;
+  const tTh=Math.atan2(n.x,n.z), tPh=Math.acos(n.y/L);
+  // animate
+  animTheta=tTh; animPhi=Math.min(2.6,Math.max(0.4,tPh));
+}
+let animTheta=null, animPhi=null;
+
+/* animate loop */
+const clock=new THREE.Clock();
+function tick(){
+  requestAnimationFrame(tick);
+  const t=clock.getElapsedTime();
+  if(animTheta!==null){ theta+= (animTheta-theta)*0.08; phi+=(animPhi-phi)*0.08; dist+=(targetDist-dist)*0.08;
+    if(Math.abs(animTheta-theta)<0.001) animTheta=null; }
+  else { dist+=(targetDist-dist)*0.1; if(!dragging) theta+=0.0006; }
+  camera.position.set(dist*Math.sin(phi)*Math.sin(theta), dist*Math.cos(phi), dist*Math.sin(phi)*Math.cos(theta));
+  camera.lookAt(0,0,0);
+  // gentle drift
+  for(const n of nodes){ n.mesh.position.set(n.x+Math.sin(t*0.5+idx[n.w])*0.8, n.y+Math.cos(t*0.4+idx[n.w])*0.8, n.z); }
+  syncEdges();
+  // face labels to camera is automatic for sprites
+  for(const n of nodes) n.lab.material.color.set(n.w===hover?"#ffffff":(temaColor[DATA[n.w].tema]||"#aaa"));
+  renderer.render(scene,camera);
+}
+
+document.getElementById("stats").textContent = `${words.length} palavras · ${pairSeen.size} relações · ${temas.length} temas`;
+document.getElementById("loading").remove();
+
+/* open ?word= */
+const q=new URLSearchParams(location.search).get("word");
+if(q){ const w=lower[q.toLowerCase()]; if(w) select(w); else { search.value=q; showSuggest(q); } }
+else search.focus();
+tick();
+</script>
+</body>
+</html>
