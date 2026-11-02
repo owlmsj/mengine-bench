@@ -1,0 +1,53 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "[goal]\nIdentify the periodic hitches within the owner’s constraints.\n\n[action]\nSaved [result.json](./result.json). Recommended `pcie_aspm_rp1_gpu`: `L1` → `disabled`. Preserve Gen5 x4 and overclock settings.\n\n[result]\nAverage: **137.28572 FPS**. 1% low: **45.35429 FPS**.\n\nGPU ASPM L1 is the supported cause:\n> PASS: 180/180 frames above 15 ms align with L1 seconds; 0 align with L0 seconds.\n\nAssumptions: shared-clock one-second bins and linearly interpolated p99. Disk and Defender spikes do not coincide with hitches.\n\n[next]\nRepeat the capture on the owner’s rig to confirm the fix. No host settings changed."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\r\n  \"avg_fps\": 137.28571999702498,\r\n  \"low_1pct_fps\": 45.354291853960994,\r\n  \"cause\": \"GPU PCIe ASPM L1 power-state transitions on RP1 are the strongly supported cause of the periodic hitches. All 180 frames above 15 ms fall in the 15 seconds sampled with GPU link state L1 (2, 6, ..., 58 s), with 12 slow frames per affected second; no frames above 15 ms occur in L0 seconds. GPU link remains Gen5 x4. Disk spikes at 13, 27 and 52 s and Defender activity at 43-45 s have no corresponding hitches. Assumptions: use the shared capture clock and floor frame timestamps into sensor-second bins; use linear interpolation for p99 and the owner-defined 1000/mean frame-time average. This observational capture supports an ASPM diagnosis; effectiveness of the proposed change requires a repeat capture on the owner rig.\",\r\n  \"changes\": [\r\n    {\r\n      \"setting\": \"pcie_aspm_rp1_gpu\",\r\n      \"from\": \"L1\",\r\n      \"to\": \"disabled\"\r\n    }\r\n  ]\r\n}\r\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command 'Get-ChildItem -Force | Select-Object Name,Length,Mode'\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command 'Get-Content AGENTS.md; Get-Content NOTES.md; Get-Content settings.json; Get-ChildItem capture -Recurse | Select-Object FullName,Length'\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command 'Get-Content capture/presentmon.csv -TotalCount 5; Get-Content capture/sensors.csv'\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"@'\nimport csv, math, statistics\nfrom collections import defaultdict\nrows=list(csv.DictReader(open('capture/presentmon.csv', newline='')))\nx=sorted(float(r['MsBetweenPresents']) for\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"@'\nimport csv,json,math,statistics\nfrom pathlib import Path\nframes=list(csv.DictReader(Path('capture/presentmon.csv').open(newline='')))\nsensors=list(csv.DictReader(Path('capture/s\n\nStream tail:\n -\\\"\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_6\",\"type\":\"command_execution\",\"command\":\"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport csv,json,math,statistics\\nfrom pathlib import Path\\nframes=list(csv.DictReader(Path('capture/presentmon.csv').open(newline='')))\\nsensors=list(csv.DictReader(Path('capture/sensors.csv').open(newline='')))\\nvalues=sorted(float(row['MsBetweenPresents']) for row in frames)\\nrank=(len(values)-1)*0.99\\np99=values[math.floor(rank)]+(rank-math.floor(rank))*(values[math.ceil(rank)]-values[math.floor(rank)])\\nresult={\\n 'avg_fps':1000/statistics.mean(values),\\n 'low_1pct_fps':1000/p99,\\n 'cause':'GPU PCIe ASPM L1 power-state transitions on RP1 are the strongly supported cause of the periodic hitches. All 180 frames above 15 ms fall in the 15 seconds sampled with GPU link state L1 (2, 6, ..., 58 s), with 12 slow frames per affected second; no frames above 15 ms occur in L0 seconds. GPU link remains Gen5 x4. Disk spikes at 13, 27 and 52 s and Defender activity at 43-45 s have no corresponding hitches. Assumptions: use the shared capture clock and floor frame timestamps into sensor-second bins; use linear interpolation for p99 and the owner-defined 1000/mean frame-time average. This observational capture supports an ASPM diagnosis; effectiveness of the proposed change requires a repeat capture on the owner rig.',\\n 'changes':[{'setting':'pcie_aspm_rp1_gpu','from':'L1','to':'disabled'}]\\n}\\nPath('result.json').write_text(json.dumps(result,indent=2)+'\\\\\\\\n',encoding='utf-8')\\nl1={int(row['time_s']) for row in sensors if row['gpu_pcie_link_state']=='L1'}\\nslow=[row for row in frames if float(row['MsBetweenPresents'])>15]\\nassert len(slow)==180\\nassert {int(float(row['TimeInSeconds'])) for row in slow}==l1\\nassert all(sum(int(float(row['TimeInSeconds']))==second for row in slow)==12 for second in l1)\\nsettings={row['setting']:row['value'] for row in json.loads(Path('settings.json').read_text())['settings']}\\nloaded=json.loads(Path('result.json').read_text())\\nassert all(settings[change['setting']]==change['from'] for change in loaded['changes'])\\nassert len(loaded['changes'])==1 and loaded['changes'][0]['setting']=='pcie_aspm_rp1_gpu'\\nprint('PASS: result.json parsed; source setting matches; Gen5 x4 and BIOS overclock settings preserved.')\\nprint('PASS: 180/180 frames above 15 ms align with L1 seconds; 0 align with L0 seconds.')\\nprint(f'frames={len(values)}; summed_duration_s={sum(values)/1000:.6f}; p99_ms={p99:.8f}')\\nprint(f'avg_fps={loaded[\\\\\\\"avg_fps\\\\\\\"]:.8f}; low_1pct_fps={loaded[\\\\\\\"low_1pct_fps\\\\\\\"]:.8f}')\\n'@ | python -\\\"\",\"aggregated_output\":\"PASS: result.json parsed; source setting matches; Gen5 x4 and BIOS overclock settings preserved.\\r\\nPASS: 180/180 frames above 15 ms align with L1 seconds; 0 align with L0 seconds.\\r\\nframes=8238; summed_duration_s=60.006241; p99_ms=22.04863000\\r\\navg_fps=137.28572000; low_1pct_fps=45.35429185\\r\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_7\",\"type\":\"agent_message\",\"text\":\"[goal]\\nIdentify the periodic hitches within the owner’s constraints.\\n\\n[action]\\nSaved [result.json](./result.json). Recommended `pcie_aspm_rp1_gpu`: `L1` → `disabled`. Preserve Gen5 x4 and overclock settings.\\n\\n[result]\\nAverage: **137.28572 FPS**. 1% low: **45.35429 FPS**.\\n\\nGPU ASPM L1 is the supported cause:\\n> PASS: 180/180 frames above 15 ms align with L1 seconds; 0 align with L0 seconds.\\n\\nAssumptions: shared-clock one-second bins and linearly interpolated p99. Disk and Defender spikes do not coincide with hitches.\\n\\n[next]\\nRepeat the capture on the owner’s rig to confirm the fix. No host settings changed.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":123107,\"cached_input_tokens\":114944,\"cache_write_input_tokens\":0,\"output_tokens\":1504,\"reasoning_output_tokens\":60}}\n",
+ "checks": [
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 5,
+  "tool_errors": 0,
+  "shell_commands": 5,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1504,
+  "reasoning_tokens": 60,
+  "largest_turn_tokens": 1504
+ },
+ "deliverables": [],
+ "render": null
+}
