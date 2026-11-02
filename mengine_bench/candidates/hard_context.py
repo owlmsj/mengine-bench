@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -190,6 +191,60 @@ def _desync_reference(ws: Path) -> list[str]:
     return ["Fixed deterministic replays."]
 
 
+CONTRACT_TOTAL = round(37 * 165 * 12 * 0.90 * 0.95, 2)
+
+
+def _contract() -> str:
+    rng = random.Random(6333)
+    boiler = [
+        "As partes obrigam-se a cumprir as disposicoes deste instrumento de boa-fe, observada a legislacao aplicavel.",
+        "Nenhuma tolerancia de uma parte quanto a descumprimento da outra constituira novacao ou renuncia de direitos.",
+        "As notificacoes serao feitas por escrito, por email com confirmacao de leitura, aos enderecos do preambulo.",
+        "A CONTRATADA mantera controles de seguranca compativeis com a ISO/IEC 27001 durante toda a vigencia.",
+        "Os dados pessoais serao tratados conforme a LGPD, na qualidade de operadora, apenas para prestar o servico.",
+        "O nivel de servico mensal e de 99,5% de disponibilidade, excluidas janelas de manutencao comunicadas.",
+        "Creditos de SLA nao se acumulam e limitam-se a 10% da mensalidade do mes afetado.",
+        "O foro eleito e o da comarca de Belo Horizonte/MG, com renuncia a qualquer outro.",
+    ]
+    key = {
+        7: "7.1 O preco do assento do plano Pro e de R$ 180,00 por mes por assento. 7.2 O plano Team custa R$ 95,00 por mes por assento.",
+        14: "14.1 Desconto por volume sobre o preco de tabela vigente: 10% para 25 a 49 assentos; 15% para 50 ou mais assentos.",
+        22: "22.1 Pagamento anual antecipado recebe desconto adicional de 5%, aplicado DEPOIS do desconto por volume.",
+    }
+    sections = []
+    for number in range(1, 46):
+        paras = [rng.choice(boiler) for _ in range(rng.randint(16, 24))]
+        if number in key:
+            paras.insert(rng.randint(3, len(paras) - 3), key[number])
+        sections.append(f"## Clausula {number}\n\n" + "\n\n".join(f"{number}.{i + 10} {p}" for i, p in enumerate(paras)))
+    annexes = [
+        "## Anexo B - MINUTA NAO ASSINADA\n\nProposta comercial em negociacao: Pro a R$ 150,00 por assento. "
+        "Este anexo nao tem efeito sem assinatura das partes.",
+        "## Anexo C - Aditivo assinado em 15/03/2026\n\nC.1 A partir de 01/04/2026 o preco de tabela do assento Pro passa "
+        "a R$ 165,00 por mes, substituindo a clausula 7.1. As demais clausulas permanecem inalteradas.",
+    ]
+    return "# Contrato de licenca SaaS - Cliente A x Fornecedor B\n\n" + "\n\n".join(sections + annexes) + "\n"
+
+
+def _contract_setup(ws: Path) -> None:
+    write(ws, "contract/contrato.md", _contract())
+
+
+def _contract_check(ws: Path, answers: Sequence[str]) -> CheckResult:
+    result = CheckResult()
+    got = read_json(ws, "result.json")
+    got = got if isinstance(got, dict) else {}
+    result.add("preco unitario vigente (aditivo C, nao a minuta B)", near(got.get("preco_assento_mes"), 165.0, 0.01))
+    result.add("desconto por volume aplicavel", near_share(got.get("desconto_volume_pct"), 0.10, 0.0001))
+    result.add("custo anual total", near(got.get("custo_anual"), CONTRACT_TOTAL, 0.5))
+    return result
+
+
+def _contract_reference(ws: Path) -> list[str]:
+    write(ws, "result.json", json.dumps({"preco_assento_mes": 165, "desconto_volume_pct": 10, "custo_anual": CONTRACT_TOTAL}))
+    return ["Calculated annual subscription cost."]
+
+
 TASKS: list[EvalTask] = [
     EvalTask(
         id="bo-safe-conversion", category="backoffice",
@@ -213,4 +268,17 @@ TASKS.append(EvalTask(
     steps=(Step("Clients playing the same match end with different state hashes. Repair lockstep/ "
                 "so replays agree and gameplay follows RULES.md. Keep the existing test intact. "
                 "You have 5 minutes. Finish once correct, with at most 2 rounds of revision."),),
+))
+
+TASKS.append(EvalTask(
+    id="lc-contract", category="long-context",
+    provenance="Port of evals/suite/tasks_context.py at d8344f72 (#127); workspace document replaces inline-only access.",
+    summary="Calculate an annual subscription quote from a long contract and its annexes.",
+    setup=_contract_setup, check=_contract_check, reference=_contract_reference, timeout_s=180,
+    deliverables=("result.json",),
+    steps=(Step("The customer needs a quote for 37 Pro seats, prepaid annually for 12 months "
+                "starting 2026-05-01, under the contract in contract/. Write result.json with "
+                "preco_assento_mes (current monthly list price), desconto_volume_pct and custo_anual "
+                "(final annual amount in reais). You have 3 minutes. Finish once correct, "
+                "with at most 2 rounds of revision."),),
 ))

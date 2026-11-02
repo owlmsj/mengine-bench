@@ -59,3 +59,31 @@ def test_desync_rejects_partial_or_fake_fix(wrong: str, tmp_path: Path) -> None:
     if wrong == "test_edit":
         (tmp_path / "tests/test_replay.py").write_text("")
     assert not task.check(tmp_path, [""]).passed
+
+
+@pytest.mark.parametrize("field,wrong", [
+    ("preco_assento_mes", 150), ("preco_assento_mes", 180),
+    ("desconto_volume_pct", 15), ("custo_anual", 37 * 165 * 12 * 0.85),
+    ("custo_anual", 37 * 165 * 12 * 0.9),
+])
+def test_contract_rejects_wrong_terms(field: str, wrong: float, tmp_path: Path) -> None:
+    task = next(t for t in TASKS if t.id == "lc-contract")
+    task.reference(tmp_path)
+    path = tmp_path / "result.json"
+    outcome = json.loads(path.read_text())
+    outcome[field] = wrong
+    path.write_text(json.dumps(outcome))
+    assert not task.check(tmp_path, [""]).passed
+
+
+def test_contract_accepts_common_formats(tmp_path: Path) -> None:
+    task = next(t for t in TASKS if t.id == "lc-contract")
+    (tmp_path / "result.json").write_text(json.dumps({
+        "preco_assento_mes": "R$ 165,00", "desconto_volume_pct": "0.10",
+        "custo_anual": "R$ 62.637,30",
+    }))
+    assert task.check(tmp_path, [""]).passed
+
+
+def test_candidate_ids() -> None:
+    assert {t.id for t in TASKS} == {"bo-safe-conversion", "gd-lockstep-desync", "lc-contract"}
