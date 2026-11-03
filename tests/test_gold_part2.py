@@ -113,13 +113,39 @@ class PayoutContract(unittest.TestCase):
     assert ok, output
 
 
-def test_longrepo_reference_fixes_only_two_modules(tmp_path: Path) -> None:
+def test_longrepo_float_payout_breaks_documented_half_up(tmp_path: Path) -> None:
+    # #164: 1300 x 1.15 is 1495, a half docs/ECONOMY.md rounds up to 1500; float math gives 1494.99... -> 1490.
+    longrepo._setup(tmp_path)
+    rounding_test = """import unittest
+from arena_server.economy.payout import match_payout
+
+class PayoutContract(unittest.TestCase):
+    def test_fractional_multiplier_half(self):
+        cfg = {"win_base": 1300, "loss_base": 600, "kill_bonus": 50, "event_multiplier": 1.15}
+        self.assertEqual(match_payout(True, 0, cfg), 1500)
+"""
+    ok, output = run_hidden_tests(tmp_path, rounding_test)
+    assert not ok, output
+
+
+def test_longrepo_reference_fixes_three_modules(tmp_path: Path) -> None:
     longrepo._setup(tmp_path)
     answers = longrepo._reference(tmp_path)
     changed = {rel for rel, original in longrepo.FILES.items()
                if (tmp_path / rel).read_text(encoding="utf-8") != original}
-    assert changed == {"arena_server/config/loader.py", "arena_server/persistence/codec.py"}
+    assert changed == {"arena_server/config/loader.py", "arena_server/persistence/codec.py",
+                       "arena_server/economy/payout.py"}
     assert longrepo._check(tmp_path, answers).passed
+
+
+def test_longrepo_loader_and_codec_fixes_alone_now_fail(tmp_path: Path) -> None:
+    # #164: the old reference fixed two modules and left 1300 x 1.15 at 1490; that delivery passed before.
+    longrepo._setup(tmp_path)
+    answers = longrepo._reference(tmp_path)
+    (tmp_path / "arena_server/economy/payout.py").write_text(
+        longrepo.FILES["arena_server/economy/payout.py"], encoding="utf-8")
+    result = longrepo._check(tmp_path, answers)
+    assert dict(result.checks)["hidden half up fractional multiplier"] is False and not result.passed
 
 
 BANKERS_PAYOUT = "    return int(round(raw / 10) * 10)\n"
@@ -129,7 +155,7 @@ LOSES_NAME = 'Profile(name=data["name"],'
 
 @pytest.mark.parametrize("module,broken,check", [
     # #28 B3: a fix must not break documented behavior the visible test does not exercise.
-    ("arena_server/economy/payout.py", ("    return int(math.floor(raw / 10 + 0.5) * 10)\n", BANKERS_PAYOUT),
+    ("arena_server/economy/payout.py", (longrepo.REFERENCE_PAYOUT_RETURN, BANKERS_PAYOUT),
      "hidden half up tie rounds up"),
     ("arena_server/config/loader.py", ("    env = os.environ if env is None else env\n", DROPS_REAL_ENV),
      "hidden real environment when env is none"),
