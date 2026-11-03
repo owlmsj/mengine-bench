@@ -215,6 +215,7 @@ def _run(args: argparse.Namespace) -> int:
     if problems:
         raise SystemExit(f"error: received {len(problems)} earlier run(s) on disk above; expected none, since an "
                          f"agent could read their solutions: delete them (README, 'What the agent may use') and run again")
+    _fetch_models(tasks)
     agent = make_agent(args.agent, args.model, args.effort, args.cmd)
     evidence = JudgeEvidence()
     settings = RunSettings(model=args.model, effort=args.effort, submitter=args.submitter, price=price,
@@ -304,3 +305,17 @@ def _tasks_doc(target: Path | None, readme: Path | None) -> int:
         readme.write_text(updated, encoding="utf-8", newline="\n")
         print(f"updated {readme}")
     return 0
+
+
+def _fetch_models(tasks: Sequence[EvalTask]) -> None:
+    """#153: grading must never download, so a model a task's check needs is fetched before the first agent starts."""
+    if not any("speech-model" in task.needs for task in tasks):
+        return
+    from mengine_bench.speech import WHISPER_MODEL, ensure_speech_model
+
+    try:
+        ensure_speech_model()
+    except Exception as error:  # noqa: BLE001 - any fetch failure stops the run here, not mid-grading
+        raise SystemExit(f"error: received {type(error).__name__} fetching whisper {WHISPER_MODEL}; expected the "
+                         f"model in the Hugging Face cache (README, 'Run it'): {error}") from error
+    print(f"preflight: whisper {WHISPER_MODEL} ready for the audio check")

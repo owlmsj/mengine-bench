@@ -46,9 +46,11 @@ class SiteHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def send_bytes(self, body: bytes, content_type: str) -> None:
+    def send_bytes(self, body: bytes, content_type: str, headers: tuple[tuple[str, str], ...] = ()) -> None:
         self.send_response(200)
         self.send_header("Content-Type", content_type)
+        for name, value in headers:
+            self.send_header(name, value)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -69,7 +71,15 @@ class SiteHandler(BaseHTTPRequestHandler):
         content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         if content_type.startswith("text/") or content_type.endswith("javascript"):
             content_type += "; charset=utf-8"
+        if target.name == "index.html":
+            body, headers = self.render_page(target.read_bytes())
+            self.send_bytes(body, content_type, headers)
+            return
         self.send_bytes(target.read_bytes(), content_type)
+
+    def render_page(self, body: bytes) -> tuple[bytes, tuple[tuple[str, str], ...]]:
+        """The app page as served, with any extra headers: a site injects a per-load value or sets a cookie here."""
+        return body, ()
 
 
 def serve(handler: type[SiteHandler], apply: ApplyEvent, seed: SiteState) -> None:

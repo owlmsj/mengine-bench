@@ -140,11 +140,20 @@ def _write_deliverables(target: Path, files: Mapping[str, Path], scope: PathScop
             continue
         dest = target / relative
         dest.parent.mkdir(parents=True, exist_ok=True)
+        if is_image_deliverable(relative):
+            # #153: an image the judge must see; bundle_leaks still scans its text chunks.
+            dest.write_bytes(source.read_bytes())
+            continue
         text = source.read_text(encoding="utf-8", errors="replace")
         dest.write_text(public_text(text, scope), encoding="utf-8", newline="")
 
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+IMAGE_DELIVERABLE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
+
+
+def is_image_deliverable(relative: str) -> bool:
+    return relative.lower().endswith(IMAGE_DELIVERABLE_SUFFIXES)
 
 
 def _without_png_pixels(raw: bytes) -> bytes:

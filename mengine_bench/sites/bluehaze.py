@@ -10,7 +10,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import secrets
+import threading
 import time
+from collections import deque
+from http.cookies import SimpleCookie
 from urllib.parse import parse_qs, urlsplit
 
 from mengine_bench.sites.server_base import SiteHandler, serve
@@ -20,7 +24,11 @@ SELF = "tester.bluehaze.test"
 POST_COLLECTION = "app.bluehaze.feed.post"
 IMAGES_EMBED = "app.bluehaze.embed.images"
 MAX_TEXT = 300
-MAX_BLOB_BYTES = 1_000_000
+MAX_BLOB_BYTES = 3_000_000
+SESSION_COOKIE = "bh_sid"
+TOKEN_HEADER = "X-Bh-Token"
+BOOT_META = "bh-boot"
+NONCES_KEPT = 50
 IMAGE_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif")
 TID_ALPHABET = "234567abcdefghijklmnopqrstuvwxyz"
 
@@ -89,6 +97,24 @@ def _tid() -> str:
     return "".join(reversed(chars))
 
 
+def write_token(nonce: str) -> str:
+    """The header the page derives from its per-load nonce (app.src.js `writeToken`): FNV-1a, four rounds."""
+    value, token = 0x811C9DC5, ""
+    for round_number in range(4):
+        for char in f"{nonce}.{round_number}":
+            value = ((value ^ ord(char)) * 0x01000193) & 0xFFFFFFFF
+        token += f"{value:08x}"
+    return token
+
+
+def client_of(headers: object) -> dict[str, object]:
+    """How a write arrived, for the record only (#153): a browser sends Sec-Fetch-* and Origin, a script rarely."""
+    get = getattr(headers, "get")
+    agent = str(get("User-Agent") or "")
+    return {"sec_fetch_mode": str(get("Sec-Fetch-Mode") or ""), "sec_fetch_site": str(get("Sec-Fetch-Site") or ""),
+            "origin": bool(get("Origin")), "ua": agent.split("/", 1)[0][:40] if agent else ""}
+
+
 class InvalidRequest(ValueError):
     def __init__(self, message: str, status: int = 400, error: str = "InvalidRequest") -> None:
         super().__init__(message)
@@ -96,6 +122,31 @@ class InvalidRequest(ValueError):
 
 
 class BluehazeHandler(SiteHandler):
+    # Session id -> the nonces of its recent page loads. Writes need the cookie and a token from one of them,
+    # as the real kind of site needs its session and anti-CSRF header (owner, #153: "the more real the better").
+    sessions: dict[str, deque[str]] = {}
+    sessions_lock = threading.Lock()
+
+    def render_page(self, body: bytes) -> tuple[bytes, tuple[tuple[str, str], ...]]:
+        session = self._session_id() or secrets.token_hex(16)
+        nonce = secrets.token_hex(16)
+        with self.sessions_lock:
+            self.sessions.setdefault(session, deque(maxlen=NONCES_KEPT)).append(nonce)
+        meta = f'<meta name="{BOOT_META}" content="{nonce}">'.encode("ascii")
+        cookie = f"{SESSION_COOKIE}={session}; Path=/; HttpOnly; SameSite=Lax"
+        return body.replace(b"</head>", meta + b"\n</head>", 1), (("Set-Cookie", cookie),)
+
+    def _session_id(self) -> str | None:
+        jar = SimpleCookie(self.headers.get("Cookie") or "")
+        morsel = jar.get(SESSION_COOKIE)
+        return morsel.value if morsel is not None else None
+
+    def _authorized(self) -> bool:
+        session, token = self._session_id(), self.headers.get(TOKEN_HEADER) or ""
+        with self.sessions_lock:
+            nonces = list(self.sessions.get(session or "", ()))
+        return any(write_token(nonce) == token for nonce in nonces)
+
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's name
         parts = urlsplit(self.path)
         query = {name: values[-1] for name, values in parse_qs(parts.query).items()}
@@ -118,6 +169,9 @@ class BluehazeHandler(SiteHandler):
                  "/xrpc/com.bluehaze.repo.deleteRecord": self._delete}.get(urlsplit(self.path).path)
         if route is None:
             self.send_json(404, {"error": "MethodNotImplemented", "message": f"no method at {self.path}"})
+            return
+        if not self._authorized():
+            self.send_json(401, {"error": "AuthRequired", "message": "Authentication Required"})
             return
         self._reply(route)
 
@@ -219,7 +273,8 @@ class BluehazeHandler(SiteHandler):
         folder.mkdir(parents=True, exist_ok=True)
         (folder / sha).write_bytes(data)
         (folder / f"{sha}.json").write_text(json.dumps({"mimeType": mime}), encoding="utf-8")
-        self.store.record({"type": "upload", "sha256": sha, "mimeType": mime, "size": len(data)})
+        self.store.record({"type": "upload", "sha256": sha, "mimeType": mime, "size": len(data),
+                           "client": client_of(self.headers)})
         return {"blob": {"$type": "blob", "ref": {"$link": sha}, "mimeType": mime, "size": len(data)}}
 
     def _create(self) -> dict[str, object]:
@@ -243,7 +298,7 @@ class BluehazeHandler(SiteHandler):
         rkey = _tid()
         post = {"uri": post_uri(SELF, rkey), "rkey": rkey, "author": SELF, "record": record,
                 "seq": max(post["seq"] for post in self.store.state["posts"]) + 1}  # type: ignore[union-attr]
-        self.store.record({"type": "create", "post": post})
+        self.store.record({"type": "create", "post": post, "client": client_of(self.headers)})
         return {"uri": post["uri"], "cid": self._view(post)["cid"]}
 
     def _delete(self) -> dict[str, object]:
@@ -251,7 +306,7 @@ class BluehazeHandler(SiteHandler):
         uri = post_uri(SELF, rkey)
         if uri not in {post["uri"] for post in self.store.state["posts"]}:  # type: ignore[union-attr]
             raise InvalidRequest(f"Could not find record {rkey!r} in {SELF}")
-        self.store.record({"type": "delete", "uri": uri})
+        self.store.record({"type": "delete", "uri": uri, "client": client_of(self.headers)})
         return {}
 
 
