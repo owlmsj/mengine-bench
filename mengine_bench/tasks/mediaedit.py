@@ -213,7 +213,7 @@ def _media_photo_checks(ws: Path, result: CheckResult) -> None:
 
 
 def media_balloon_whole(image: object) -> tuple[bool, str]:
-    """The magenta disc: present, clear of every edge, round and filled like a whole disc."""
+    """Locate the envelope, then check the whole subject and the source photo around it."""
     rgb = image.convert("RGB")  # type: ignore[attr-defined]
     width, height = rgb.size
     pixels = rgb.load()
@@ -234,6 +234,55 @@ def media_balloon_whole(image: object) -> tuple[bool, str]:
     ratio, fill = box_w / box_h, len(xs) / (box_w * box_h)
     if not MEDIA_ROUND_RATIO[0] <= ratio <= MEDIA_ROUND_RATIO[1] or not MEDIA_DISC_FILL[0] <= fill <= MEDIA_DISC_FILL[1]:
         return False, saw({**found, "width/height": round(ratio, 2), "fill": round(fill, 2)}, "a round, whole balloon")
+    return _media_source_correspondence(rgb, (left, top, right, bottom))
+
+
+def _media_source_correspondence(image: object, bounds: tuple[int, int, int, int]) -> tuple[bool, str]:
+    from PIL import Image, ImageChops
+
+    left, top, right, bottom = bounds
+    scale = ((right - left + 1) + (bottom - top + 1)) / (2 * (2 * MEDIA_BALLOON_RADIUS + 1))
+    source_x, source_y = MEDIA_BALLOON_CENTER
+    center_x, center_y = (left + right) / 2, (top + bottom) / 2
+    width, height = image.size  # type: ignore[attr-defined]
+
+    def project(x: float, y: float) -> tuple[int, int]:
+        return round(center_x + (x - source_x) * scale), round(center_y + (y - source_y) * scale)
+
+    # #164: the subject includes the suspension and basket, 170px below the
+    # envelope in the source; the magenta bounding box alone missed their loss.
+    basket_bottom = project(source_x, source_y + MEDIA_BALLOON_RADIUS + 170)[1]
+    if basket_bottom >= height:
+        return False, saw({"basket bottom": basket_bottom, "height": height}, "the complete basket inside the picture")
+    source = Image.open(io.BytesIO(media_photo_jpeg())).convert("RGB")
+    actual = image.load()  # type: ignore[attr-defined]
+    expected = source.load()
+    # #164: letterboxing is a valid route, in any color. Uniform outer bands
+    # are not source pixels and must not count as correspondence errors.
+    background = Image.new("RGB", (width, height), actual[0, 0])
+    content = ImageChops.difference(image, background).convert("L").point(lambda value: 255 if value > 15 else 0).getbbox()
+    content_left, content_top, content_right, content_bottom = content or (0, 0, width, height)
+
+    def difference(x: int, y: int) -> float | None:
+        px, py = project(x, y)
+        if not (2 <= px < width - 2 and 2 <= py < height - 2):
+            return None
+        if not (content_left <= px < content_right and content_top <= py < content_bottom):
+            return None
+        # #164: tolerate JPEG and resampling shifts at edges without rewarding a
+        # synthetic disc. Compare source pixels through the envelope's placement.
+        return min(sum(abs(a - b) for a, b in zip(actual[px + dx, py + dy], expected[x, y])) / 3
+                   for dx in (-1, 0, 1) for dy in (-1, 0, 1))
+
+    errors = [error for y in range(50, source.height, 100) for x in range(50, source.width, 100)
+              if (error := difference(x, y)) is not None]
+    mean_error = sum(errors) / len(errors) if len(errors) >= 12 else 255.0
+    basket_errors = [difference(source_x + dx, source_y + MEDIA_BALLOON_RADIUS + dy)
+                     for dx in (-20, 0, 20) for dy in (125, 150)]
+    basket_ok = all(error is not None and error <= 40 for error in basket_errors)
+    if mean_error > 25 or not basket_ok:
+        return False, saw({"source mean RGB error": round(mean_error, 2), "basket errors": basket_errors},
+                          "source photo RGB error <= 25 and complete basket RGB errors <= 40")
     return True, ""
 
 
