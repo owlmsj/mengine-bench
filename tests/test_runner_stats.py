@@ -48,7 +48,7 @@ def test_opencode_stream_gives_counts_tokens_and_times() -> None:
         "file_writes": 2, "repeated_tool_calls": 1, "outside_path_uses": 1,
         "input_tokens": 210, "cached_input_tokens": 190, "generated_tokens": 1100, "reasoning_tokens": 400,
         "largest_turn_tokens": 1000, "first_tool_s": 2.0, "first_write_s": 15.0, "last_event_s": 20.0,
-        "tool_s": 6.0, "wait_s": 6.0, "turn_tps_median": 100.0,
+        "tool_s": 6.0, "wait_s": 6.0, "turn_tps_median": 100.0, "tool_s_median": 1.0,
     }
 
 
@@ -87,6 +87,7 @@ def test_codex_stream_counts_tools_and_leaves_times_unmeasured() -> None:
     assert (record["shell_commands"], record["shell_failures"], record["file_writes"]) == (1, 1, 1)
     assert (record["input_tokens"], record["generated_tokens"], record["reasoning_tokens"]) == (70, 50, 20)
     assert record["first_write_s"] is None and record["last_event_s"] is None and record["turn_tps_median"] is None
+    assert record["tool_s_median"] is None, "Codex times no call: no estimate (#162)"
 
 
 def test_claude_stream_ties_errors_to_their_tool_call() -> None:

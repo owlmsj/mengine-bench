@@ -10,8 +10,8 @@ the Score, and a Cost kept apart.
 | **Speed** | 100 at 5 min of Time or less, 0 at 30 min or more, linear in between: `100 x (1800 - Time) / 1500`. |
 | **Score** | `0.6 x Correct % + 0.15 x Judge + 0.25 x Speed x Correct % / 100`, one decimal, from the published values. Speed pays only for work that is right. Only once judged. |
 | **Time** | Total agent wall seconds. Grading and judging are excluded; a timeout counts its full time. On Codex the clock stops at the final event (`turn.completed`); a process still alive 5 s later is ended and flagged, not counted as a timeout. |
-| **Cost** | USD estimate of inference, with its basis. A separate column: no points per dollar. |
-| **Est. price** | The run's tokens at public API list prices, so subscription and API runs compare. No points either. |
+| **Cost** | One column (#162): `$x` exact when the harness reports it, else `~$x`, the run's tokens at public API list prices (below), so subscription and API runs compare; `$0.00 (local)` for local inference, `>=` a lower bound, `n/a` neither. No points per dollar. |
+| **Thinking, Tools, Tool s** | Reasoning tokens, tool calls, and the median seconds per tool call where the harness times each call (opencode, AGY, Claude Code event stamps; `-` on Codex, never estimated). Statistics only, no points (#162). |
 
 The formulas live in `mengine_bench/scoring.py`. Runs compare when they ran the
 same bench major.minor (2.0.x). A patch release changes no task or brief; a workspace safety rule may change. When it changes how a run is judged or
@@ -181,9 +181,9 @@ A step without usage (crash, timeout) makes the total a lower bound, shown as
 `>= $x`. Tokens are always recorded, per step, per task and in total; the
 leaderboard's Tokens column is input (cache reads and writes included) plus output.
 
-## Est. price
+## Estimated cost
 
-Cost is `n/a` for most subscription runs, so the leaderboard also prices every run the same way:
+A harness reports cost only on some runs, so the leaderboard's Cost falls back to pricing the run the same way for all:
 `((input - cached) x X + cached x Y + generated x Z) / 1,000,000`. It is an estimate, shown as `~$x`, and a
 subscription does not bill this amount. `generated` holds reasoning on every harness. A model with no price below
 shows `n/a`, and local inference declared free shows `$0.00 (local)`.

@@ -1,4 +1,4 @@
-"""The board's Est. price: a run's tokens at public API list prices (#76).
+"""The board's estimated Cost: a run's tokens at public API list prices (#76, #162).
 
 A subscription hides what a run would cost, so the Cost column is mostly n/a. This
 puts every run on one scale; it never counts toward the Score. USD per million

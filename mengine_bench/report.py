@@ -167,7 +167,10 @@ def count_text(value: object) -> str:
 def _stats_cells(stats: object) -> str:
     row = stats if isinstance(stats, dict) else {}
     first_write = row.get("first_write_s")
-    return (f"{_fmt(row.get('model_turns'))} | {_fmt(row.get('tool_calls'))} | {count_text(row.get('generated_tokens'))} | "
+    tool_s = row.get("tool_s_median")
+    # #162: tool calls, their median seconds where the harness times each call, and thinking tokens.
+    return (f"{_fmt(row.get('model_turns'))} | {_fmt(row.get('tool_calls'))} | "
+            f"{'-' if not isinstance(tool_s, (int, float)) else f'{tool_s:.1f}'} | {count_text(row.get('generated_tokens'))} | "
             f"{count_text(row.get('reasoning_tokens'))} | {'-' if first_write is None else f'{first_write:.0f} s'}")
 
 
@@ -232,9 +235,9 @@ def render_summary(results: Mapping[str, object]) -> str:
         f"- Run: {results['date']}, started {_fmt(results.get('started_at'))}; bench at "
         f"{_commit_text(results.get('bench_commit'))}; submitter {_fmt(results.get('submitter'))}",
         "",
-        "| task | status | correct | checks | judge | time | cost (USD) | turns | tools | generated | reasoning | "
+        "| task | status | correct | checks | judge | time | cost (USD) | turns | tools | tool s | generated | thinking | "
         "first write |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     tasks = results["tasks"]
     assert isinstance(tasks, list)
