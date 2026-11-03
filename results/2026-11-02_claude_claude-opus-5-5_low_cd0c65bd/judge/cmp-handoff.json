@@ -1,0 +1,74 @@
+{
+ "task_id": "cmp-handoff",
+ "prompts": [
+  "You are handing this debugging work to a colleague who will never see {WS}/session/transcript.md. Write {WS}/HANDOFF.md, at most 1000 characters, so they can carry on from where it really stands.",
+  "You just took over this work, and {WS}/HANDOFF.md is all you have. Where was the recipe applied, what are the final decode speed and VRAM, which quantization was discarded, what is still pending, and which command measures it again? Record it in {WS}/result.json: file_line, final_decode, final_vram_mib, discarded_quant, pending, measure_command."
+ ],
+ "answers": [
+  "I wrote `./HANDOFF.md` (821 characters, under the 1000 limit). I didn't re-run any measurements; everything in it comes from the transcript.\n\n**Where it stands:**\n- **First result doesn't count:** at 128k context, local-9b Q5 first measured 37.8 tokens/s using 7881 MiB of GPU memory. That figure is invalid: 7881 MiB is the Windows display-driver (WDDM) ceiling, and 1494 MiB had overflowed into shared system memory.\n- **Valid result:** adding `--no-mmproj-offload` and `-ub 512` removed the overflow. Memory dropped to 7697 MiB and speed was 38.0 tokens/s (median of 3 runs).\n- **Where the fix lives:** it's applied in `scripts/start_server.ps1:165` (the local9 block) and in `profiles/local/local-9b.json`.\n- **Other quantizations:** Q6_K doesn't fit at 128k and was dropped. Q4_K_M fits (7305 MiB, 40.4 tokens/s) and is kept only as a fallback.\n- **Still to do:** the evals README still cites `check_vision.ps1`, which no longer exists.\n\n**My assumption:** the transcript doesn't clearly show whether the 38.0 runs happened after a background download finished, so the handoff tells the colleague to re-run once and confirm shared memory use is 0.\n\n**Why I trust this:** I filtered the transcript down to the user's request and the agent's result lines. The rest is repeated filler (log reading, waiting, GPU-panel checks) with nothing new in it.",
+  "I wrote `./result.json`. Everything in it comes from `HANDOFF.md`, and none of it has been checked against the files it describes. The workspace only holds `AGENTS.md` and `HANDOFF.md`: the `scripts/` folder, the profile file and `session/transcript.md` aren't here. The handoff also says its author never re-ran anything.\n\n- **Where the recipe was applied:** `scripts/start_server.ps1:165`, in the local9 block. The handoff says the same change was also made in `profiles/local/local-9b.json`.\n- **Final decode speed and VRAM:** 38.0 t/s (median of 3 runs) at 7697 MiB, with nothing spilling into shared memory. The recipe is `--no-mmproj-offload` plus `-ub 512`. I left out the first reading of 37.8 t/s and 7881 MiB because the handoff marks it invalid: that was the memory ceiling, with 1494 MiB spilled into shared memory.\n- **Discarded quantization:** Q6_K, because it doesn't fit at 128k context. Q4_K_M (7305 MiB, 40.4 t/s) is kept only as a fallback, so I didn't count it as discarded.\n- **Still pending:**\n  - Update the evals README, which still cites `check_vision.ps1`, a script that no longer exists.\n  - Re-run the 38.0 t/s measurement once and confirm Shared Usage is 0. The earlier runs may not have been clean, because the log was waiting on a download.\n- **Command to measure again:** `pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`\n\nFor the speed I recorded the valid 38.0 t/s rather than the invalid first measurement. I checked each field against the handoff text, but because the scripts are missing I couldn't confirm what is actually at line 165, and I couldn't re-run the measurement."
+ ],
+ "diff": "A HANDOFF.md\nA result.json\nD session/transcript.md\n\n--- HANDOFF.md ---\n# Handoff: local-9b Q5 at 128k context\n\nGoal (user): run local-9b Q5 at 131072 ctx.\n\nState:\n- First measure (`pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`): 37.8 t/s, 7881 MiB. INVALID: that is the WDDM ceiling, 1494 MiB spilled to Shared memory.\n- Fix: `--no-mmproj-offload` + `-ub 512` -> 7697 MiB, no spill, 38.0 t/s (median of 3). Valid number.\n- Applied in scripts/start_server.ps1:165 (local9 block) and profiles/local/local-9b.json.\n- Q6_K does not fit at 128k (dropped). Q4_K_M: 7305 MiB, 40.4 t/s, fallback only.\n\nLeft to do:\n- Update evals README: it still cites check_vision.ps1, which no longer exists.\n- Assumption: the 38.0 runs were clean (log kept waiting for a download); rerun once, check Shared Usage = 0.\n\nSource: session/transcript.md (other steps were noise). Not re-run by me.\n\n\n--- result.json ---\n{\n  \"file_line\": \"scripts/start_server.ps1:165\",\n  \"final_decode\": \"38.0 t/s\",\n  \"final_vram_mib\": 7697,\n  \"discarded_quant\": \"Q6_K\",\n  \"pending\": [\n    \"Update evals README: it still cites check_vision.ps1, which no longer exists\",\n    \"Rerun the 38.0 t/s measurement once and confirm Shared Usage = 0 (earlier runs may not have been clean)\"\n  ],\n  \"measure_command\": \"pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024\"\n}\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ cd <WORKSPACE>; ls -R | head -30; wc -c session/transcript.md; tail -c 3500 session/transcript.md\n$ cd <WORKSPACE>; grep -v \"omitted\" session/transcript.md | grep -vE \"\\(step [0-9]+\\)$\" | head -60\n$ cd <WORKSPACE>; cat > HANDOFF.md <<'EOF'\n# Handoff: local-9b Q5 at 128k context\n\nGoal (user): run local-9b Q5 at 131072 ctx.\n\nState:\n- First measure (`pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`): 37.8 t/s, 7881 MiB. INVALID: that is th\n$ cd <WORKSPACE>; ls; sed -n '160,170p' scripts/start_server.ps1 2>&1; ls scripts\n$ cd <WORKSPACE>; cat > result.json <<'EOF'\n{\n  \"file_line\": \"scripts/start_server.ps1:165\",\n  \"final_decode\": \"38.0 t/s\",\n  \"final_vram_mib\": 7697,\n  \"discarded_quant\": \"Q6_K\",\n  \"pending\": [\n    \"Update evals README: it still cites check_vision.ps1, which no\n\nStream tail:\n_id\":\"req_011CgfAaxSCJtM9RMN9bWmMi\"}\n{\"duration_api_ms\":28755,\"stop_reason\":\"end_turn\",\"session_id\":\"f45b43ef-165c-42f7-b99d-f8dbe8d511e2\",\"total_cost_usd\":0.1525928,\"usage\":{\"input_tokens\":8,\"cache_creation_input_tokens\":13346,\"cache_read_input_tokens\":110564,\"output_tokens\":1184,\"output_tokens_details\":{\"thinking_tokens\":13},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":13346,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":655,\"cache_read_input_tokens\":31807,\"cache_creation_input_tokens\":528,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":528},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":8,\"outputTokens\":1184,\"cacheReadInputTokens\":110564,\"cacheCreationInputTokens\":13346,\"webSearchRequests\":0,\"costUSD\":0.1525928,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":13,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":13346,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":4,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"I wrote `./result.json`. Everything in it comes from `HANDOFF.md`, and none of it has been checked against the files it describes. The workspace only holds `AGENTS.md` and `HANDOFF.md`: the `scripts/` folder, the profile file and `session/transcript.md` aren't here. The handoff also says its author never re-ran anything.\\n\\n- **Where the recipe was applied:** `scripts/start_server.ps1:165`, in the local9 block. The handoff says the same change was also made in `profiles/local/local-9b.json`.\\n- **Final decode speed and VRAM:** 38.0 t/s (median of 3 runs) at 7697 MiB, with nothing spilling into shared memory. The recipe is `--no-mmproj-offload` plus `-ub 512`. I left out the first reading of 37.8 t/s and 7881 MiB because the handoff marks it invalid: that was the memory ceiling, with 1494 MiB spilled into shared memory.\\n- **Discarded quantization:** Q6_K, because it doesn't fit at 128k context. Q4_K_M (7305 MiB, 40.4 t/s) is kept only as a fallback, so I didn't count it as discarded.\\n- **Still pending:**\\n  - Update the evals README, which still cites `check_vision.ps1`, a script that no longer exists.\\n  - Re-run the 38.0 t/s measurement once and confirm Shared Usage is 0. The earlier runs may not have been clean, because the log was waiting on a download.\\n- **Command to measure again:** `pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`\\n\\nFor the speed I recorded the valid 38.0 t/s rather than the invalid first measurement. I checked each field against the handoff text, but because the scripts are missing I couldn't confirm what is actually at line 165, and I couldn't re-run the measurement.\",\"ttft_ms\":4376,\"type\":\"result\",\"duration_ms\":30018,\"uuid\":\"5c78e872-052f-48b4-8594-7ea4a25430ab\",\"ttft_stream_ms\":3886,\"time_to_request_ms\":199,\"first_content_frame_ms\":3886,\"queued_turn_count\":0,\"result_index\":0,\"model_usage_since_last_result\":{\"claude-opus-5-5\":{\"inputTokens\":8,\"outputTokens\":1184,\"cacheReadInputTokens\":110564,\"cacheCreationInputTokens\":13346,\"webSearchRequests\":0,\"costUSD\":0.1525928,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":13,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":13346,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}}}\n",
+ "checks": [
+  [
+   "summary exists and fits in 1000 characters",
+   true
+  ],
+  [
+   "summary keeps `--no-mmproj-offload`",
+   true
+  ],
+  [
+   "summary keeps `-ub 512`",
+   true
+  ],
+  [
+   "summary keeps `7697`",
+   true
+  ],
+  [
+   "answer file_line",
+   true
+  ],
+  [
+   "answer final_decode",
+   true
+  ],
+  [
+   "answer final_vram_mib",
+   true
+  ],
+  [
+   "answer discarded_quant",
+   true
+  ],
+  [
+   "answer pending",
+   true
+  ],
+  [
+   "answer measure_command",
+   true
+  ],
+  [
+   "does not repeat the spilled VRAM as final",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 6,
+  "tool_errors": 1,
+  "shell_commands": 5,
+  "shell_failures": 1,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2484,
+  "reasoning_tokens": 13
+ },
+ "deliverables": [],
+ "render": null
+}
