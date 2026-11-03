@@ -15,7 +15,8 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from mengine_bench.core import CheckResult, EvalTask, Step, WROTE_RESULT, checkpoints, number, result_json, saw, write
+from mengine_bench.core import Checkpoint, CheckResult, EvalTask, Step, ToolCall, TraceCheck, WROTE_RESULT, checkpoints, number, result_json, saw, write
+from mengine_bench.runner.trace import fetched_urls, url_key
 from mengine_bench.tasks.webresearch import _web_date
 
 
@@ -68,7 +69,8 @@ def _webfacts_entry(got: Mapping[str, object], key: str) -> Mapping[str, object]
     return entry if isinstance(entry, dict) else {}
 
 
-def _webfacts_check(ws: Path, answers: Sequence[str]) -> CheckResult:
+@TraceCheck
+def _webfacts_check(ws: Path, answers: Sequence[str], trace: Sequence[ToolCall]) -> CheckResult:
     result = CheckResult()
     got = result_json(ws)
     for fact in WEB_FACTS:
@@ -77,6 +79,10 @@ def _webfacts_check(ws: Path, answers: Sequence[str]) -> CheckResult:
         result.add(f"{fact.key} value", _webfacts_value_ok(entry.get("value"), fact), saw(entry.get("value"), want))
         result.add(f"{fact.key} primary source", _webfacts_host_ok(entry.get("url"), fact.domains),
                    saw(entry.get("url"), f"an http(s) URL on {' or '.join(fact.domains)}"))
+    fetched = fetched_urls(trace)
+    missing = [fact.key for fact in WEB_FACTS if url_key(_webfacts_entry(got, fact.key).get("url")) not in fetched]
+    result.add("cited primary sources were fetched", not missing,
+               saw(missing, "each cited URL's host and path in a fetch action"))
     return result
 
 
@@ -99,8 +105,7 @@ TASKS = [
         summary="Look up three fixed facts on the web and give each with the official page that proves it.",
         setup=_webfacts_setup, check=_webfacts_check, reference=_webfacts_reference, timeout_s=60,
         checkpoints=checkpoints(("searched the web", r"web_?search|search_query|google|bing|duckduckgo"),
-                                ("opened a source", r"web_?fetch|fetch_url|curl|Invoke-WebRequest|sqlite\.org|postgresql\.org|unicode\.org"),
-                                WROTE_RESULT),
+                                WROTE_RESULT) + (Checkpoint("opened a source", r"https?://", fetch_only=True),),
         steps=(Step(WEB_FACTS_PROMPT),),
     ),
 ]

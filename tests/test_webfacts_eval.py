@@ -8,10 +8,17 @@ from pathlib import Path
 import pytest
 
 from mengine_bench import catalog
-from mengine_bench.core import write
+from mengine_bench.core import CheckResult, ToolCall, write
 from mengine_bench.tasks.webfacts import WEB_FACTS
+from mengine_bench.runner.trace import url_key
 
 TASK = next(task for task in catalog.all_tasks() if task.id == "web-fact-search")
+
+
+def _check(ws: Path, answers: list[str]) -> CheckResult:
+    entries = json.loads((ws / "result.json").read_text()) if (ws / "result.json").exists() else {}
+    trace = [ToolCall("WebFetch", {"url": entry.get("url")}) for entry in entries.values()]
+    return TASK.check(ws, answers, trace)
 
 
 def _solved(ws: Path) -> Path:
@@ -28,11 +35,11 @@ def _set(ws: Path, key: str, field: str, value: object) -> None:
 
 
 def test_the_reference_passes_and_the_untouched_folder_fails(tmp_path: Path) -> None:
-    assert TASK.check(_solved(tmp_path / "solved"), ["done"]).passed
+    assert _check(_solved(tmp_path / "solved"), ["done"]).passed
     (tmp_path / "bare").mkdir()
     TASK.setup(tmp_path / "bare")
-    bare = TASK.check(tmp_path / "bare", [""])
-    assert bare.score == 0.0 and len(bare.checks) == 2 * len(WEB_FACTS)
+    bare = _check(tmp_path / "bare", [""])
+    assert bare.score == 0.0 and len(bare.checks) == 2 * len(WEB_FACTS) + 1
 
 
 @pytest.mark.parametrize(("key", "value", "url"), [
@@ -46,7 +53,7 @@ def test_other_writings_and_other_pages_of_the_same_site_pass(tmp_path: Path, ke
     ws = _solved(tmp_path)
     _set(ws, key, "value", value)
     _set(ws, key, "url", url)
-    assert TASK.check(ws, [""]).passed
+    assert _check(ws, [""]).passed
 
 
 @pytest.mark.parametrize(("key", "field", "bad", "check"), [
@@ -64,8 +71,9 @@ def test_other_writings_and_other_pages_of_the_same_site_pass(tmp_path: Path, ke
 def test_each_wrong_fact_or_source_fails_only_its_check(tmp_path: Path, key: str, field: str, bad: object, check: str) -> None:
     ws = _solved(tmp_path)
     _set(ws, key, field, bad)
-    result = TASK.check(ws, [""])
-    assert result.failed() == [check] and check in result.details
+    result = _check(ws, [""])
+    expected = [check] + (["cited primary sources were fetched"] if field == "url" and not url_key(bad) else [])
+    assert result.failed() == expected and check in result.details
 
 
 def test_the_brief_asks_for_the_web_and_hands_over_no_answer() -> None:
@@ -80,4 +88,18 @@ def test_a_correct_answer_in_the_chat_alone_earns_nothing(tmp_path: Path) -> Non
     ws = _solved(tmp_path / "ref")
     answer = (ws / "result.json").read_text(encoding="utf-8")
     (tmp_path / "chat").mkdir()
-    assert TASK.check(tmp_path / "chat", [answer]).score == 0.0
+    assert _check(tmp_path / "chat", [answer]).score == 0.0
+
+
+def test_memory_only_result_no_longer_passes(tmp_path: Path) -> None:
+    # #164: Opus wrote the right facts and primary URLs with only a heredoc, no fetch.
+    result = TASK.check(_solved(tmp_path), ["done"])
+    assert not result.passed
+    assert "cited primary sources were fetched" in result.failed()
+
+
+def test_fetching_a_different_page_on_the_same_host_is_insufficient(tmp_path: Path) -> None:
+    ws = _solved(tmp_path)
+    trace = [ToolCall("WebFetch", {"url": fact.source}) for fact in WEB_FACTS]
+    trace[0] = ToolCall("WebFetch", {"url": "https://sqlite.org/index.html"})
+    assert TASK.check(ws, [], trace).failed() == ["cited primary sources were fetched"]
