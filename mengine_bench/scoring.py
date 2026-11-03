@@ -5,7 +5,7 @@
   never Solved and counts its full time.
 - Judge = mean of the one rubric vote per task, 0-100 (set by `mengine-bench judge`).
 - Speed = 100 at 5 min of Time or less, 0 at 30 min or more, linear in between.
-- Score = 0.6 * Correct + 0.15 * Judge + 0.25 * Speed * Correct / 100, from the published one-decimal values.
+- Score = 0.5 * Correct + 0.25 * Judge + 0.25 * Speed * Correct / 100, from the published one-decimal values.
 - Time = total agent wall seconds; Cost = USD with its basis, not folded into
   Score. Comparability is the bench major.minor version, so there is no separate
   scoring version and no per-task weights.
@@ -20,8 +20,10 @@ from dataclasses import dataclass
 from mengine_bench.runner.agents import Usage
 
 STATUSES = ("ok", "timeout", "crash")
-CORRECT_SHARE = 0.6
-JUDGE_SHARE = 0.15
+# #164: an audit found the judge calibrated (55 of 56 votes within 8 points) and the checks lenient, so 2.5 moves
+# 0.1 from Correct to Judge.
+CORRECT_SHARE = 0.5
+JUDGE_SHARE = 0.25
 SPEED_SHARE = 0.25
 # #41: a good run takes about 10 min, and 40 to 50 min is too long.
 SPEED_FULL_S = 300.0

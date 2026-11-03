@@ -117,6 +117,9 @@ def test_scoring_uses_the_recorded_rounded_agent_time() -> None:
 def _write_result(results: Path, name: str, score: float | None, *, model: str = "m", judged: bool = True,
                   task_ids: list[str] | None = None, bench_version: str = __version__) -> Path:
     ids = task_ids if task_ids is not None else [task.id for task in catalog.all_tasks()]
+    # #164: the current table recomputes Score from Correct, Judge and Speed; at Speed 100 the formula gives back
+    # `score` when Correct and Judge equal it, so a test sets one number and the ranking follows it.
+    correct, judge, speed = (score, score, 100.0) if score is not None and judged else (80.0, 70.0 if judged else None, 0.0)
     result = {
         "date": "2026-10-19", "bench_version": bench_version, "submitter": "dquill",
         "agent": {"name": "codex", "model": model, "effort": "high", "version": "codex-cli 0.162.1"},
@@ -124,8 +127,8 @@ def _write_result(results: Path, name: str, score: float | None, *, model: str =
         "config": {"personal_instructions": [], "provider": "openai", "mcp": "none"},
         "environment": {"os": "Linux 6", "cpu": "AMD Ryzen 9 7950X", "cpu_count": 32, "ram_gb": 62.6,
                         "gpu": "NVIDIA GeForce RTX 4090 (24 GB)"},
-        "totals": {"score": score, "correct": 80.0, "solved": 10, "total": len(ids), "judge": 70.0 if judged else None,
-                   "speed": 0.0, "time_s": 1830.0, "cost_usd": 2.5, "cost_basis": "price", "cost_lower_bound": True,
+        "totals": {"score": score, "correct": correct, "solved": 10, "total": len(ids), "judge": judge,
+                   "speed": speed, "time_s": 1830.0, "cost_usd": 2.5, "cost_basis": "price", "cost_lower_bound": True,
                    "tokens": {"input": 1_500_000, "cached_input": 0, "output": 250_000, "reasoning": 0},
                    "timeouts": 1, "stats": {"generated_tokens": 3400, "model_turns": 12}},
         "tasks": [{"id": task_id} for task_id in ids],
@@ -148,7 +151,7 @@ def test_leaderboard_is_one_table_sorted_by_score_with_the_spec_columns(tmp_path
                       "Turns | Tools | Tool s | Agent | Model | Effort | Hardware | Config | Submitter | Date | Run |")
     assert table.index("high-model") < table.index("low-model")
     row = table.splitlines()[2]
-    for cell in ("| 1 | **90.0** | 80.0 | 10/", "| 70.0 | 0.0 | 30 min 30 s | 1 | n/a | 1.75M | 3.4k | - | 12 | - | - |",
+    for cell in ("| 1 | **90.0** | 90.0 | 10/", "| 90.0 | 100.0 | 30 min 30 s | 1 | n/a | 1.75M | 3.4k | - | 12 | - | - |",
                  "| codex codex-cli 0.162.1 | high-model | high |", "AMD Ryzen 9 7950X, NVIDIA GeForce RTX 4090 (24 GB)",
                  "provider=openai, mcp=none", "| dquill | 2026-10-19 | [run](results/high/summary.md) |"):
         assert cell in row, (cell, row)
@@ -185,7 +188,7 @@ def test_leaderboard_ranks_the_current_major_minor_only(tmp_path: Path) -> None:
     assert board.ranked == 2 and board.history == 1 and board.unranked == []
 
 
-def test_2_0_to_2_3_runs_stay_ranked_in_2_4_with_their_marks_161(tmp_path: Path) -> None:
+def test_2_0_to_2_4_runs_stay_ranked_in_2_5_with_their_marks_161_164(tmp_path: Path) -> None:
     # #139: 2.1 kept the 2.0 runs ranked. #151: 2.2 added three tasks and kept both. #153: 2.3 keeps all three.
     # #161: 2.4 adds a check to two tasks and keeps all four; a 2.3 run is complete on its own catalog.
     added = leaderboard.TASKS_ADDED_IN_2_2 | leaderboard.TASKS_ADDED_IN_2_3
@@ -202,7 +205,7 @@ def test_2_0_to_2_3_runs_stay_ranked_in_2_4_with_their_marks_161(tmp_path: Path)
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 5
     text = board.markdown
-    assert "Bench 2.0, 2.1, 2.2 and 2.3 runs stay in this ranking (#139, #151, #153, #161)" in text
+    assert "Bench 2.0 to 2.4 runs stay in this ranking (#139, #151, #153, #161, #164)" in text
     assert "a row marked 2.3 covers 28, without the 2.4 check" in " ".join(text.split())
     order = [text.index(mark) for mark in ("v21-model", "v22-model", "v23-model", "v24-model", "## Not ranked")]
     assert order == sorted(order)
@@ -247,10 +250,28 @@ def test_an_older_ranking_stays_on_the_board_as_history(tmp_path: Path) -> None:
     assert [name for name, _ in board.unranked] == ["results/old-pending"]
 
 
-def test_bench_is_version_2_4_x() -> None:
+def test_the_current_table_recomputes_score_with_todays_weights_and_history_keeps_its_own_164(tmp_path: Path) -> None:
+    # #164: 2.5 moved 0.1 from Correct to Judge; a stored Score from older weights must not rank a current run.
+    results = tmp_path / "results"
+    current = _write_result(results, "current", 60.0, model="current-model")
+    stale = json.loads((current / "result.json").read_text(encoding="utf-8"))
+    stale["totals"]["score"] = 99.0
+    (current / "result.json").write_text(json.dumps(stale), encoding="utf-8")
+    _write_result(results, "rival", 70.0, model="rival-model")
+    _write_result(results, "old", 41.0, model="old-model", bench_version="0.2.0")
+    board = leaderboard.build_leaderboard(results, tmp_path)
+    text = board.markdown
+    assert "| 1 | **70.0** |" in text and "| 2 | **60.0** |" in text, text
+    assert "**99.0**" not in text
+    assert "**41.0**" in text[text.index("## Bench 0.2 (history)"):]
+    assert leaderboard.current_score({"correct": 53.3, "judge": 56.7, "speed": 32.0}) == 45.1
+    assert leaderboard.current_score({"correct": 80.0, "judge": None, "speed": 0.0}) is None
+
+
+def test_bench_is_version_2_5_x() -> None:
     import tomllib
     pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
-    assert __version__ == pyproject["project"]["version"] and __version__.startswith("2.4.")
+    assert __version__ == pyproject["project"]["version"] and __version__.startswith("2.5.")
 
 
 def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:
