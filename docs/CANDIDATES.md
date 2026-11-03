@@ -45,3 +45,9 @@ re-run identically. Proposal, no code yet:
   untouched empty feed.
 - Open questions for the owner: which harnesses expose a browser in a bench run (Claude Code since bench#101;
   the others are unknown), and whether a harness without one scores zero or the task is skipped for it.
+
+## Proposals
+
+git lost-work variant of `git-merge-conflict`: the feature commit lives only on a detached HEAD (Terminal-Bench
+`fix-git`), so the agent must find it in the reflog before merging; hardens the existing task without making it
+longer (#151).

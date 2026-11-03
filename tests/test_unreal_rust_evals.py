@@ -32,7 +32,7 @@ def test_both_evals_are_in_the_catalog_and_the_old_ones_left() -> None:
     ids = {task.id for task in catalog.all_tasks()}
     assert {"ue-packaged-bug", "rs-lock-bug"} <= ids
     assert not {"gd-astar-doors", "gd-ecs-collision-bug"} & ids
-    assert len(ids) == 20  # #124: bench 2.0
+    assert len(ids) == 23  # #124: bench 2.0 had 20; #151: 2.2 added three
 
 
 @pytest.mark.parametrize("task_id", ["ue-packaged-bug", "rs-lock-bug"])
