@@ -12,13 +12,13 @@ import pytest
 from mengine_bench import catalog
 from mengine_bench.core import CheckResult
 from mengine_bench.runner.site import serve_site
-from mengine_bench.sites.bluehaze import SEED, SELF, TOKEN_HEADER, apply_bluehaze
+from mengine_bench.sites.bluehaze import SEED, SELF, TOKEN_HEADER, apply_bluehaze, post_uri
 from mengine_bench.sites.signed_store import DATA_DIR, KEY_FILE, STATE_FILE, SignedStore, verify
-from mengine_bench.tasks.social import (DECOY, IMAGE, INTEGRITY_GATE, TARGET, TASKS, SiteClient, png_size, poster_png,
-                                        solve)
+from mengine_bench.tasks.social import IMAGE, INTEGRITY_GATE, TASKS, SiteClient, png_size, poster_png, solve
 
 TASK = TASKS[0]
 MARA = "mara-quill.bluehaze.test"
+VOLUNTEERS = post_uri(MARA, "3m4mara7vw4ee")
 
 
 def _get(url: str) -> bytes:
@@ -82,8 +82,20 @@ def test_missing_alt_text_fails(tmp_path: Path) -> None:
     _failed_only(_check(_solved(tmp_path, alt="")), "image has the given alt text")
 
 
-def test_reply_to_the_wrong_post_fails(tmp_path: Path) -> None:
-    _failed_only(_check(_solved(tmp_path, parent=DECOY)), "reply answers Mara's volunteer post")
+def test_leaving_the_test_post_up_fails(tmp_path: Path) -> None:
+    # #155: the cycle is post then delete; a post left standing fails both the delete and the "nothing else" check.
+    _failed_only(_check(_solved(tmp_path, delete=False)), "test post deleted", "nothing else published",
+                 "post, then delete")
+
+
+def test_a_reply_left_behind_fails(tmp_path: Path) -> None:
+    # #155: the 2.3.0 reply step is gone, so an agent that still replies publishes something not asked for.
+    ws = _solved(tmp_path)
+    reply = {"uri": f"at://did:web:{SELF}/app.bluehaze.feed.post/3zzzzzzzzzzzy", "rkey": "3zzzzzzzzzzzy",
+             "author": SELF, "seq": 98, "record": {"text": "Count me in!", "createdAt": "2026-11-03T00:00:00Z",
+                                                   "reply": {"root": {"uri": VOLUNTEERS}, "parent": {"uri": VOLUNTEERS}}}}
+    _resign_with(ws, [{"type": "create", "post": reply}])
+    _failed_only(_check(ws), "nothing else published")
 
 
 def test_an_image_of_the_wrong_size_fails(tmp_path: Path) -> None:
@@ -170,7 +182,7 @@ def test_the_replica_ships_a_minified_bundle_and_the_real_flows(tmp_path: Path) 
         assert b'<meta name="bh-boot"' in page and served[2].encode() in page
         feed = json.loads(_get(f"{site.url}/xrpc/app.bluehaze.feed.getAuthorFeed?actor={MARA}&limit=2"))
         assert [entry["post"]["author"]["handle"] for entry in feed["feed"]] == [MARA, MARA] and feed["cursor"] == "2"
-        thread = json.loads(_get(f"{site.url}/xrpc/app.bluehaze.feed.getPostThread?uri={TARGET}"))
+        thread = json.loads(_get(f"{site.url}/xrpc/app.bluehaze.feed.getPostThread?uri={VOLUNTEERS}"))
         assert "Volunteers wanted" in thread["thread"]["post"]["record"]["text"]
 
 

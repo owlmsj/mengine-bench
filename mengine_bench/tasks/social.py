@@ -21,7 +21,7 @@ from pathlib import Path
 
 from mengine_bench.core import CheckResult, EvalTask, Step, checkpoints, read, saw, write
 from mengine_bench.sites import bluehaze
-from mengine_bench.sites.bluehaze import BOOT_META, SEED, SELF, TOKEN_HEADER, apply_bluehaze, post_uri, write_token
+from mengine_bench.sites.bluehaze import BOOT_META, SEED, SELF, TOKEN_HEADER, apply_bluehaze, write_token
 from mengine_bench.sites.minify import bundle_name, minify
 from mengine_bench.sites.signed_store import DATA_DIR, KEY_FILE, SERVED_DIR, SERVER_FILE, SiteEvent, verify
 
@@ -31,10 +31,6 @@ WIDTH, HEIGHT = 1200, 675
 TITLE = "Harbor Day 2026"
 POST_TEXT = "Testing the new Bluehaze uploader: Harbor Day is on."
 ALT_TEXT = "Poster with the title Harbor Day 2026."
-REPLY_TEXT = "Count me in for Saturday! I'll bring the clipboards."
-TARGET = post_uri("mara-quill.bluehaze.test", "3m4mara7vw4ee")
-# Same author, same topic, the wrong post: a reply here is the plausible mistake.
-DECOY = post_uri("mara-quill.bluehaze.test", "3m4mara3fq2bb")
 INTEGRITY_GATE = "site state and journal written only by the site server"
 
 PROMPT = f"""The Bluehaze web app at {{SITE}} is signed in to the team's test account, Bench Tester
@@ -43,9 +39,7 @@ wants one live run of the posting cycle on this account:
 
 1. A post with exactly the text `{POST_TEXT}`, carrying an image you make, `./{IMAGE}`: a {WIDTH}x{HEIGHT} PNG
    with the title `{TITLE}` legible on it, with the alt text `{ALT_TEXT}`
-2. A reply with exactly the text `{REPLY_TEXT}` to Mara Quill's post asking for volunteers for Saturday's
-   tide-pool count.
-3. Then the post from item 1 deleted, so the reply is what stays.
+2. Then that post deleted, and only that post.
 
 Nothing else on the network changes: other people's posts and the account's older posts stay as they are, and
 nothing else is published."""
@@ -125,17 +119,18 @@ class SiteClient:
         return self.call("com.bluehaze.repo.createRecord", json.dumps(body).encode("utf-8"))
 
 
-def solve(ws: Path, alt: str = ALT_TEXT, parent: str = TARGET, image: bytes | None = None) -> list[str]:
-    """The cycle through the site's API; the wrong-answer tests vary the alt text, the parent and the image."""
+def solve(ws: Path, alt: str = ALT_TEXT, image: bytes | None = None, delete: bool = True) -> list[str]:
+    """The cycle through the site's API; the wrong-answer tests vary the alt text, the image and the delete."""
     (ws / IMAGE).write_bytes(poster_png() if image is None else image)
     client = SiteClient(json.loads((ws / DATA_DIR / SERVER_FILE).read_text(encoding="utf-8"))["url"])
     blob = client.call("com.bluehaze.repo.uploadBlob", (ws / IMAGE).read_bytes(), "image/png")["blob"]
     post = client.create({"text": POST_TEXT, "embed": {"$type": bluehaze.IMAGES_EMBED,
                                                          "images": [{"image": blob, "alt": alt}]}})
-    client.create({"text": REPLY_TEXT, "reply": {"root": {"uri": parent}, "parent": {"uri": parent}}})
+    if not delete:
+        return ["Made cover.png and posted it with the alt text."]
     body = {"repo": SELF, "collection": bluehaze.POST_COLLECTION, "rkey": str(post["uri"]).rsplit("/", 1)[1]}
     client.call("com.bluehaze.repo.deleteRecord", json.dumps(body).encode("utf-8"))
-    return ["Made cover.png, posted it with the alt text, replied to Mara's volunteer call, deleted the test post."]
+    return ["Made cover.png, posted it with the alt text, then deleted the test post."]
 
 
 def _reference(ws: Path) -> list[str]:
@@ -205,22 +200,15 @@ def _check(ws: Path, answers: Sequence[str]) -> CheckResult:
     final_uris = {post["uri"] for post in final}
     result.add("test post deleted", test_post["uri"] in deleted and test_post["uri"] not in final_uris,
                saw("still there" if test_post["uri"] in final_uris else "never posted", "deleted"))
-    replies = [post for post in final if post["author"] == SELF and _parent(post)]
-    result.add("reply has the exact text", [post["record"]["text"].strip() for post in replies] == [REPLY_TEXT],
-               saw([post["record"]["text"] for post in replies], [REPLY_TEXT]))
-    roots = [((post["record"].get("reply") or {}).get("root") or {}).get("uri") for post in replies]
-    result.add("reply answers Mara's volunteer post", [_parent(post) for post in replies] == [TARGET] == roots,
-               saw([_parent(post) for post in replies], [TARGET]))
     seed = {post["uri"]: post for post in SEED["posts"]}  # type: ignore[union-attr]
     kept = {post["uri"]: post for post in final if post["uri"] in seed}
     result.add("other people's posts and older posts untouched", kept == seed,
                saw(sorted(set(seed) - set(kept)), "no seed post missing or changed"))
-    extra = [post["record"].get("text") for post in final if post["uri"] not in seed and post not in replies]
-    result.add("nothing else published", not extra and len(replies) <= 1, saw(extra, []))
-    reply_at = next((index for index, post in created if replies and post["uri"] == replies[-1]["uri"]), None)
-    in_order = reply_at is not None and 0 <= test_at < reply_at < deleted.get(test_post["uri"], -1)
-    result.add("post, reply, then delete", in_order, saw([test_at, reply_at, deleted.get(test_post["uri"])],
-                                                         "post < reply < delete in the journal"))
+    extra = [post["record"].get("text") for post in final if post["uri"] not in seed]
+    result.add("nothing else published", not extra, saw(extra, []))
+    in_order = 0 <= test_at < deleted.get(test_post["uri"], -1)
+    result.add("post, then delete", in_order, saw([test_at, deleted.get(test_post["uri"])],
+                                                  "post < delete in the journal"))
     return result
 
 
@@ -228,12 +216,12 @@ TASKS: list[EvalTask] = [EvalTask(
     id="cu-social-cycle",
     category="computer-use",
     provenance="new for bench#153; replaces the live cu B1-B5 of owlmsj/mengine evals/cu with a local replica",
-    summary="Make a poster image, post it with alt text on a social site, reply to a neighbor, then delete the test post.",
+    summary="Make a poster image, post it with alt text on a social site, then delete that test post.",
     setup=_setup,
     steps=(Step(PROMPT),),
     check=_check,
     reference=_reference,
-    timeout_s=150,
+    timeout_s=180,
     deliverables=(IMAGE,),
     checkpoints=checkpoints(("made the image", r"cover\.png"), ("opened the site", r"127\.0\.0\.1|navigate"),
                             ("deleted the test post", r"deleteRecord|Delete post|confirmBtn")),

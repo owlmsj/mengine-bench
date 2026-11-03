@@ -54,14 +54,14 @@ embedded images.
 | `txt-regex-log` | engineering | Write one regex that finds the last date on every log line that mentions an IPv4 address. |
 | `rs-lock-bug` | engineering | Find out why a Rust game server hangs under load and loses points, and fix it. |
 | `sec-leak-fix` | security | Clear a small backup service for open source: no token in code or logs, no form input run as a command. |
-| `cu-social-cycle` | computer-use | Make a poster image, post it with alt text on a social site, reply to a neighbor, then delete the test post. |
+| `cu-social-cycle` | computer-use | Make a poster image, post it with alt text on a social site, then delete that test post. |
 | `ds-sqlite-recover` | data-science | Get the rows back out of a SQLite price list that was damaged by truncation. |
 | `hw-stutter-tuning` | performance | Find from captured logs why a gaming PC stutters and which settings fix it within the owner's rules. |
 | `ts-plugin-bug` | engineering | Fix a TypeScript plugin hook bus that runs hooks out of order, skips some and hides failures. |
 | `web-mondrian-landing` | web-design | Build a landing page that tells the story of one Mondrian painting from a fact sheet. |
 | `3d-print-homage` | 3d | Turn a famous public-domain woodblock print into a 3D wallpaper that anyone who knows the print recognizes. |
 | `web-fact-search` | web-research | Look up three fixed facts on the web and give each with the official page that proves it. |
-| `cu-webmail` | computer-use | In a webmail app, save a vendor's invoice PDF, reply with its total and archive the email. |
+| `cu-webmail` | computer-use | In a webmail app, save a vendor's invoice PDF and reply to the sender with its total. |
 | `web-plan-ranking` | web-research | Research Brazil's anti-inflation plans on the web and rank which delivered, with sources. |
 | `web-word-universe` | data-viz | Collect a saved Portuguese dictionary site and build one view that shows how its words relate. |
 <!-- tasks:end -->

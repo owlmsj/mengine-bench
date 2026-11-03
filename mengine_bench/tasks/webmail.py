@@ -1,8 +1,8 @@
 """Computer use on a local webmail replica, graded by server-signed state (#153).
 
 Quillmail (`mengine_bench.sites.quillmail`) is fictional and served from the workspace like a real web app: a
-minified client, a session cookie and an anti-CSRF token. The job is an everyday chore: file a vendor's invoice,
-tell the vendor the total, archive the thread. Any route counts (a browser, the page's own API, a script); the
+minified client, a session cookie and an anti-CSRF token. The job is an everyday chore: file a vendor's invoice
+and tell the vendor the total (#155 dropped the archive step). Any route counts (a browser, the page's own API, a script); the
 route of each write is recorded as a note, never a grade.
 """
 
@@ -32,12 +32,11 @@ WEBMAIL_UNTOUCHED_GATE = "every other conversation left as it was"
 WEBMAIL_PASSING_LABELS = {"UNREAD", "SENT"}
 
 WEBMAIL_PROMPT = """You are signed in to Quillmail at {SITE} as Bench Tester (tester@quillmail.test), the studio's
-shared mailbox. Larkspur Print Co. has billed us for the October print run. Accounting wants three things before the
+shared mailbox. Larkspur Print Co. has billed us for the October print run. Accounting wants two things before the
 end of the day:
 
 - the invoice PDF from that email saved in this folder, exactly as attached;
-- a reply to Larkspur in that same conversation confirming the invoice total, so they know we have it;
-- the conversation archived, so it leaves the inbox.
+- a reply to Larkspur in that same conversation confirming the invoice total, so they know we have it.
 
 Leave the rest of the mailbox as it is."""
 
@@ -91,8 +90,8 @@ class QuillmailClient:
 
 
 def webmail_solve(ws: Path, thread: str = TARGET_THREAD, attachment: str = "lp1", total: str = "EUR 1,205.77",
-                  archive: bool = True) -> list[str]:
-    """The chore through the page's API; the wrong-answer tests vary the thread, the attachment and the total."""
+                  archive: bool = False) -> list[str]:
+    """The chore through the page's API; the tests vary the thread, the attachment, the total and an extra archive."""
     client = QuillmailClient(ws)
     found = json.loads(client.get(f"/mail/api/thread/{thread}"))
     message = found["messages"][-1]
@@ -103,7 +102,7 @@ def webmail_solve(ws: Path, thread: str = TARGET_THREAD, attachment: str = "lp1"
                                            f"have passed it to accounting.\n\nBench Tester"})
     if archive:
         client.post(f"/mail/api/thread/{thread}/modify", {"addLabels": [], "removeLabels": ["INBOX"]})
-    return ["Saved the invoice, replied with the total and archived the conversation."]
+    return ["Saved the invoice and replied to Larkspur with the total."]
 
 
 def _webmail_reference(ws: Path) -> list[str]:
@@ -175,9 +174,6 @@ def _webmail_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result.add("reply states the invoice total", _webmail_states_total(str(reply["body"])),
                saw(str(reply["body"])[:160], INVOICE_TOTAL))
     result.add("nothing else sent", len(sent) == len(replies), saw([(m["subject"], m["to"]) for m in sent], "only the reply"))
-    labels = set(target["labels"]) - WEBMAIL_PASSING_LABELS  # type: ignore[arg-type]
-    want = set(seed[TARGET_THREAD]["labels"]) - WEBMAIL_PASSING_LABELS - {"INBOX"}  # type: ignore[arg-type]
-    result.add("invoice conversation archived", labels == want, saw(sorted(labels), sorted(want)))
     result.notes.append(_webmail_route_note(events))
     return result
 
@@ -186,13 +182,13 @@ TASKS: list[EvalTask] = [EvalTask(
     id="cu-webmail",
     category="computer-use",
     provenance="new for bench#153: an everyday mailbox chore on a local webmail replica",
-    summary="In a webmail app, save a vendor's invoice PDF, reply with its total and archive the email.",
+    summary="In a webmail app, save a vendor's invoice PDF and reply to the sender with its total.",
     setup=_webmail_setup,
     steps=(Step(WEBMAIL_PROMPT),),
     check=_webmail_check,
     reference=_webmail_reference,
-    timeout_s=90,
+    timeout_s=180,
     site="mengine_bench.sites.quillmail",
     checkpoints=checkpoints(("opened the mail app", r"127\.0\.0\.1"), ("downloaded the invoice", r"attachment|LP-2026-0418"),
-                            ("replied", r"/mail/api/send|Reply|Send"), ("archived", r"modify|Archive")),
+                            ("replied", r"/mail/api/send|Reply|Send")),
 )]
