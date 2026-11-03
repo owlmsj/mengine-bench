@@ -26,6 +26,14 @@ marked 2.0 ran with the longer 2.0 limits (worst case 76 min, against 49.5 min i
 
 Read as ties, because the higher run keeps its lead in under 80% of 2000 draws of the tasks: #1 and #2 (58%), #2 and #3 (60%), #4 and #5 (61%), #6 and #7 (59%), #7 and #8 (69%), #8 and #9 (79%), #9 and #10 (47%). `mengine-bench analyze` shows the rest.
 
+## Observations (not ranked)
+
+| # | Score | Correct % | Solved | Judge | Speed | Time | Timeouts | Cost | Est. price | Tokens | Generated | Turns | Agent | Model | Effort | Hardware | Config | Submitter | Date | Run |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | **59.0** | 81.0 | 14/20 | 69.2 | 0.0 | 33 min 08 s | 6 | n/a | ~$10.83 | 2.00M | 36.5k | 15 | codex codex-cli 0.165.0 | gpt-6-astra | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=codex default clean install, service_tier=fast | owlmsj | 2026-11-02 | [run](results/2026-11-02_codex_gpt-6-astra_low_43e898d9/summary.md) |
+
+- 2026-11-02_codex_gpt-6-astra_low_43e898d9: clean Codex, Astra low, Fast. The model never replied on ds-sql-funnel, hw-stutter-tuning and ts-plugin-bug (the stream ends at turn.started); two reruns stalled the same way, the #144 retry too, while a short prompt on the same login answered in 5 s. Kept as the most complete of three attempts, not ranked.
+
 ## Bench 1.7 (history)
 
 | # | Score | Correct % | Solved | Judge | Speed | Time | Timeouts | Cost | Est. price | Tokens | Generated | Turns | Agent | Model | Effort | Hardware | Config | Submitter | Date | Run |
