@@ -26,13 +26,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mengine_bench.core import CheckResult, EvalTask, TraceCheck
+from mengine_bench.core import CheckResult, EvalTask, TraceCheck, saw
 from mengine_bench.runner import process
 from mengine_bench.runner.agents import Agent, AgentError, Usage, sum_usage, partial_answer
 from mengine_bench.runner.leftovers import LeftProcess, TaskWindow
 from mengine_bench.runner.site import SITE_PLACEHOLDER, SiteFailed, end_pages, serve_site
 from mengine_bench.runner.stats import RunStats, merge_stats, stream_stats
 from mengine_bench.runner.trace import tool_trace
+from mengine_bench.runner.workspace_gate import WORKSPACE_WRITE_GATE, outside_changes, outside_snapshot
 from mengine_bench.visual import add_page_checks
 
 # Browser user-data dirs an agent left in the workspace; their cache files can
@@ -98,6 +99,7 @@ class TaskRunRecord:
     # task left running that the runner killed after grading.
     left_open_tabs: int | None = None
     left_running: list[LeftProcess] = field(default_factory=list)
+    outside_writes: list[str] = field(default_factory=list)
 
     @property
     def usage(self) -> Usage | None:
@@ -290,12 +292,19 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: in
     prompt_file = prompts / f"step-{label}.md"
     prompt_file.write_text(prompt, encoding="utf-8")
     call = agent.invocation(prompt, prompt_file.resolve(), workspace.resolve(), attachments)
+    before = outside_snapshot(workspace, root)
     try:
         result = process.run_process(call.argv, workspace, task.timeout_s, stdin_text=call.stdin_text,
                                      env=_step_env(workspace, call.env), final_event=call.final_event)
     except OSError as error:
         record.steps.append(StepRecord(index, 0.0, None, "crash", str(error)))
         raise StepFailed("crash", f"could not start agent {call.argv[0]!r}: {error}") from error
+    finally:
+        # #164: capture before settling removes sibling scratch files, including at timeout/crash.
+        try:
+            record.outside_writes.extend(outside_changes(before, outside_snapshot(workspace, root)))
+        except OSError:
+            record.outside_writes.append("filesystem snapshot unavailable")
     if result.reaped:
         print(f"[{task.id}] step {label}: killed {result.reaped} process(es) the agent left running", flush=True)
     if result.stopped_after_final:
@@ -333,6 +342,9 @@ def _grade(task: EvalTask, record: TaskRunRecord) -> None:
     try:
         record.check = (task.check(record.workspace, answers, tool_trace(record.streams))
                         if isinstance(task.check, TraceCheck) else task.check(record.workspace, answers))
+        record.check.mandatory.append((WORKSPACE_WRITE_GATE, not record.outside_writes))
+        if record.outside_writes:
+            record.check.details[WORKSPACE_WRITE_GATE] = saw(sorted(set(record.outside_writes)), "no filesystem changes outside the workspace")
         if task.render_target is not None:
             add_page_checks(record.check, record.workspace / task.render_target)
     except (ValueError, RuntimeError, OSError) as error:
