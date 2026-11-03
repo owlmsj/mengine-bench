@@ -1,0 +1,56 @@
+{
+ "task_id": "ts-plugin-bug",
+ "prompts": [
+  "Users of our harness plugins report that tool.after hooks run out of order, that sometimes a hook never runs, and that a failing hook is silently ignored. The hook bus and the plugin are in {WS}; the README there says how the bus must behave. Fix the bus. Its public API stays as it is, the tests in {WS}/test stay as they are, and package.json takes no dependencies."
+ ],
+ "answers": [
+  "**[goal]** Fix the hook bus so it behaves as `README.md` describes. The public API, the existing tests in `./test` and the empty dependency list in `package.json` stay unchanged.\n\n**[action]**\n- Root cause: in `src/bus.ts`, `emit` used `list.forEach(async ...)`. That starts every handler at once and nobody waits for them, so `emit` returns before they finish and a rejection is lost. It also looped over the live list, so a handler that unsubscribed itself during an emit shifted the list and the next handler was skipped.\n- Fix: `emit` now copies the handler list when it starts and runs the copy with `for ... of` plus `await`. That gives subscription order, one handler at a time, and `emit` resolves only after the last one finishes. A thrown error or rejection rejects `emit` with the same error, and the handlers after it don't run.\n- I added a new test file, `test/bus.contract.test.ts`, with three tests: order and waiting, error passed through and later handlers stopped, and self-unsubscribe during an emit.\n\n**[result]** `npm test` output:\n```\nℹ tests 5\nℹ pass 5\nℹ fail 0\n```\nAll three user reports map to the old `forEach(async)` code: wrong order, a skipped hook, and a silently ignored failure. I did not run the new tests against the old code to see them fail first. I didn't touch `src/plugin.ts`.\n\nAssumptions:\n- Adding a new test file is allowed; \"the tests stay as they are\" means the existing ones aren't edited.\n- A handler subscribed during an emit only runs from the next emit on, since `emit` uses its copy of the list.\n\n**[next]** To confirm the new tests catch the bug, swap the old `emit` back in and run `npm test`."
+ ],
+ "diff": "M src/bus.ts\nA test/bus.contract.test.ts\n\n--- src/bus.ts ---\n/**\r\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\r\n * handlers run one after another in subscription order, emit resolves after all of them,\r\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\r\n */\r\n\r\nexport type Handler<T> = (payload: T) => void | Promise<void>;\r\n\r\nexport class HookBus {\r\n  private handlers: Map<string, Handler<unknown>[]> = new Map();\r\n\r\n  /** Subscribes a handler to an event; returns the function that unsubscribes it. */\r\n  on<T>(event: string, handler: Handler<T>): () => void {\r\n    const list = this.handlers.get(event) ?? [];\r\n    list.push(handler as Handler<unknown>);\r\n    this.handlers.set(event, list);\r\n    return () => {\r\n      const index = list.indexOf(handler as Handler<unknown>);\r\n      if (index >= 0) {\r\n        list.splice(index, 1);\r\n      }\r\n    };\r\n  }\r\n\r\n  /** Runs the handlers of an event with the payload. */\r\n  async emit<T>(event: string, payload: T): Promise<void> {\r\n    // Snapshot: unsubscribes during this emit take effect from the next emit (README).\r\n    const snapshot = [...(this.handlers.get(event) ?? [])];\r\n    for (const handler of snapshot) {\r\n      await handler(payload);\r\n    }\r\n  }\r\n\r\n  /** How many handlers an event has. */\r\n  count(event: string): number {\r\n    return (this.handlers.get(event) ?? []).length;\r\n  }\r\n}\r\n\n\n--- test/bus.contract.test.ts ---\nimport { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { HookBus } from \"../src/bus.ts\";\n\nconst tick = () => new Promise((r) => setTimeout(r, 5));\n\ntest(\"handlers run in order, sequentially, and emit waits\", async () => {\n  const bus = new HookBus();\n  const seen: string[] = [];\n  bus.on(\"e\", async () => { await tick(); seen.push(\"a\"); });\n  bus.on(\"e\", () => { seen.push(\"b\"); });\n  await bus.emit(\"e\", null);\n  assert.deepEqual(seen, [\"a\", \"b\"]);\n});\n\ntest(\"rejection propagates and stops later handlers\", async () => {\n  const bus = new HookBus();\n  const boom = new Error(\"boom\");\n  let ran = false;\n  bus.on(\"e\", async () => { throw boom; });\n  bus.on(\"e\", () => { ran = true; });\n  await assert.rejects(bus.emit(\"e\", null), (e) => e === boom);\n  assert.equal(ran, false);\n});\n\ntest(\"self-unsubscribe during emit does not skip others\", async () => {\n  const bus = new HookBus();\n  const seen: string[] = [];\n  const off = bus.on(\"e\", () => { seen.push(\"a\"); off(); });\n  bus.on(\"e\", () => { seen.push(\"b\"); });\n  await bus.emit(\"e\", null);\n  await bus.emit(\"e\", null);\n  assert.deepEqual(seen, [\"a\", \"b\", \"b\"]);\n});\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ cd \"<WORKSPACE>\"; ls -R | grep -v node_modules | head -30; cat README* package.json; find . -name \"*.js\" -not -path \"*/node_modules/*\" | xargs cat\n$ cd \"<WORKSPACE>\"; cat src/bus.ts; cat test/bus.test.ts | head -60\n$ cd \"<WORKSPACE>\"; python - <<'E'\np='src/bus.ts';s=open(p).read()\ns=s.replace(\"\"\"    const list = this.handlers.get(event) ?? [];\n    list.forEach(async (handler) => {\n      await handler(payload);\n    });\"\"\",\"\"\"    // Snapshot: unsubscr\n$ cd \"<WORKSPACE>\"; npm test 2>&1 | tail -12\n\nStream tail:\n9,\"stop_reason\":\"end_turn\",\"session_id\":\"f472d54d-fa13-49e3-a3dd-eb95f3d90423\",\"total_cost_usd\":0.20966600000000002,\"usage\":{\"input_tokens\":10,\"cache_creation_input_tokens\":17570,\"cache_read_input_tokens\":155530,\"output_tokens\":1898,\"output_tokens_details\":{\"thinking_tokens\":98},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":17570,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":591,\"cache_read_input_tokens\":36199,\"cache_creation_input_tokens\":360,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":360},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":10,\"outputTokens\":1898,\"cacheReadInputTokens\":155530,\"cacheCreationInputTokens\":17570,\"webSearchRequests\":0,\"costUSD\":0.20966600000000002,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":98,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":17570,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":5,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"**[goal]** Fix the hook bus so it behaves as `README.md` describes. The public API, the existing tests in `./test` and the empty dependency list in `package.json` stay unchanged.\\n\\n**[action]**\\n- Root cause: in `src/bus.ts`, `emit` used `list.forEach(async ...)`. That starts every handler at once and nobody waits for them, so `emit` returns before they finish and a rejection is lost. It also looped over the live list, so a handler that unsubscribed itself during an emit shifted the list and the next handler was skipped.\\n- Fix: `emit` now copies the handler list when it starts and runs the copy with `for ... of` plus `await`. That gives subscription order, one handler at a time, and `emit` resolves only after the last one finishes. A thrown error or rejection rejects `emit` with the same error, and the handlers after it don't run.\\n- I added a new test file, `test/bus.contract.test.ts`, with three tests: order and waiting, error passed through and later handlers stopped, and self-unsubscribe during an emit.\\n\\n**[result]** `npm test` output:\\n```\\nℹ tests 5\\nℹ pass 5\\nℹ fail 0\\n```\\nAll three user reports map to the old `forEach(async)` code: wrong order, a skipped hook, and a silently ignored failure. I did not run the new tests against the old code to see them fail first. I didn't touch `src/plugin.ts`.\\n\\nAssumptions:\\n- Adding a new test file is allowed; \\\"the tests stay as they are\\\" means the existing ones aren't edited.\\n- A handler subscribed during an emit only runs from the next emit on, since `emit` uses its copy of the list.\\n\\n**[next]** To confirm the new tests catch the bug, swap the old `emit` back in and run `npm test`.\",\"ttft_ms\":3914,\"type\":\"result\",\"duration_ms\":32391,\"uuid\":\"0b1bb95b-de86-41a7-a3ed-b85b8ee476d1\",\"ttft_stream_ms\":2898,\"time_to_request_ms\":101,\"first_content_frame_ms\":2898,\"queued_turn_count\":0,\"result_index\":0,\"model_usage_since_last_result\":{\"claude-opus-5-5\":{\"inputTokens\":10,\"outputTokens\":1898,\"cacheReadInputTokens\":155530,\"cacheCreationInputTokens\":17570,\"webSearchRequests\":0,\"costUSD\":0.20966600000000002,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":98,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":17570,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}}}\n",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "package.json takes no dependencies",
+   true
+  ],
+  [
+   "hidden handlers run in subscription order",
+   true
+  ],
+  [
+   "hidden emit resolves after every handler",
+   true
+  ],
+  [
+   "hidden a failing handler rejects emit",
+   true
+  ],
+  [
+   "hidden a handler that unsubscribes itself does not stop the others",
+   true
+  ],
+  [
+   "hidden the audit plugin redacts before it logs",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 4,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 1,
+  "generated_tokens": 1898,
+  "reasoning_tokens": 98
+ },
+ "deliverables": [],
+ "render": null
+}
