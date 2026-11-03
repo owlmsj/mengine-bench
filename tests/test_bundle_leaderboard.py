@@ -185,22 +185,25 @@ def test_leaderboard_ranks_the_current_major_minor_only(tmp_path: Path) -> None:
     assert board.ranked == 2 and board.history == 1 and board.unranked == []
 
 
-def test_2_0_runs_stay_ranked_in_2_1_and_are_marked_139(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # #139: 2.1 only shortened the time limits; the owner kept the 2.0 runs in the active ranking.
-    # #151: pinned to 2.1, since 2.2 added tasks and ranks alone.
-    monkeypatch.setattr(leaderboard, "__version__", "2.1.1")
+def test_2_0_and_2_1_runs_stay_ranked_in_2_2_with_their_marks_151(tmp_path: Path) -> None:
+    # #139: 2.1 kept the 2.0 runs ranked. #151: 2.2 added three tasks and keeps both, each row marked with its version.
+    old_ids = [task.id for task in catalog.all_tasks() if task.id not in leaderboard.TASKS_ADDED_IN_2_2]
     results = tmp_path / "results"
-    _write_result(results, "v20", 90.0, model="v20-model", bench_version="2.0.0")
-    _write_result(results, "v21", 80.0, model="v21-model", bench_version="2.1.0")
+    _write_result(results, "v20", 90.0, model="v20-model", bench_version="2.0.0", task_ids=old_ids)
+    _write_result(results, "v21", 85.0, model="v21-model", bench_version="2.1.1", task_ids=old_ids)
+    _write_result(results, "v22", 80.0, model="v22-model")
+    _write_result(results, "v21-short", 99.0, model="short-model", bench_version="2.1.1", task_ids=old_ids[1:])
     _write_result(results, "v17", 99.0, model="v17-model", bench_version="1.7.3", task_ids=[TASK])
     board = leaderboard.build_leaderboard(results, tmp_path)
-    assert board.ranked == 2
+    assert board.ranked == 3
     text = board.markdown
-    assert "Bench 2.0 runs stay in this ranking (#139)" in text
-    assert text.index("v20-model") < text.index("v21-model")
+    assert "Bench 2.0 and 2.1 runs stay in this ranking (#139, #151)" in text
+    assert text.index("v20-model") < text.index("v21-model") < text.index("v22-model") < text.index("## Not ranked")
     assert "[run](results/v20/summary.md) (bench 2.0) |" in text
-    assert "[run](results/v21/summary.md) |" in text
-    assert "## Bench 2.0 (history)" not in text
+    assert "[run](results/v21/summary.md) (bench 2.1) |" in text
+    assert "[run](results/v22/summary.md) |" in text
+    assert "## Bench 2.0 (history)" not in text and "## Bench 2.1 (history)" not in text
+    assert [name for name, _ in board.unranked] == ["results/v17", "results/v21-short"]
 
 
 def test_an_observed_run_is_shown_with_its_reason_and_never_ranked_146(tmp_path: Path,

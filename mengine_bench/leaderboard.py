@@ -35,9 +35,12 @@ TASKS_CHANGED_IN_2_0 = frozenset({"lc-changelog", "vis-chart", "ir-studio-wiki",
 TASKS_ADDED_IN_2_2 = frozenset({"txt-regex-log", "ds-sqlite-recover", "py-async-cancel"})
 TASKS_THAT_CAME_AND_WENT = TASKS_CHANGED_SINCE_1_5 | TASKS_CHANGED_IN_2_0 | TASKS_ADDED_IN_2_2
 # #139: the owner kept the 2.0 runs ranked in 2.1, which only shortened the time limits (#137); they cost real runs.
-RANKED_WITH_CURRENT: dict[str, frozenset[str]] = {"2.1": frozenset({"2.0"})}
-RANKED_WITH_NOTE = ("Bench 2.0 runs stay in this ranking (#139): 2.1 only shortened the time limits (#137), so a row\n"
-                    "marked 2.0 ran with the longer 2.0 limits (worst case 76 min, against 49.5 min in 2.1).\n")
+# #151: and kept the 2.0 and 2.1 runs ranked in 2.2, which added three tasks.
+RANKED_WITH_CURRENT: dict[str, frozenset[str]] = {"2.1": frozenset({"2.0"}), "2.2": frozenset({"2.0", "2.1"})}
+RANKED_WITH_NOTE = ("Bench 2.0 and 2.1 runs stay in this ranking (#139, #151), marked with their version. 2.2 added three\n"
+                    "tasks (txt-regex-log, ds-sqlite-recover, py-async-cancel), so a row marked 2.0 or 2.1 covers 20 tasks\n"
+                    "and an unmarked 2.2 row 23. 2.1 only shortened the time limits (#137): a row marked 2.0 ran with the\n"
+                    "longer 2.0 limits (worst case 76 min, against 49.5 min in 2.1 and 52.5 min in 2.2).\n")
 # #146: runs the owner keeps on the board without ranking them, by bundle name, with why.
 OBSERVED_RUNS: dict[str, str] = {
     "2026-11-02_codex_gpt-6-astra_low_43e898d9": (
@@ -105,7 +108,8 @@ def is_complete_run(result: dict[str, object]) -> bool:
     assert isinstance(tasks, list)
     ids = [str(task["id"]) for task in tasks]
     expected = {task.id for task in catalog.all_tasks()}
-    if major_minor(result.get("bench_version")) not in ranked_versions():
+    # #151: a ranked older version (a 2.1 run under 2.2) is complete on its own catalog, not the current one.
+    if major_minor(result.get("bench_version")) != major_minor(__version__):
         return len(ids) == len(set(ids)) and set(ids) - TASKS_THAT_CAME_AND_WENT == expected - TASKS_THAT_CAME_AND_WENT
     return len(ids) == len(set(ids)) and set(ids) == expected
 
