@@ -37,6 +37,8 @@ follow the 2.1 rule from the slowest finished probe (+25%, rounded up to 30 s): 
 case is 60 min. Opus 5.5 xhigh took 98.0 + 47.5 + 25.1 + 51.6 + 28.9 s, about 4 min more for a good run (owner
 budget: a best run of about 15 min). The 2.0, 2.1 and 2.2 runs stay in the ranking, each row marked
 with its version.
+2.3.1 (#155): cu-social-cycle drops the reply, cu-webmail drops the archive, after the first 2.3.0 run timed out on
+both through the browser (~4 s per browser action). No 2.3.0 run was published, so 2.3.1 keeps the same minor.
 
 A run is one sample and runs are not repeated, so ties come from the published tasks: draw the tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
