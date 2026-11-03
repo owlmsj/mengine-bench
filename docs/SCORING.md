@@ -21,6 +21,7 @@ Bench 2.0 keeps the 1.8 weights and changes the tasks (#124): 20 instead of 15.
 Bench 2.1 changes only the time limits (#137): each is the slowest finished time in the eight published 2.0
 runs plus 25%, rounded up to 30 s, at least 60 s, never above the 2.0 limit and never below a limit a published run
 hit. A run's worst case drops from 76 to 49.5 min, so a setup that cannot keep up fails sooner.
+The eight 2.0 runs stay in the 2.1 ranking, each marked 2.0 (#139): they ran with the longer limits.
 
 A run is one sample and runs are not repeated, so ties come from the published tasks: draw the 20 tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
