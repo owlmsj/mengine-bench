@@ -12,10 +12,11 @@ import re
 import shutil
 import subprocess
 import tempfile
+import tomllib
 from collections.abc import Sequence
 from pathlib import Path
 
-from mengine_bench.core import CheckResult, EvalTask, Step, checkpoints, read, scratch_root, write
+from mengine_bench.core import CheckResult, EvalTask, Step, checkpoints, read, saw, scratch_root, write
 
 CARGO_TOML = """[package]
 name = "arena_scores"
@@ -164,12 +165,25 @@ fn clones_share_the_scores() {
     board.clone().award(1, 2);
     assert_eq!((board.score(1), board.total()), (3, 3));
 }
+
+#[test]
+fn asymmetric_transfers_move_points() {
+    let board = Board::new();
+    board.join(1, 30);
+    board.join(2, 7);
+    board.transfer(1, 2, 9);
+    assert_eq!((board.score(1), board.score(2), board.total()), (21, 16, 37));
+    board.transfer(2, 1, 4);
+    assert_eq!((board.score(1), board.score(2), board.total()), (25, 12, 37));
+}
 """
 
 HIDDEN_CASES = (("awards from many threads all count", "awards_from_many_threads_all_count"),
                 ("opposite transfers do not hang", "opposite_transfers_do_not_hang"),
                 ("a transfer to the same player changes nothing", "a_transfer_to_the_same_player_changes_nothing"),
-                ("clones share the scores", "clones_share_the_scores"))
+                ("clones share the scores", "clones_share_the_scores"),
+                ("asymmetric transfers move points", "asymmetric_transfers_move_points"),
+                ("the visible score example passes", "one_thread_keeps_the_scores"))
 RS_FILES = {"Cargo.toml": CARGO_TOML, "src/lib.rs": LIB, "tests/board.rs": VISIBLE}
 CARGO_LIMIT_S = 180
 
@@ -196,9 +210,12 @@ def run_cargo_hidden(ws: Path) -> tuple[dict[str, bool], str]:
         (crate / "Cargo.toml").write_bytes((ws / "Cargo.toml").read_bytes())
         shutil.copytree(ws / "src", crate / "src")
         write(crate, "tests/hidden_gold.rs", HIDDEN)
+        # Balanced transfers alone cannot distinguish a no-op from a real move (#164).
+        write(crate, "tests/board.rs", VISIBLE)
         env = {**os.environ, "CARGO_TARGET_DIR": str(crate / "target"), "CARGO_TERM_COLOR": "never"}
         try:
-            done = subprocess.run([cargo, "test", "--offline", "--test", "hidden_gold"], cwd=crate, env=env, capture_output=True,
+            done = subprocess.run([cargo, "test", "--offline", "--test", "hidden_gold", "--test", "board", "--no-fail-fast"],
+                                  cwd=crate, env=env, capture_output=True,
                                   text=True, encoding="utf-8", errors="replace", timeout=CARGO_LIMIT_S, check=False)
         except subprocess.TimeoutExpired:
             return {}, f"cargo test exceeded {CARGO_LIMIT_S}s"
@@ -212,12 +229,19 @@ def _rs_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     untouched = _sha(read(ws, "tests/board.rs") or "") == _sha(VISIBLE)
     result.mandatory.append(("visible tests left untouched", untouched))
     manifest = read(ws, "Cargo.toml") or ""
-    dependencies = re.search(r"^\[(?:[\w-]*-)?dependencies\][^\[]*", manifest, re.MULTILINE)
-    no_new = dependencies is None or not re.sub(r"\[.*?\]", "", dependencies.group(0)).strip()
+    # TOML comments are not dependencies; inspect every Cargo dependency table (#164).
+    try:
+        parsed = tomllib.loads(manifest)
+        sections = [parsed, parsed.get("workspace", {}), *parsed.get("target", {}).values()]
+        no_new = not any(section.get(key) for section in sections
+                         for key in ("dependencies", "dev-dependencies", "build-dependencies"))
+    except (tomllib.TOMLDecodeError, AttributeError, TypeError):
+        no_new = False
     result.mandatory.append(("no new dependencies", no_new))
     passed, why = run_cargo_hidden(ws) if (ws / "Cargo.toml").is_file() and (ws / "src").is_dir() else ({}, "the crate is gone")
     for label, test in HIDDEN_CASES:
-        result.add(f"hidden {label}", passed.get(test, False), why if not passed else f"{test} failed")
+        result.add(f"hidden {label}", passed.get(test, False),
+                   saw(why if not passed else passed.get(test, "missing test result"), f"{test} passed"))
     return result
 
 
