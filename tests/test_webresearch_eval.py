@@ -133,7 +133,7 @@ def test_a_bare_collor_is_not_a_plan_name() -> None:
 
 def test_the_brief_asks_for_the_web_but_hands_over_no_answer() -> None:
     prompt = TASK.steps[0].prompt
-    assert "web" in prompt and "web" in TASK.needs and TASK.timeout_s == 300
+    assert "web" in prompt and "web" in TASK.needs and TASK.timeout_s == 210
     for leaked in ("Collor", "Cruzado", "IPCA", "1994", "1993", "2477", "0.7", "60 months", "URV"):
         assert leaked not in prompt, leaked
 

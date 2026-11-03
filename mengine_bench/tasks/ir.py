@@ -151,7 +151,7 @@ TASKS = [
         id="ir-server-logs", category="retrieval",
         provenance="Game server ops: incident window, root cause and monthly SLO from 3 days of logs",
         summary="Investigate a game server outage from its logs and report what happened.",
-        setup=_logs_setup, check=_logs_check, reference=_logs_reference, timeout_s=180,
+        setup=_logs_setup, check=_logs_check, reference=_logs_reference, timeout_s=60,
         checkpoints=checkpoints(("read the notes", r"logs.{1,4}README"), ("read the logs", r"gameserver|logs"), WROTE_RESULT),
         steps=(Step("The game went down in June and we owe the team an incident report. The logs and their notes are in "
                     "{WS}/logs. When did it start and end, how long was it, did we keep our monthly availability target, and "

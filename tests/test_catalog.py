@@ -46,15 +46,20 @@ def test_duplicate_ids_are_rejected() -> None:
         catalog.collect([one, two])
 
 
-def test_limits_fit_the_measured_times_and_cap_the_worst_case_at_73_minutes() -> None:
-    # #98: from 7 to 10 runs. The slowest short eval took 50 s, Mondrian 194 s and 3D 288 s. The 56 min apply only when an
-    # agent hits every limit; the prompt also asks it to stop polishing once the work is right.
-    # #124, bench 2.0: 20 tasks; the new ones start at 180 s (web research 300 s) until a pilot measures them.
-    limits = {task.id: task.timeout_s for task in catalog.all_tasks()}
-    assert sum(limits.values()) == 4380, limits
-    assert {task: limit for task, limit in limits.items() if limit != 180} == {
-        "gd-integration-repo": 300, "web-mondrian-landing": 300, "3d-print-homage": 420, "web-word-universe": 360,
-        "web-plan-ranking": 300}
+def test_limits_fit_the_measured_times_and_cap_the_worst_case_at_50_minutes() -> None:
+    # #98: from 7 to 10 runs. The slowest short eval took 50 s, Mondrian 194 s and 3D 288 s. The worst case applies only
+    # when an agent hits every limit; the prompt also asks it to stop polishing once the work is right.
+    # #137, bench 2.1: each limit is the slowest finished time in the eight 2.0 runs plus 25%, rounded up to 30 s,
+    # at least 60 s, never above 2.0 and never below a limit a 2.0 run hit (rs-lock-bug, Mondrian, word universe).
+    tasks = catalog.all_tasks()
+    worst = sum(task.timeout_s * len(task.steps) for task in tasks)
+    assert worst == 2970, worst
+    assert {task.id: task.timeout_s for task in tasks} == {
+        "ds-ab-playtest": 180, "bo-pnl-runway": 150, "bo-reconcile": 90, "cmp-handoff": 90, "cfg-source-drift": 60,
+        "doc-lab-pdf": 60, "ds-sql-funnel": 90, "ue-packaged-bug": 90, "git-merge-conflict": 90, "infra-gpu-fit": 60,
+        "ir-server-logs": 60, "gd-integration-repo": 150, "rs-lock-bug": 180, "sec-leak-fix": 90,
+        "hw-stutter-tuning": 90, "ts-plugin-bug": 60, "web-mondrian-landing": 300, "3d-print-homage": 420,
+        "web-plan-ranking": 210, "web-word-universe": 360}
 
 
 def test_a_run_folder_with_read_only_git_objects_is_removed(tmp_path: Path) -> None:

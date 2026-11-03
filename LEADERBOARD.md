@@ -7,6 +7,10 @@ by the maintainer on review; the transcripts are in each bundle. Only complete,
 judged runs of the current bench version are ranked. Older rankings stay below as history:
 their Scores use that version's formula and do not compare with the table above.
 
+No results yet.
+
+## Bench 2.0 (history)
+
 | # | Score | Correct % | Solved | Judge | Speed | Time | Timeouts | Cost | Est. price | Tokens | Generated | Turns | Agent | Model | Effort | Hardware | Config | Submitter | Date | Run |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | **90.6** | 100.0 | 20/20 | 81.0 | 73.8 | 11 min 32 s | 0 | $2.54 (harness) | ~$2.49 | 3.73M | 50.2k | 103 | claude 2.1.316 (Claude Code) | claude-sonnet-5-5 | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=claude-code, tier=0, role=default, instructions=~... | owlmsj | 2026-11-02 | [run](results/2026-11-02_claude_claude-sonnet-5-5_low_228a1e76/summary.md) |
@@ -17,8 +21,6 @@ their Scores use that version's formula and do not compare with the table above.
 | 6 | **78.1** | 95.0 | 18/20 | 81.2 | 37.7 | 20 min 34 s | 1 | $0.00 (price) | $0.00 (local) | 4.02M | 129.9k | 267 | opencode opencode v2.2.5 | home/qwen38-flash-next-exl3-605-256k | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=local, server_gpu=2x RTX 5090 + 2x RTX 4090, ser... | owlmsj | 2026-11-02 | [run](results/2026-11-02_opencode_home-qwen38-flash-next-exl3-605-256k_low_ace9ae19/summary.md) |
 | 7 | **72.1** | 94.7 | 17/20 | 72.3 | 18.9 | 25 min 17 s | 1 | >= $0.09 (harness) | ~$0.09 | 1.53M | 51.5k | 186 | opencode opencode v2.2.5 | zai/glm-5.3-flash | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=opencode, tier=1, role=default, instructions=~/.c... | owlmsj | 2026-11-02 | [run](results/2026-11-02_opencode_zai-glm-5.3-flash_low_940d8f4b/summary.md) |
 | 8 | **70.4** | 94.5 | 17/20 | 85.0 | 3.9 | 29 min 01 s | 1 | >= $0.18 (harness) | ~$0.20 | 7.43M | 223.1k | 348 | opencode opencode v2.2.5 | deepseek/deepseek-flash | low | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=opencode, tier=1, role=default, instructions=~/.c... | owlmsj | 2026-11-02 | [run](results/2026-11-02_opencode_deepseek-deepseek-flash_low_9f0de396/summary.md) |
-
-Read as ties, because the higher run keeps its lead in under 80% of 2000 draws of the tasks: #2 and #3 (61%), #4 and #5 (59%), #5 and #6 (69%), #6 and #7 (79%), #7 and #8 (47%). `mengine-bench analyze` shows the rest.
 
 ## Bench 1.7 (history)
 

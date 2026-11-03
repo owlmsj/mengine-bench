@@ -199,7 +199,7 @@ TASKS = [
         id="hw-stutter-tuning", category="performance",
         provenance="Tuning the owner's Windows gaming rig for 1% lows from a PresentMon capture and a sensor log",
         summary="Find from captured logs why a gaming PC stutters and which settings fix it within the owner's rules.",
-        setup=_stutter_setup, check=_stutter_check, reference=_stutter_reference, timeout_s=180,
+        setup=_stutter_setup, check=_stutter_check, reference=_stutter_reference, timeout_s=90,
         checkpoints=checkpoints(("read the frame capture", r"presentmon"), ("read the sensor log", r"sensors"),
                                 ("read the settings", r"settings\.json"), ("read the owner notes", r"NOTES"), WROTE_RESULT),
         steps=(Step("The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, "

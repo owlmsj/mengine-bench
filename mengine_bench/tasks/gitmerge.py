@@ -333,7 +333,7 @@ TASKS = [
         id="git-merge-conflict", category="engineering",
         provenance="Parallel sessions merging branches in the owner's repos: two features changed the same function",
         summary="Merge a feature branch into main without losing what main shipped meanwhile.",
-        setup=_gm_setup, check=_gm_check, reference=_gm_reference, timeout_s=180,
+        setup=_gm_setup, check=_gm_check, reference=_gm_reference, timeout_s=90,
         checkpoints=checkpoints(("merged the branch", r"git\s+(-c\s+\S+\s+)*merge"), ("ran the tests", r"unittest|pytest"),
                                 ("committed", r"git\s+(-c\s+\S+\s+)*commit")),
         steps=(Step(f"Our dungeon game's repo is {{WS}}/{GM_REPO}. The {GM_BRANCH} branch has to go into main before the "
