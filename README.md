@@ -32,7 +32,7 @@ Formulas and edge cases: [docs/SCORING.md](docs/SCORING.md).
 
 ## The 23 tasks
 
-Each runs in a fresh folder and has a limit of 1 to 7 minutes, 52.5 min for the whole run at most. Only `web-plan-ranking` needs the web: it researches a
+Each runs in a fresh folder and has a limit of 1 to 7 minutes, 52.5 min for the whole run at most. The three tasks bench 2.2 added (#151) took an Opus 5.5 xhigh probe 46.2 + 31.6 + 44.7 s. Only `web-plan-ranking` needs the web: it researches a
 historical case on the open web, and its checks stay offline. If time
 runs out, what is in the folder and the reply so far still get graded, and the prompt
 says so. Each task has a reference solution that the test suite proves passes.

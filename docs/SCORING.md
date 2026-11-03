@@ -25,8 +25,9 @@ The eight 2.0 runs stay in the 2.1 ranking, each marked 2.0 (#139): they ran wit
 Bench 2.1.1 (#144): a task whose model never replied before its limit (no turn, tool call, write, token or reply)
 runs once more from scratch and keeps the second attempt, flagged on the task; a slow agent is never retried.
 Bench 2.2 adds three tasks adapted from Terminal-Bench 2.1 (#151): `txt-regex-log`, `ds-sqlite-recover` and
-`py-async-cancel`, 60 s each by the 2.1 rule, so the worst case is 52.5 min. Runs of 2.1 and earlier lack them and
-stay in the history.
+`py-async-cancel`, 60 s each by the 2.1 rule, so the worst case is 52.5 min. They add about 2 min to a good run: the
+Opus 5.5 xhigh probe took 46.2 + 31.6 + 44.7 s. The 2.0 and 2.1 runs stay in the ranking, each row marked with
+its version (#151): their 20 tasks against 23 for a 2.2 row.
 
 A run is one sample and runs are not repeated, so ties come from the published tasks: draw the tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
