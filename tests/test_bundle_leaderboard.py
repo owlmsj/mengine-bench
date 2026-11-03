@@ -185,23 +185,27 @@ def test_leaderboard_ranks_the_current_major_minor_only(tmp_path: Path) -> None:
     assert board.ranked == 2 and board.history == 1 and board.unranked == []
 
 
-def test_2_0_and_2_1_runs_stay_ranked_in_2_2_with_their_marks_151(tmp_path: Path) -> None:
-    # #139: 2.1 kept the 2.0 runs ranked. #151: 2.2 added three tasks and keeps both, each row marked with its version.
-    old_ids = [task.id for task in catalog.all_tasks() if task.id not in leaderboard.TASKS_ADDED_IN_2_2]
+def test_2_0_2_1_and_2_2_runs_stay_ranked_in_2_3_with_their_marks_153(tmp_path: Path) -> None:
+    # #139: 2.1 kept the 2.0 runs ranked. #151: 2.2 added three tasks and kept both. #153: 2.3 keeps all three.
+    added = leaderboard.TASKS_ADDED_IN_2_2 | leaderboard.TASKS_ADDED_IN_2_3
+    old_ids = [task.id for task in catalog.all_tasks() if task.id not in added]
+    v22_ids = [task.id for task in catalog.all_tasks() if task.id not in leaderboard.TASKS_ADDED_IN_2_3]
     results = tmp_path / "results"
     _write_result(results, "v20", 90.0, model="v20-model", bench_version="2.0.0", task_ids=old_ids)
     _write_result(results, "v21", 85.0, model="v21-model", bench_version="2.1.1", task_ids=old_ids)
-    _write_result(results, "v22", 80.0, model="v22-model")
+    _write_result(results, "v22", 80.0, model="v22-model", bench_version="2.2.0", task_ids=v22_ids)
+    _write_result(results, "v23", 75.0, model="v23-model")
     _write_result(results, "v21-short", 99.0, model="short-model", bench_version="2.1.1", task_ids=old_ids[1:])
     _write_result(results, "v17", 99.0, model="v17-model", bench_version="1.7.3", task_ids=[TASK])
     board = leaderboard.build_leaderboard(results, tmp_path)
-    assert board.ranked == 3
+    assert board.ranked == 4
     text = board.markdown
-    assert "Bench 2.0 and 2.1 runs stay in this ranking (#139, #151)" in text
-    assert text.index("v20-model") < text.index("v21-model") < text.index("v22-model") < text.index("## Not ranked")
+    assert "Bench 2.0, 2.1 and 2.2 runs stay in this ranking (#139, #151, #153)" in text
+    assert text.index("v21-model") < text.index("v22-model") < text.index("v23-model") < text.index("## Not ranked")
     assert "[run](results/v20/summary.md) (bench 2.0) |" in text
     assert "[run](results/v21/summary.md) (bench 2.1) |" in text
-    assert "[run](results/v22/summary.md) |" in text
+    assert "[run](results/v22/summary.md) (bench 2.2) |" in text
+    assert "[run](results/v23/summary.md) |" in text
     assert "## Bench 2.0 (history)" not in text and "## Bench 2.1 (history)" not in text
     assert [name for name, _ in board.unranked] == ["results/v17", "results/v21-short"]
 
@@ -238,10 +242,10 @@ def test_an_older_ranking_stays_on_the_board_as_history(tmp_path: Path) -> None:
     assert [name for name, _ in board.unranked] == ["results/old-pending"]
 
 
-def test_bench_is_version_2_2_x() -> None:
+def test_bench_is_version_2_3_x() -> None:
     import tomllib
     pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
-    assert __version__ == pyproject["project"]["version"] and __version__.startswith("2.2.")
+    assert __version__ == pyproject["project"]["version"] and __version__.startswith("2.3.")
 
 
 def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:

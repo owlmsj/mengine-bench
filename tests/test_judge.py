@@ -158,3 +158,23 @@ def test_visual_judge_cwd_holds_only_the_screenshot(fake_agent: FakeAgent, tmp_p
     seen = json.loads((tmp_path / "fakes" / "where.cwd").read_text(encoding="utf-8"))
     assert seen["files"] == ["screenshot.png"]
     assert not Path(seen["cwd"]).resolve().is_relative_to(tmp_path.resolve())
+
+
+def test_an_image_the_agent_made_is_attached_and_graded_as_deliverable() -> None:
+    # #153: cu-social-cycle's cover.png reaches the vote as an image, without switching to the rendered-page criterion.
+    from mengine_bench.judge import build_judge_prompt
+
+    prompt = build_judge_prompt(CONTEXT, screenshot=False, deliverable_images=("cover.png",))
+    assert "Third criterion: verification." in prompt
+    assert "Attached images, in this order: cover.png. They are deliverables the agent made" in prompt
+    assert "Attached images" not in build_judge_prompt(CONTEXT, screenshot=False)
+
+
+def test_an_image_deliverable_is_stored_byte_for_byte(tmp_path: Path) -> None:
+    from mengine_bench.bundle import _write_deliverables
+    from mengine_bench.redact import PathScope, LocalNames
+
+    image = b"\x89PNG\r\n\x1a\n" + bytes(range(256))
+    (tmp_path / "cover.png").write_bytes(image)
+    _write_deliverables(tmp_path / "out", {"cover.png": tmp_path / "cover.png"}, PathScope(names=LocalNames()))
+    assert (tmp_path / "out" / "cover.png").read_bytes() == image

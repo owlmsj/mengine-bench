@@ -23,11 +23,11 @@ import re
 import shutil
 import tempfile
 from collections.abc import Callable, MutableMapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from mengine_bench import __version__, catalog
-from mengine_bench.bundle import JUDGE_DIR, RESULT_NAME, SUMMARY_NAME, public_json, public_text
+from mengine_bench.bundle import JUDGE_DIR, RESULT_NAME, SUMMARY_NAME, is_image_deliverable, public_json, public_text
 from mengine_bench.core import EvalTask
 from mengine_bench.judge import JUDGE_SYSTEM_PROMPT, RUBRIC_VERSION, SCREENSHOT_NAME, JudgeContext, RubricJudge, TaskVerdict
 from mengine_bench.judge_view import NO_CALLS, tool_log, transcript_streams
@@ -52,14 +52,16 @@ class JudgePacket:
     context: JudgeContext
     # Workspace-relative HTML deliverable to render, stored under judge/<task>/.
     render: str | None
+    # #153: image deliverables the vote sees as attachments, name -> stored file.
+    images: dict[str, Path] = field(default_factory=dict)
 
 
 def read_packet(bundle: Path, task_id: str) -> JudgePacket:
     """The evidence of one task. The bundle comes from a contributor's pull request, so the task's prompts
     and the page to render come from the catalog, never from the packet (#23 review)."""
-    task = next((task for task in catalog.all_tasks() if task.id == task_id), None)
+    task = catalog.task_by_id(task_id)
     if task is None:
-        raise ValueError(f"received task {task_id!r} in {bundle.name}; expected a catalog task id")
+        raise ValueError(f"received task {task_id!r} in {bundle.name}; expected a catalog or candidate task id")
     packet_file = bundle / JUDGE_DIR / f"{task_id}.json"
     if not packet_file.is_file():
         raise ValueError(f"received {bundle.name} without {JUDGE_DIR}/{task_id}.json; expected judge evidence "
@@ -72,12 +74,17 @@ def read_packet(bundle: Path, task_id: str) -> JudgePacket:
                          f"expected the judge's tool log to show them")
     context = replace(context, task_id=task.id, prompts=tuple(step.prompt for step in task.steps),
                       diff=_agent_diff(context.diff, task), tool_log=log, deliverables=_stored_deliverables(bundle, task))
-    return JudgePacket(context=context, render=task.render_target)
+    return JudgePacket(context=context, render=task.render_target, images=_stored_images(bundle, task))
+
+
+def _stored_images(bundle: Path, task: EvalTask) -> dict[str, Path]:
+    stored = {Path(rel).name: bundle / JUDGE_DIR / task.id / rel for rel in task.deliverables if is_image_deliverable(rel)}
+    return {name: path for name, path in stored.items() if path.is_file() and not path.is_symlink()}
 
 
 def _stored_deliverables(bundle: Path, task: EvalTask) -> tuple[tuple[str, str], ...]:
-    """Each declared file whole; a link a PR committed never reaches the prompt (#23 review)."""
-    stored = [(rel, bundle / JUDGE_DIR / task.id / rel) for rel in task.deliverables]
+    """Each declared text file whole; a link a PR committed never reaches the prompt (#23 review)."""
+    stored = [(rel, bundle / JUDGE_DIR / task.id / rel) for rel in task.deliverables if not is_image_deliverable(rel)]
     return tuple((rel, path.read_text(encoding="utf-8", errors="replace")) for rel, path in stored
                  if path.is_file() and not path.is_symlink())
 
@@ -159,7 +166,7 @@ def judge_bundle(bundle: Path, judge_agent: Agent, render: Renderer | None = Non
             print(f"[{task_id}] judging", flush=True)
             workdir = Path(tmp) / task_id
             if packet.render is None:
-                verdicts[task_id] = judge.grade(packet.context, workdir / "judge")
+                verdicts[task_id] = judge.grade(packet.context, workdir / "judge", deliverable_images=packet.images)
                 continue
             verdicts[task_id] = _render_verdict(bundle, task_id, packet, judge, workdir,
                                                 render or render_headless)

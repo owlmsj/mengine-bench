@@ -11,6 +11,7 @@ The owner picks; adding tasks makes every run longer.
 
 Each candidate has a reference solution that `tests/test_candidates_*.py` proves passes, and an untouched
 workspace fails. Agent time is not measured for any of them; the number below is the limit set.
+`run --tasks <id>` runs a candidate for its probe, never ranked (#153).
 
 | id | module | adds over the catalog (closest task) | limit | saturation risk | diagnosing a failure by hand |
 | --- | --- | --- | --- | --- | --- |
@@ -31,22 +32,15 @@ workspace fails. Agent time is not measured for any of them; the number below is
   `ds-ab-playtest`, `ds-sql-funnel`, `gd-integration-repo`, `ir-server-logs`, `web-mondrian-landing`) or were
   retired by the owner as saturated (see `TASKS_THAT_CAME_AND_WENT`).
 
-## Proposal: offline computer use (`cu`)
-
-The mengine `cu` eval (B1-B5) drove a real Bluesky test account: post with an image and alt text, reply,
-delete. That does not fit the bench: it needs an account, it writes to a public network and it cannot be
-re-run identically. Proposal, no code yet:
-
-- A local, fictional social page served from the workspace, driven only by the harness's own browser.
-- Steps: upload an image with alt text, post, reply to a given post, delete the agent's own post, leave the
-  others untouched.
-- Grading reads the page's saved state plus an append-only event journal: exact text, image hash,
-  parent and child, order of deletion, unrelated posts preserved. The journal tells a finished run from an
-  untouched empty feed.
-- Open questions for the owner: which harnesses expose a browser in a bench run (Claude Code since bench#101;
-  the others are unknown), and whether a harness without one scores zero or the task is skipped for it.
-
 ## Proposals
+
+Computer use beyond bench 2.3 (#153; `cu-social-cycle`, `cu-webmail`, `web-fact-search`, `file-media-edit` and
+`media-voice` are in the catalog):
+
+- `cu-profile-verify`: replicas of profiles on three networks plus a studio site; list the official accounts that
+  show at least two ownership signals, with two impostors in the set; graded as exact JSON.
+- `cu-video-audit`: a video-site replica; the six newest regular videos (no Shorts, no lives) with views and duration
+  from the page's embedded data, plus a vision label per thumbnail; graded per CSV field.
 
 git lost-work variant of `git-merge-conflict`: the feature commit lives only on a detached HEAD (Terminal-Bench
 `fix-git`), so the agent must find it in the reflog before merging; hardens the existing task without making it

@@ -29,6 +29,7 @@ from mengine_bench.environment import parse_config
 from mengine_bench.run_command import JudgeEvidence, RunSettings, run_tasks
 from mengine_bench.judge import OFFICIAL_JUDGE_EFFORT, OFFICIAL_JUDGE_MODEL, RubricJudge
 from mengine_bench.runner.agents import AGENT_NAMES, make_agent
+from mengine_bench.runner.site import serve_site
 from mengine_bench.visual import add_page_checks
 from mengine_bench.scoring import CORRECT_SHARE, JUDGE_SHARE, SPEED_SHARE, parse_price
 from mengine_bench.submit import SubmitError, gh_login, submit
@@ -175,7 +176,8 @@ def _submit(bundle: Path) -> int:
 
 
 def _run(args: argparse.Namespace) -> int:
-    tasks = _select(catalog.all_tasks(), args.tasks)
+    # A candidate runs only by id, for its probe (CONTRIBUTING): a run with --tasks is never ranked.
+    tasks = _select(catalog.all_tasks() + (catalog.candidate_tasks() if args.tasks else []), args.tasks)
     if args.agent == "cmd" and not args.cmd:
         raise SystemExit("error: received --agent cmd without --cmd; expected an argv template with {prompt_file}")
     try:
@@ -213,6 +215,7 @@ def _run(args: argparse.Namespace) -> int:
     if problems:
         raise SystemExit(f"error: received {len(problems)} earlier run(s) on disk above; expected none, since an "
                          f"agent could read their solutions: delete them (README, 'What the agent may use') and run again")
+    _fetch_models(tasks)
     agent = make_agent(args.agent, args.model, args.effort, args.cmd)
     evidence = JudgeEvidence()
     settings = RunSettings(model=args.model, effort=args.effort, submitter=args.submitter, price=price,
@@ -273,11 +276,15 @@ def _gold_problem(task: EvalTask, root: Path) -> str | None:
     empty, solved = root / "empty", root / "solved"
     empty.mkdir(parents=True)
     task.setup(empty)
+    with serve_site(task.site, empty):
+        pass
     if task.check(empty, [""] * len(task.steps)).passed:
         return "gold passes an untouched workspace"
     solved.mkdir()
     task.setup(solved)
-    result = task.check(solved, task.reference(solved))
+    with serve_site(task.site, solved):
+        answers = task.reference(solved)
+    result = task.check(solved, answers)
     if task.render_target is not None:
         add_page_checks(result, solved / task.render_target)
     return None if result.passed else f"reference fails {result.failed()}"
@@ -298,3 +305,17 @@ def _tasks_doc(target: Path | None, readme: Path | None) -> int:
         readme.write_text(updated, encoding="utf-8", newline="\n")
         print(f"updated {readme}")
     return 0
+
+
+def _fetch_models(tasks: Sequence[EvalTask]) -> None:
+    """#153: grading must never download, so a model a task's check needs is fetched before the first agent starts."""
+    if not any("speech-model" in task.needs for task in tasks):
+        return
+    from mengine_bench.speech import WHISPER_MODEL, ensure_speech_model
+
+    try:
+        ensure_speech_model()
+    except Exception as error:  # noqa: BLE001 - any fetch failure stops the run here, not mid-grading
+        raise SystemExit(f"error: received {type(error).__name__} fetching whisper {WHISPER_MODEL}; expected the "
+                         f"model in the Hugging Face cache (README, 'Run it'): {error}") from error
+    print(f"preflight: whisper {WHISPER_MODEL} ready for the audio check")

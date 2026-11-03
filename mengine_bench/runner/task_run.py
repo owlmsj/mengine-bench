@@ -29,6 +29,7 @@ from pathlib import Path
 from mengine_bench.core import CheckResult, EvalTask
 from mengine_bench.runner import process
 from mengine_bench.runner.agents import Agent, AgentError, Usage, sum_usage, partial_answer
+from mengine_bench.runner.site import SITE_PLACEHOLDER, SiteFailed, serve_site
 from mengine_bench.runner.stats import RunStats, merge_stats, stream_stats
 from mengine_bench.visual import add_page_checks
 
@@ -117,9 +118,13 @@ class StepFailed(Exception):
         self.status = status
 
 
-def render_prompt(task: EvalTask, index: int, workspace: Path, hidden: Path) -> str:
+def render_prompt(task: EvalTask, index: int, workspace: Path, hidden: Path, site_url: str | None = None) -> str:
     step = task.steps[index]
     text = step.prompt.replace("{WS}", ".")
+    if SITE_PLACEHOLDER in text:
+        if site_url is None:
+            raise ValueError(f"task {task.id!r} names {SITE_PLACEHOLDER} without a running site; expected task.site")
+        text = text.replace(SITE_PLACEHOLDER, site_url)
     for relative in step.inline:
         body = (workspace / relative).read_text(encoding="utf-8")
         text += f'\n<document name="{Path(relative).name}">\n{body}\n</document>\n'
@@ -162,6 +167,21 @@ def run_task(task: EvalTask, agent: Agent, root: Path, fresh_root: Path | None =
     task.setup(workspace)
     initial_files = {**snapshot(workspace), "AGENTS.md": WORKSPACE_RULES.encode("utf-8")}
     record = TaskRunRecord(task_id=task.id, initial_files=initial_files)
+    try:
+        # A site task has one step (EvalTask), so its server lives exactly as long as the agent's turn.
+        with serve_site(task.site, workspace) as site:
+            workspace, workspace_index = _run_steps(task, agent, root, fresh_root, workspace, record,
+                                                    site.url if site else None)
+    except SiteFailed as error:
+        record.status, record.error, workspace_index = "crash", str(error), 0
+    record.workspace = settle_workspace(workspace, root, workspace_index)
+    _grade(task, record)
+    return record
+
+
+def _run_steps(task: EvalTask, agent: Agent, root: Path, fresh_root: Path | None, workspace: Path,
+               record: TaskRunRecord, site_url: str | None) -> tuple[Path, int]:
+    """Every step in turn, stopping at the first failure; returns the last workspace and its step index."""
     workspace_index = 0
     for index, step in enumerate(task.steps):
         try:
@@ -169,7 +189,7 @@ def run_task(task: EvalTask, agent: Agent, root: Path, fresh_root: Path | None =
                 fresh = fresh_workspace(workspace, step.carry, fresh_root)
                 settle_workspace(workspace, root, workspace_index)
                 workspace, workspace_index = fresh, index
-            prompt = render_prompt(task, index, workspace, root / "hidden" / str(index))
+            prompt = render_prompt(task, index, workspace, root / "hidden" / str(index), site_url)
             prompt += BRIEF_NOTE + ANY_TOOL_NOTE + TIME_LIMIT_NOTE.format(minutes=f"{task.timeout_s / 60:g}")
             (workspace / "AGENTS.md").write_text(WORKSPACE_RULES, encoding="utf-8", newline="")
             _run_step(agent, task, workspace, root, index, prompt, record)
@@ -179,9 +199,7 @@ def run_task(task: EvalTask, agent: Agent, root: Path, fresh_root: Path | None =
         except (ValueError, OSError) as error:
             record.status, record.error = "crash", str(error)
             break
-    record.workspace = settle_workspace(workspace, root, workspace_index)
-    _grade(task, record)
-    return record
+    return workspace, workspace_index
 
 
 def _isolated_workspace(fresh_root: Path | None) -> Path:

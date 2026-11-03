@@ -11,13 +11,14 @@ import pkgutil
 from collections.abc import Iterable
 from types import ModuleType
 
+from mengine_bench import candidates as candidates_package
 from mengine_bench import tasks as tasks_package
 from mengine_bench.core import EvalTask
 
 
-def discover_task_modules() -> list[ModuleType]:
-    names = sorted(info.name for info in pkgutil.iter_modules(tasks_package.__path__))
-    return [importlib.import_module(f"{tasks_package.__name__}.{name}") for name in names if not name.startswith("_")]
+def discover_task_modules(package: ModuleType = tasks_package) -> list[ModuleType]:
+    names = sorted(info.name for info in pkgutil.iter_modules(package.__path__))
+    return [importlib.import_module(f"{package.__name__}.{name}") for name in names if not name.startswith("_")]
 
 
 def collect(modules: Iterable[ModuleType]) -> list[EvalTask]:
@@ -38,3 +39,12 @@ def collect(modules: Iterable[ModuleType]) -> list[EvalTask]:
 
 def all_tasks() -> list[EvalTask]:
     return collect(discover_task_modules())
+
+
+def candidate_tasks() -> list[EvalTask]:
+    """Tasks outside the catalog (docs/CANDIDATES.md), runnable by id with `run --tasks` for a probe, never ranked."""
+    return collect(discover_task_modules(candidates_package))
+
+
+def task_by_id(task_id: str) -> EvalTask | None:
+    return next((task for task in [*all_tasks(), *candidate_tasks()] if task.id == task_id), None)
