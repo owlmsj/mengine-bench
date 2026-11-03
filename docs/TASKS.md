@@ -50,6 +50,7 @@ embedded images.
 | `ir-server-logs` | retrieval | Investigate a game server outage from its logs and report what happened. |
 | `gd-integration-repo` | gamedev | Find every cause behind a failing integration test in a game backend, and fix them. |
 | `media-voice` | media | Record a ferry boarding announcement as a short spoken WAV file. |
+| `file-media-edit` | documents | Crop a photo to a 1080x1350 feed picture keeping its subject, and fill and flatten a PDF form. |
 | `txt-regex-log` | engineering | Write one regex that finds the last date on every log line that mentions an IPv4 address. |
 | `rs-lock-bug` | engineering | Find out why a Rust game server hangs under load and loses points, and fix it. |
 | `sec-leak-fix` | security | Clear a small backup service for open source: no token in code or logs, no form input run as a command. |
@@ -59,6 +60,8 @@ embedded images.
 | `ts-plugin-bug` | engineering | Fix a TypeScript plugin hook bus that runs hooks out of order, skips some and hides failures. |
 | `web-mondrian-landing` | web-design | Build a landing page that tells the story of one Mondrian painting from a fact sheet. |
 | `3d-print-homage` | 3d | Turn a famous public-domain woodblock print into a 3D wallpaper that anyone who knows the print recognizes. |
+| `web-fact-search` | web-research | Look up three fixed facts on the web and give each with the official page that proves it. |
+| `cu-webmail` | computer-use | In a webmail app, save a vendor's invoice PDF, reply with its total and archive the email. |
 | `web-plan-ranking` | web-research | Research Brazil's anti-inflation plans on the web and rank which delivered, with sources. |
 | `web-word-universe` | data-viz | Collect a saved Portuguese dictionary site and build one view that shows how its words relate. |
 <!-- tasks:end -->

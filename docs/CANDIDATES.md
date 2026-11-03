@@ -34,7 +34,8 @@ workspace fails. Agent time is not measured for any of them; the number below is
 
 ## Proposals
 
-Computer use beyond bench 2.3 (#153; `cu-social-cycle` and `media-voice` are in the catalog):
+Computer use beyond bench 2.3 (#153; `cu-social-cycle`, `cu-webmail`, `web-fact-search`, `file-media-edit` and
+`media-voice` are in the catalog):
 
 - `cu-profile-verify`: replicas of profiles on three networks plus a studio site; list the official accounts that
   show at least two ownership signals, with two impostors in the set; graded as exact JSON.

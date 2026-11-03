@@ -34,7 +34,7 @@ TASKS_CHANGED_IN_2_0 = frozenset({"lc-changelog", "vis-chart", "ir-studio-wiki",
 # #151: bench 2.2 added three tasks ported from Terminal-Bench 2.1.
 TASKS_ADDED_IN_2_2 = frozenset({"txt-regex-log", "ds-sqlite-recover", "py-async-cancel"})
 # #153: bench 2.3 adds computer use and basic media. More 2.3 ids go here only; the note below follows.
-TASKS_ADDED_IN_2_3 = frozenset({"cu-social-cycle", "media-voice"})
+TASKS_ADDED_IN_2_3 = frozenset({"cu-social-cycle", "media-voice", "cu-webmail", "web-fact-search", "file-media-edit"})
 TASKS_THAT_CAME_AND_WENT = TASKS_CHANGED_SINCE_1_5 | TASKS_CHANGED_IN_2_0 | TASKS_ADDED_IN_2_2 | TASKS_ADDED_IN_2_3
 # #139: the owner kept the 2.0 runs ranked in 2.1, which only shortened the time limits (#137); they cost real runs.
 # #151: and kept the 2.0 and 2.1 runs ranked in 2.2, which added three tasks; #153: and all three in 2.3.

@@ -1,7 +1,7 @@
 # mengine-bench
 
-**How well does your coding agent do real work, and how fast?** 25 everyday jobs,
-one Score, about 12 minutes for a good setup (estimated until the first 2.0 runs). Every result is public and auditable.
+**How well does your coding agent do real work, and how fast?** 28 everyday jobs,
+one Score, about 15 minutes for a good setup (estimated until the first 2.3 runs). Every result is public and auditable.
 
 It grades the whole **agent**: the harness (Claude Code, Codex CLI, opencode, AGY or your
 own command) + the model + its effort + your hardware + your configuration. Change
@@ -30,9 +30,9 @@ thinking time cost it about 17 points. Cost and an estimated price at API list p
 
 Formulas and edge cases: [docs/SCORING.md](docs/SCORING.md).
 
-## The 25 tasks
+## The 28 tasks
 
-Each runs in a fresh folder and has a limit of 1 to 7 minutes, 56 min for the whole run at most. The three tasks bench 2.2 added (#151) took an Opus 5.5 xhigh probe 46.2 + 31.6 + 44.7 s, and the two bench 2.3 added (#153) 98.0 + 28.9 s. `cu-social-cycle` works on a fictional social site the bench serves on 127.0.0.1 for that task only, and `media-voice` is graded by an offline transcript with whisper tiny (faster-whisper, about 75 MB, fetched once before the first agent starts, never while grading). Only `web-plan-ranking` needs the web: it researches a
+Each runs in a fresh folder and has a limit of 1 to 7 minutes, 60 min for the whole run at most. The three tasks bench 2.2 added (#151) took an Opus 5.5 xhigh probe 46.2 + 31.6 + 44.7 s, and the five bench 2.3 added (#153) 98.0 + 47.5 + 25.1 + 51.6 + 28.9 s. `cu-social-cycle` and `cu-webmail` work on fictional sites the bench serves on 127.0.0.1 for that task only, `file-media-edit` is graded with Pillow and pypdf, and `media-voice` is graded by an offline transcript with whisper tiny (faster-whisper, about 75 MB, fetched once before the first agent starts, never while grading). Only `web-plan-ranking` and `web-fact-search` need the web: it researches a
 historical case on the open web, and its checks stay offline. If time
 runs out, what is in the folder and the reply so far still get graded, and the prompt
 says so. Each task has a reference solution that the test suite proves passes.
@@ -57,6 +57,7 @@ Toolchains on the machine: Rust for `rs-lock-bug` (`cargo test`), Node.js 22.18 
 | `ir-server-logs` | retrieval | Investigate a game server outage from its logs and report what happened. |
 | `gd-integration-repo` | gamedev | Find every cause behind a failing integration test in a game backend, and fix them. |
 | `media-voice` | media | Record a ferry boarding announcement as a short spoken WAV file. |
+| `file-media-edit` | documents | Crop a photo to a 1080x1350 feed picture keeping its subject, and fill and flatten a PDF form. |
 | `txt-regex-log` | engineering | Write one regex that finds the last date on every log line that mentions an IPv4 address. |
 | `rs-lock-bug` | engineering | Find out why a Rust game server hangs under load and loses points, and fix it. |
 | `sec-leak-fix` | security | Clear a small backup service for open source: no token in code or logs, no form input run as a command. |
@@ -66,6 +67,8 @@ Toolchains on the machine: Rust for `rs-lock-bug` (`cargo test`), Node.js 22.18 
 | `ts-plugin-bug` | engineering | Fix a TypeScript plugin hook bus that runs hooks out of order, skips some and hides failures. |
 | `web-mondrian-landing` | web-design | Build a landing page that tells the story of one Mondrian painting from a fact sheet. |
 | `3d-print-homage` | 3d | Turn a famous public-domain woodblock print into a 3D wallpaper that anyone who knows the print recognizes. |
+| `web-fact-search` | web-research | Look up three fixed facts on the web and give each with the official page that proves it. |
+| `cu-webmail` | computer-use | In a webmail app, save a vendor's invoice PDF, reply with its total and archive the email. |
 | `web-plan-ranking` | web-research | Research Brazil's anti-inflation plans on the web and rank which delivered, with sources. |
 | `web-word-universe` | data-viz | Collect a saved Portuguese dictionary site and build one view that shows how its words relate. |
 <!-- task-summaries:end -->
