@@ -187,7 +187,7 @@ TASKS: list[EvalTask] = [EvalTask(
     steps=(Step(WEBMAIL_PROMPT),),
     check=_webmail_check,
     reference=_webmail_reference,
-    timeout_s=90,
+    timeout_s=180,
     site="mengine_bench.sites.quillmail",
     checkpoints=checkpoints(("opened the mail app", r"127\.0\.0\.1"), ("downloaded the invoice", r"attachment|LP-2026-0418"),
                             ("replied", r"/mail/api/send|Reply|Send")),

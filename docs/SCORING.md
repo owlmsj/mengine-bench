@@ -39,6 +39,8 @@ budget: a best run of about 15 min). The 2.0, 2.1 and 2.2 runs stay in the ranki
 with its version.
 2.3.1 (#155): cu-social-cycle drops the reply, cu-webmail drops the archive, after the first 2.3.0 run timed out on
 both through the browser (~4 s per browser action). No 2.3.0 run was published, so 2.3.1 keeps the same minor.
+Their limits follow the 2.1 rule from Sonnet 5.5 low browser-route probes (Claude in Chrome): cu-social-cycle
+127.6 and 118.2 s, cu-webmail 128.0 and 126.3 s, so 180 s each (from 150 and 90) and a worst case of 62 min.
 
 A run is one sample and runs are not repeated, so ties come from the published tasks: draw the tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
