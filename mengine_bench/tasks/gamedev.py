@@ -210,7 +210,7 @@ TASKS = [
         id="ue-packaged-bug", category="gamedev",
         provenance="Real Unreal work: garbage collection and the cook list, two bugs an editor session hides; synthetic project",
         summary="Find out why an Unreal game loses its colors and crashes only in the packaged build, and fix it.",
-        setup=_ue_setup, check=_ue_check, reference=_ue_reference, timeout_s=180,
+        setup=_ue_setup, check=_ue_check, reference=_ue_reference, timeout_s=90,
         checkpoints=checkpoints(("read the crash log", r"shipping\.log"), ("read the game mode", r"ArenaGameMode"), WROTE_RESULT),
         steps=(Step("Pixel Arena, our Unreal game in {WS}, runs fine in the editor. In the packaged build, players say the arena "
                     "has no colors, and the game crashes after a minute or so of play. The log of one packaged run is in "

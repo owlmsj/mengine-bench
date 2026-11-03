@@ -330,7 +330,7 @@ TASKS = [
         provenance="Real TypeScript harness plugin work: an OpenCode-style hook bus; hidden node --test cases, any "
                    "sequential design passes",
         summary="Fix a TypeScript plugin hook bus that runs hooks out of order, skips some and hides failures.",
-        setup=_ts_setup, check=_ts_check, reference=_ts_reference, timeout_s=180,
+        setup=_ts_setup, check=_ts_check, reference=_ts_reference, timeout_s=60,
         checkpoints=checkpoints(("read the bus", r"bus\.ts"), ("ran the tests", r"node\s+(--\S+\s+)*--test|npm\s+(run\s+)?test")),
         steps=(Step("Users of our harness plugins report that tool.after hooks run out of order, that sometimes a hook "
                     "never runs, and that a failing hook is silently ignored. The hook bus and the plugin are in {WS}; "

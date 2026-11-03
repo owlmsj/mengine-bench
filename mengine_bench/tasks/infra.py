@@ -130,7 +130,7 @@ TASKS = [
         id="infra-gpu-fit", category="infra",
         provenance="Renting GPUs to serve a 70B model under the owner's US$ 4/h cap (mengine tier 3, #623)",
         summary="Pick the cheapest rented GPU offer that can serve a model within a spending policy.",
-        setup=_gpu_fit_setup, check=_gpu_fit_check, reference=_gpu_fit_reference, timeout_s=180,
+        setup=_gpu_fit_setup, check=_gpu_fit_check, reference=_gpu_fit_reference, timeout_s=60,
         checkpoints=checkpoints(("read the offers", r"offers\.csv"), ("read the model", r"MODEL\.md"),
                                 ("read the policy", r"POLICY\.md"), WROTE_RESULT),
         steps=(Step("We want to serve the model described in {WS}/MODEL.md on rented GPUs. Today's offers are in "

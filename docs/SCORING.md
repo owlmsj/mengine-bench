@@ -1,4 +1,4 @@
-# Scoring (bench 2.0)
+# Scoring (bench 2.1)
 
 A run of an agent (harness + model + configuration) gets three numbers folded into
 the Score, and a Cost kept apart.
@@ -18,6 +18,9 @@ same bench major.minor (2.0.x). A patch release changes no task or brief; a work
 scored, every ranked run is judged again from its bundle (`mengine-bench judge --again`), so none has to run again. Rankings of older versions stay in LEADERBOARD.md as history, with the Scores of their own formula.
 Bench 1.8 changed only the weights (#122): Speed 0.25 and Judge 0.15, from 0.15 and 0.25 in 1.7; tasks and briefs are those of 1.7.
 Bench 2.0 keeps the 1.8 weights and changes the tasks (#124): 20 instead of 15.
+Bench 2.1 changes only the time limits (#137): each is the slowest finished time in the eight published 2.0
+runs plus 25%, rounded up to 30 s, at least 60 s, never above the 2.0 limit and never below a limit a published run
+hit. A run's worst case drops from 76 to 49.5 min, so a setup that cannot keep up fails sooner.
 
 A run is one sample and runs are not repeated, so ties come from the published tasks: draw the 20 tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
@@ -37,7 +40,7 @@ untouched", or the page file exists).
   half of the task; a gate that guards the tests still does. The task shows its status, counts its full time and
   is never Solved. A reply already given when the limit hits counts as the reply. With nothing written or
   said, there is nothing for the checks to credit.
-- Each prompt states the limit, 3 to 7 min per step, and that the folder and the reply are graded as they
+- Each prompt states the limit, 1 to 7 min per step, and that the folder and the reply are graded as they
   stand when time runs out. Load a local model before the run: a cold load counts against the first task.
 - **Solved** = the agent finished, and every gate and every check passed.
 

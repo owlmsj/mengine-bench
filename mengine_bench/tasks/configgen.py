@@ -222,7 +222,7 @@ TASKS = [
         id="cfg-source-drift", category="engineering",
         provenance="Owner's rule: one source of truth generates every harness config; a hand-edited generated copy is a bug",
         summary="Make three harness configs agree on a model's context window, for good.",
-        setup=_cfg_setup, check=_cfg_check, reference=_cfg_reference, timeout_s=180,
+        setup=_cfg_setup, check=_cfg_check, reference=_cfg_reference, timeout_s=60,
         checkpoints=checkpoints(("read the readme", r"README"), ("ran the generator", r"gen\.py")),
         steps=(Step("The model configs our coding harnesses use are in {WS}: OpenCode, Codex and Claude Code each get "
                     "one. They disagree about the context window of fast-coder: OpenCode's config says 262144, the other "

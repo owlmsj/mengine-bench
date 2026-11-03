@@ -296,7 +296,7 @@ TASKS = [
         id="web-plan-ranking", category="web-research", needs=frozenset({"web"}),
         provenance="Policy newsletter fact-check: rank Brazil's 1986-1994 anti-inflation plans from public sources",
         summary="Research Brazil's anti-inflation plans on the web and rank which delivered, with sources.",
-        setup=_web_setup, check=_web_check, reference=_web_reference, timeout_s=300,
+        setup=_web_setup, check=_web_check, reference=_web_reference, timeout_s=210,
         deliverables=(DOSSIER_FILE,),
         checkpoints=checkpoints(("read the rubric", r"RUBRIC"), ("searched the web", r"web_?search|search_query|google|bing|duckduckgo"),
                                 ("opened a source", r"web_?fetch|fetch_url|curl|Invoke-WebRequest|wikipedia\.org|ibge\.gov"), WROTE_RESULT,

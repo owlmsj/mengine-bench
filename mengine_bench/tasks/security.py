@@ -324,7 +324,7 @@ TASKS = [
         provenance="Real pre-open-source security review: a hardcoded token in code and logs, and form input in a "
                    "shell command; hidden unittest cases, any archive route passes",
         summary="Clear a small backup service for open source: no token in code or logs, no form input run as a command.",
-        setup=_sec_setup, check=_sec_check, reference=_sec_reference, timeout_s=180,
+        setup=_sec_setup, check=_sec_check, reference=_sec_reference, timeout_s=90,
         checkpoints=checkpoints(("read the service", r"backup_agent\.py"), ("read the config", r"config\.py"),
                                 ("ran the tests", r"unittest|pytest")),
         steps=(Step("We want to publish the backup service in {WS} as open source, and the security review blocks it. "

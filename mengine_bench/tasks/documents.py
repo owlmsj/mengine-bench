@@ -211,7 +211,7 @@ TASKS = [
         id="doc-lab-pdf", category="documents",
         provenance="Indexing a patient's lab exam PDFs from two labs into one history per marker",
         summary="Turn two lab exam PDFs from different labs into one comparable history per marker.",
-        setup=_lab_setup, check=_lab_check, reference=_lab_reference, timeout_s=180,
+        setup=_lab_setup, check=_lab_check, reference=_lab_reference, timeout_s=60,
         checkpoints=checkpoints(("opened the exams", r"exams|\.pdf"),
                                 ("extracted the text", r"pdftotext|pypdf|PyPDF2|fitz|pdfplumber|pdfminer|Tj\b|stream"),
                                 WROTE_RESULT),
