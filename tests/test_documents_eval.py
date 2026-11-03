@@ -98,6 +98,10 @@ def test_every_valid_answer_passes(tmp_path: Path, payload: dict[str, object]) -
     (_with("glucose", "2026-08-19", 109.9), "glucose history"),
     ({**GOOD, "worse": ["glucose"]}, "flags what got worse and left the range"),
     ({**GOOD, "worse": ["glucose", "LDL", "HbA1c"]}, "leaves out what stayed in range"),
+    # #164: a marker the reports never had used to drop out silently; impossible dates used to crash the grader.
+    ({**GOOD, "worse": ["glucose", "LDL", "Troponin"]}, "leaves out what stayed in range"),
+    (_with("glucose", "2026-99-01", 100), "glucose history"),
+    (_with("glucose", "31/02/2026", 100), "glucose history"),
 ])
 def test_each_check_fails_on_its_own_wrong_answer(tmp_path: Path, payload: dict[str, object], check: str) -> None:
     ws = _workspace(tmp_path)

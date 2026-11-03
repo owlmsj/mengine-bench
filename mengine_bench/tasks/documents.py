@@ -145,13 +145,18 @@ def _lab_marker_of(name: str) -> str | None:
     return next((marker for marker, (pattern, _, _) in LAB_MARKERS.items() if re.search(pattern, name, re.IGNORECASE)), None)
 
 
-def _lab_date_of(key: str) -> date | None:
+def _lab_date_of(key: str) -> date | str | None:
+    """The date a history key names, the key itself when its date is impossible (#164), None when it names none."""
     iso = re.search(r"(\d{4})-(\d{2})-(\d{2})", key)
-    if iso:
-        return date(int(iso[1]), int(iso[2]), int(iso[3]))
     # Brazilian reports write day first.
     local = re.search(r"(\d{1,2})[/.](\d{1,2})[/.](\d{4})", key)
-    return date(int(local[3]), int(local[2]), int(local[1])) if local else None
+    parts = (iso[1], iso[2], iso[3]) if iso else (local[3], local[2], local[1]) if local else None
+    if parts is None:
+        return None
+    try:
+        return date(int(parts[0]), int(parts[1]), int(parts[2]))
+    except ValueError:
+        return key
 
 
 def _lab_value_of(value: object) -> float | None:
@@ -164,11 +169,11 @@ def _lab_value_of(value: object) -> float | None:
     return number(value)
 
 
-def _lab_series(got: Mapping[str, object]) -> dict[str, dict[date, float | None]]:
+def _lab_series(got: Mapping[str, object]) -> dict[str, dict[date | str, float | None]]:
     history = got.get("history")
     if not isinstance(history, dict):
         return {}
-    found: dict[str, dict[date, float | None]] = {}
+    found: dict[str, dict[date | str, float | None]] = {}
     for name, series in history.items():
         marker = _lab_marker_of(str(name))
         if marker is None or not isinstance(series, dict):
@@ -189,10 +194,12 @@ def _lab_check(ws: Path, answers: Sequence[str]) -> CheckResult:
                    saw({str(day): value for day, value in got.items()}, {str(day): round(value, 2) for day, value in want.items()}))
     worse = result_json(ws).get("worse")
     names = list(worse) if isinstance(worse, (list, dict)) else []
-    flagged = {_lab_marker_of(str(name)) for name in names} - {None}
+    flagged = {_lab_marker_of(str(name)) for name in names}
     result.add("flags what got worse and left the range", LAB_WORSE <= flagged, saw(worse, sorted(LAB_WORSE)))
     # #124: HbA1c rose but stays in range; an empty list flags nothing wrong but finds nothing either.
-    result.add("leaves out what stayed in range", bool(flagged) and not flagged - LAB_WORSE, saw(worse, sorted(LAB_WORSE)))
+    # #164: a name that is none of the reports' markers (None here) is an invented flag, not a dropped one.
+    result.add("leaves out what stayed in range", bool(flagged - {None}) and not flagged - LAB_WORSE,
+               saw(worse, sorted(LAB_WORSE)))
     return result
 
 
