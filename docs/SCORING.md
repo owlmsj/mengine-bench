@@ -41,6 +41,12 @@ with its version.
 both through the browser (~4 s per browser action). No 2.3.0 run was published, so 2.3.1 keeps the same minor.
 Their limits follow the 2.1 rule from Sonnet 5.5 low browser-route probes (Claude in Chrome): cu-social-cycle
 127.6 and 118.2 s, cu-webmail 128.0 and 126.3 s, so 180 s each (from 150 and 90) and a worst case of 62 min.
+Bench 2.4 (#161): every prompt asks the agent to close the browser tabs, windows and apps it opened. cu-social-cycle and
+cu-webmail gain the scored check "closed the tabs and apps it opened": no site page still sends its heartbeat 5 s after
+the agent is done, and nothing the task started is left running. On every task the runner then kills what the task
+left running (a process born during the task whose parent links lead back to the runner; never one that existed
+before the task or was born from one) and records it as `left_running`, with `left_open_tabs` on the site tasks; a
+page told the task is over blanks itself. The 2.0 to 2.3 runs stay in the ranking, each row marked with its version.
 
 A run is one sample and runs are not repeated, so ties come from the published tasks: draw the tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as

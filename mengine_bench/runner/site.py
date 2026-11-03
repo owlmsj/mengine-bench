@@ -15,6 +15,9 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
+import urllib.error
+import urllib.request
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -24,11 +27,15 @@ from typing import IO
 import mengine_bench
 from mengine_bench.runner.containment import PosixSession, WindowsJob, new_scope, stop_session_group
 from mengine_bench.runner.process import kill_tree
+from mengine_bench.sites.server_base import KEY_HEADER, PRESENCE_PREFIX
 from mengine_bench.sites.signed_store import DATA_DIR, KEY_FILE
 
 START_TIMEOUT_S = 20
 CREATE_NO_WINDOW = 0x08000000
 SITE_PLACEHOLDER = "{SITE}"
+# #161: a page beats every 2 s; an open tab beats at least twice in this wait, and is told the task is over.
+PRESENCE_WAIT_S = 5.0
+PRESENCE_TIMEOUT_S = 5
 
 
 class SiteFailed(RuntimeError):
@@ -94,6 +101,27 @@ def start_site(module: str, workspace: Path) -> SiteServer:
                          f"stderr: {tail}")
     server.port = port
     return server
+
+
+def _presence_call(server: SiteServer, name: str, method: str) -> dict[str, object]:
+    request = urllib.request.Request(server.url + PRESENCE_PREFIX + name, data=b"" if method == "POST" else None,
+                                     method=method, headers={KEY_HEADER: server.key})
+    with urllib.request.urlopen(request, timeout=PRESENCE_TIMEOUT_S) as reply:
+        payload = json.loads(reply.read())
+    if not isinstance(payload, dict):
+        raise ValueError(f"received {payload!r:.80} from {name}; expected a JSON object")
+    return payload
+
+
+def end_pages(server: SiteServer, wait_s: float | None = None) -> int | None:
+    """Tell every app page the task is over and count those still open (#161); None when the server did not answer."""
+    try:
+        _presence_call(server, "end", "POST")
+        time.sleep(PRESENCE_WAIT_S if wait_s is None else wait_s)
+        count = _presence_call(server, "open-tabs", "GET").get("open_tabs")
+    except (OSError, ValueError, urllib.error.URLError):
+        return None
+    return count if isinstance(count, int) else None
 
 
 def stop_site(server: SiteServer, write_key: bool = True) -> None:

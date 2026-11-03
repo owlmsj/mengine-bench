@@ -41,6 +41,9 @@ class TaskDetail(TypedDict):
     usage: dict[str, object] | None
     stats: RunStats
     checkpoints: NotRequired[list[dict[str, object]]]
+    # #161: site pages left open (None: not a site task or not counted) and processes the runner killed.
+    left_open_tabs: NotRequired[int | None]
+    left_running: NotRequired[list[dict[str, object]]]
 
 
 @dataclass(frozen=True)
@@ -81,6 +84,7 @@ def _task_entry(score: TaskScore, detail: TaskDetail) -> dict[str, object]:
     return {
         "id": score.task_id, "status": score.status, "error": detail["error"], "flags": detail["flags"],
         "checkpoints": detail.get("checkpoints", []),
+        "left_open_tabs": detail.get("left_open_tabs"), "left_running": detail.get("left_running", []),
         "c": score.correctness, "solved": score.solved, "checks": detail["checks"],
         # Set by `mengine-bench judge` on review (#23): one rubric vote per task.
         "judge": score.judge, "judge_rationale": None, "judge_errors": [],
@@ -242,7 +246,20 @@ def render_summary(results: Mapping[str, object]) -> str:
         lines.append(f"| {task['id']} | {task['status']}{flags} | {100 * task['c']:.0f}% | {passed}/{len(checks)} | "
                      f"{_fmt(task.get('judge'))} | {time_text(task['agent_s'])} | "
                      f"{'-' if cost is None else f'{cost:.4f}'} | {_stats_cells(task.get('stats'))} |")
-    return "\n".join([*lines, *_failed_checks(tasks), *_checkpoint_lines(tasks)]) + "\n"
+    return "\n".join([*lines, *_failed_checks(tasks), *_left_open_lines(tasks), *_checkpoint_lines(tasks)]) + "\n"
+
+
+def _left_open_lines(tasks: Iterable[Mapping[str, object]]) -> list[str]:
+    """#161: tabs and processes a task left open, so a harness that leaves things behind shows."""
+    lines = []
+    for task in tasks:
+        tabs, running = task.get("left_open_tabs"), task.get("left_running")
+        cells = [f"{tabs} tab(s) open"] if isinstance(tabs, int) and tabs else []
+        if isinstance(running, list) and running:
+            cells.append("still running: " + ", ".join(f"{item.get('name')} ({item.get('pid')})" for item in running))
+        if cells:
+            lines.append(f"- `{task['id']}`: " + "; ".join(cells))
+    return ["", "## Left open", "", *lines] if lines else []
 
 
 def _failed_checks(tasks: Iterable[Mapping[str, object]]) -> list[str]:

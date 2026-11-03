@@ -37,15 +37,18 @@ TASKS_ADDED_IN_2_2 = frozenset({"txt-regex-log", "ds-sqlite-recover", "py-async-
 TASKS_ADDED_IN_2_3 = frozenset({"cu-social-cycle", "media-voice", "cu-webmail", "web-fact-search", "file-media-edit"})
 TASKS_THAT_CAME_AND_WENT = TASKS_CHANGED_SINCE_1_5 | TASKS_CHANGED_IN_2_0 | TASKS_ADDED_IN_2_2 | TASKS_ADDED_IN_2_3
 # #139: the owner kept the 2.0 runs ranked in 2.1, which only shortened the time limits (#137); they cost real runs.
-# #151: and kept the 2.0 and 2.1 runs ranked in 2.2, which added three tasks; #153: and all three in 2.3.
+# #151: and kept the 2.0 and 2.1 runs ranked in 2.2, which added three tasks; #153: and all three in 2.3;
+# #161: and all four in 2.4, which adds a scored cleanup check to the two site tasks.
 RANKED_WITH_CURRENT: dict[str, frozenset[str]] = {"2.1": frozenset({"2.0"}), "2.2": frozenset({"2.0", "2.1"}),
-                                                  "2.3": frozenset({"2.0", "2.1", "2.2"})}
-RANKED_WITH_NOTE = ("Bench 2.0, 2.1 and 2.2 runs stay in this ranking (#139, #151, #153), marked with their version. 2.2\n"
-                    "added three tasks (txt-regex-log, ds-sqlite-recover, py-async-cancel) and 2.3 added "
+                                                  "2.3": frozenset({"2.0", "2.1", "2.2"}),
+                                                  "2.4": frozenset({"2.0", "2.1", "2.2", "2.3"})}
+RANKED_WITH_NOTE = ("Bench 2.0, 2.1, 2.2 and 2.3 runs stay in this ranking (#139, #151, #153, #161), marked with their "
+                    "version. 2.2\nadded three tasks (txt-regex-log, ds-sqlite-recover, py-async-cancel) and 2.3 added "
                     f"{len(TASKS_ADDED_IN_2_3)}\n({', '.join(sorted(TASKS_ADDED_IN_2_3))}), so a row marked 2.0 or 2.1 "
-                    f"covers 20 tasks, a row marked 2.2 covers 23\nand an unmarked 2.3 row {23 + len(TASKS_ADDED_IN_2_3)}. "
-                    "2.1 only shortened the time limits (#137): a row marked 2.0 ran with the\n"
-                    "longer 2.0 limits (worst case 76 min, against 49.5 min in 2.1 and 52.5 min in 2.2; 2.3 in "
+                    f"covers 20 tasks, a row marked 2.2 covers 23\nand a row marked 2.3 covers {23 + len(TASKS_ADDED_IN_2_3)}, "
+                    "without the 2.4 check that cu-social-cycle and cu-webmail\nclose the tabs and apps they opened "
+                    "(an unmarked 2.4 row has it). 2.1 only shortened the time limits (#137): a row\nmarked 2.0 ran with "
+                    "the longer 2.0 limits (worst case 76 min, against 49.5 min in 2.1 and 52.5 min in 2.2; 2.3 in "
                     "docs/SCORING.md).\n")
 # #146: runs the owner keeps on the board without ranking them, by bundle name, with why.
 OBSERVED_RUNS: dict[str, str] = {

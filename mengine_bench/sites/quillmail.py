@@ -19,7 +19,7 @@ import time
 import zlib
 from urllib.parse import parse_qs, quote, urlsplit
 
-from mengine_bench.sites.server_base import SiteHandler, serve
+from mengine_bench.sites.server_base import SiteHandler, serve, with_presence
 from mengine_bench.sites.signed_store import SERVED_DIR, SiteEvent, SiteState
 
 SELF = {"name": "Bench Tester", "email": "tester@quillmail.test"}
@@ -215,7 +215,7 @@ class QuillmailHandler(SiteHandler):
                 self.sessions.add(session)
         page = (self.workspace / SERVED_DIR / "index.html").read_text(encoding="utf-8")
         page = page.replace("__QM_AT__", self._csrf_for(session))
-        body = page.encode("utf-8")
+        body = with_presence(page.encode("utf-8"))
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
