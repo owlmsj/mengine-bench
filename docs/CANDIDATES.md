@@ -10,7 +10,8 @@ Promoting one means: move its `EvalTask` into a module under `mengine_bench/task
 The owner picks; adding tasks makes every run longer.
 
 Each candidate has a reference solution that `tests/test_candidates_*.py` proves passes, and an untouched
-workspace fails. Agent time is not measured for any of them; the number below is the limit set.
+workspace fails. Agent time is measured only for `cu-social-cycle` (its Opus 5.5 xhigh probe); for the others
+the number below is the limit set. `run --tasks <id>` runs a candidate for its probe, never ranked (#153).
 
 | id | module | adds over the catalog (closest task) | limit | saturation risk | diagnosing a failure by hand |
 | --- | --- | --- | --- | --- | --- |
@@ -19,6 +20,7 @@ workspace fails. Agent time is not measured for any of them; the number below is
 | `lc-contract` | `hard_context` | Price precedence across a long contract and its annexes (`doc-lab-pdf`) | 3 min | High: searchable document with fixed terms | Read clause 7, the volume and prepayment discounts and signed annex C; recompute the annual quote |
 | `cmp-meeting-decisions` | `compaction_web` | Decisions, owners, deadlines and a conditional hire carried to a fresh session (`cmp-handoff`) | 3 min per step | High | Compare the meeting's decision turns with `DECISIONS.md` and `result.json` |
 | `cmp-agent-trajectory` | `compaction_web` | Current state rebuilt from a chronological tool-event log (`cmp-handoff`) | 3 min per step | Medium to high | Read events 96, 150 and 157-159, then compare `STATE.md` and `result.json` |
+| `cu-social-cycle` | `cu_social` | Computer use on a local social-site replica (Bluehaze, fictional): post with image and alt text, reply, delete own post; graded from server-signed state (none) | 2 min; probe 39.3 s, correct 100%, judge 92 (Opus 5.5 xhigh, 2026-11-03) | High: the probe skipped the browser and drove the JSON API with curl after reading `site/app.js` | `site-data/journal.jsonl`: the create, reply and delete events in order; `summary.md` names the failed check |
 
 ## Not ported
 
@@ -31,20 +33,16 @@ workspace fails. Agent time is not measured for any of them; the number below is
   `ds-ab-playtest`, `ds-sql-funnel`, `gd-integration-repo`, `ir-server-logs`, `web-mondrian-landing`) or were
   retired by the owner as saturated (see `TASKS_THAT_CAME_AND_WENT`).
 
-## Proposal: offline computer use (`cu`)
+## Computer use (`cu`)
 
-The mengine `cu` eval (B1-B5) drove a real Bluesky test account: post with an image and alt text, reply,
-delete. That does not fit the bench: it needs an account, it writes to a public network and it cannot be
-re-run identically. Proposal, no code yet:
+The mengine `cu` eval (B1-B5) drove a real social account, so it could not be re-run identically. `cu-social-cycle`
+replaces it with a local replica (#153): the runner starts the task's stdlib server (`EvalTask.site`) on
+127.0.0.1, names it in the prompt as `{SITE}` and kills it when the task ends. The server signs an append-only
+journal and the state with a per-run key it gets on stdin; the key reaches the workspace only after the server is
+gone, and a mandatory gate fails any edit the server did not sign.
 
-- A local, fictional social page served from the workspace, driven only by the harness's own browser.
-- Steps: upload an image with alt text, post, reply to a given post, delete the agent's own post, leave the
-  others untouched.
-- Grading reads the page's saved state plus an append-only event journal: exact text, image hash,
-  parent and child, order of deletion, unrelated posts preserved. The journal tells a finished run from an
-  untouched empty feed.
-- Open questions for the owner: which harnesses expose a browser in a bench run (Claude Code since bench#101;
-  the others are unknown), and whether a harness without one scores zero or the task is skipped for it.
+Open for the owner: the probe solved it through the API without a browser. Whether the replica should make the
+browser route the only one (for example a session cookie set by the page) is a design choice, not a bug.
 
 ## Proposals
 
