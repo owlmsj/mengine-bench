@@ -7,6 +7,8 @@ screenshots for the rendered-look part of its rubric; a blank page scores low th
 
 from __future__ import annotations
 
+import functools
+import io
 import os
 import platform
 import re
@@ -16,13 +18,14 @@ import subprocess
 import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO
 
 import psutil
+from PIL import Image
 
-from mengine_bench.core import CheckResult
+from mengine_bench.core import CheckResult, saw
 from mengine_bench.redact import PathScope, local_names, redact_paths, redact_text
 from mengine_bench.runner.process import kill_tree
 
@@ -58,6 +61,17 @@ DRAWS_CHECK = "page draws something (screenshot not blank)"
 # Measured on Edge at 1440x900 (#82): an empty page 5,850 bytes, one h1 8,616, the plain reference scene 31,253,
 # and the smallest of 46 published pages 55,611.
 BLANK_PAGE_MAX_BYTES = 12_000
+COMPOSITION_CHECK = "render keeps the print's composition (blue layout)"
+# #164: the print a page must recompose, by task id; the rest of the visual tasks have no print to match.
+COMPOSITION_PRINTS = {"3d-print-homage": Path(__file__).resolve().parent / "assets" / "prints" / "great-wave.jpg"}
+# #164 calibration on the 15 judged renders of bench 2.2-2.4 (8 s frame; the 1 s and 4 s frames move it by <= 0.10):
+# the judge reference scores 0.563 and the task's gold scene 0.561; every render the judge gave rendered <= 13/30
+# scores <= 0.345 (the two audited ones 0.327 and 0.319), every one it gave >= 14 scores >= 0.438 except two
+# without a curl (a wave-less hump, r18, 0.305; a blue disc, r14, 0.311). 0.40 sits in that gap; a blank page
+# scores 0, a flat blue one 0.17.
+COMPOSITION_MIN = 0.40
+COMPOSITION_SIZE = (240, 150)
+COMPOSITION_GRID = (4, 3)
 THREE_CDN_HOST = "cdn.jsdelivr.net"
 CDN_TIMEOUT_S = 5.0
 
@@ -176,6 +190,8 @@ class PageProbe:
     status: str
     errors: tuple[str, ...] = ()
     png_bytes: int = 0
+    # #164: the screenshot itself, for the composition check; left out of ==, a run is compared by what it says.
+    png: bytes = field(default=b"", repr=False, compare=False)
 
 
 def page_errors(console: Sequence[str]) -> list[str]:
@@ -189,8 +205,45 @@ def probe_page(html: Path, browser_argv: Sequence[str] | None = None) -> PagePro
     with tempfile.TemporaryDirectory(prefix="mengine-bench-probe-") as tmp:
         png = Path(tmp) / "page.png"
         status = render_headless(html, png, browser_argv=browser_argv, console=console)
-        size = png.stat().st_size if png.is_file() else 0
-    return PageProbe(status, tuple(page_errors(console)), size)
+        shot = png.read_bytes() if png.is_file() else b""
+    return PageProbe(status, tuple(page_errors(console)), len(shot), shot)
+
+
+def _blue_layout(image: Image.Image) -> list[float]:
+    """Share of print-blue pixels per cell of a coarse grid, row by row (#164).
+
+    Blue is the print's own signal: the wave, the swells and Fuji are blue, the sky and the foam are not, so where
+    the blue sits is where the composition sits. Hue-only, so a lighter or darker scene keeps its layout.
+    """
+    width, height = COMPOSITION_SIZE
+    columns, rows = COMPOSITION_GRID
+    pixels = list(image.convert("RGB").resize(COMPOSITION_SIZE, Image.BILINEAR).get_flattened_data())
+    cell_w, cell_h = width // columns, height // rows
+    counts = [0] * (columns * rows)
+    for index, (red, green, blue) in enumerate(pixels):
+        if blue > red + 35 and blue >= green:
+            y, x = divmod(index, width)
+            counts[(y // cell_h) * columns + x // cell_w] += 1
+    return [count / (cell_w * cell_h) for count in counts]
+
+
+@functools.lru_cache(maxsize=4)
+def _print_layout(print_path: Path) -> tuple[float, ...]:
+    with Image.open(print_path) as image:
+        return tuple(_blue_layout(image))
+
+
+def composition_similarity(png: bytes, print_path: Path) -> float:
+    """Weighted Jaccard of the screenshot's blue layout and the print's: 1.0 is the print, 0.0 no shared blue (#164).
+
+    Not 1 - mean gap: the print is mostly paper, so a blank cream page scored 0.83 against it.
+    """
+    with Image.open(io.BytesIO(png)) as image:
+        shot = _blue_layout(image)
+    target = _print_layout(print_path)
+    pairs = list(zip(shot, target, strict=True))
+    union = sum(max(pair) for pair in pairs)
+    return sum(min(pair) for pair in pairs) / union if union else 0.0
 
 
 def three_cdn_reachable() -> bool:
@@ -202,8 +255,11 @@ def three_cdn_reachable() -> bool:
 
 
 def add_page_checks(result: CheckResult, html: Path, probe: Callable[[Path], PageProbe] = probe_page,
-                    cdn_reachable: Callable[[], bool] = three_cdn_reachable) -> None:
-    """Run the page once and add two checks; what the machine cannot do is a note, never a lost point."""
+                    cdn_reachable: Callable[[], bool] = three_cdn_reachable, composition: Path | None = None) -> None:
+    """Run the page once and add two checks; what the machine cannot do is a note, never a lost point.
+
+    `composition`, a print the page recomposes (COMPOSITION_PRINTS), adds a third check on the same screenshot.
+    """
     if not html.is_file():
         return
     try:
@@ -220,6 +276,13 @@ def add_page_checks(result: CheckResult, html: Path, probe: Callable[[Path], Pag
         return
     result.add(SCRIPT_ERROR_CHECK, not page.errors, " | ".join(page.errors[:2]))
     result.add(DRAWS_CHECK, not blank, f"the screenshot has {page.png_bytes} bytes, a blank page has about 5850")
+    if composition is None or not page.png:
+        return
+    # #164: token and palette checks gave 100% to a spire and to a pillar that the judge found unrecognisable.
+    similarity = round(composition_similarity(page.png, composition), 3)
+    result.add(COMPOSITION_CHECK, similarity >= COMPOSITION_MIN,
+               saw(similarity, f"a blue-layout similarity to {composition.name} of at least {COMPOSITION_MIN} "
+                               f"on a {COMPOSITION_GRID[0]}x{COMPOSITION_GRID[1]} grid"))
 
 
 def dump_page_dom(html: Path, query: str, browser_argv: Sequence[str] | None = None) -> tuple[str, str]:
