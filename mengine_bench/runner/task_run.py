@@ -26,12 +26,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mengine_bench.core import CheckResult, EvalTask
+from mengine_bench.core import CheckResult, EvalTask, TraceCheck
 from mengine_bench.runner import process
 from mengine_bench.runner.agents import Agent, AgentError, Usage, sum_usage, partial_answer
 from mengine_bench.runner.leftovers import LeftProcess, TaskWindow
 from mengine_bench.runner.site import SITE_PLACEHOLDER, SiteFailed, end_pages, serve_site
 from mengine_bench.runner.stats import RunStats, merge_stats, stream_stats
+from mengine_bench.runner.trace import tool_trace
 from mengine_bench.visual import add_page_checks
 
 # Browser user-data dirs an agent left in the workspace; their cache files can
@@ -330,7 +331,8 @@ def _grade(task: EvalTask, record: TaskRunRecord) -> None:
     started = time.monotonic()
     answers = record.answers + [""] * (len(task.steps) - len(record.answers))
     try:
-        record.check = task.check(record.workspace, answers)
+        record.check = (task.check(record.workspace, answers, tool_trace(record.streams))
+                        if isinstance(task.check, TraceCheck) else task.check(record.workspace, answers))
         if task.render_target is not None:
             add_page_checks(record.check, record.workspace / task.render_target)
     except (ValueError, RuntimeError, OSError) as error:

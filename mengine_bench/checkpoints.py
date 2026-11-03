@@ -10,6 +10,7 @@ import re
 from collections.abc import Sequence
 
 from mengine_bench.core import Checkpoint
+from mengine_bench.runner.trace import fetch_actions, tool_trace
 
 # One event per call: "item.started" would count a Codex command twice, and an active AGY step is not done yet.
 _TOOL_EVENT = re.compile(r'"tool_use"|"item\.completed".*"(command_execution|file_change|mcp_tool_call)"|"step_update"')
@@ -23,10 +24,13 @@ def _tool_events(streams: Sequence[str]) -> list[str]:
 
 def reached_checkpoints(declared: Sequence[Checkpoint], streams: Sequence[str]) -> list[dict[str, object]]:
     """Each checkpoint with the number of the tool call that first reached it, or None."""
-    events = _tool_events(streams)
+    calls = tool_trace(streams)
+    actions = fetch_actions(calls)
+    events = [str((call.name, call.inputs)) for call in calls]
     rows: list[dict[str, object]] = []
     for mark in declared:
         pattern = re.compile(mark.pattern, re.IGNORECASE | re.DOTALL)
-        call = next((index for index, event in enumerate(events, start=1) if pattern.search(event)), None)
+        candidates = [" ".join(urls) for urls in actions] if mark.fetch_only else events
+        call = next((index for index, event in enumerate(candidates, start=1) if pattern.search(event)), None)
         rows.append({"name": mark.name, "call": call})
     return rows

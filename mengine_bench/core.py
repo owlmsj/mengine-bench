@@ -17,7 +17,7 @@ import stat
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -48,6 +48,7 @@ class Checkpoint:
 
     name: str
     pattern: str
+    fetch_only: bool = False
 
 
 def checkpoints(*pairs: tuple[str, str]) -> tuple[Checkpoint, ...]:
@@ -116,7 +117,27 @@ class CheckResult:
 
 
 Setup = Callable[[Path], None]
-Check = Callable[[Path, Sequence[str]], CheckResult]
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    """Harness-neutral tool input, without tool output or assistant prose (#164)."""
+
+    name: str
+    inputs: Mapping[str, object]
+
+
+@dataclass(frozen=True)
+class TraceCheck:
+    """Opt in to trace evidence; old two-argument checks keep their contract (#164)."""
+
+    evaluate: Callable[[Path, Sequence[str], Sequence[ToolCall]], CheckResult]
+
+    def __call__(self, ws: Path, answers: Sequence[str], trace: Sequence[ToolCall] = ()) -> CheckResult:
+        return self.evaluate(ws, answers, trace)
+
+
+Check = Callable[[Path, Sequence[str]], CheckResult] | TraceCheck
 Reference = Callable[[Path], list[str]]
 
 
