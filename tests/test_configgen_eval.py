@@ -17,6 +17,7 @@ NEW_FAST = '"name": "fast-coder", "context_window": 262144'
 REGENERATED = "regenerating gives fast-coder 262144 in all three configs"
 DELIVERED = "the delivered configs equal what the source generates"
 UNCHANGED = "the other models and fields are unchanged"
+OWN_GENERATOR = "the delivered generator still writes those configs"
 
 
 def _task() -> configgen.EvalTask:
@@ -121,6 +122,30 @@ def test_a_refactored_generator_with_the_same_output_passes(tmp_path: Path) -> N
     write(ws, "gen.py", CFG_GEN + "\n# renderers listed once so a drift test can reuse them\n")
     write(ws, "test_gen.py", "import unittest\n")
     assert _cfg_check(ws, [""]).passed
+
+
+@pytest.mark.parametrize("broken", [
+    "raise SystemExit('gen.py broken')\n",
+    CFG_GEN.replace('"contextWindow": model["context_window"]', '"contextWindow": 131072'),
+    CFG_GEN.replace("    main()\n", "    pass\n"),
+], ids=["crashes", "hardcodes-claude-context", "writes-nothing"])
+def test_a_delivery_whose_generator_no_longer_regenerates_fails(tmp_path: Path, broken: str) -> None:
+    # #164: right source and outputs with a broken gen.py passed, because only the bundled generator ran.
+    ws = _fresh(tmp_path)
+    _cfg_reference(ws)
+    write(ws, "gen.py", broken)
+    result = _cfg_check(ws, [""])
+    assert result.failed() == [OWN_GENERATOR], (result.failed(), result.details)
+
+
+def test_a_generator_split_into_modules_passes(tmp_path: Path) -> None:
+    # #164: an equivalent refactor that imports a sibling module still regenerates the same configs.
+    ws = _fresh(tmp_path)
+    _cfg_reference(ws)
+    write(ws, "render.py", CFG_GEN.replace('if __name__ == "__main__":\n    main()\n', ""))
+    write(ws, "gen.py", "from render import main\n\nmain()\n")
+    result = _cfg_check(ws, [""])
+    assert result.passed, (result.failed(), result.details)
 
 
 def test_the_brief_does_not_hand_over_the_cause() -> None:
