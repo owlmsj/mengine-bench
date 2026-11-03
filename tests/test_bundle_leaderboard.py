@@ -144,11 +144,11 @@ def test_leaderboard_is_one_table_sorted_by_score_with_the_spec_columns(tmp_path
     assert board.ranked == 2 and board.unranked == []
     table = board.markdown[board.markdown.index("| # |"):]
     header = table.splitlines()[0]
-    assert header == ("| # | Score | Correct % | Solved | Judge | Speed | Time | Timeouts | Cost | Est. price | Tokens | Generated | Turns | Agent | Model | Effort | "
-                      "Hardware | Config | Submitter | Date | Run |")
+    assert header == ("| # | Score | Correct % | Solved | Judge | Speed | Time | Timeouts | Cost | Tokens | Generated | Thinking | "
+                      "Turns | Tools | Tool s | Agent | Model | Effort | Hardware | Config | Submitter | Date | Run |")
     assert table.index("high-model") < table.index("low-model")
     row = table.splitlines()[2]
-    for cell in ("| 1 | **90.0** | 80.0 | 10/", "| 70.0 | 0.0 | 30 min 30 s | 1 | >= $2.50 (price) | n/a | 1.75M | 3.4k | 12 |",
+    for cell in ("| 1 | **90.0** | 80.0 | 10/", "| 70.0 | 0.0 | 30 min 30 s | 1 | n/a | 1.75M | 3.4k | - | 12 | - | - |",
                  "| codex codex-cli 0.162.1 | high-model | high |", "AMD Ryzen 9 7950X, NVIDIA GeForce RTX 4090 (24 GB)",
                  "provider=openai, mcp=none", "| dquill | 2026-10-19 | [run](results/high/summary.md) |"):
         assert cell in row, (cell, row)
@@ -185,8 +185,9 @@ def test_leaderboard_ranks_the_current_major_minor_only(tmp_path: Path) -> None:
     assert board.ranked == 2 and board.history == 1 and board.unranked == []
 
 
-def test_2_0_2_1_and_2_2_runs_stay_ranked_in_2_3_with_their_marks_153(tmp_path: Path) -> None:
+def test_2_0_to_2_3_runs_stay_ranked_in_2_4_with_their_marks_161(tmp_path: Path) -> None:
     # #139: 2.1 kept the 2.0 runs ranked. #151: 2.2 added three tasks and kept both. #153: 2.3 keeps all three.
+    # #161: 2.4 adds a check to two tasks and keeps all four; a 2.3 run is complete on its own catalog.
     added = leaderboard.TASKS_ADDED_IN_2_2 | leaderboard.TASKS_ADDED_IN_2_3
     old_ids = [task.id for task in catalog.all_tasks() if task.id not in added]
     v22_ids = [task.id for task in catalog.all_tasks() if task.id not in leaderboard.TASKS_ADDED_IN_2_3]
@@ -194,18 +195,22 @@ def test_2_0_2_1_and_2_2_runs_stay_ranked_in_2_3_with_their_marks_153(tmp_path: 
     _write_result(results, "v20", 90.0, model="v20-model", bench_version="2.0.0", task_ids=old_ids)
     _write_result(results, "v21", 85.0, model="v21-model", bench_version="2.1.1", task_ids=old_ids)
     _write_result(results, "v22", 80.0, model="v22-model", bench_version="2.2.0", task_ids=v22_ids)
-    _write_result(results, "v23", 75.0, model="v23-model")
+    _write_result(results, "v23", 75.0, model="v23-model", bench_version="2.3.1")
+    _write_result(results, "v24", 70.0, model="v24-model")
     _write_result(results, "v21-short", 99.0, model="short-model", bench_version="2.1.1", task_ids=old_ids[1:])
     _write_result(results, "v17", 99.0, model="v17-model", bench_version="1.7.3", task_ids=[TASK])
     board = leaderboard.build_leaderboard(results, tmp_path)
-    assert board.ranked == 4
+    assert board.ranked == 5
     text = board.markdown
-    assert "Bench 2.0, 2.1 and 2.2 runs stay in this ranking (#139, #151, #153)" in text
-    assert text.index("v21-model") < text.index("v22-model") < text.index("v23-model") < text.index("## Not ranked")
+    assert "Bench 2.0, 2.1, 2.2 and 2.3 runs stay in this ranking (#139, #151, #153, #161)" in text
+    assert "a row marked 2.3 covers 28, without the 2.4 check" in " ".join(text.split())
+    order = [text.index(mark) for mark in ("v21-model", "v22-model", "v23-model", "v24-model", "## Not ranked")]
+    assert order == sorted(order)
     assert "[run](results/v20/summary.md) (bench 2.0) |" in text
     assert "[run](results/v21/summary.md) (bench 2.1) |" in text
     assert "[run](results/v22/summary.md) (bench 2.2) |" in text
-    assert "[run](results/v23/summary.md) |" in text
+    assert "[run](results/v23/summary.md) (bench 2.3) |" in text
+    assert "[run](results/v24/summary.md) |" in text
     assert "## Bench 2.0 (history)" not in text and "## Bench 2.1 (history)" not in text
     assert [name for name, _ in board.unranked] == ["results/v17", "results/v21-short"]
 
@@ -242,10 +247,10 @@ def test_an_older_ranking_stays_on_the_board_as_history(tmp_path: Path) -> None:
     assert [name for name, _ in board.unranked] == ["results/old-pending"]
 
 
-def test_bench_is_version_2_3_x() -> None:
+def test_bench_is_version_2_4_x() -> None:
     import tomllib
     pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
-    assert __version__ == pyproject["project"]["version"] and __version__.startswith("2.3.")
+    assert __version__ == pyproject["project"]["version"] and __version__.startswith("2.4.")
 
 
 def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:
@@ -286,3 +291,70 @@ def test_a_complete_1_7_run_stays_complete_in_2_0() -> None:
                "web-mondrian-landing", "3d-voxel-landscape", "web-word-universe"]
     assert is_complete_run({"bench_version": "1.7.3", "tasks": [{"id": task_id} for task_id in ids_1_7]})
     assert not is_complete_run({"bench_version": "1.7.3", "tasks": [{"id": task_id} for task_id in ids_1_7[1:]]})
+
+
+@pytest.mark.parametrize(("totals", "price", "model", "expected"), [
+    ({"cost_usd": 3.19, "cost_basis": "harness"}, None, "m", "$3.19"),
+    ({"cost_usd": 3.19, "cost_basis": "harness", "cost_lower_bound": True}, None, "m", ">= $3.19"),
+    ({"cost_usd": None, "cost_basis": None}, None, "claude-sonnet-5-5", "~$5.40"),
+    ({"cost_usd": None, "cost_basis": None, "cost_lower_bound": True}, None, "claude-sonnet-5-5", ">= ~$5.40"),
+    ({"cost_usd": 0.0, "cost_basis": "price"}, {"input": 0, "cached": 0, "output": 0}, "local-27b", "$0.00 (local)"),
+    ({"cost_usd": None, "cost_basis": None}, None, "unpriced-model", "n/a"),
+], ids=["exact", "exact-bound", "estimate", "estimate-bound", "local", "neither"])
+def test_one_cost_cell_is_exact_estimated_local_or_na_162(totals: dict[str, object], price: object, model: str,
+                                                        expected: str) -> None:
+    result = {"agent": {"model": model}, "price_per_mtok": price, "config": {},
+              "totals": {**totals, "tokens": {"input": 1_000_000, "cached_input": 0, "output": 140_000}}}
+    assert leaderboard.run_cost_text(result) == expected
+
+
+def _claude_tool_stream() -> str:
+    events = [
+        {"type": "assistant", "timestamp": "2026-11-03T13:43:00.000Z",
+         "message": {"id": "a", "content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}}]}},
+        {"type": "user", "timestamp": "2026-11-03T13:43:01.500Z",
+         "message": {"content": [{"type": "tool_result", "tool_use_id": "t1"}]}},
+        {"type": "assistant", "timestamp": "2026-11-03T13:43:02.000Z",
+         "message": {"id": "b", "content": [{"type": "tool_use", "id": "t2", "name": "Read", "input": {"path": "x"}}]}},
+        {"type": "user", "timestamp": "2026-11-03T13:43:06.000Z",
+         "message": {"content": [{"type": "tool_result", "tool_use_id": "t2"}]}},
+        {"type": "assistant", "timestamp": "2026-11-03T13:43:07.000Z",
+         "message": {"id": "c", "content": [{"type": "tool_use", "id": "t3", "name": "Read", "input": {"path": "y"}}]}},
+        {"type": "user", "timestamp": "2026-11-03T13:43:09.500Z",
+         "message": {"content": [{"type": "tool_result", "tool_use_id": "t3"}]}},
+    ]
+    return "\n".join(json.dumps(event) for event in events) + "\n"
+
+
+def test_tool_seconds_come_from_the_bundle_transcripts_or_stay_a_dash_162(tmp_path: Path) -> None:
+    import gzip
+
+    results = tmp_path / "results"
+    timed = _write_result(results, "timed", 90.0, model="timed-model")
+    (timed / "transcripts").mkdir()
+    lines = [json.dumps({"step": "0", "stream": "stdout", "text": _claude_tool_stream()}),
+             json.dumps({"step": "0", "stream": "stderr", "text": ""})]
+    (timed / "transcripts" / "t.jsonl.gz").write_bytes(gzip.compress(("\n".join(lines) + "\n").encode("utf-8")))
+    untimed = _write_result(results, "untimed", 80.0, model="untimed-model")
+    (untimed / "transcripts").mkdir()
+    no_stamps = _claude_tool_stream().replace('"timestamp"', '"stamp"')
+    (untimed / "transcripts" / "t.jsonl.gz").write_bytes(gzip.compress(
+        (json.dumps({"step": "0", "stream": "stdout", "text": no_stamps}) + "\n").encode("utf-8")))
+    rows = {line.split(" | ")[16]: line for line in leaderboard.build_leaderboard(results, tmp_path).markdown.splitlines()
+            if line.startswith("| 1 |") or line.startswith("| 2 |")}
+    # Median of 1.5, 4.0 and 2.5 s; a stream without stamps has no per-call time, never an estimate.
+    assert set(rows) == {"timed-model", "untimed-model"}
+    assert " | 12 | - | 2.5 | " in rows["timed-model"] and " | 12 | - | - | " in rows["untimed-model"]
+
+
+def test_the_summary_has_thinking_tools_and_tool_seconds_per_task_162() -> None:
+    from mengine_bench.report import render_summary
+    stats = {"model_turns": 4, "tool_calls": 9, "tool_s_median": 1.25, "generated_tokens": 3000, "reasoning_tokens": 1200}
+    summary = render_summary({"bench_version": "2.4.0", "date": "d", "agent": {"name": "a", "model": "m"},
+                              "totals": {"score": 1.0, "correct": 1.0, "solved": 1, "total": 2, "judge": 1.0, "time_s": 1.0},
+                              "tasks": [{"id": "timed", "status": "ok", "flags": [], "c": 1.0, "agent_s": 1.0, "checks": [],
+                                         "stats": stats},
+                                        {"id": "untimed", "status": "ok", "flags": [], "c": 1.0, "agent_s": 1.0,
+                                         "checks": [], "stats": {**stats, "tool_s_median": None}}]})
+    assert "| turns | tools | tool s | generated | thinking | first write |" in summary
+    assert "| 4 | 9 | 1.2 | 3.0k | 1.2k | - |" in summary and "| 4 | 9 | - | 3.0k | 1.2k | - |" in summary

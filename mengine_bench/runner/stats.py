@@ -4,12 +4,15 @@ They come from the stream rather than from `Usage`, so a run stopped at its limi
 still has them. None means the harness does not report that value, never zero:
 only opencode stamps its events, so the time fields are None for Claude and Codex;
 AGY reports each step's duration, so it has tool time and turn rates.
+Per-call tool time (#162) comes from opencode's tool clock, AGY's step duration and, on Claude Code, the stamps
+of a tool_use event and of its result; Codex gives none, so its median stays None, never an estimate.
 """
 
 from __future__ import annotations
 
 import json
 import statistics
+from datetime import datetime
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field
 
@@ -49,6 +52,8 @@ class RunStats:
     # Between one turn's end and the next one's start: prefill and queue.
     wait_s: float | None = None
     turn_rates: list[float] = field(default_factory=list)
+    # #162: seconds of each tool call whose harness times it.
+    tool_call_s: list[float] = field(default_factory=list)
 
 
 def stats_record(stats: RunStats) -> dict[str, object]:
@@ -56,6 +61,8 @@ def stats_record(stats: RunStats) -> dict[str, object]:
     record = asdict(stats)
     rates = record.pop("turn_rates")
     record["turn_tps_median"] = round(statistics.median(rates), 1) if rates else None
+    calls = record.pop("tool_call_s")
+    record["tool_s_median"] = round(statistics.median(calls), 2) if calls else None
     return {key: round(value, 2) if isinstance(value, float) else value for key, value in record.items()}
 
 
@@ -78,6 +85,7 @@ def merge_stats(parts: Iterable[RunStats]) -> RunStats:
         merged.first_tool_s = part.first_tool_s if merged.first_tool_s is None else merged.first_tool_s
         merged.first_write_s = part.first_write_s if merged.first_write_s is None else merged.first_write_s
         merged.turn_rates.extend(part.turn_rates)
+        merged.tool_call_s.extend(part.tool_call_s)
     return merged
 
 
@@ -151,6 +159,7 @@ def _opencode_tool(stats: RunStats, seen: set[str], part: Mapping[str, object], 
     times = _mapping(state.get("time"))
     if type(times.get("start")) is int and type(times.get("end")) is int:
         stats.tool_s += (times["end"] - times["start"]) / 1000
+        stats.tool_call_s.append((times["end"] - times["start"]) / 1000)
     inner = _mapping(_mapping(state.get("metadata")).get("metadata"))
     _note_tool(stats, seen, str(part.get("tool") or ""), state.get("input"), failed=state.get("status") == "error",
                exit_code=inner.get("exit"), at_s=at_s)
@@ -215,12 +224,40 @@ def _claude_stats(events: list[dict[str, object]]) -> RunStats:
                 _note_tool(stats, seen, str(block.get("name") or ""), block.get("input"), failed=error,
                            exit_code=1 if error else 0)
     stats.model_turns = len(usage_by_call)
+    stats.tool_call_s = _claude_call_seconds(events)
     # Stream usage holds only early output counts; the result has the totals, so a stopped run is a lower bound.
     results = [event for event in events if event.get("type") == "result" and _mapping(event.get("usage"))]
     for usage in [_mapping(results[-1].get("usage"))] if results else usage_by_call.values():
         _note_claude_usage(stats, usage)
     stats.largest_turn_tokens = None
     return stats
+
+
+def _stamp(event: Mapping[str, object]) -> float | None:
+    stamp = event.get("timestamp")
+    if not isinstance(stamp, str):
+        return None
+    try:
+        return datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def _claude_call_seconds(events: list[dict[str, object]]) -> list[float]:
+    """From the stamp of each tool_use event to the stamp of its result; older Claude Code streams have no stamps."""
+    started: dict[str, float] = {}
+    seconds: list[float] = []
+    for event in events:
+        stamp = _stamp(event)
+        if stamp is None or event.get("type") not in ("assistant", "user"):
+            continue
+        for block in _claude_blocks(event):
+            call = str(block.get("id") if block.get("type") == "tool_use" else block.get("tool_use_id"))
+            if block.get("type") == "tool_use":
+                started[call] = stamp
+            elif block.get("type") == "tool_result" and call in started and stamp >= started[call]:
+                seconds.append(stamp - started.pop(call))
+    return seconds
 
 
 def _note_claude_usage(stats: RunStats, usage: Mapping[str, object]) -> None:
@@ -247,7 +284,9 @@ def _agy_stats(events: list[dict[str, object]]) -> RunStats:
             _agy_turn(stats, step)
         elif step.get("step_type") == "tool":
             info = _mapping(step.get("tool_info"))
-            stats.tool_s += step["duration_seconds"] if type(step.get("duration_seconds")) is float else 0.0
+            if type(step.get("duration_seconds")) is float:
+                stats.tool_s += step["duration_seconds"]
+                stats.tool_call_s.append(step["duration_seconds"])
             _note_tool(stats, seen, str(step.get("tool_name") or ""), info.get("parameters"),
                        failed=step.get("state") != "DONE", exit_code=agy_tool_result(info)[0])
     return stats

@@ -29,7 +29,8 @@ from pathlib import Path
 from mengine_bench.core import CheckResult, EvalTask
 from mengine_bench.runner import process
 from mengine_bench.runner.agents import Agent, AgentError, Usage, sum_usage, partial_answer
-from mengine_bench.runner.site import SITE_PLACEHOLDER, SiteFailed, serve_site
+from mengine_bench.runner.leftovers import LeftProcess, TaskWindow
+from mengine_bench.runner.site import SITE_PLACEHOLDER, SiteFailed, end_pages, serve_site
 from mengine_bench.runner.stats import RunStats, merge_stats, stream_stats
 from mengine_bench.visual import add_page_checks
 
@@ -58,6 +59,9 @@ ANY_TOOL_NOTE = ("\n\nYou may use any skill, tool or MCP server available to you
 BRIEF_NOTE = ("\n\nThis is the whole brief: there is no second turn and nobody can answer questions. Choose your own "
               "approach, decide what the brief leaves open and state your assumptions. End by saying what you found "
               "and how you know it is right.")
+# #161: owner rule; graded on the site tasks (CLEANUP_CHECK), kept clean by the runner on every task.
+CLOSE_NOTE = "\n\nBefore you finish, close the browser tabs, windows and apps you opened."
+CLEANUP_CHECK = "closed the tabs and apps it opened"
 COPY_IGNORE = shutil.ignore_patterns(".git", "tmp", "__pycache__", "_render")
 
 
@@ -89,6 +93,10 @@ class TaskRunRecord:
     notes: list[str] = field(default_factory=list)
     # Raw stdout of each step, for the checkpoints. Not published from here: the transcripts are, after redaction.
     streams: list[str] = field(default_factory=list)
+    # #161: site pages still open when the agent was done (None: no site, or not counted), and what the
+    # task left running that the runner killed after grading.
+    left_open_tabs: int | None = None
+    left_running: list[LeftProcess] = field(default_factory=list)
 
     @property
     def usage(self) -> Usage | None:
@@ -161,6 +169,17 @@ def snapshot(workspace: Path) -> dict[str, bytes]:
 def run_task(task: EvalTask, agent: Agent, root: Path, fresh_root: Path | None = None) -> TaskRunRecord:
     """`fresh_root` hosts fresh-session workspaces (default: system temp)."""
     root.mkdir(parents=True, exist_ok=False)
+    window = TaskWindow()
+    try:
+        record = _run_and_grade(task, agent, root, fresh_root)
+    finally:
+        left = window.sweep()
+    record.left_running = left
+    add_cleanup_check(task, record)
+    return record
+
+
+def _run_and_grade(task: EvalTask, agent: Agent, root: Path, fresh_root: Path | None) -> TaskRunRecord:
     # #59: alone in a temp root. Next to prompts and transcripts, in a folder named step-0 under the task id, three
     # runs delivered to `../` and the document an answer-only task hides stayed one `..` away.
     workspace = _isolated_workspace(fresh_root)
@@ -172,6 +191,8 @@ def run_task(task: EvalTask, agent: Agent, root: Path, fresh_root: Path | None =
         with serve_site(task.site, workspace) as site:
             workspace, workspace_index = _run_steps(task, agent, root, fresh_root, workspace, record,
                                                     site.url if site else None)
+            if site is not None:
+                record.left_open_tabs = end_pages(site)
     except SiteFailed as error:
         record.status, record.error, workspace_index = "crash", str(error), 0
     record.workspace = settle_workspace(workspace, root, workspace_index)
@@ -190,7 +211,7 @@ def _run_steps(task: EvalTask, agent: Agent, root: Path, fresh_root: Path | None
                 settle_workspace(workspace, root, workspace_index)
                 workspace, workspace_index = fresh, index
             prompt = render_prompt(task, index, workspace, root / "hidden" / str(index), site_url)
-            prompt += BRIEF_NOTE + ANY_TOOL_NOTE + TIME_LIMIT_NOTE.format(minutes=f"{task.timeout_s / 60:g}")
+            prompt += BRIEF_NOTE + ANY_TOOL_NOTE + CLOSE_NOTE + TIME_LIMIT_NOTE.format(minutes=f"{task.timeout_s / 60:g}")
             (workspace / "AGENTS.md").write_text(WORKSPACE_RULES, encoding="utf-8", newline="")
             _run_step(agent, task, workspace, root, index, prompt, record)
         except StepFailed as failure:
@@ -316,3 +337,15 @@ def _grade(task: EvalTask, record: TaskRunRecord) -> None:
         record.error = f"{record.error or ''} grading failed: {error}".strip()
         record.status = "crash"
     record.grading_s = time.monotonic() - started
+
+
+def add_cleanup_check(task: EvalTask, record: TaskRunRecord) -> None:
+    """#161: a site task scores closing its tabs and apps; an uncounted tab is a note, never a lost point."""
+    if task.site is None or record.check is None:
+        return
+    if record.left_open_tabs is None:
+        record.notes.append("open tabs not counted")
+        return
+    names = ", ".join(sorted({left.name for left in record.left_running}))
+    detail = f"{record.left_open_tabs} tab(s) still open" + (f"; still running: {names}" if names else "")
+    record.check.add(CLEANUP_CHECK, record.left_open_tabs == 0 and not record.left_running, detail)

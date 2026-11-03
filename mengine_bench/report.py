@@ -41,6 +41,9 @@ class TaskDetail(TypedDict):
     usage: dict[str, object] | None
     stats: RunStats
     checkpoints: NotRequired[list[dict[str, object]]]
+    # #161: site pages left open (None: not a site task or not counted) and processes the runner killed.
+    left_open_tabs: NotRequired[int | None]
+    left_running: NotRequired[list[dict[str, object]]]
 
 
 @dataclass(frozen=True)
@@ -81,6 +84,7 @@ def _task_entry(score: TaskScore, detail: TaskDetail) -> dict[str, object]:
     return {
         "id": score.task_id, "status": score.status, "error": detail["error"], "flags": detail["flags"],
         "checkpoints": detail.get("checkpoints", []),
+        "left_open_tabs": detail.get("left_open_tabs"), "left_running": detail.get("left_running", []),
         "c": score.correctness, "solved": score.solved, "checks": detail["checks"],
         # Set by `mengine-bench judge` on review (#23): one rubric vote per task.
         "judge": score.judge, "judge_rationale": None, "judge_errors": [],
@@ -163,7 +167,10 @@ def count_text(value: object) -> str:
 def _stats_cells(stats: object) -> str:
     row = stats if isinstance(stats, dict) else {}
     first_write = row.get("first_write_s")
-    return (f"{_fmt(row.get('model_turns'))} | {_fmt(row.get('tool_calls'))} | {count_text(row.get('generated_tokens'))} | "
+    tool_s = row.get("tool_s_median")
+    # #162: tool calls, their median seconds where the harness times each call, and thinking tokens.
+    return (f"{_fmt(row.get('model_turns'))} | {_fmt(row.get('tool_calls'))} | "
+            f"{'-' if not isinstance(tool_s, (int, float)) else f'{tool_s:.1f}'} | {count_text(row.get('generated_tokens'))} | "
             f"{count_text(row.get('reasoning_tokens'))} | {'-' if first_write is None else f'{first_write:.0f} s'}")
 
 
@@ -228,9 +235,9 @@ def render_summary(results: Mapping[str, object]) -> str:
         f"- Run: {results['date']}, started {_fmt(results.get('started_at'))}; bench at "
         f"{_commit_text(results.get('bench_commit'))}; submitter {_fmt(results.get('submitter'))}",
         "",
-        "| task | status | correct | checks | judge | time | cost (USD) | turns | tools | generated | reasoning | "
+        "| task | status | correct | checks | judge | time | cost (USD) | turns | tools | tool s | generated | thinking | "
         "first write |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     tasks = results["tasks"]
     assert isinstance(tasks, list)
@@ -242,7 +249,20 @@ def render_summary(results: Mapping[str, object]) -> str:
         lines.append(f"| {task['id']} | {task['status']}{flags} | {100 * task['c']:.0f}% | {passed}/{len(checks)} | "
                      f"{_fmt(task.get('judge'))} | {time_text(task['agent_s'])} | "
                      f"{'-' if cost is None else f'{cost:.4f}'} | {_stats_cells(task.get('stats'))} |")
-    return "\n".join([*lines, *_failed_checks(tasks), *_checkpoint_lines(tasks)]) + "\n"
+    return "\n".join([*lines, *_failed_checks(tasks), *_left_open_lines(tasks), *_checkpoint_lines(tasks)]) + "\n"
+
+
+def _left_open_lines(tasks: Iterable[Mapping[str, object]]) -> list[str]:
+    """#161: tabs and processes a task left open, so a harness that leaves things behind shows."""
+    lines = []
+    for task in tasks:
+        tabs, running = task.get("left_open_tabs"), task.get("left_running")
+        cells = [f"{tabs} tab(s) open"] if isinstance(tabs, int) and tabs else []
+        if isinstance(running, list) and running:
+            cells.append("still running: " + ", ".join(f"{item.get('name')} ({item.get('pid')})" for item in running))
+        if cells:
+            lines.append(f"- `{task['id']}`: " + "; ".join(cells))
+    return ["", "## Left open", "", *lines] if lines else []
 
 
 def _failed_checks(tasks: Iterable[Mapping[str, object]]) -> list[str]:

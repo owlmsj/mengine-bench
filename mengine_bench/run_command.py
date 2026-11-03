@@ -178,6 +178,7 @@ def _detail(task: EvalTask, record: TaskRunRecord) -> TaskDetail:
         flags=([] if record.status == "ok" else [record.status]) + list(notes) + record.notes, error=_public_error(record.error, record),
         answers=list(record.answers), usage=usage_record(record.usage), stats=record.stats,
         checkpoints=reached_checkpoints(task.checkpoints, record.streams),
+        left_open_tabs=record.left_open_tabs, left_running=[left.record() for left in record.left_running],
     )
 
 

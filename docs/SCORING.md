@@ -10,8 +10,8 @@ the Score, and a Cost kept apart.
 | **Speed** | 100 at 5 min of Time or less, 0 at 30 min or more, linear in between: `100 x (1800 - Time) / 1500`. |
 | **Score** | `0.6 x Correct % + 0.15 x Judge + 0.25 x Speed x Correct % / 100`, one decimal, from the published values. Speed pays only for work that is right. Only once judged. |
 | **Time** | Total agent wall seconds. Grading and judging are excluded; a timeout counts its full time. On Codex the clock stops at the final event (`turn.completed`); a process still alive 5 s later is ended and flagged, not counted as a timeout. |
-| **Cost** | USD estimate of inference, with its basis. A separate column: no points per dollar. |
-| **Est. price** | The run's tokens at public API list prices, so subscription and API runs compare. No points either. |
+| **Cost** | One column (#162): `$x` exact when the harness reports it, else `~$x`, the run's tokens at public API list prices (below), so subscription and API runs compare; `$0.00 (local)` for local inference, `>=` a lower bound, `n/a` neither. No points per dollar. |
+| **Thinking, Tools, Tool s** | Reasoning tokens, tool calls, and the median seconds per tool call where the harness times each call (opencode, AGY, Claude Code event stamps; `-` on Codex, never estimated). Statistics only, no points (#162). |
 
 The formulas live in `mengine_bench/scoring.py`. Runs compare when they ran the
 same bench major.minor (2.0.x). A patch release changes no task or brief; a workspace safety rule may change. When it changes how a run is judged or
@@ -41,6 +41,12 @@ with its version.
 both through the browser (~4 s per browser action). No 2.3.0 run was published, so 2.3.1 keeps the same minor.
 Their limits follow the 2.1 rule from Sonnet 5.5 low browser-route probes (Claude in Chrome): cu-social-cycle
 127.6 and 118.2 s, cu-webmail 128.0 and 126.3 s, so 180 s each (from 150 and 90) and a worst case of 62 min.
+Bench 2.4 (#161): every prompt asks the agent to close the browser tabs, windows and apps it opened. cu-social-cycle and
+cu-webmail gain the scored check "closed the tabs and apps it opened": no site page still sends its heartbeat 5 s after
+the agent is done, and nothing the task started is left running. On every task the runner then kills what the task
+left running (a process born during the task whose parent links lead back to the runner; never one that existed
+before the task or was born from one) and records it as `left_running`, with `left_open_tabs` on the site tasks; a
+page told the task is over blanks itself. The 2.0 to 2.3 runs stay in the ranking, each row marked with its version.
 
 A run is one sample and runs are not repeated, so ties come from the published tasks: draw the tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
@@ -175,9 +181,9 @@ A step without usage (crash, timeout) makes the total a lower bound, shown as
 `>= $x`. Tokens are always recorded, per step, per task and in total; the
 leaderboard's Tokens column is input (cache reads and writes included) plus output.
 
-## Est. price
+## Estimated cost
 
-Cost is `n/a` for most subscription runs, so the leaderboard also prices every run the same way:
+A harness reports cost only on some runs, so the leaderboard's Cost falls back to pricing the run the same way for all:
 `((input - cached) x X + cached x Y + generated x Z) / 1,000,000`. It is an estimate, shown as `~$x`, and a
 subscription does not bill this amount. `generated` holds reasoning on every harness. A model with no price below
 shows `n/a`, and local inference declared free shows `$0.00 (local)`.
