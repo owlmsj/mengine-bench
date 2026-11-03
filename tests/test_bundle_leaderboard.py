@@ -185,8 +185,10 @@ def test_leaderboard_ranks_the_current_major_minor_only(tmp_path: Path) -> None:
     assert board.ranked == 2 and board.history == 1 and board.unranked == []
 
 
-def test_2_0_runs_stay_ranked_in_2_1_and_are_marked_139(tmp_path: Path) -> None:
+def test_2_0_runs_stay_ranked_in_2_1_and_are_marked_139(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # #139: 2.1 only shortened the time limits; the owner kept the 2.0 runs in the active ranking.
+    # #151: pinned to 2.1, since 2.2 added tasks and ranks alone.
+    monkeypatch.setattr(leaderboard, "__version__", "2.1.1")
     results = tmp_path / "results"
     _write_result(results, "v20", 90.0, model="v20-model", bench_version="2.0.0")
     _write_result(results, "v21", 80.0, model="v21-model", bench_version="2.1.0")
@@ -233,10 +235,10 @@ def test_an_older_ranking_stays_on_the_board_as_history(tmp_path: Path) -> None:
     assert [name for name, _ in board.unranked] == ["results/old-pending"]
 
 
-def test_bench_is_version_2_1_x() -> None:
+def test_bench_is_version_2_2_x() -> None:
     import tomllib
     pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
-    assert __version__ == pyproject["project"]["version"] and __version__.startswith("2.1.")
+    assert __version__ == pyproject["project"]["version"] and __version__.startswith("2.2.")
 
 
 def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:

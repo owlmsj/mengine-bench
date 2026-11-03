@@ -24,8 +24,11 @@ hit. A run's worst case drops from 76 to 49.5 min, so a setup that cannot keep u
 The eight 2.0 runs stay in the 2.1 ranking, each marked 2.0 (#139): they ran with the longer limits.
 Bench 2.1.1 (#144): a task whose model never replied before its limit (no turn, tool call, write, token or reply)
 runs once more from scratch and keeps the second attempt, flagged on the task; a slow agent is never retried.
+Bench 2.2 adds three tasks adapted from Terminal-Bench 2.1 (#151): `txt-regex-log`, `ds-sqlite-recover` and
+`py-async-cancel`, 60 s each by the 2.1 rule, so the worst case is 52.5 min. Runs of 2.1 and earlier lack them and
+stay in the history.
 
-A run is one sample and runs are not repeated, so ties come from the published tasks: draw the 20 tasks again with
+A run is one sample and runs are not repeated, so ties come from the published tasks: draw the tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
 a tie. This shows how much the order rests on this set of tasks; it says nothing about the noise between two runs of one agent.
 `mengine-bench analyze` prints the shares, the points each part of the Score moves and the tasks that separate runs. No agent runs.

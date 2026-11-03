@@ -31,7 +31,9 @@ TASKS_CHANGED_SINCE_1_5 = frozenset({"web-word-universe", "ue-packaged-bug", "rs
 TASKS_CHANGED_IN_2_0 = frozenset({"lc-changelog", "vis-chart", "ir-studio-wiki", "3d-voxel-landscape", "3d-print-homage",
                                   "cfg-source-drift", "git-merge-conflict", "ts-plugin-bug", "sec-leak-fix", "infra-gpu-fit",
                                   "hw-stutter-tuning", "doc-lab-pdf", "web-plan-ranking"})
-TASKS_THAT_CAME_AND_WENT = TASKS_CHANGED_SINCE_1_5 | TASKS_CHANGED_IN_2_0
+# #151: bench 2.2 added three tasks ported from Terminal-Bench 2.1.
+TASKS_ADDED_IN_2_2 = frozenset({"txt-regex-log", "ds-sqlite-recover", "py-async-cancel"})
+TASKS_THAT_CAME_AND_WENT = TASKS_CHANGED_SINCE_1_5 | TASKS_CHANGED_IN_2_0 | TASKS_ADDED_IN_2_2
 # #139: the owner kept the 2.0 runs ranked in 2.1, which only shortened the time limits (#137); they cost real runs.
 RANKED_WITH_CURRENT: dict[str, frozenset[str]] = {"2.1": frozenset({"2.0"})}
 RANKED_WITH_NOTE = ("Bench 2.0 runs stay in this ranking (#139): 2.1 only shortened the time limits (#137), so a row\n"

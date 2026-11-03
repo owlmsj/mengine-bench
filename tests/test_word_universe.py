@@ -12,7 +12,7 @@ import pytest
 
 from mengine_bench import __version__, catalog, visual
 from mengine_bench.core import CheckResult
-from mengine_bench.leaderboard import is_complete_run
+from mengine_bench.leaderboard import TASKS_THAT_CAME_AND_WENT, is_complete_run
 from mengine_bench.runner import task_run
 from mengine_bench.tasks import words
 
@@ -361,7 +361,9 @@ def test_a_broken_view_fails_the_query_check(render, reason: str) -> None:
 def test_a_new_eval_keeps_older_complete_runs_in_the_history() -> None:
     older = [task.id for task in catalog.all_tasks() if task.id != "web-word-universe"]
     assert is_complete_run({"bench_version": "1.5.0", "tasks": [{"id": task} for task in older]})
-    assert not is_complete_run({"bench_version": "1.5.0", "tasks": [{"id": task} for task in older[1:]]})
+    # #151: drop a task that never came or went; the catalog's first module is now a 2.2 addition.
+    dropped = next(task for task in older if task not in TASKS_THAT_CAME_AND_WENT)
+    assert not is_complete_run({"bench_version": "1.5.0", "tasks": [{"id": task} for task in older if task != dropped]})
     assert not is_complete_run({"bench_version": __version__, "tasks": [{"id": task} for task in older]})
 
 @pytest.mark.parametrize('ranking', [

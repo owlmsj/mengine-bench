@@ -14,7 +14,7 @@ from test_bundle_leaderboard import _write_result
 IDS = [task.id for task in catalog.all_tasks()]
 
 
-def _run(model: str, seconds: float = 30.0, judge: int = 80, correct: dict[str, float] | None = None) -> dict[str, object]:
+def _run(model: str, seconds: float = 30.0, judge: float = 80, correct: dict[str, float] | None = None) -> dict[str, object]:
     tasks = [{"id": task_id, "c": (correct or {}).get(task_id, 1.0), "solved": True, "judge": judge,
               "agent_s": seconds, "status": "ok"} for task_id in IDS]
     mean_c = sum(task["c"] for task in tasks) / len(tasks)
@@ -37,10 +37,12 @@ def test_win_share_is_the_same_on_every_call() -> None:
 
 
 def test_a_lead_that_rests_on_one_task_is_a_tie() -> None:
-    one_task = _run("a", judge=80)
+    one_task = _run("a", judge=60)
     one_task["tasks"][0]["judge"] = 100
-    # Scores round to 0.1: the gap is wide enough that a draw holding the task once still wins, at any task count.
-    share = analyze.win_share(analyze.task_points(one_task), analyze.task_points(_run("b", judge=80.5)))
+    # Scores round to 0.1: the 40-point bump leaves at least 0.2 between a draw without the task and one holding it
+    # once, and b sits halfway, so a wins exactly the draws that hold the task, at any task count (#151: 23 tasks
+    # turned the old 20-point bump into rounding ties).
+    share = analyze.win_share(analyze.task_points(one_task), analyze.task_points(_run("b", judge=60 + 20 / len(IDS))))
     assert 0.5 < share < analyze.TIE_BELOW
 
 
