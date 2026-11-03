@@ -128,15 +128,19 @@ def _answer_drops(answer: str) -> list[tuple[str, str]]:
         text = re.sub(phrase, token, text)
     platform = r"\b(?P<platform>pc|steamdeck)\b"
     step = r"\b(?P<step>install|tutorial_complete|first_match|purchase)\b"
+    transition = r"\b(?:from\s+)?(?:install|tutorial_complete|first_match|purchase)\s*(?:to\b|->|\u2192)\s*" + step
+    text = re.sub(transition, lambda match: match["step"], text)
     cue = r"\b(?:biggest_drop|(?:largest|greatest|steepest|worst)\s+drop(?:[ -]off)?|lowest\s+conversion|loses?\s+(?:the\s+)?most\s+players)\b"
     # #164: only explicit claims are scored; the brief allows a file-only answer.
     # Do not cross another named platform/step or sentence to infer an association.
     gap = r"(?:(?!\b(?:pc|steamdeck|install|tutorial_complete|first_match|purchase|not)\b)[^.!?;]){0,80}?"
+    on_platform = r"\s+(?:on|for|in)\s+(?:the\s+)?" + platform
     text = re.sub(r"\bnot\s+(?:install|tutorial_complete|first_match|purchase)\b\s*(?:but\s+)?", "", text)
     patterns = (platform + gap + cue + gap + step,
                 cue + gap + platform + gap + step,
-                step + gap + r"\bis\b" + gap + cue + gap + platform,
-                cue + gap + step + gap + platform)
+                platform + gap + step + gap + r"\bis\b" + gap + cue,
+                step + gap + r"\bis\b" + gap + cue + on_platform,
+                cue + gap + step + on_platform)
     return [(match["platform"], match["step"]) for pattern in patterns for match in re.finditer(pattern, text)]
 
 

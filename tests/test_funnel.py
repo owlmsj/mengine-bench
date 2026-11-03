@@ -31,11 +31,16 @@ def test_sonnet_funnel_contradiction(tmp_path: Path) -> None:
 @pytest.mark.parametrize("answer", [
     "done", "", "The counts are in result.json.",
     "- **PC:** biggest_drop is `PURCHASE`.\n- Steam Deck: largest drop is tutorial complete.",
+    "- **PC:** biggest_drop is `PURCHASE`\n- **Steam Deck:** largest drop is tutorial complete",
+    "PC: biggest drop is purchase, Steam Deck: biggest drop is tutorial_complete",
     "The biggest drop on PC is purchase; the lowest conversion for steamdeck is tutorial_complete.",
     "Purchase is the biggest drop for PC. Tutorial complete is the largest drop on Steam Deck.",
     "PC loses the most players at purchase. Steamdeck loses the most players at tutorial_complete.",
     "PC: first_match converts at 0.838; purchase converts at 0.825.",
     "PC's biggest drop is not first_match but purchase.",
+    "PC: purchase is the biggest drop. Steamdeck: tutorial_complete is the largest drop.",
+    "PC: the largest drop is from first_match to purchase.",
+    "Steam Deck: the largest drop is install -> tutorial_complete.",
 ])
 def test_funnel_allows_omission_and_valid_wording(tmp_path: Path, answer: str) -> None:
     funnel._funnel_reference(tmp_path)
@@ -50,6 +55,8 @@ def test_funnel_allows_omission_and_valid_wording(tmp_path: Path, answer: str) -
     "Steam Deck: lowest conversion is purchase.",
     "PC: biggest drop is purchase. Steamdeck: biggest drop is first_match.",
     "PC: biggest drop is purchase. PC: biggest drop is first_match.",
+    "PC: first_match is the biggest drop.",
+    "PC: the largest drop is from tutorial_complete to first_match.",
 ])
 def test_funnel_rejects_explicit_wrong_drop(tmp_path: Path, answer: str) -> None:
     funnel._funnel_reference(tmp_path)
