@@ -2,7 +2,7 @@
 
 The second web task after `web-plan-ranking`: short lookups, no analysis. Every answer is a fact that cannot change
 (a tagged release's date, a published standard's count), and every check is offline: the value is compared with the
-gold below, the proof URL only by its domain. Values confirmed on 2026-11-03 at the URL beside each fact.
+gold below, and the proof URL by its domain and fetch trace. Values confirmed on 2026-11-03 at the URL beside each fact.
 """
 
 from __future__ import annotations
@@ -15,7 +15,10 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from mengine_bench.core import Checkpoint, CheckResult, EvalTask, Step, ToolCall, TraceCheck, WROTE_RESULT, checkpoints, number, result_json, saw, write
+from mengine_bench.core import (
+    Checkpoint, CheckResult, EvalTask, ReferenceAnswers, Step, ToolCall, TraceCheck,
+    WROTE_RESULT, checkpoints, number, result_json, saw, write,
+)
 from mengine_bench.runner.trace import fetched_urls, url_key
 from mengine_bench.tasks.webresearch import _web_date
 
@@ -95,7 +98,7 @@ def _webfacts_reference(ws: Path) -> list[str]:
     facts = {fact.key: {"value": fact.answer.isoformat() if isinstance(fact.answer, date) else fact.answer,
                         "url": fact.source} for fact in WEB_FACTS}
     write(ws, "result.json", json.dumps(facts, indent=2))
-    return ["done"]
+    return ReferenceAnswers(["done"], [ToolCall("WebFetch", {"url": fact.source}) for fact in WEB_FACTS])
 
 
 TASKS = [

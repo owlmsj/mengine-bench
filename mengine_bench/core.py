@@ -125,6 +125,15 @@ class ToolCall:
 
     name: str
     inputs: Mapping[str, object]
+    failed: bool = False
+
+
+class ReferenceAnswers(list[str]):
+    """Trusted offline reference evidence; the runner always overrides it with its real trace (#164)."""
+
+    def __init__(self, answers: Sequence[str], trace: Sequence[ToolCall]) -> None:
+        super().__init__(answers)
+        self.trace = tuple(trace)
 
 
 @dataclass(frozen=True)
@@ -133,7 +142,9 @@ class TraceCheck:
 
     evaluate: Callable[[Path, Sequence[str], Sequence[ToolCall]], CheckResult]
 
-    def __call__(self, ws: Path, answers: Sequence[str], trace: Sequence[ToolCall] = ()) -> CheckResult:
+    def __call__(self, ws: Path, answers: Sequence[str], trace: Sequence[ToolCall] | None = None) -> CheckResult:
+        if trace is None:
+            trace = answers.trace if isinstance(answers, ReferenceAnswers) else ()
         return self.evaluate(ws, answers, trace)
 
 

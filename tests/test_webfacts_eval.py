@@ -16,7 +16,7 @@ TASK = next(task for task in catalog.all_tasks() if task.id == "web-fact-search"
 
 
 def _check(ws: Path, answers: list[str]) -> CheckResult:
-    entries = json.loads((ws / "result.json").read_text()) if (ws / "result.json").exists() else {}
+    entries = json.loads((ws / "result.json").read_text(encoding="utf-8")) if (ws / "result.json").exists() else {}
     trace = [ToolCall("WebFetch", {"url": entry.get("url")}) for entry in entries.values()]
     return TASK.check(ws, answers, trace)
 
@@ -35,7 +35,9 @@ def _set(ws: Path, key: str, field: str, value: object) -> None:
 
 
 def test_the_reference_passes_and_the_untouched_folder_fails(tmp_path: Path) -> None:
-    assert _check(_solved(tmp_path / "solved"), ["done"]).passed
+    ws = _solved(tmp_path / "solved")
+    assert _check(ws, ["done"]).passed
+    assert TASK.check(ws, TASK.reference(ws)).passed
     (tmp_path / "bare").mkdir()
     TASK.setup(tmp_path / "bare")
     bare = _check(tmp_path / "bare", [""])

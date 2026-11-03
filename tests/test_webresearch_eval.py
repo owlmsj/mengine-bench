@@ -46,6 +46,7 @@ def _row(got: dict[str, object], name: str) -> dict[str, object]:
 def test_the_reference_passes_and_the_untouched_folder_fails(tmp_path: Path) -> None:
     result = _check(_solved(tmp_path / "solved"), ["done"])
     assert result.passed, result.details
+    assert TASK.check(tmp_path / "solved", TASK.reference(tmp_path / "solved")).passed
     (tmp_path / "bare").mkdir()
     TASK.setup(tmp_path / "bare")
     bare = _check(tmp_path / "bare", [""])
@@ -197,3 +198,20 @@ def test_one_fetched_source_cannot_satisfy_three_url_dossier(tmp_path: Path) -> 
     result = TASK.check(ws, [], [ToolCall("WebFetch", {"url": url})])
     assert result.failed() == ["dossier"]
     assert "'urls': 1" in result.details["dossier"]
+
+
+def test_distinct_fetched_query_urls_still_count_as_three_urls(tmp_path: Path) -> None:
+    ws = _solved(tmp_path)
+    urls = [f"https://example.org/source?year={year}" for year in (1985, 1987, 1989)]
+    write(ws, web.DOSSIER_FILE, "Cruzado, Bresser, Real. " * 35 + "\n" + "\n".join(urls))
+    result = TASK.check(ws, [], [ToolCall("WebFetch", {"url": url}) for url in urls])
+    assert "dossier" not in result.failed()
+
+
+def test_dossier_urls_with_prose_punctuation_and_parentheses(tmp_path: Path) -> None:
+    ws = _solved(tmp_path)
+    urls = ["https://example.org/one", "https://example.org/two", "https://example.org/Plan_(history)"]
+    citations = f"Source: {urls[0]}. Source: {urls[1]}; [history]({urls[2]})"
+    write(ws, web.DOSSIER_FILE, "Cruzado, Bresser, Real. " * 35 + "\n" + citations)
+    result = TASK.check(ws, [], [ToolCall("WebFetch", {"url": url}) for url in urls])
+    assert "dossier" not in result.failed()

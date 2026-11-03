@@ -20,6 +20,7 @@ from mengine_bench.core import (
     Checkpoint,
     CheckResult,
     EvalTask,
+    ReferenceAnswers,
     Step,
     ToolCall,
     TraceCheck,
@@ -222,10 +223,21 @@ def _web_row_score_ok(row: Mapping[str, object]) -> bool:
     return abs(score - want) <= WEB_SCORE_TOL or abs(score / 100 - want) <= WEB_SCORE_TOL
 
 
+def _web_cited_urls(text: str) -> set[str]:
+    urls: set[str] = set()
+    for url in re.findall(r'''https?://[^\s<>\]"']+''', text):
+        url = url.rstrip(".,;:")
+        # #164: prose punctuation and Markdown's closing parenthesis are not part of a cited URL.
+        while url.endswith(")") and url.count(")") > url.count("("):
+            url = url[:-1]
+        urls.add(url)
+    return urls
+
+
 def _web_has_url(row: Mapping[str, object], fetched: set[str]) -> bool:
     sources = row.get("sources")
     items = sources if isinstance(sources, list) else [sources]
-    return any(url_key(item) in fetched for item in items)
+    return any(url_key(url) in fetched for item in items for url in _web_cited_urls(str(item or "")))
 
 
 @TraceCheck
@@ -269,7 +281,7 @@ def _web_check(ws: Path, answers: Sequence[str], trace: Sequence[ToolCall]) -> C
     unsourced = [name for name in names if name not in rows or not _web_has_url(rows[name], fetched)]
     result.add("every plan has a source", not unsourced, saw(unsourced, "a fetched http(s) URL in sources for every plan"))
     dossier = read(ws, DOSSIER_FILE) or ""
-    urls = {url_key(url) for url in re.findall(r"https?://[^\s)>\]]+", dossier)} & fetched
+    urls = {url for url in _web_cited_urls(dossier) if url_key(url) in fetched}
     plain = unicodedata.normalize("NFKD", dossier).encode("ascii", "ignore").decode().lower()
     plans_named = sorted(word for word in ("cruzado", "bresser", "verao", "collor", "real") if re.search(rf"\b{word}\b", plain))
     result.add("dossier", len(dossier) >= 600 and len(urls) >= 3 and len(plans_named) >= 3,
@@ -294,7 +306,9 @@ def _web_reference(ws: Path) -> list[str]:
               "cut the annual rate but were followed by a new plan within three years.", "",
               "IPCA series: https://apisidra.ibge.gov.br/values/t/1737/n1/all/v/2265"]
     write(ws, DOSSIER_FILE, "\n".join(lines) + "\n")
-    return ["done"]
+    urls = {str(url) for row in rows for url in row["sources"]}
+    urls.add("https://apisidra.ibge.gov.br/values/t/1737/n1/all/v/2265")
+    return ReferenceAnswers(["done"], [ToolCall("WebFetch", {"url": url}) for url in sorted(urls)])
 
 
 TASKS = [
