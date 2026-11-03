@@ -7,6 +7,7 @@ One task failing never aborts the run: it is recorded as a crash.
 
 from __future__ import annotations
 
+import shutil
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -21,12 +22,14 @@ from mengine_bench.environment import collect_environment
 from mengine_bench.report import RunMeta, TaskDetail, build_results, stats_summary, usage_record
 from mengine_bench.runner.agents import Agent, split_jsonl
 from mengine_bench.runner.stats import stats_record
-from mengine_bench.runner.task_run import TaskRunRecord, run_task, snapshot
+from mengine_bench.runner.task_run import TaskRunRecord, run_task, silent_timeout, snapshot
 from mengine_bench.scoring import Price, TaskOutcome, score_run
 
 TRANSCRIPT_TAIL_CHARS = 4_000
 # The judge grades self-verification from these; the stream tail rarely shows them (#23 review).
 COMMANDS_SHOWN = 40
+# #144: a request that never came back is the harness's or provider's fault, not the agent's; one fresh retry.
+SILENT_RETRY_NOTE = "retried once: the first attempt got no reply from the model before its limit"
 
 
 @dataclass(frozen=True)
@@ -60,6 +63,11 @@ def run_tasks(tasks: Sequence[EvalTask], agent: Agent, settings: RunSettings, wo
         record: TaskRunRecord | None = None
         try:
             record = run_task(task, agent, work / task.id)
+            if silent_timeout(record):
+                print(f"[{task.id}] no reply from the model before the limit; retrying once (#144)", flush=True)
+                shutil.move(str(work / task.id), str(work / f"{task.id}.silent"))
+                record = run_task(task, agent, work / task.id)
+                record.notes.append(SILENT_RETRY_NOTE)
             detail = _detail(task, record)
             evidence.packets[task.id] = _judge_packet(task, record, work / task.id)
             evidence.deliverables[task.id] = _deliverables(task, record)

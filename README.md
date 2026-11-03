@@ -138,7 +138,8 @@ projects, so skim `results/<run>/` before you submit.
 - One run is one sample, and runs are not repeated. A lead that holds in under 80% of the draws of the tasks is a tie, and that says nothing about the noise between two runs of one agent.
 - Results are self-reported. The transcripts let anyone check a run, but nothing re-runs it.
 - The task folder is an instruction, not a sandbox: an agent with full permissions can read the rest of your disk.
-- A timeout or a crash with nothing written has nothing to grade. There are no retries.
+- A timeout or a crash with nothing written has nothing to grade. The only retry is for a task whose model never
+  replied before the limit (#144): it runs once more from scratch, and its flags say so.
 - Time depends on your machine and network, and Cost is an estimate.
 - A machine without Rust, Node.js or git fails the checks of the tasks that need them, and a harness without web
   search or fetch scores only what it delivers on `web-plan-ranking`.

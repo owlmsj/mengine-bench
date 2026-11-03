@@ -102,6 +102,15 @@ class TaskRunRecord:
         return sum(step.wall_s for step in self.steps)
 
 
+def silent_timeout(record: TaskRunRecord) -> bool:
+    """#144: the last step hit its limit with nothing from the model: no turn, tool call, write, token or reply."""
+    if record.status != "timeout" or not record.steps:
+        return False
+    stats = record.steps[-1].stats
+    replied = any(answer.strip() for answer in record.answers)
+    return not (stats.model_turns or stats.tool_calls or stats.file_writes or stats.generated_tokens or replied)
+
+
 class StepFailed(Exception):
     def __init__(self, status: str, message: str) -> None:
         super().__init__(message)
