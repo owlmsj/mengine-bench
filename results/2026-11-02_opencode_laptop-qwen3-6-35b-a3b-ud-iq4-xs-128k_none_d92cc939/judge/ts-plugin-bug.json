@@ -1,0 +1,57 @@
+{
+ "task_id": "ts-plugin-bug",
+ "prompts": [
+  "Users of our harness plugins report that tool.after hooks run out of order, that sometimes a hook never runs, and that a failing hook is silently ignored. The hook bus and the plugin are in {WS}; the README there says how the bus must behave. Fix the bus. Its public API stays as it is, the tests in {WS}/test stay as they are, and package.json takes no dependencies."
+ ],
+ "answers": [
+  "Now I have the full picture. Let me fix the bugs.\n\n**Diagnosis of `src/bus.ts` `emit` method:**\n\n| Bug | Root cause |\n|---|---|\n| Hooks run out of order / concurrently | `list.forEach(async …)` fires all handlers at once; no sequential awaits |\n| A hook never runs | `emit` returns `undefined` (no promise); callers resolve immediately |\n| Failing hook silently ignored | Errors in the fire-and-forget async callbacks are never observed |\n\n**Fix:** snapshot the handler list, iterate with a sequential `for` loop, `await` each handler, re-throw on first error. The snapshot also satisfies the requirement that unsubscribes during an emit don't affect it.\n\n"
+ ],
+ "diff": "M src/bus.ts\n\n--- src/bus.ts ---\n/**\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\n * handlers run one after another in subscription order, emit resolves after all of them,\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\n */\n\nexport type Handler<T> = (payload: T) => void | Promise<void>;\n\nexport class HookBus {\n  private handlers: Map<string, Handler<unknown>[]> = new Map();\n\n  /** Subscribes a handler to an event; returns the function that unsubscribes it. */\n  on<T>(event: string, handler: Handler<T>): () => void {\n    const list = this.handlers.get(event) ?? [];\n    list.push(handler as Handler<unknown>);\n    this.handlers.set(event, list);\n    return () => {\n      const index = list.indexOf(handler as Handler<unknown>);\n      if (index >= 0) {\n        list.splice(index, 1);\n      }\n    };\n  }\n\n  /** Runs the handlers of an event with the payload. */\n  async emit<T>(event: string, payload: T): Promise<void> {\n    const list = [...(this.handlers.get(event) ?? [])];\n    for (const handler of list) {\n      await handler(payload);\n    }\n  }\n\n  /** How many handlers an event has. */\n  count(event: string): number {\n    return (this.handlers.get(event) ?? []).length;\n  }\n}\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ Get-ChildItem -Recurse -Name <WORKSPACE>\n$ cd <WORKSPACE> && node --test 2>&1\n\nStream tail:\n | `emit` returns `undefined` (no promise); callers resolve immediately |\\n| Failing hook silently ignored | Errors in the fire-and-forget async callbacks are never observed |\\n\\n**Fix:** snapshot the handler list, iterate with a sequential `for` loop, `await` each handler, re-throw on first error. The snapshot also satisfies the requirement that unsubscribes during an emit don't affect it.\\n\\n\",\"time\":{\"start\":1793666242975,\"end\":1793666254786}}}\n\n{\"type\":\"tool_use\",\"timestamp\":1793666254792,\"sessionID\":\"ses_e6129db15ffeGeQBelNITovsz6\",\"part\":{\"partID\":\"prt_19ed6ee42001kltW0K83LtWveP\",\"sessionID\":\"ses_e6129db15ffeGeQBelNITovsz6\",\"messageID\":\"msg_19ed6c1af001X4lMqzvUoQhNSA\",\"type\":\"tool\",\"id\":\"QoPvFS7ycmQyGQpNErbtrL4YsSVeBOeG\",\"tool\":\"edit\",\"state\":{\"status\":\"completed\",\"input\":{\"path\":\"<WORKSPACE>\\\\src\\\\bus.ts\",\"oldString\":\"  /** Runs the handlers of an event with the payload. */\\n  async emit<T>(event: string, payload: T): Promise<void> {\\n    const list = this.handlers.get(event) ?? [];\\n    list.forEach(async (handler) => {\\n      await handler(payload);\\n    });\\n  }\",\"newString\":\"  /** Runs the handlers of an event with the payload. */\\n  async emit<T>(event: string, payload: T): Promise<void> {\\n    const list = [...(this.handlers.get(event) ?? [])];\\n    for (const handler of list) {\\n      await handler(payload);\\n    }\\n  }\"},\"output\":\"Edited <WORKSPACE>/src/bus.ts (1 replacement)\",\"title\":\"edit\",\"metadata\":{\"metadata\":{\"files\":[{\"file\":\"<WORKSPACE>/src/bus.ts\",\"patch\":\"Index: <WORKSPACE>/src/bus.ts\\n===================================================================\\n--- <WORKSPACE>/src/bus.ts\\n+++ <WORKSPACE>/src/bus.ts\\n@@ -23,12 +23,12 @@\\n   }\\n \\n   /** Runs the handlers of an event with the payload. */\\n   async emit<T>(event: string, payload: T): Promise<void> {\\n-    const list = this.handlers.get(event) ?? [];\\n-    list.forEach(async (handler) => {\\n+    const list = [...(this.handlers.get(event) ?? [])];\\n+    for (const handler of list) {\\n       await handler(payload);\\n-    });\\n+    }\\n   }\\n \\n   /** How many handlers an event has. */\\n   count(event: string): number {\\n\",\"status\":\"modified\",\"additions\":3,\"deletions\":3}],\"truncated\":false},\"content\":[{\"type\":\"text\",\"text\":\"Edited <WORKSPACE>/src/bus.ts (1 replacement)\"}],\"providerCall\":{\"executed\":false},\"providerResult\":{\"executed\":false},\"rawInput\":\"{\\\"path\\\":\\\"<WORKSPACE>\\\\\\\\src\\\\\\\\bus.ts\\\",\\\"oldString\\\":\\\"  /** Runs the handlers of an event with the payload. */\\\\n  async emit<T>(event: string, payload: T): Promise<void> {\\\\n    const list = this.handlers.get(event) ?? [];\\\\n    list.forEach(async (handler) => {\\\\n      await handler(payload);\\\\n    });\\\\n  }\\\",\\\"newString\\\":\\\"  /** Runs the handlers of an event with the payload. */\\\\n  async emit<T>(event: string, payload: T): Promise<void> {\\\\n    const list = [...(this.handlers.get(event) ?? [])];\\\\n    for (const handler of list) {\\\\n      await handler(payload);\\\\n    }\\\\n  }\\\"}\"},\"time\":{\"start\":1793666248258,\"end\":1793666254792}}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793666254794,\"sessionID\":\"ses_e6129db15ffeGeQBelNITovsz6\",\"part\":{\"id\":\"prt_19ed707ca001dbGg1YvY9xH4oV\",\"sessionID\":\"ses_e6129db15ffeGeQBelNITovsz6\",\"messageID\":\"msg_19ed6c1af001X4lMqzvUoQhNSA\",\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"cost\":0,\"tokens\":{\"input\":105,\"output\":518,\"reasoning\":0,\"cache\":{\"read\":9557,\"write\":0}}}}\n\n",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "package.json takes no dependencies",
+   true
+  ],
+  [
+   "hidden handlers run in subscription order",
+   true
+  ],
+  [
+   "hidden emit resolves after every handler",
+   true
+  ],
+  [
+   "hidden a failing handler rejects emit",
+   true
+  ],
+  [
+   "hidden a handler that unsubscribes itself does not stop the others",
+   true
+  ],
+  [
+   "hidden the audit plugin redacts before it logs",
+   true
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 4,
+  "tool_calls": 9,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1425,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 518
+ },
+ "deliverables": [],
+ "render": null
+}

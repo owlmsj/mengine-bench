@@ -1,0 +1,43 @@
+{
+ "task_id": "bo-reconcile",
+ "prompts": [
+  "Finance has to chase June's receivables. The invoices, the bank statement and our reconciliation notes are in {WS}/backoffice. What do we still have to collect or fix? Record it in {WS}/result.json: unpaid and duplicated (invoice ids) and mismatched (id, invoiced, paid)."
+ ],
+ "answers": [],
+ "diff": "A tmp/reconcile.py\n\n--- tmp/reconcile.py ---\nimport csv\nimport json\nimport re\nfrom collections import defaultdict\n\n# Load invoices\ninvoices = {}\nwith open('backoffice/invoices.csv', newline='') as f:\n    for row in csv.DictReader(f):\n        invoices[row['id']] = float(row['amount'])\n\n# Load bank statement\nbank_rows = []\nwith open('backoffice/bank_statement_june.csv', newline='') as f:\n    for row in csv.DictReader(f):\n        bank_rows.append({'date': row['date'], 'memo': row['memo'], 'amount': float(row['amount'])})\n\n# Extract invoice references from bank memos\n# Patterns: \"inv1007 payment\", \"PIX INV-1015 resend\", \"TED invoice 1023\", \"inv1010 payment\"\ndef extract_invoice_ids(memo):\n    # Try INV-NNNN or just NNNN patterns\n    # First try INV-NNNN\n    m = re.search(r'INV-(\\d+)', memo, re.IGNORECASE)\n    if m:\n        return [f'INV-{m.group(1)}']\n    # Then try just digits (like \"inv1007 payment\" -> 1007)\n    m = re.search(r'inv(\\d+)', memo, re.IGNORECASE)\n    if m:\n        return [f'INV-{m.group(1)}']\n    # \"unidentified\" or \"BANK SERVICE\" or \"CDB INTEREST\" -> no invoice\n    return []\n\n# Map invoice_id -> list of (amount, memo)\ninvoice_payments = defaultdict(list)\nfor row in bank_rows:\n    ids = extract_invoice_ids(row['memo'])\n    for inv_id in ids:\n        if inv_id in invoices:\n            invoice_payments[inv_id].append((row['amount'], row['memo']))\n\n# Categorize\nunpaid = []\nduplicated = []\nmismatched = []  # (id, invoiced, paid)\n\nfor inv_id in sorted(invoices):\n    inv_amount = invoices[inv_id]\n    payments = invoice_payments.get(inv_id, [])\n    \n    if not payments:\n        unpaid.append(inv_id)\n    elif len(payments) > 1:\n        # Duplicated: check if all payments match the invoice amount\n        all_match = all(p[0] == inv_amount for p in payments)\n        duplicated.append(inv_id)\n    else:\n        # Single payment - check for mismatch\n        paid_amount = payments[0][0]\n        if paid_amount != inv_amount:\n            mismatched.append({\n                'id': inv_id,\n                'invoiced': inv_amount,\n                'paid': paid_amount\n            })\n\nresult = {\n    'unpaid': unpaid,\n    'duplicated': duplicated,\n    'mismatched': mismatched\n}\n\nprint(json.dumps(result, indent=2))\n\n# Debug: print all invoice->payments mapping\nprint(\"\\n--- DEBUG ---\")\nfor inv_id in sorted(invoices):\n    payments = invoice_payments.get(inv_id, [])\n    if payments:\n        for amt, memo in payments:\n            flag = \"\"\n            if inv_id in duplicated:\n                flag = \" [DUPLICATED]\"\n            elif inv_id in [m['id'] for m in mismatched]:\n                flag = \" [MISMATCHED]\"\n            print(f\"  {inv_id}: invoice={invoices[inv_id]}, paid={amt} {flag} | {memo}\")\nprint(f\"\\nUnpaid: {unpaid}\")\nprint(f\"Duplicated: {duplicated}\")\nprint(f\"Mismatched: {mismatched}\")\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ cd <WORKSPACE> && python tmp/reconcile.py\n\nStream tail:\n 'INV-1039']\\r\\nDuplicated: ['INV-1015']\\r\\nMismatched: [{'id': 'INV-1021', 'invoiced': 21320.36, 'paid': 21070.36}]\\r\\n\",\"title\":\"shell\",\"metadata\":{\"metadata\":{\"status\":\"completed\",\"truncated\":false,\"exit\":0},\"content\":[{\"type\":\"text\",\"text\":\"{\\r\\n  \\\"unpaid\\\": [\\r\\n    \\\"INV-1002\\\",\\r\\n    \\\"INV-1006\\\",\\r\\n    \\\"INV-1008\\\",\\r\\n    \\\"INV-1009\\\",\\r\\n    \\\"INV-1013\\\",\\r\\n    \\\"INV-1017\\\",\\r\\n    \\\"INV-1023\\\",\\r\\n    \\\"INV-1030\\\",\\r\\n    \\\"INV-1033\\\",\\r\\n    \\\"INV-1036\\\",\\r\\n    \\\"INV-1037\\\",\\r\\n    \\\"INV-1039\\\"\\r\\n  ],\\r\\n  \\\"duplicated\\\": [\\r\\n    \\\"INV-1015\\\"\\r\\n  ],\\r\\n  \\\"mismatched\\\": [\\r\\n    {\\r\\n      \\\"id\\\": \\\"INV-1021\\\",\\r\\n      \\\"invoiced\\\": 21320.36,\\r\\n      \\\"paid\\\": 21070.36\\r\\n    }\\r\\n  ]\\r\\n}\\r\\n\\r\\n--- DEBUG ---\\r\\n  INV-1001: invoice=14387.1, paid=14387.1  | PIX INV-1001 KESTREL GAMES\\r\\n  INV-1003: invoice=3742.23, paid=3742.23  | inv1003 payment\\r\\n  INV-1004: invoice=10182.62, paid=10182.62  | inv1004 payment\\r\\n  INV-1005: invoice=5192.93, paid=5192.93  | inv1005 payment\\r\\n  INV-1007: invoice=18866.76, paid=18866.76  | inv1007 payment\\r\\n  INV-1010: invoice=8346.06, paid=8346.06  | inv1010 payment\\r\\n  INV-1011: invoice=16085.37, paid=16085.37  | PIX INV-1011 ATELIÊ NORTE\\r\\n  INV-1012: invoice=17434.44, paid=17434.44  | PIX INV-1012 VETOR BI\\r\\n  INV-1014: invoice=16532.99, paid=16532.99  | PIX INV-1014 CORUJA LABS\\r\\n  INV-1015: invoice=1904.29, paid=1904.29  [DUPLICATED] | PIX INV-1015 resend\\r\\n  INV-1015: invoice=1904.29, paid=1904.29  [DUPLICATED] | PIX INV-1015 ARENA STUDIO\\r\\n  INV-1016: invoice=4219.04, paid=4219.04  | PIX INV-1016 PAMPA FOODS\\r\\n  INV-1018: invoice=4316.93, paid=4316.93  | PIX INV-1018 VETOR BI\\r\\n  INV-1019: invoice=5692.66, paid=5692.66  | inv1019 payment\\r\\n  INV-1020: invoice=14053.27, paid=14053.27  | PIX INV-1020 CORUJA LABS\\r\\n  INV-1021: invoice=21320.36, paid=21070.36  [MISMATCHED] | PIX INV-1021 ARENA STUDIO\\r\\n  INV-1022: invoice=11582.83, paid=11582.83  | PIX INV-1022 PAMPA FOODS\\r\\n  INV-1024: invoice=13718.18, paid=13718.18  | PIX INV-1024 VETOR BI\\r\\n  INV-1025: invoice=21578.53, paid=21578.53  | PIX INV-1025 KESTREL GAMES\\r\\n  INV-1026: invoice=3449.61, paid=3449.61  | inv1026 payment\\r\\n  INV-1027: invoice=18225.86, paid=18225.86  | PIX INV-1027 ARENA STUDIO\\r\\n  INV-1028: invoice=10327.03, paid=10327.03  | PIX INV-1028 PAMPA FOODS\\r\\n  INV-1029: invoice=17678.95, paid=17678.95  | inv1029 payment\\r\\n  INV-1031: invoice=15441.67, paid=15441.67  | inv1031 payment\\r\\n  INV-1032: invoice=13634.48, paid=13634.48  | inv1032 payment\\r\\n  INV-1034: invoice=14059.15, paid=14059.15  | PIX INV-1034 PAMPA FOODS\\r\\n  INV-1035: invoice=21675.66, paid=21675.66  | inv1035 payment\\r\\n  INV-1038: invoice=9026.16, paid=9026.16  | PIX INV-1038 CORUJA LABS\\r\\n  INV-1040: invoice=2441.33, paid=2441.33  | PIX INV-1040 PAMPA FOODS\\r\\n\\r\\nUnpaid: ['INV-1002', 'INV-1006', 'INV-1008', 'INV-1009', 'INV-1013', 'INV-1017', 'INV-1023', 'INV-1030', 'INV-1033', 'INV-1036', 'INV-1037', 'INV-1039']\\r\\nDuplicated: ['INV-1015']\\r\\nMismatched: [{'id': 'INV-1021', 'invoiced': 21320.36, 'paid': 21070.36}]\\r\\n\"}],\"providerCall\":{\"executed\":false},\"providerResult\":{\"executed\":false},\"rawInput\":\"{\\\"command\\\":\\\"cd <WORKSPACE> && python tmp/reconcile.py\\\"}\"},\"time\":{\"start\":1793665044852,\"end\":1793665047059}}}}\n\n{\"type\":\"step_finish\",\"timestamp\":1793665047061,\"sessionID\":\"ses_e613c42ddffeZYnUH7cYwEI87j\",\"part\":{\"id\":\"prt_19ec49a15001uIlTPaiHQvxrmy\",\"sessionID\":\"ses_e613c42ddffeZYnUH7cYwEI87j\",\"messageID\":\"msg_19ec48b890012lzOoWrWIr4aeF\",\"type\":\"step-finish\",\"reason\":\"tool-calls\",\"cost\":0,\"tokens\":{\"input\":53,\"output\":81,\"reasoning\":0,\"cache\":{\"read\":11306,\"write\":0}}}}\n\n{\"type\":\"step_start\",\"timestamp\":1793665049992,\"sessionID\":\"ses_e613c42ddffeZYnUH7cYwEI87j\",\"part\":{\"id\":\"prt_19ec4a588001s1Uuwvuvyc0ZYB\",\"sessionID\":\"ses_e613c42ddffeZYnUH7cYwEI87j\",\"messageID\":\"msg_19ec49a1b001NF62pYDcloHDsv\",\"type\":\"step-start\"}}\n\n",
+ "checks": [
+  [
+   "unpaid invoices",
+   false
+  ],
+  [
+   "duplicated payments",
+   false
+  ],
+  [
+   "mismatched amounts",
+   false
+  ],
+  [
+   "invoiced vs paid on mismatches",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 6,
+  "tool_errors": 0,
+  "shell_commands": 1,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1441,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1038
+ },
+ "deliverables": [],
+ "render": null
+}
