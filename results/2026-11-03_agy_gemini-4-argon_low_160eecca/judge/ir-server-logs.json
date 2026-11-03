@@ -1,0 +1,53 @@
+{
+ "task_id": "ir-server-logs",
+ "prompts": [
+  "The game went down in June and we owe the team an incident report. The logs and their notes are in {WS}/logs. When did it start and end, how long was it, did we keep our monthly availability target, and why did it happen? Record it in {WS}/result.json: start, end, minutes_down, availability_june_pct, slo_999_ok, root_cause."
+ ],
+ "answers": [
+  "[goal]\nProduce the June outage incident report and write [result.json](<WORKSPACE>/result.json) with `start`, `end`, `minutes_down`, `availability_june_pct`, `slo_999_ok`, and `root_cause`.\n\n[action]\nRead [README.md](<WORKSPACE>/logs/README.md) and scanned [gameserver-2026-06-01.log](<WORKSPACE>/logs/gameserver-2026-06-01.log), [gameserver-2026-06-02.log](<WORKSPACE>/logs/gameserver-2026-06-02.log), and [gameserver-2026-06-03.log](<WORKSPACE>/logs/gameserver-2026-06-03.log) for warnings, errors, fatals, and recovery markers, then recorded the metrics in [result.json](<WORKSPACE>/result.json).\n\nAssumptions for choices left open by the brief:\n- Timestamp format in `start` and `end` matches the raw log timestamp string (`YYYY-MM-DD HH:MM:SS`).\n- `minutes_down` is computed from the exact second delta (`2149s / 60 = 35.8167`, rounded to 2 decimal places: `35.82`).\n- `availability_june_pct` is computed against all 30 days of June (`2,592,000` seconds = `43,200` minutes): `(2592000 - 2149) / 2592000 * 100 = 99.917091...%`, rounded to 4 decimal places (`99.9171`).\n\n[result]\nWhat I found and how I know it is right:\n- **Definition of downtime** ([README.md](<WORKSPACE>/logs/README.md#L1)):\n  `Dedicated game server. Monthly availability SLO: 99.9%. Down = from the first save error to the 'server ready' line. June has 30 days; there is only one incident.`\n- **Start (`2026-06-02 03:17:42`) & Root Cause** ([gameserver-2026-06-02.log](<WORKSPACE>/logs/gameserver-2026-06-02.log#L241-L254)):\n  ```text\n  241: 2026-06-02 03:10:02 WARN disk /data usage 97% (free 3.1 GB)\n  251: 2026-06-02 03:17:42 ERROR SaveGame failed: write /data/game/Saved/Level.sav: No space left on device\n  252: 2026-06-02 03:18:00 ERROR SaveGame failed: write /data/game/Saved/Level.sav: No space left on device\n  253: 2026-06-02 03:18:05 FATAL watchdog: server unresponsive for 20s, restarting\n  254: 2026-06-02 03:18:31 WARN watchdog: restart attempt, server exited code 137\n  ```\n- **Recovery & End (`2026-06-02 03:53:31`)** ([gameserver-2026-06-02.log](<WORKSPACE>/logs/gameserver-2026-06-02.log#L292-L294)):\n  ```text\n  292: 2026-06-02 03:52:10 INFO backup rotation freed 38.2 GB on /data\n  293: 2026-06-02 03:52:20 WARN watchdog: restart attempt, server exited code 137\n  294: 2026-06-02 03:53:31 INFO server ready, accepting players\n  ```\n- **Duration & SLO verification**:\n  - Exact duration: `03:53:31 - 03:17:42` = `35m 49s` = `2,149` seconds = `35.82` minutes (`35.8167` min).\n  - Monthly 99.9% SLO budget for June (30 days = `43,200` min = `2,592,000` s): max allowed downtime is `43.2` minutes (`2,592` s).\n  - Because `35.82 < 43.2` minutes (`99.9171% >= 99.9%`), the monthly availability target was kept (`slo_999_ok: true`).\n  - Exhaustive grep across all three log files confirmed zero other `SaveGame failed`, `FATAL`, or `server ready` lines (only an unrelated `ERROR RCON auth failed` on `2026-06-01 09:12:40`).\n- **Written [result.json](<WORKSPACE>/result.json#L1-L8)**:\n  ```json\n  {\n    \"start\": \"2026-06-02 03:17:42\",\n    \"end\": \"2026-06-02 03:53:31\",\n    \"minutes_down\": 35.82,\n    \"availability_june_pct\": 99.9171,\n    \"slo_999_ok\": true,\n    \"root_cause\": \"Disk /data reached 100% capacity (No space left on device) when writing /data/game/Saved/Level.sav, causing the server to hang and fail watchdog restarts (exit code 137) until scheduled backup rotation freed 38.2 GB on /data at 03:52:10.\"\n  }\n  ```\n\n[next]\nAlert on `/data` disk usage well before 97% and trigger backup rotation before free space falls below the size of a full level save plus backup margin.\n"
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"start\": \"2026-06-02 03:17:42\",\n  \"end\": \"2026-06-02 03:53:31\",\n  \"minutes_down\": 35.82,\n  \"availability_june_pct\": 99.9171,\n  \"slo_999_ok\": true,\n  \"root_cause\": \"Disk /data reached 100% capacity (No space left on device) when writing /data/game/Saved/Level.sav, causing the server to hang and fail watchdog restarts (exit code 137) until scheduled backup rotation freed 38.2 GB on /data at 03:52:10.\"\n}\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ Get-ChildItem -Path . -Recurse -File | Select-Object FullName, Length\n$ Select-String -Path .\\logs\\*.log -Pattern \"ERROR|WARN|FAIL|DOWN|CRITICAL|OUTAGE|500|502|503|504|Exception|panic|fatal|timeout|recovery|up|online|offline\" -CaseSensitive:$false | Select-Object -First 60\n$ Select-String -Path .\\logs\\*.log -Pattern \"WARN|ERROR|FATAL|server ready|disk|SaveGame\" -CaseSensitive:$false\n\nStream tail:\n-06-02.log](<WORKSPACE>/logs/gameserver-2026-06-02.log), and [gameserver-2026-06-03.log](<WORKSPACE>/logs/gameserver-2026-06-03.log) for warnings, errors, fatals, and recovery markers, then recorded the metrics in [result.json](<WORKSPACE>/result.json).\\n\\nAssumptions for choices left open by the brief:\\n- Timestamp format in `start` and `end` matches the raw log timestamp string (`YYYY-MM-DD HH:MM:SS`).\\n- `minutes_down` is computed from the exact second delta (`2149s / 60 = 35.8167`, rounded to 2 decimal places: `35.82`).\\n- `availability_june_pct` is computed against all 30 days of June (`2,592,000` seconds = `43,200` minutes): `(2592000 - 2149) / 2592000 * 100 = 99.917091...%`, rounded to 4 decimal places (`99.9171`).\\n\\n[result]\\nWhat I found and how I know it is right:\\n- **Definition of downtime** ([README.md](<WORKSPACE>/logs/README.md#L1)):\\n  `Dedicated game server. Monthly availability SLO: 99.9%. Down = from the first save error to the 'server ready' line. June has 30 days; there is only one incident.`\\n- **Start (`2026-06-02 03:17:42`) \\u0026 Root Cause** ([gameserver-2026-06-02.log](<WORKSPACE>/logs/gameserver-2026-06-02.log#L241-L254)):\\n  ```text\\n  241: 2026-06-02 03:10:02 WARN disk /data usage 97% (free 3.1 GB)\\n  251: 2026-06-02 03:17:42 ERROR SaveGame failed: write /data/game/Saved/Level.sav: No space left on device\\n  252: 2026-06-02 03:18:00 ERROR SaveGame failed: write /data/game/Saved/Level.sav: No space left on device\\n  253: 2026-06-02 03:18:05 FATAL watchdog: server unresponsive for 20s, restarting\\n  254: 2026-06-02 03:18:31 WARN watchdog: restart attempt, server exited code 137\\n  ```\\n- **Recovery \\u0026 End (`2026-06-02 03:53:31`)** ([gameserver-2026-06-02.log](<WORKSPACE>/logs/gameserver-2026-06-02.log#L292-L294)):\\n  ```text\\n  292: 2026-06-02 03:52:10 INFO backup rotation freed 38.2 GB on /data\\n  293: 2026-06-02 03:52:20 WARN watchdog: restart attempt, server exited code 137\\n  294: 2026-06-02 03:53:31 INFO server ready, accepting players\\n  ```\\n- **Duration \\u0026 SLO verification**:\\n  - Exact duration: `03:53:31 - 03:17:42` = `35m 49s` = `2,149` seconds = `35.82` minutes (`35.8167` min).\\n  - Monthly 99.9% SLO budget for June (30 days = `43,200` min = `2,592,000` s): max allowed downtime is `43.2` minutes (`2,592` s).\\n  - Because `35.82 \\u003c 43.2` minutes (`99.9171% \\u003e= 99.9%`), the monthly availability target was kept (`slo_999_ok: true`).\\n  - Exhaustive grep across all three log files confirmed zero other `SaveGame failed`, `FATAL`, or `server ready` lines (only an unrelated `ERROR RCON auth failed` on `2026-06-01 09:12:40`).\\n- **Written [result.json](<WORKSPACE>/result.json#L1-L8)**:\\n  ```json\\n  {\\n    \\\"start\\\": \\\"2026-06-02 03:17:42\\\",\\n    \\\"end\\\": \\\"2026-06-02 03:53:31\\\",\\n    \\\"minutes_down\\\": 35.82,\\n    \\\"availability_june_pct\\\": 99.9171,\\n    \\\"slo_999_ok\\\": true,\\n    \\\"root_cause\\\": \\\"Disk /data reached 100% capacity (No space left on device) when writing /data/game/Saved/Level.sav, causing the server to hang and fail watchdog restarts (exit code 137) until scheduled backup rotation freed 38.2 GB on /data at 03:52:10.\\\"\\n  }\\n  ```\\n\\n[next]\\nAlert on `/data` disk usage well before 97% and trigger backup rotation before free space falls below the size of a full level save plus backup margin.\\n\",\"duration_seconds\":49.7476387,\"num_turns\":1,\"usage\":{\"input_tokens\":30376,\"output_tokens\":2502,\"thinking_tokens\":0,\"cache_read_tokens\":76363,\"total_tokens\":32878}}}\n",
+ "checks": [
+  [
+   "incident start",
+   true
+  ],
+  [
+   "incident end",
+   true
+  ],
+  [
+   "minutes down",
+   true
+  ],
+  [
+   "June availability",
+   true
+  ],
+  [
+   "SLO 99.9 met",
+   true
+  ],
+  [
+   "root cause = /data disk full",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2502,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1804
+ },
+ "deliverables": [],
+ "render": null
+}
