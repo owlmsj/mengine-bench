@@ -323,9 +323,12 @@ def _universe_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     want = _relations()
     got = _delivered_links(read_json(ws, WORDS_FILE))
     result.add("collected exactly the site's words", set(got) == set(want), _set_detail(set(got), set(want)))
-    wrong = [word for word in RELATION_SAMPLE if got.get(word) != want[word]]
+    # #164: a complete crawl is required; keeping only sampled edges lost most
+    # of the graph while a copied gold summary still earned full credit.
+    wrong = sorted(word for word in set(got) | set(want) if got.get(word) != want.get(word))
     result.add("relations of a sample of words", not wrong,
-               f"{wrong[0]}: {_set_detail(got.get(wrong[0], set()), want[wrong[0]])}" if wrong else "")
+               saw(f"{wrong[0]}: {_set_detail(got.get(wrong[0], set()), want.get(wrong[0], set()))}",
+                   "all relations from the site") if wrong else "")
     false_pairs = _pairs(got) & _noise_pairs()
     examples = [" - ".join(sorted(pair)) for pair in sorted(false_pairs, key=sorted)[:3]]
     result.add("no relation from a sidebar or a footer", bool(got) and not false_pairs,
@@ -333,10 +336,14 @@ def _universe_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     summary = result_json(ws)
     degree = max(map(len, want.values()))
     tied = {word for word, others in want.items() if len(others) == degree}
+    delivered_degree = max(map(len, got.values()), default=0)
+    delivered_tied = {word for word, others in got.items() if len(others) == delivered_degree}
     expected = {"words": len(want), "relations": len(_pairs(want)), "most_connected": sorted(tied)}
     result.add("result.json has the right words, relations and most_connected",
                near(summary.get("words"), len(want), 0) and near(summary.get("relations"), len(_pairs(want)), 0)
-               and _most_connected_ok(summary.get("most_connected"), tied), saw(summary, expected))
+               and near(summary.get("words"), len(got), 0) and near(summary.get("relations"), len(_pairs(got)), 0)
+               and _most_connected_ok(summary.get("most_connected"), tied)
+               and _most_connected_ok(summary.get("most_connected"), delivered_tied), saw(summary, expected))
     html = _rendered_source(ws, PAGE)
     result.add("the page has a search field", has(html, r"<input\b|<textarea\b|contenteditable|role\s*=\s*[\"']?searchbox|createElement\(\s*[\"'`]input"),
                f"no input, contenteditable or searchbox in {PAGE}")
