@@ -173,18 +173,25 @@ test("emit resolves after every handler", { timeout: 5000 }, async () => {
 """,
     "a failing handler rejects emit": """
 test("a failing handler rejects emit", { timeout: 5000 }, async () => {
-  const bus = new HookBus();
-  const boom = new Error("boom");
-  bus.on("tool.after", async () => { await pause(5); throw boom; });
-  let caught: unknown = undefined;
-  try {
-    await bus.emit("tool.after", {});
-  } catch (error) {
-    caught = error;
+  for (const asynchronous of [false, true]) {
+    const bus = new HookBus();
+    const boom = new Error("boom");
+    let laterRan = false;
+    bus.on("tool.after", asynchronous ? async () => { await pause(5); throw boom; } : () => { throw boom; });
+    // Continuing after either kind of failure violates the README contract (#164).
+    bus.on("tool.after", () => { laterRan = true; });
+    let caught: unknown = undefined;
+    try {
+      await bus.emit("tool.after", {});
+    } catch (error) {
+      caught = error;
+    }
+    const wrapped = caught as { cause?: unknown; errors?: unknown[] } | undefined;
+    assert.ok(caught === boom || wrapped?.cause === boom || (wrapped?.errors ?? []).includes(boom),
+              `expected emit to reject with the handler error, got ${String(caught)}`);
+    await pause(20);
+    assert.equal(laterRan, false, `received laterRan=${laterRan}; expected false after a handler failure`);
   }
-  const wrapped = caught as { cause?: unknown; errors?: unknown[] } | undefined;
-  assert.ok(caught === boom || wrapped?.cause === boom || (wrapped?.errors ?? []).includes(boom),
-            `expected emit to reject with the handler error, got ${String(caught)}`);
 });
 """,
     "a handler that unsubscribes itself does not stop the others": """
