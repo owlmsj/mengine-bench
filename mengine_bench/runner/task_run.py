@@ -47,7 +47,8 @@ BROWSER_PROFILE_DIRS = frozenset({"_browser-profile", ".browser-profile", "brows
 # workspace are not: earlier steps and runs live next to it, and the
 # transcripts are published.
 # A Sonnet run stopped its page server with `Get-Process python | Stop-Process -Force`, which killed this runner too (#107).
-WORKSPACE_RULES = ("Use any skill, tool or MCP server you have. Read and write local files only inside this directory.\n"
+WORKSPACE_RULES = ("Use any skill, tool or MCP server you have. Write local files only inside this directory.\n"
+                   "You may read installed tools and skills outside it, but not other task workspaces, runs or benchmark answers.\n"
                    "Other programs run on this machine: stop only the processes you started, by their id, never by name.\n"
                    "Do not print credentials, environment variables or personal data: this session is published.\n")
 # #41: without this a model can plan until the limit and leave nothing to grade.
@@ -292,7 +293,11 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: in
     prompt_file = prompts / f"step-{label}.md"
     prompt_file.write_text(prompt, encoding="utf-8")
     call = agent.invocation(prompt, prompt_file.resolve(), workspace.resolve(), attachments)
-    before = outside_snapshot(workspace, root)
+    try:
+        before = outside_snapshot(workspace, root)
+    except OSError:
+        record.outside_writes.append("filesystem snapshot unavailable")
+        raise
     try:
         result = process.run_process(call.argv, workspace, task.timeout_s, stdin_text=call.stdin_text,
                                      env=_step_env(workspace, call.env), final_event=call.final_event)

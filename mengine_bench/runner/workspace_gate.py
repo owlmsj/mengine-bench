@@ -10,6 +10,10 @@ WORKSPACE_WRITE_GATE = "no writes outside the task workspace"
 FileStamp = tuple[int, int, int]
 
 
+def _snapshot_error(error: OSError) -> None:
+    raise error
+
+
 def outside_snapshot(workspace: Path, root: Path) -> dict[str, FileStamp]:
     """Do not follow links or read contents; tool installations may be read freely.
 
@@ -18,7 +22,7 @@ def outside_snapshot(workspace: Path, root: Path) -> dict[str, FileStamp]:
     """
     stamps: dict[str, FileStamp] = {}
     for label, parent in (("parent", workspace.parent), ("run", root)):
-        for directory, dirs, files in os.walk(parent, followlinks=False):
+        for directory, dirs, files in os.walk(parent, followlinks=False, onerror=_snapshot_error):
             base = Path(directory)
             dirs[:] = [name for name in dirs if base / name != workspace]
             for name in [*dirs, *files]:
