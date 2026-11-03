@@ -1,4 +1,4 @@
-"""#153: cu-webmail grades the signed mailbox: invoice saved, reply with the total in the thread, archived, nothing else."""
+"""#153, #155: cu-webmail grades the signed mailbox: invoice saved, reply with the total in the thread, nothing else."""
 
 from __future__ import annotations
 
@@ -55,20 +55,22 @@ def _also_archive_quote(ws: Path) -> None:
 
 
 def _new_mail_not_reply(ws: Path) -> None:
-    webmail_solve(ws, archive=True)
+    webmail_solve(ws)
     QuillmailClient(ws).post("/mail/api/send", {"to": ["billing@larkspur-print.test"], "subject": "Invoice", "body": "EUR 1,205.77"})
 
 
-def _trash_instead(ws: Path) -> None:
-    webmail_solve(ws, archive=False)
-    QuillmailClient(ws).post(f"/mail/api/thread/{TARGET_THREAD}/modify", {"addLabels": ["TRASH"], "removeLabels": ["INBOX"]})
+def _reply_to_self(ws: Path) -> None:
+    client = QuillmailClient(ws)
+    message = json.loads(client.get(f"/mail/api/thread/{TARGET_THREAD}"))["messages"][-1]
+    (ws / webmail.INVOICE_FILE).write_bytes(client.get(f"/mail/u/0/attachment?th={TARGET_THREAD}&att=lp1"))
+    client.post("/mail/api/send", {"threadId": TARGET_THREAD, "inReplyTo": message["id"], "to": ["tester@quillmail.test"],
+                                   "body": "Invoice total EUR 1,205.77, filed."})
 
 
 @pytest.mark.parametrize(("act", "failed"), [
     (lambda ws: webmail_solve(ws, total="EUR 996.50"), ["reply states the invoice total"]),  # the subtotal
     (lambda ws: webmail_solve(ws, total="EUR 209.27"), ["reply states the invoice total"]),  # the VAT line
-    (lambda ws: webmail_solve(ws, archive=False), ["invoice conversation archived"]),
-    (_trash_instead, ["invoice conversation archived"]),
+    (_reply_to_self, ["reply addressed to the sender"]),
     (_new_mail_not_reply, ["nothing else sent"]),
     # The same vendor's quote: wrong file, reply and archive in the wrong conversation.
     (lambda ws: webmail_solve(ws, thread=QUOTE_THREAD, attachment="q1"), [webmail.WEBMAIL_UNTOUCHED_GATE]),
@@ -92,6 +94,11 @@ def test_a_quote_saved_instead_of_the_invoice_fails_the_file_check(tmp_path: Pat
         (ws / "invoice.pdf").write_bytes(client.get(f"/mail/u/0/attachment?th={QUOTE_THREAD}&att=q1"))
 
     assert _graded(tmp_path, quote_file).failed() == ["invoice PDF saved byte for byte"]
+
+
+def test_archiving_the_invoice_conversation_anyway_passes(tmp_path: Path) -> None:
+    # #155: 2.3.1 no longer asks for the archive; an agent that still archives the thread is not failed for it.
+    assert _graded(tmp_path, lambda ws: webmail_solve(ws, archive=True)).passed
 
 
 def test_a_renamed_copy_in_a_subfolder_and_european_writing_pass(tmp_path: Path) -> None:
@@ -127,7 +134,7 @@ def test_the_session_and_token_guard_writes_like_the_real_site(tmp_path: Path) -
 
 def test_an_edited_state_file_fails_the_integrity_gate(tmp_path: Path) -> None:
     def forge(ws: Path) -> None:
-        webmail_solve(ws, archive=False)
+        webmail_solve(ws)
 
     ws = tmp_path / "ws"
     ws.mkdir()
