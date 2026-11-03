@@ -57,9 +57,9 @@ class JudgePacket:
 def read_packet(bundle: Path, task_id: str) -> JudgePacket:
     """The evidence of one task. The bundle comes from a contributor's pull request, so the task's prompts
     and the page to render come from the catalog, never from the packet (#23 review)."""
-    task = next((task for task in catalog.all_tasks() if task.id == task_id), None)
+    task = catalog.task_by_id(task_id)
     if task is None:
-        raise ValueError(f"received task {task_id!r} in {bundle.name}; expected a catalog task id")
+        raise ValueError(f"received task {task_id!r} in {bundle.name}; expected a catalog or candidate task id")
     packet_file = bundle / JUDGE_DIR / f"{task_id}.json"
     if not packet_file.is_file():
         raise ValueError(f"received {bundle.name} without {JUDGE_DIR}/{task_id}.json; expected judge evidence "

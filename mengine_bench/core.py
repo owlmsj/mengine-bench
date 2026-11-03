@@ -136,10 +136,15 @@ class EvalTask:
     # (visual tasks: the page it renders).
     deliverables: tuple[str, ...] = ()
     checkpoints: tuple[Checkpoint, ...] = ()
+    # A stdlib server module the runner starts on 127.0.0.1 for the task; the prompt names it as {SITE} (#153).
+    site: str | None = None
 
     def __post_init__(self) -> None:
         if not self.steps:
             raise ValueError(f"task {self.id!r} received no steps; expected at least one Step")
+        if self.site is not None and len(self.steps) != 1:
+            raise ValueError(f"task {self.id!r} received a site with {len(self.steps)} steps; expected one step, "
+                             f"since a fresh session moves to a new workspace the server does not serve")
         resumed = [index for index, step in enumerate(self.steps) if index and not step.fresh_session]
         if resumed:
             raise ValueError(f"task {self.id!r} received steps {resumed} that continue a session; "

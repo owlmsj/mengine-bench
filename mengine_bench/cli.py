@@ -29,6 +29,7 @@ from mengine_bench.environment import parse_config
 from mengine_bench.run_command import JudgeEvidence, RunSettings, run_tasks
 from mengine_bench.judge import OFFICIAL_JUDGE_EFFORT, OFFICIAL_JUDGE_MODEL, RubricJudge
 from mengine_bench.runner.agents import AGENT_NAMES, make_agent
+from mengine_bench.runner.site import serve_site
 from mengine_bench.visual import add_page_checks
 from mengine_bench.scoring import CORRECT_SHARE, JUDGE_SHARE, SPEED_SHARE, parse_price
 from mengine_bench.submit import SubmitError, gh_login, submit
@@ -175,7 +176,8 @@ def _submit(bundle: Path) -> int:
 
 
 def _run(args: argparse.Namespace) -> int:
-    tasks = _select(catalog.all_tasks(), args.tasks)
+    # A candidate runs only by id, for its probe (CONTRIBUTING): a run with --tasks is never ranked.
+    tasks = _select(catalog.all_tasks() + (catalog.candidate_tasks() if args.tasks else []), args.tasks)
     if args.agent == "cmd" and not args.cmd:
         raise SystemExit("error: received --agent cmd without --cmd; expected an argv template with {prompt_file}")
     try:
@@ -273,11 +275,15 @@ def _gold_problem(task: EvalTask, root: Path) -> str | None:
     empty, solved = root / "empty", root / "solved"
     empty.mkdir(parents=True)
     task.setup(empty)
+    with serve_site(task.site, empty):
+        pass
     if task.check(empty, [""] * len(task.steps)).passed:
         return "gold passes an untouched workspace"
     solved.mkdir()
     task.setup(solved)
-    result = task.check(solved, task.reference(solved))
+    with serve_site(task.site, solved):
+        answers = task.reference(solved)
+    result = task.check(solved, answers)
     if task.render_target is not None:
         add_page_checks(result, solved / task.render_target)
     return None if result.passed else f"reference fails {result.failed()}"
