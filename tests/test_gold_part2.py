@@ -180,6 +180,12 @@ def test_retrieval_and_integration_summaries_are_short_sentences(task: EvalTask)
     ("Watchdog killed the server (exit code 137); the disk wasn't full", False),
     ("Watchdog restarted the unresponsive server", False),
     ("RCON auth failed from a bad password", False),
+    # #164: "capacity" alone is not "full"; healthy storage named beside the wrong cause must not pass.
+    ("The disk had sufficient capacity; RCON authentication caused the outage", False),
+    ("The /data volume had plenty of spare capacity, the watchdog restart loop caused the outage", False),
+    ("The /data disk reached capacity and saves failed", True),
+    ("Storage on /data hit full capacity", True),
+    ("The disk had all that capacity free; RCON auth failures caused it", False),
 ])
 def test_logs_root_cause_accepts_every_out_of_space_wording(tmp_path: Path, root_cause: str, ok: bool) -> None:
     from mengine_bench.tasks import ir
