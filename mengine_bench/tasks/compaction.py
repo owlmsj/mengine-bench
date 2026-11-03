@@ -79,7 +79,9 @@ HANDOFF_GOLD = {
     # #59: the value with a unit glued to it counts; the superseded 37.8 next to it does not.
     "final_decode": r"^(?!.*37[.,]8)(?=.*(?<![\w.,+-])38(?:[.,]0+)?(?!\d|[.,]\d))",
     "final_vram_mib": r"(?<![\w.,+-])7697(?:[.,]0+)?(?!\w|[.,]\d)",
-    "discarded_quant": r"\bQ6(?:_?K)?\b",
+    # #164: one quantization, not a hedge containing the gold plus other candidates.
+    "discarded_quant": r"^(?=.*\bQ6(?:_?K)?\b)"
+                       r"(?!.*\b(?!Q6(?:_?K)?\b)(?:I?Q\d+[A-Z0-9_]*|BF16|FP(?:16|32)|F(?:16|32))\b)",
     # #28, #59: the README with what is wrong in it, in any wording, and not another README.
     "pending": r"^(?!.*\broot\b)(?=.*\bREADME\b)"
                r"(?=.*\b(?:update|fix|remove|edit|replace|check_vision|evals|stale|out of date))",
