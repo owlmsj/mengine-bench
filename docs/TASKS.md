@@ -49,9 +49,11 @@ embedded images.
 | `infra-gpu-fit` | infra | Pick the cheapest rented GPU offer that can serve a model within a spending policy. |
 | `ir-server-logs` | retrieval | Investigate a game server outage from its logs and report what happened. |
 | `gd-integration-repo` | gamedev | Find every cause behind a failing integration test in a game backend, and fix them. |
+| `media-voice` | media | Record a ferry boarding announcement as a short spoken WAV file. |
 | `txt-regex-log` | engineering | Write one regex that finds the last date on every log line that mentions an IPv4 address. |
 | `rs-lock-bug` | engineering | Find out why a Rust game server hangs under load and loses points, and fix it. |
 | `sec-leak-fix` | security | Clear a small backup service for open source: no token in code or logs, no form input run as a command. |
+| `cu-social-cycle` | computer-use | Make a poster image, post it with alt text on a social site, reply to a neighbor, then delete the test post. |
 | `ds-sqlite-recover` | data-science | Get the rows back out of a SQLite price list that was damaged by truncation. |
 | `hw-stutter-tuning` | performance | Find from captured logs why a gaming PC stutters and which settings fix it within the owner's rules. |
 | `ts-plugin-bug` | engineering | Fix a TypeScript plugin hook bus that runs hooks out of order, skips some and hides failures. |

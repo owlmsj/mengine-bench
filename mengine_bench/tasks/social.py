@@ -233,7 +233,7 @@ TASKS: list[EvalTask] = [EvalTask(
     steps=(Step(PROMPT),),
     check=_check,
     reference=_reference,
-    timeout_s=120,
+    timeout_s=150,
     deliverables=(IMAGE,),
     checkpoints=checkpoints(("made the image", r"cover\.png"), ("opened the site", r"127\.0\.0\.1|navigate"),
                             ("deleted the test post", r"deleteRecord|Delete post|confirmBtn")),

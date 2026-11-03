@@ -52,7 +52,8 @@ def test_limits_fit_the_measured_times_and_cap_the_worst_case_at_56_minutes() ->
     # #137, bench 2.1: each limit is the slowest finished time in the eight 2.0 runs plus 25%, rounded up to 30 s,
     # at least 60 s, never above 2.0 and never below a limit a 2.0 run hit (rs-lock-bug, Mondrian, word universe).
     # #151, bench 2.2: the three Terminal-Bench ports take the same rule from one Opus 5.5 xhigh probe (31.6 to 46.2 s).
-    # #153, bench 2.3: cu-social-cycle and media-voice, limits set from their Opus 5.5 xhigh and Sonnet 5.5 low probes.
+    # #153, bench 2.3: the same rule on the slowest finished probe (Opus 5.5 xhigh, Sonnet 5.5 low): cu-social-cycle
+    # 114.0 s, media-voice 28.9 s.
     tasks = catalog.all_tasks()
     worst = sum(task.timeout_s * len(task.steps) for task in tasks)
     assert worst == 3360, worst
@@ -63,7 +64,7 @@ def test_limits_fit_the_measured_times_and_cap_the_worst_case_at_56_minutes() ->
         "hw-stutter-tuning": 90, "ts-plugin-bug": 60, "web-mondrian-landing": 300, "3d-print-homage": 420,
         "web-plan-ranking": 210, "web-word-universe": 360,
         "txt-regex-log": 60, "ds-sqlite-recover": 60, "py-async-cancel": 60,
-        "cu-social-cycle": 120, "media-voice": 90}
+        "cu-social-cycle": 150, "media-voice": 60}
 
 
 def test_a_run_folder_with_read_only_git_objects_is_removed(tmp_path: Path) -> None:

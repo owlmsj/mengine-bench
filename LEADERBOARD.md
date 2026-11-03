@@ -7,10 +7,11 @@ by the maintainer on review; the transcripts are in each bundle. Only complete,
 judged runs of the current bench version are ranked. Older rankings stay below as history:
 their Scores use that version's formula and do not compare with the table above.
 
-Bench 2.0 and 2.1 runs stay in this ranking (#139, #151), marked with their version. 2.2 added three
-tasks (txt-regex-log, ds-sqlite-recover, py-async-cancel), so a row marked 2.0 or 2.1 covers 20 tasks
-and an unmarked 2.2 row 23. 2.1 only shortened the time limits (#137): a row marked 2.0 ran with the
-longer 2.0 limits (worst case 76 min, against 49.5 min in 2.1 and 52.5 min in 2.2).
+Bench 2.0, 2.1 and 2.2 runs stay in this ranking (#139, #151, #153), marked with their version. 2.2
+added three tasks (txt-regex-log, ds-sqlite-recover, py-async-cancel) and 2.3 added 2
+(cu-social-cycle, media-voice), so a row marked 2.0 or 2.1 covers 20 tasks, a row marked 2.2 covers 23
+and an unmarked 2.3 row 25. 2.1 only shortened the time limits (#137): a row marked 2.0 ran with the
+longer 2.0 limits (worst case 76 min, against 49.5 min in 2.1 and 52.5 min in 2.2; 2.3 in docs/SCORING.md).
 
 | # | Score | Correct % | Solved | Judge | Speed | Time | Timeouts | Cost | Est. price | Tokens | Generated | Turns | Agent | Model | Effort | Hardware | Config | Submitter | Date | Run |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |

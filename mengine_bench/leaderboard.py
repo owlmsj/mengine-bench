@@ -33,14 +33,20 @@ TASKS_CHANGED_IN_2_0 = frozenset({"lc-changelog", "vis-chart", "ir-studio-wiki",
                                   "hw-stutter-tuning", "doc-lab-pdf", "web-plan-ranking"})
 # #151: bench 2.2 added three tasks ported from Terminal-Bench 2.1.
 TASKS_ADDED_IN_2_2 = frozenset({"txt-regex-log", "ds-sqlite-recover", "py-async-cancel"})
-TASKS_THAT_CAME_AND_WENT = TASKS_CHANGED_SINCE_1_5 | TASKS_CHANGED_IN_2_0 | TASKS_ADDED_IN_2_2
+# #153: bench 2.3 adds computer use and basic media. More 2.3 ids go here only; the note below follows.
+TASKS_ADDED_IN_2_3 = frozenset({"cu-social-cycle", "media-voice"})
+TASKS_THAT_CAME_AND_WENT = TASKS_CHANGED_SINCE_1_5 | TASKS_CHANGED_IN_2_0 | TASKS_ADDED_IN_2_2 | TASKS_ADDED_IN_2_3
 # #139: the owner kept the 2.0 runs ranked in 2.1, which only shortened the time limits (#137); they cost real runs.
-# #151: and kept the 2.0 and 2.1 runs ranked in 2.2, which added three tasks.
-RANKED_WITH_CURRENT: dict[str, frozenset[str]] = {"2.1": frozenset({"2.0"}), "2.2": frozenset({"2.0", "2.1"})}
-RANKED_WITH_NOTE = ("Bench 2.0 and 2.1 runs stay in this ranking (#139, #151), marked with their version. 2.2 added three\n"
-                    "tasks (txt-regex-log, ds-sqlite-recover, py-async-cancel), so a row marked 2.0 or 2.1 covers 20 tasks\n"
-                    "and an unmarked 2.2 row 23. 2.1 only shortened the time limits (#137): a row marked 2.0 ran with the\n"
-                    "longer 2.0 limits (worst case 76 min, against 49.5 min in 2.1 and 52.5 min in 2.2).\n")
+# #151: and kept the 2.0 and 2.1 runs ranked in 2.2, which added three tasks; #153: and all three in 2.3.
+RANKED_WITH_CURRENT: dict[str, frozenset[str]] = {"2.1": frozenset({"2.0"}), "2.2": frozenset({"2.0", "2.1"}),
+                                                  "2.3": frozenset({"2.0", "2.1", "2.2"})}
+RANKED_WITH_NOTE = ("Bench 2.0, 2.1 and 2.2 runs stay in this ranking (#139, #151, #153), marked with their version. 2.2\n"
+                    "added three tasks (txt-regex-log, ds-sqlite-recover, py-async-cancel) and 2.3 added "
+                    f"{len(TASKS_ADDED_IN_2_3)}\n({', '.join(sorted(TASKS_ADDED_IN_2_3))}), so a row marked 2.0 or 2.1 "
+                    f"covers 20 tasks, a row marked 2.2 covers 23\nand an unmarked 2.3 row {23 + len(TASKS_ADDED_IN_2_3)}. "
+                    "2.1 only shortened the time limits (#137): a row marked 2.0 ran with the\n"
+                    "longer 2.0 limits (worst case 76 min, against 49.5 min in 2.1 and 52.5 min in 2.2; 2.3 in "
+                    "docs/SCORING.md).\n")
 # #146: runs the owner keeps on the board without ranking them, by bundle name, with why.
 OBSERVED_RUNS: dict[str, str] = {
     "2026-11-02_codex_gpt-6-astra_low_43e898d9": (

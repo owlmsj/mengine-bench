@@ -28,6 +28,12 @@ Bench 2.2 adds three tasks adapted from Terminal-Bench 2.1 (#151): `txt-regex-lo
 `py-async-cancel`, 60 s each by the 2.1 rule, so the worst case is 52.5 min. They add about 2 min to a good run: the
 Opus 5.5 xhigh probe took 46.2 + 31.6 + 44.7 s. The 2.0 and 2.1 runs stay in the ranking, each row marked with
 its version (#151): their 20 tasks against 23 for a 2.2 row.
+Bench 2.3 adds computer use and basic media (#153): `cu-social-cycle` (a post with an image the agent makes, a reply
+and a delete on a local social-site replica, graded from state the site's server signs) and `media-voice` (a spoken
+WAV, transcribed offline by whisper tiny). Their limits follow the 2.1 rule from the slowest finished probe,
+Sonnet 5.5 low at 114.0 s and Opus 5.5 xhigh at 28.9 s: 150 s and 60 s, so the worst case is 56 min. Opus 5.5 xhigh
+took 98.0 + 28.9 s, about 2 min more for a good run. The 2.0, 2.1 and 2.2 runs stay in the ranking, each row marked
+with its version.
 
 A run is one sample and runs are not repeated, so ties come from the published tasks: draw the tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
