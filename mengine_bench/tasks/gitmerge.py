@@ -272,15 +272,17 @@ def _gm_setup(ws: Path) -> None:
 
 
 def _gm_merge_problem(repo: Path) -> str:
-    """Why main is not the committed merge of the old main and the branch, or "" when it is."""
+    """Why main does not contain the committed merge of the old main and the branch, or "" when it does."""
     old_main, branch_tip = _gm_tips()
     try:
-        parents = _gm_git(repo, "rev-list", "--parents", "-n", "1", "main").split()[1:]
+        # A follow-up commit does not undo the requested committed merge (#164).
+        merges = _gm_git(repo, "rev-list", "--parents", "--merges", "main").splitlines()
         dirty = _gm_git(repo, "status", "--porcelain", "--untracked-files=no")
     except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
         return str(error)
-    if parents != [old_main, branch_tip]:
-        return saw(parents, [old_main, branch_tip])
+    parents = [line.split()[1:] for line in merges]
+    if [old_main, branch_tip] not in parents:
+        return saw(parents, f"a merge in main's ancestry with parents {[old_main, branch_tip]}")
     if dirty:
         return saw(f"uncommitted changes: {dirty[:120]}", "the resolution committed")
     return ""
@@ -296,10 +298,10 @@ def _gm_tracked(repo: Path) -> list[str]:
 def _gm_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     repo = ws / GM_REPO
+    # Incoming tests are protected too, including deletion during resolution (#164).
     changed = [rel for rel, text in GM_VISIBLE.items()
-               if (repo / rel).exists() and _gm_sha(read(repo, rel)) != _gm_sha(text)]
-    deleted = [rel for rel in ("tests/test_loot.py", "tests/test_pity.py") if not (repo / rel).is_file()]
-    result.mandatory.append(("visible tests left untouched", not changed and not deleted))
+               if not (repo / rel).is_file() or _gm_sha(read(repo, rel)) != _gm_sha(text)]
+    result.mandatory.append(("visible tests left untouched", not changed))
     if not (repo / ".git").exists():
         result.add("main is a merge commit of the old main and the branch", False, saw("no repo", f"{GM_REPO}/.git"))
     else:
@@ -308,9 +310,10 @@ def _gm_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     marked = [rel for rel in _gm_tracked(repo) if GM_CONFLICT_MARKER.search(read(repo, rel) or "")]
     result.add("no conflict markers in tracked files", not marked, saw(marked, []))
     with tempfile.TemporaryDirectory(prefix="bench-gm-tree-", dir=scratch_root(), ignore_cleanup_errors=True) as tmp:
-        # A copy of the work tree's modules: hidden tests import loot.py from here, never from .git.
-        for path in repo.glob("*.py"):
-            shutil.copy2(path, Path(tmp) / path.name)
+        # Local packages and their resources are valid implementations of loot.py (#164).
+        if repo.is_dir():
+            shutil.copytree(repo, tmp, dirs_exist_ok=True,
+                            ignore=shutil.ignore_patterns(".git", ".venv", "__pycache__"))
         for label, case in GM_HIDDEN_CASES:
             source = GM_HIDDEN + f"\n\ndef load_tests(loader, tests, pattern):\n    return loader.loadTestsFromTestCase({case})\n"
             ok, why = run_hidden_tests(Path(tmp), source, timeout_s=GM_TEST_LIMIT_S)
