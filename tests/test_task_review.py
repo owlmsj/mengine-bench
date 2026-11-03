@@ -172,11 +172,11 @@ def test_a_broken_suite_does_not_pass_the_integration_task(tmp_path: Path) -> No
 
 
 @pytest.mark.parametrize("value,ok", [
-    # #98: which valid test is the agent's call, so any p under the 5% in the release rule stands, rounding included.
-    (0.0002, True), (0.000198, True), (0.0001, True), (0.0011, True), (0, True), ("<0.001", True),
+    # #164: equivalent tests and censored reporting remain valid; significance alone is insufficient.
+    (0.0002, True), (0.000198, True), (0.0001, True), (0.0011, False), (0, False), ("<0.001", True),
     (0.05, False), (0.2, False), (-0.01, False), ("significant", False), (None, False),
 ])
-def test_the_p_value_must_be_a_number_under_the_release_threshold(tmp_path: Path, value: object, ok: bool) -> None:
+def test_the_p_value_must_match_the_gain_not_only_the_release_threshold(tmp_path: Path, value: object, ok: bool) -> None:
     business._ab_setup(tmp_path)
     answers = business._ab_reference(tmp_path)
     _edit_result(tmp_path, p_value=value)
