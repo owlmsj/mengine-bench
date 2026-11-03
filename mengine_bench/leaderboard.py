@@ -36,6 +36,13 @@ TASKS_THAT_CAME_AND_WENT = TASKS_CHANGED_SINCE_1_5 | TASKS_CHANGED_IN_2_0
 RANKED_WITH_CURRENT: dict[str, frozenset[str]] = {"2.1": frozenset({"2.0"})}
 RANKED_WITH_NOTE = ("Bench 2.0 runs stay in this ranking (#139): 2.1 only shortened the time limits (#137), so a row\n"
                     "marked 2.0 ran with the longer 2.0 limits (worst case 76 min, against 49.5 min in 2.1).\n")
+# #146: runs the owner keeps on the board without ranking them, by bundle name, with why.
+OBSERVED_RUNS: dict[str, str] = {
+    "2026-11-02_codex_gpt-6-astra_low_43e898d9": (
+        "clean Codex, Astra low, Fast. The model never replied on ds-sql-funnel, hw-stutter-tuning and ts-plugin-bug "
+        "(the stream ends at turn.started); two reruns stalled the same way, the #144 retry too, while a short prompt "
+        "on the same login answered in 5 s. Kept as the most complete of three attempts, not ranked."),
+}
 COLUMNS = ("#", "Score", "Correct %", "Solved", "Judge", "Speed", "Time", "Timeouts", "Cost", "Est. price", "Tokens", "Generated",
            "Turns",
            "Agent", "Model", "Effort",
@@ -198,13 +205,16 @@ def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
     ranked: list[RankedBundle] = []
     unranked: list[tuple[str, str]] = []
     history: dict[str, list[RankedBundle]] = {}
+    observed: list[RankedBundle] = []
     for result_file in sorted(results_dir.glob(f"*/{RESULT_NAME}")):
         bundle = result_file.parent
         result = json.loads(result_file.read_text(encoding="utf-8"))
         reason = unranked_reason(result)
         entry = RankedBundle(result=result, summary_link=_link(bundle / SUMMARY_NAME, link_base))
         older = _history_version(result)
-        if older is not None:
+        if bundle.name in OBSERVED_RUNS:
+            observed.append(entry)
+        elif older is not None:
             history.setdefault(older, []).append(entry)
         elif reason is not None:
             unranked.append((_link(bundle, link_base), reason))
@@ -214,6 +224,10 @@ def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
     note = [RANKED_WITH_NOTE] if RANKED_WITH_CURRENT.get(major_minor(__version__)) else []
     sections = [LEADERBOARD_HEADER, *note, _table(ranked) if ranked else "No results yet.\n",
                 *tie_note([entry.result for entry in ranked])]
+    if observed:
+        notes = "\n".join(f"- {Path(entry.summary_link).parent.name}: {OBSERVED_RUNS[Path(entry.summary_link).parent.name]}"
+                          for entry in observed)
+        sections.append("## Observations (not ranked)\n\n" + _table(sorted(observed, key=_by_score)) + "\n" + notes + "\n")
     for version in sorted(history, key=_version_key, reverse=True):
         sections.append(f"## Bench {version} (history)\n\n" + _table(sorted(history[version], key=_by_score)))
     if unranked:

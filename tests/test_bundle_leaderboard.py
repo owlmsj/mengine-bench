@@ -201,6 +201,21 @@ def test_2_0_runs_stay_ranked_in_2_1_and_are_marked_139(tmp_path: Path) -> None:
     assert "## Bench 2.0 (history)" not in text
 
 
+def test_an_observed_run_is_shown_with_its_reason_and_never_ranked_146(tmp_path: Path,
+                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    # #146: a run the owner keeps on the board, outside the ranking, with why.
+    monkeypatch.setattr(leaderboard, "OBSERVED_RUNS", {"stalled": "the model never replied on 3 tasks"})
+    results = tmp_path / "results"
+    _write_result(results, "stalled", 99.0, model="stalled-model")
+    _write_result(results, "current", 50.0, model="current-model")
+    board = leaderboard.build_leaderboard(results, tmp_path)
+    assert board.ranked == 1 and board.unranked == []
+    text = board.markdown
+    observed = text[text.index("## Observations (not ranked)"):]
+    assert "stalled-model" in observed and "- stalled: the model never replied on 3 tasks" in observed
+    assert text.index("current-model") < text.index("## Observations (not ranked)")
+
+
 def test_an_older_ranking_stays_on_the_board_as_history(tmp_path: Path) -> None:
     # #41: the owner keeps the previous version's ranking; its Scores use that version's formula.
     results = tmp_path / "results"
