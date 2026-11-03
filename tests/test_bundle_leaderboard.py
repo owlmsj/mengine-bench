@@ -185,6 +185,22 @@ def test_leaderboard_ranks_the_current_major_minor_only(tmp_path: Path) -> None:
     assert board.ranked == 2 and board.history == 1 and board.unranked == []
 
 
+def test_2_0_runs_stay_ranked_in_2_1_and_are_marked_139(tmp_path: Path) -> None:
+    # #139: 2.1 only shortened the time limits; the owner kept the 2.0 runs in the active ranking.
+    results = tmp_path / "results"
+    _write_result(results, "v20", 90.0, model="v20-model", bench_version="2.0.0")
+    _write_result(results, "v21", 80.0, model="v21-model", bench_version="2.1.0")
+    _write_result(results, "v17", 99.0, model="v17-model", bench_version="1.7.3", task_ids=[TASK])
+    board = leaderboard.build_leaderboard(results, tmp_path)
+    assert board.ranked == 2
+    text = board.markdown
+    assert "Bench 2.0 runs stay in this ranking (#139)" in text
+    assert text.index("v20-model") < text.index("v21-model")
+    assert "[run](results/v20/summary.md) (bench 2.0) |" in text
+    assert "[run](results/v21/summary.md) |" in text
+    assert "## Bench 2.0 (history)" not in text
+
+
 def test_an_older_ranking_stays_on_the_board_as_history(tmp_path: Path) -> None:
     # #41: the owner keeps the previous version's ranking; its Scores use that version's formula.
     results = tmp_path / "results"

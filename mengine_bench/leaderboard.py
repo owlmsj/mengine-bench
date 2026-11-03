@@ -32,6 +32,10 @@ TASKS_CHANGED_IN_2_0 = frozenset({"lc-changelog", "vis-chart", "ir-studio-wiki",
                                   "cfg-source-drift", "git-merge-conflict", "ts-plugin-bug", "sec-leak-fix", "infra-gpu-fit",
                                   "hw-stutter-tuning", "doc-lab-pdf", "web-plan-ranking"})
 TASKS_THAT_CAME_AND_WENT = TASKS_CHANGED_SINCE_1_5 | TASKS_CHANGED_IN_2_0
+# #139: the owner kept the 2.0 runs ranked in 2.1, which only shortened the time limits (#137); they cost real runs.
+RANKED_WITH_CURRENT: dict[str, frozenset[str]] = {"2.1": frozenset({"2.0"})}
+RANKED_WITH_NOTE = ("Bench 2.0 runs stay in this ranking (#139): 2.1 only shortened the time limits (#137), so a row\n"
+                    "marked 2.0 ran with the longer 2.0 limits (worst case 76 min, against 49.5 min in 2.1).\n")
 COLUMNS = ("#", "Score", "Correct %", "Solved", "Judge", "Speed", "Time", "Timeouts", "Cost", "Est. price", "Tokens", "Generated",
            "Turns",
            "Agent", "Model", "Effort",
@@ -80,22 +84,28 @@ def major_minor(version: object) -> str:
     return ".".join(str(version).split(".")[:2])
 
 
+def ranked_versions() -> frozenset[str]:
+    """The bench major.minor versions ranked together: the current one and any the owner kept with it (#139)."""
+    current = major_minor(__version__)
+    return frozenset({current}) | RANKED_WITH_CURRENT.get(current, frozenset())
+
+
 def is_complete_run(result: dict[str, object]) -> bool:
     """True when the run holds every catalog task of its own bench version exactly once."""
     tasks = result["tasks"]
     assert isinstance(tasks, list)
     ids = [str(task["id"]) for task in tasks]
     expected = {task.id for task in catalog.all_tasks()}
-    if major_minor(result.get("bench_version")) != major_minor(__version__):
+    if major_minor(result.get("bench_version")) not in ranked_versions():
         return len(ids) == len(set(ids)) and set(ids) - TASKS_THAT_CAME_AND_WENT == expected - TASKS_THAT_CAME_AND_WENT
     return len(ids) == len(set(ids)) and set(ids) == expected
 
 
 def unranked_reason(result: dict[str, object]) -> str | None:
     """Why a run is not ranked, or None when it is."""
-    current = major_minor(__version__)
-    if major_minor(result.get("bench_version")) != current:
-        return f"older bench {result.get('bench_version')}; only bench {current}.x runs are ranked"
+    if major_minor(result.get("bench_version")) not in ranked_versions():
+        ranked = " and ".join(f"{version}.x" for version in sorted(ranked_versions(), key=_version_key))
+        return f"older bench {result.get('bench_version')}; only bench {ranked} runs are ranked"
     if not is_complete_run(result):
         return "incomplete: not exactly every catalog task once (a --tasks run, or a crash before the bundle)"
     judge = result.get("judge")
@@ -112,7 +122,7 @@ def _history_version(result: dict[str, object]) -> str | None:
     """The older bench major.minor of a complete run the official judge model voted on, else None."""
     version = major_minor(result.get("bench_version"))
     judge = result.get("judge")
-    if version == major_minor(__version__) or not is_complete_run(result) or not isinstance(judge, dict):
+    if version in ranked_versions() or not is_complete_run(result) or not isinstance(judge, dict):
         return None
     official = (judge.get("agent"), judge.get("model"), judge.get("effort")) == ("claude", OFFICIAL_JUDGE_MODEL,
                                                                                  OFFICIAL_JUDGE_EFFORT)
@@ -155,8 +165,14 @@ def _row(rank: int, entry: RankedBundle) -> str:
              count_text(stats.get("generated_tokens")), _fmt(stats.get("model_turns")),
              f"{agent['name']} {agent.get('version') or ''}".strip(), str(agent["model"]),
              _fmt(agent.get("effort")), hardware_short_text(row.get("environment")), _config_cell(row.get("config")),
-             _fmt(row.get("submitter")), str(row.get("date")), f"[run]({entry.summary_link})"]
+             _fmt(row.get("submitter")), str(row.get("date")), _run_cell(entry)]
     return "| " + " | ".join(cell.replace("|", "/") for cell in cells) + " |"
+
+
+def _run_cell(entry: RankedBundle) -> str:
+    version = major_minor(entry.result.get("bench_version"))
+    link = f"[run]({entry.summary_link})"
+    return link if version == major_minor(__version__) else f"{link} (bench {version})"
 
 
 def _table(rows: Iterable[RankedBundle]) -> str:
@@ -195,7 +211,8 @@ def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
         else:
             ranked.append(entry)
     ranked.sort(key=_by_score)
-    sections = [LEADERBOARD_HEADER, _table(ranked) if ranked else "No results yet.\n",
+    note = [RANKED_WITH_NOTE] if RANKED_WITH_CURRENT.get(major_minor(__version__)) else []
+    sections = [LEADERBOARD_HEADER, *note, _table(ranked) if ranked else "No results yet.\n",
                 *tie_note([entry.result for entry in ranked])]
     for version in sorted(history, key=_version_key, reverse=True):
         sections.append(f"## Bench {version} (history)\n\n" + _table(sorted(history[version], key=_by_score)))
