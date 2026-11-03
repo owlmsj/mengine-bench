@@ -1,0 +1,52 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "[goal] Find the cause of the hitches and the setting that fixes them. Write `./result.json`.\n\n[action] I computed the metrics from `capture/presentmon.csv`. I lined the frame times up against `capture/sensors.csv` and `settings.json`. `result.json` is written and the work is finished.\n\n[result]\n- **Metrics (measured):** avg_fps 137.29 (8238 frames, mean 7.284 ms). low_1pct_fps 45.35 (p99 frame time 22.05 ms).\n- **Cause:**\n  - Every 4 s, at t=2, 6, 10, … 58 s (15 times), exactly 12 consecutive frames take about 22 ms instead of about 7 ms. No other seconds have frames over 15 ms.\n  - Those seconds are the same ones where the sensor log shows `gpu_pcie_link_state` = L1, which is the PCIe low-power state. All other seconds show L0.\n  - The rig's BIOS has `pcie_aspm_rp1_gpu` = L1, so the GPU link is allowed to drop into that state.\n- **Fix:** change `pcie_aspm_rp1_gpu` from L1 to disabled. This leaves the link at Gen5 x4, and XMP, PBO and the core ratio are untouched, so both owner constraints hold.\n- **Ruled out:**\n  - **Defender:** its scan at 43–45 s raised DPC latency and CPU use, but frames in those seconds were normal (143–144 per second, none over 15 ms).\n  - **Disk:** disk spikes at 13, 27 and 52 s coincide with no slow frames.\n  - **CPU and GPU clocks:** both stay steady through the capture.\n- **Not tested:** I can't run the fix, so the post-fix FPS is not measured. I expect the 1% low to rise close to the average, but that is an inference.\n\n[next] The owner sets `pcie_aspm_rp1_gpu` to disabled in the BIOS and re-captures. The 4 s hitches should be gone and the sensor log should show L0 throughout."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\"avg_fps\":137.29,\"low_1pct_fps\":45.35,\"cause\":\"PCIe ASPM L1 on the GPU root port (BIOS pcie_aspm_rp1_gpu=L1): every 4 s (t=2,6,10,...,58 s) the GPU link drops to L1 (sensors gpu_pcie_link_state) and each time 12 consecutive frames take ~22 ms instead of ~7 ms. Not Defender (its scan at 43-45 s did not touch frame times), not disk, not CPU, not clocks.\",\n\"changes\":[{\"setting\":\"pcie_aspm_rp1_gpu\",\"from\":\"L1\",\"to\":\"disabled\"}]}\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ cd <WORKSPACE>; ls -la; head -c 1500 *; wc -l *\n$ cd <WORKSPACE>; ls -la capture; tail -n +60 settings.json | tr -d ' \\n'; for f in capture/*; do echo; echo $f; head -3 \"$f\"; wc -l \"$f\"; done\n$ cd <WORKSPACE>/capture; cat sensors.csv | cut -c1-90; python -I -c \"\nimport csv\nr=[x for x in csv.DictReader(open('presentmon.csv'))]\nm=sorted(float(x['MsBetweenPresents']) for x in r)\nn=len(m);print(n,sum(m)/n,1000/(sum(m)/n),m[int(.99\n$ cd <WORKSPACE>/capture; python -I -c \"\nimport csv,collections\nr=list(csv.DictReader(open('presentmon.csv')))\nc=collections.Counter();t=collections.Counter()\nfor x in r:\n  s=int(float(x['TimeInSeconds']));c[s]+=1\n  if float(x['MsBetweenP\n$ cd <WORKSPACE>; cat > result.json <<'E'\n{\"avg_fps\":137.29,\"low_1pct_fps\":45.35,\"cause\":\"PCIe ASPM L1 on the GPU root port (BIOS pcie_aspm_rp1_gpu=L1): every 4 s (t=2,6,10,...,58 s) the GPU link drops to L1 (sensors gpu_pcie_link_state) \n\nStream tail:\nms\":35834,\"stop_reason\":\"end_turn\",\"session_id\":\"5caf65ef-7c02-4d84-a04a-cfac78b2e54d\",\"total_cost_usd\":0.11640420000000001,\"usage\":{\"input_tokens\":12,\"cache_creation_input_tokens\":18335,\"cache_read_input_tokens\":203602,\"output_tokens\":2268,\"output_tokens_details\":{\"thinking_tokens\":316},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":18335,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":698,\"cache_read_input_tokens\":40037,\"cache_creation_input_tokens\":495,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":495},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-sonnet-5-5\":{\"inputTokens\":12,\"outputTokens\":2268,\"cacheReadInputTokens\":203602,\"cacheCreationInputTokens\":18335,\"webSearchRequests\":0,\"costUSD\":0.11640420000000001,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":316,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":18335,\"canonicalModel\":\"claude-sonnet-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":6,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"[goal] Find the cause of the hitches and the setting that fixes them. Write `./result.json`.\\n\\n[action] I computed the metrics from `capture/presentmon.csv`. I lined the frame times up against `capture/sensors.csv` and `settings.json`. `result.json` is written and the work is finished.\\n\\n[result]\\n- **Metrics (measured):** avg_fps 137.29 (8238 frames, mean 7.284 ms). low_1pct_fps 45.35 (p99 frame time 22.05 ms).\\n- **Cause:**\\n  - Every 4 s, at t=2, 6, 10, … 58 s (15 times), exactly 12 consecutive frames take about 22 ms instead of about 7 ms. No other seconds have frames over 15 ms.\\n  - Those seconds are the same ones where the sensor log shows `gpu_pcie_link_state` = L1, which is the PCIe low-power state. All other seconds show L0.\\n  - The rig's BIOS has `pcie_aspm_rp1_gpu` = L1, so the GPU link is allowed to drop into that state.\\n- **Fix:** change `pcie_aspm_rp1_gpu` from L1 to disabled. This leaves the link at Gen5 x4, and XMP, PBO and the core ratio are untouched, so both owner constraints hold.\\n- **Ruled out:**\\n  - **Defender:** its scan at 43–45 s raised DPC latency and CPU use, but frames in those seconds were normal (143–144 per second, none over 15 ms).\\n  - **Disk:** disk spikes at 13, 27 and 52 s coincide with no slow frames.\\n  - **CPU and GPU clocks:** both stay steady through the capture.\\n- **Not tested:** I can't run the fix, so the post-fix FPS is not measured. I expect the 1% low to rise close to the average, but that is an inference.\\n\\n[next] The owner sets `pcie_aspm_rp1_gpu` to disabled in the BIOS and re-captures. The 4 s hitches should be gone and the sensor log should show L0 throughout.\",\"ttft_ms\":2874,\"type\":\"result\",\"duration_ms\":39049,\"uuid\":\"944de4ee-7a37-45f3-a96a-970454e2381c\",\"ttft_stream_ms\":2215,\"time_to_request_ms\":106,\"first_content_frame_ms\":2215,\"queued_turn_count\":0,\"result_index\":0,\"model_usage_since_last_result\":{\"claude-sonnet-5-5\":{\"inputTokens\":12,\"outputTokens\":2268,\"cacheReadInputTokens\":203602,\"cacheCreationInputTokens\":18335,\"webSearchRequests\":0,\"costUSD\":0.11640420000000001,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":316,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":18335,\"canonicalModel\":\"claude-sonnet-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}}}\n",
+ "checks": [
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 5,
+  "tool_errors": 1,
+  "shell_commands": 5,
+  "shell_failures": 1,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2268,
+  "reasoning_tokens": 316
+ },
+ "deliverables": [],
+ "render": null
+}
