@@ -13,6 +13,7 @@ import io
 import json
 import math
 import random
+import re
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from datetime import date
@@ -105,9 +106,16 @@ def _ab_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result.add("completion rates", near_share(got.get("completion_rate_a"), float(exp["rate_a"]), 2e-3)
                and near_share(got.get("completion_rate_b"), float(exp["rate_b"]), 2e-3),
                saw({key: got.get(key) for key in ("completion_rate_a", "completion_rate_b")}, (exp["rate_a"], exp["rate_b"])))
-    # #98: which valid test is the agent's call (z, chi-squared, Fisher); all put this gap well under 5%.
+    # #164: absolute tolerance 0.00015 covers rounding and equivalent two-sided
+    # z/chi-square/Fisher tests (#98), without accepting an invented significant p.
     p_value = number(got.get("p_value"))
-    result.add("the gain is significant", p_value is not None and 0 <= p_value < 0.05, saw(got.get("p_value"), f"about {exp['p_value']:.4f}"))
+    # #164: preserve the existing censored-reporting route ("<0.001"); it must
+    # contain the gold and convey at least this precision, not just significance.
+    bound = re.fullmatch(r"\s*(?:p\s*)?<\s*(0[.,]\d+)\s*", str(got.get("p_value")), re.IGNORECASE)
+    valid_bound = bound is not None and exp["p_value"] < float(bound[1].replace(",", ".")) <= 0.001
+    result.add("the gain is significant", p_value is not None and 0 <= p_value < 0.05
+               and (valid_bound if bound else abs(p_value - exp["p_value"]) <= 0.00015),
+               saw(got.get("p_value"), f"{exp['p_value']:.9f} +/- 0.00015 (pooled two-sided z-test or equivalent), or a containing upper bound <= 0.001"))
     result.add("ship decision", is_yes(got.get("ship_b")), saw(got.get("ship_b"), True))
     return result
 
