@@ -32,7 +32,9 @@ def test_both_evals_are_in_the_catalog_and_the_old_ones_left() -> None:
     ids = {task.id for task in catalog.all_tasks()}
     assert {"ue-packaged-bug", "rs-lock-bug"} <= ids
     assert not {"gd-astar-doors", "gd-ecs-collision-bug"} & ids
-    assert len(ids) == 23  # #124: bench 2.0 had 20; #151: 2.2 added three
+    # #124: bench 2.0 had 20; #151: 2.2 added three; #153: 2.3 adds TASKS_ADDED_IN_2_3.
+    from mengine_bench.leaderboard import TASKS_ADDED_IN_2_2, TASKS_ADDED_IN_2_3
+    assert len(ids) == 20 + len(TASKS_ADDED_IN_2_2) + len(TASKS_ADDED_IN_2_3)
 
 
 @pytest.mark.parametrize("task_id", ["ue-packaged-bug", "rs-lock-bug"])
