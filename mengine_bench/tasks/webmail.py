@@ -147,12 +147,14 @@ def _webmail_states_total(text: str) -> bool:
             before, after = clause[:match.start()], clause[match.end():]
             prefix = re.split(r",|\band\b|\bincluding\b", before, flags=re.I)[-1]
             # #164: negation scopes over the amount's noun phrase, not just its currency.
-            noun_phrase = r"(?:(?:the|an?|earlier|previous|invoice|total|amount|of|previously|quoted|as)\s+)*"
-            denied = re.search(r"\b(?:not|never|isn't|isn\u2019t|wasn't|wasn\u2019t)\s*" + noun_phrase
+            noun_phrase = r"(?:(?:the|an?|earlier|previous|invoice|total|amount|of|previously|quoted|as|confirm(?:ed)?)\s+)*"
+            denied = re.search(r"\b(?:not|never|cannot|can't|can\u2019t|isn't|isn\u2019t|wasn't|wasn\u2019t)\s*" + noun_phrase
                                + r"(?:EUR\s*|\u20ac\s*)?$", prefix, re.I)
             denied_after = re.match(r"\s*(?:EUR|\u20ac)?\s*(?:is|was)\s+not\b", after, re.I)
-            historical = re.search(r"\b(?:earlier|previous(?:ly)?|quoted|superseded)\b",
-                                   re.split(r"\bconfirm(?:ed)?\b", prefix, flags=re.I)[-1], re.I)
+            confirmation = re.split(r"\bconfirm(?:ed)?\b", prefix, flags=re.I)
+            # #164: "confirm the quoted total" reaffirms it; an unconfirmed quotation remains historical.
+            historical_words = r"earlier|previous(?:ly)?|superseded" + (r"|quoted" if len(confirmation) == 1 else "")
+            historical = re.search(r"\b(?:" + historical_words + r")\b", confirmation[-1], re.I)
             superseded = re.match(r"\s*(?:EUR|\u20ac)?\s*(?:is|was|has been)\s+(?:superseded|replaced|incorrect|wrong)\b", after, re.I)
             if denied or denied_after or historical or superseded:
                 continue

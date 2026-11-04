@@ -120,6 +120,8 @@ def test_a_renamed_copy_in_a_subfolder_and_european_writing_pass(tmp_path: Path)
     '> We confirm EUR 1,205.77.\nWe confirm EUR 996.50.',
     "The invoice total is not the amount of EUR 1,205.77.",
     "Earlier we quoted the total EUR 1,205.77.",
+    "We do not confirm the quoted total of EUR 1,205.77.",
+    "We cannot confirm the quoted total of EUR 1,205.77.",
     '> We confirm EUR 1,205.77.',
 ])
 def test_a_denied_or_contradictory_total_fails(tmp_path: Path, body: str) -> None:
@@ -137,6 +139,7 @@ def test_a_denied_or_contradictory_total_fails(tmp_path: Path, body: str) -> Non
     "Confirmed: EUR 1,205.77.",
     "Not EUR 996.50 but EUR 1,205.77 is the total.",
     "The subtotal is EUR 996.50 and VAT is EUR 209.27. Total: EUR 1,205.77.",
+    "We confirm the quoted total of EUR 1,205.77.",
     "We confirm the total EUR 1205.77, including subtotal EUR 996.50 and VAT EUR 209.27.",
     "We have not paid yet; we confirm the invoice total of EUR 1,205.77.",
     "We confirm invoice LP-2026-0418, total EUR 1,205.77 for 20 prints.",
