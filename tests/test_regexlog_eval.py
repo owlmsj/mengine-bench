@@ -20,11 +20,13 @@ GLUED = "dates glued to letters or digits match nothing"
 UPSTREAM_SHAPE = (r"(?=.*(?:^|[^0-9A-Za-z])(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)"
                   r"(?=$|[^0-9A-Za-z])).*(?:^|[^0-9A-Za-z])(\d{4}-(?:(?:01|03|05|07|08|10|12)-(?:0[1-9]|[12]\d|3[01])"
                   r"|(?:04|06|09|11)-(?:0[1-9]|[12]\d|30)|02-(?:0[1-9]|1\d|2[0-9])))(?=$|[^0-9A-Za-z])")
-# The same construction kept to one line: another valid route.
-PER_LINE_SHAPE = "^" + UPSTREAM_SHAPE.replace("[^0-9A-Za-z]", r"[^0-9A-Za-z\n]")
+# The same construction kept to one line, with upstream's octet 1?\d?\d (it takes 01) made strict: another valid route.
+PER_LINE_SHAPE = "^" + UPSTREAM_SHAPE.replace("[^0-9A-Za-z]", r"[^0-9A-Za-z\n]").replace(r"1?\d?\d", r"1\d\d|[1-9]?\d")
 FIRST_DATE = RL_REFERENCE_REGEX.replace(r")[^\n]*(?<!", r")[^\n]*?(?<!", 1)
 ANY_DATE = RL_REFERENCE_REGEX.replace(r"(\d{4}-(?:", r"(\d{4}-(?:\d\d-\d\d|", 1)
 LOOSE_ADDRESS = RL_REFERENCE_REGEX.replace(_RL_ADDRESS, r"\d+\.\d+\.\d+\.\d+")
+# #164: the reference with octets that take a leading zero; the brief rules 01.2.3.4 out.
+LEADING_ZERO = RL_REFERENCE_REGEX.replace(r"1\d\d|[1-9]?\d)", r"1\d\d|[01]?\d?\d)")
 WORD_EDGES = r"^(?=[^\n]*\b(?:\d{1,3}\.){3}\d{1,3}\b)[^\n]*\b(\d{4}-\d\d-\d\d)\b"
 
 
@@ -69,6 +71,7 @@ def test_the_upstream_regex_leaks_into_the_next_line(tmp_path: Path) -> None:
     (FIRST_DATE, [LAST]),
     (ANY_DATE, [BAD_DATE]),
     (LOOSE_ADDRESS, [NO_ADDRESS]),
+    (LEADING_ZERO, [NO_ADDRESS]),
     (WORD_EDGES, [NO_ADDRESS, BAD_DATE]),
     (r"(?!)", [LAST, NO_ADDRESS, BAD_DATE, GLUED]),
     (r"(\d{4}-\d\d-\d\d", [LAST, NO_ADDRESS, BAD_DATE, GLUED]),

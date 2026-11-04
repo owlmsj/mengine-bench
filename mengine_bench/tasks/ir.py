@@ -127,7 +127,9 @@ def _logs_check(ws: Path, answers: Sequence[str]) -> CheckResult:
 # #26, #28: every storage noun and every way of saying "full" name the same cause.
 # #59: "space" alone also fits "the disk had free space", which rules the cause out.
 _STORAGE = r"(disk|disco|volume|partition|mount|file\s?system|storage|/data)"
-_FULL = r"(full|cheio|fill\w*|capacity|exhaust\w*|100(\.0+)?\s?%|sem espa\w*)"
+# #164: bare "capacity" also fits "the disk had sufficient capacity"; only a capacity that was reached counts.
+_CAPACITY_REACHED = r"\b(reach\w*|hit|at|over|exceed\w*|out of)\s+(\w+\s+)?capacity|capacity\s+(was\s+)?(reached|hit|exceeded)"
+_FULL = rf"(full|cheio|fill\w*|{_CAPACITY_REACHED}|exhaust\w*|100(\.0+)?\s?%|sem espa\w*)"
 DISK_FULL_CAUSE = (rf"{_STORAGE}\b.{{0,40}}{_FULL}|\b{_FULL}.{{0,40}}{_STORAGE}"
                    r"|out of (disk |storage )?space|ran out of (disk|space|storage)|no space left"
                    r"|(not enough|insufficient|without|no) (free |disk )?space|\benospc\b")

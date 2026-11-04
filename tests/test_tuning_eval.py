@@ -61,6 +61,8 @@ def test_the_spikes_line_up_with_the_link_state_and_not_with_the_decoys(tmp_path
     {**GOOD, "cause": ["Active State Power Management on rp1"],
      "changes": [{"setting": "pcie_aspm_rp1_gpu", "from": "L1", "to": "L0"},
                  {"setting": "pcie_aspm_rp0_nvme", "from": "L1", "to": "disabled"}]},
+    # #164: the final value per setting decides, so a plan that tries L0s first and then disables it still fixes.
+    {**GOOD, "changes": [{**FIX, "to": "L0s"}, FIX]},
 ])
 def test_every_valid_answer_passes(tmp_path: Path, payload: dict[str, object]) -> None:
     ws = _workspace(tmp_path)
@@ -79,6 +81,9 @@ def test_every_valid_answer_passes(tmp_path: Path, payload: dict[str, object]) -
     ("changes", [{**FIX, "setting": "pcie_aspm_rp0_nvme"}, {"setting": "power_plan", "from": "Balanced", "to": "High"}],
      "ASPM off on the GPU root port"),
     ("changes", [{**FIX, "to": "L0s"}, {"setting": "game_mode", "from": "on", "to": "off"}], "ASPM off on the GPU root port"),
+    # #164: a later change that turns the same setting back to L1 leaves the cause in place.
+    ("changes", [FIX, {"setting": "pcie_aspm_rp1_gpu", "from": "disabled", "to": "L1"}], "ASPM off on the GPU root port"),
+    ("changes", [FIX, {"setting": "PCIE_ASPM_RP1_GPU", "from": "disabled", "to": "L0s"}], "ASPM off on the GPU root port"),
     ("changes", [FIX, {"setting": "gpu_link_speed", "from": "Gen5", "to": "Gen4"}], "GPU link speed kept"),
     ("changes", [FIX, {"setting": "xmp_profile", "from": "XMP I", "to": "disabled"}], "BIOS overclock kept"),
 ])

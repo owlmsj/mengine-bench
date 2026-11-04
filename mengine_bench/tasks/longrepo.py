@@ -2,7 +2,9 @@
 
 Two layered bugs across two modules (config precedence and profile codec).
 Unit tests pass; the visible integration test fails; fixing one bug reveals
-the next. Payout rounding already follows docs/ECONOMY.md.
+the next. Payout rounding follows docs/ECONOMY.md on whole numbers but float
+math breaks its half-up rule on a fractional multiplier (1300 x 1.15 = 1495
+gives 1490, not 1500): a third, documented cause both audited runs fixed (#164).
 Ported from the private suite with a neutral test profile.
 """
 
@@ -247,6 +249,11 @@ class Hidden(unittest.TestCase):
     def test_half_up_tie_rounds_up(self):
         self.assertEqual(play({"win_base": 1000}, {"ARENA_WIN_BASE": "1425"}, True, 0).credits, 1430)
 
+    # #164: 1300 x 1.15 is exactly 1495, a half; float math gives 1494.99... and rounds it down to 1490.
+    def test_half_up_fractional_multiplier(self):
+        self.assertEqual(play({"win_base": 1000}, {"ARENA_WIN_BASE": "1300", "ARENA_EVENT_MULTIPLIER": "1.15"},
+                              True, 0).credits, 1500)
+
     def test_persisted_name_survives(self):
         p = play(None, {}, True, 1, 10, name="Player One")
         self.assertEqual((p.name, p.credits), ("Player One", 960))
@@ -286,7 +293,7 @@ def _check(ws: Path, answers: Sequence[str]) -> CheckResult:
     untouched = all(_sha(read(ws, rel) or "") == _sha(FILES[rel]) for rel in PROTECTED)
     result.mandatory.append(("existing tests untouched", untouched))
     for scenario in ("config_override_and_persistence", "env_float_wins_over_file", "round_trip_keeps_everything",
-                     "half_up_tie_rounds_up", "persisted_name_survives", "real_environment_when_env_is_none"):
+                     "half_up_tie_rounds_up", "half_up_fractional_multiplier", "persisted_name_survives", "real_environment_when_env_is_none"):
         selection = ("\n\ndef load_tests(loader, tests, pattern):\n"
                      f"    return unittest.TestSuite([Hidden('test_{scenario}')])\n")
         ok, why = run_hidden_tests(ws, HIDDEN + selection)
@@ -295,6 +302,19 @@ def _check(ws: Path, answers: Sequence[str]) -> CheckResult:
     modules = [rel[:-3].replace("/", ".") for rel in PROTECTED if rel.endswith(".py") and "/test_" in rel]
     result.add("existing test suite passes", run_workspace_tests(ws, modules))
     return result
+
+
+REFERENCE_PAYOUT_RETURN = "    return int((raw / 10).quantize(Decimal(1), rounding=ROUND_HALF_UP) * 10)\n"
+# #164: decimal from the config's written values, so 1300 x 1.15 is exactly 1495 and its half rounds up.
+REFERENCE_PAYOUT = '''"""Match payout. Rules live in docs/ECONOMY.md."""
+
+from decimal import ROUND_HALF_UP, Decimal
+
+
+def match_payout(won, kills, cfg):
+    base = cfg["win_base"] if won else cfg["loss_base"]
+    raw = (Decimal(str(base)) + kills * Decimal(str(cfg["kill_bonus"]))) * Decimal(str(cfg["event_multiplier"]))
+''' + REFERENCE_PAYOUT_RETURN
 
 
 def _reference(ws: Path) -> list[str]:
@@ -320,7 +340,8 @@ def _reference(ws: Path) -> list[str]:
         '                   cosmetics=data.get("cosmetics", []))')
     write(ws, "arena_server/config/loader.py", loader)
     write(ws, "arena_server/persistence/codec.py", codec)
-    return ["fixed loader precedence and codec credits"]
+    write(ws, "arena_server/economy/payout.py", REFERENCE_PAYOUT)
+    return ["fixed loader precedence, codec credits and decimal half-up payout"]
 
 
 TASKS = [

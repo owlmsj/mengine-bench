@@ -3,11 +3,13 @@
 The owner's rule is that a generated file is never the place to fix a value: the fix goes into the source and the
 copies are rebuilt from it. The gold runs the original generator on the delivered source, so editing the source and
 running the generator passes, and so does editing the source and patching every copy by hand to the same result.
+The delivered gen.py must also still rebuild those same configs (#164), so a broken generator fails one check.
 """
 
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -111,14 +113,32 @@ def _cfg_generate(source_text: str) -> dict[str, str]:
         root = Path(tmp)
         write(root, CFG_GEN_FILE, CFG_GEN)
         write(root, CFG_SOURCE_FILE, source_text)
-        try:
-            done = subprocess.run([sys.executable, "-I", str(root / CFG_GEN_FILE)], cwd=root, capture_output=True,
-                                  text=True, timeout=CFG_GEN_LIMIT_S, check=False)
-        except subprocess.TimeoutExpired:
-            return {}
-        if done.returncode != 0:
-            return {}
-        return {rel: read(root, rel) or "" for rel in CFG_OUTPUTS}
+        return _cfg_run_generator(root, "-I")
+
+
+def _cfg_generate_delivered(ws: Path) -> dict[str, str]:
+    """The delivered gen.py run on a copy of the delivered project with out/ emptied, or {} when it fails (#164)."""
+    with tempfile.TemporaryDirectory(prefix="bench-cfg-own-", dir=scratch_root()) as tmp:
+        root = Path(tmp) / "project"
+        # A refactor may import sibling modules, so the whole project goes; the outputs do not, so a generator that
+        # writes nothing cannot pass on the delivered copies.
+        shutil.copytree(ws, root, ignore=shutil.ignore_patterns(".git", "__pycache__", ".venv", "node_modules"))
+        for rel in CFG_OUTPUTS:
+            (root / rel).unlink(missing_ok=True)
+        # As the README runs it (`python gen.py`): -I would also hide the script's own folder from its imports.
+        return _cfg_run_generator(root, "-Es")
+
+
+def _cfg_run_generator(root: Path, isolation: str) -> dict[str, str]:
+    try:
+        done = subprocess.run([sys.executable, isolation, str(root / CFG_GEN_FILE)], cwd=root, capture_output=True,
+                              text=True, timeout=CFG_GEN_LIMIT_S, check=False)
+    except subprocess.TimeoutExpired:
+        return {}
+    outputs = {rel: read(root, rel) for rel in CFG_OUTPUTS}
+    if done.returncode != 0 or any(text is None for text in outputs.values()):
+        return {}
+    return {rel: text or "" for rel, text in outputs.items()}
 
 
 def _cfg_parse(rel: str, text: str | None) -> object | None:
@@ -201,6 +221,12 @@ def _cfg_check(ws: Path, answers: Sequence[str]) -> CheckResult:
              if not regenerated or _cfg_parse(rel, read(ws, rel)) != _cfg_parse(rel, regenerated.get(rel))]
     result.add("the delivered configs equal what the source generates", not stale,
                saw(f"{stale} differ from a fresh generation", "every out/ file as gen.py writes it"))
+    # #164: "for good" means the project's own generator still rebuilds out/; any equivalent refactor passes.
+    own = _cfg_generate_delivered(ws) if regenerated else {}
+    differs = [rel for rel in CFG_OUTPUTS if not own or _cfg_parse(rel, own.get(rel)) != _cfg_parse(rel, regenerated.get(rel))]
+    result.add("the delivered generator still writes those configs", not differs,
+               saw(f"{differs} differ or are missing when the delivered {CFG_GEN_FILE} runs",
+                   "every out/ file as the original gen.py writes it from the delivered source"))
     models = _cfg_without_target(_cfg_models_by_name(source))
     expected = _cfg_without_target(_cfg_models_by_name(CFG_SOURCE))
     result.add("the other models and fields are unchanged", models == expected, saw(models, expected))
