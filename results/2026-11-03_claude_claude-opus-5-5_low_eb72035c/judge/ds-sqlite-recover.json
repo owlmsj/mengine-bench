@@ -1,0 +1,52 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [
+  "**[goal]** Get the price rows out of the damaged `prices.db` and save them to `./recovered.json`.\n\n**[action]** The file is 4096 bytes. It has no SQLite header: it starts with byte `0x0d`, which marks a table page holding rows, and that page is intact. I wrote a small parser (`tmp/r.py`) that reads the 10 rows the page lists and decodes each one directly. I assumed the columns are (id, item, price). The empty first column is normal in SQLite: an integer id column stores its value as the row number instead. I kept the rows in row-number order.\n\n**[result]** I found 10 rows and wrote all 10 to `recovered.json`:\ntrail map 0, matchbox 1, tent stake 2.75, lantern 24, rope coil 18, water filter 39.9, sleeping bag 129, camp stove 310, compass 15.5, first aid kit 0.99.\n\nHow I know it's right:\n- The page itself says it holds 10 rows, and the parser decoded all 10 with no errors.\n- The row numbers run 1 to 10 with no gaps.\n- Every row has the same three-column layout.\n- The prices 0 and 1 are not filler. The file stores them as SQLite's built-in constants for 0 and 1, so they are really in the data.\n- Nothing was guessed or made up: every value was read from the file's bytes.\n\n**[next]** I did not search the page's freed space for deleted rows, so any older deleted rows are not in the output. I opened no browser tabs or apps."
+ ],
+ "diff": "A recovered.json\nA tmp/r.py\n\n--- recovered.json ---\n[\r\n {\r\n  \"item\": \"trail map\",\r\n  \"price\": 0\r\n },\r\n {\r\n  \"item\": \"matchbox\",\r\n  \"price\": 1\r\n },\r\n {\r\n  \"item\": \"tent stake\",\r\n  \"price\": 2.75\r\n },\r\n {\r\n  \"item\": \"lantern\",\r\n  \"price\": 24\r\n },\r\n {\r\n  \"item\": \"rope coil\",\r\n  \"price\": 18\r\n },\r\n {\r\n  \"item\": \"water filter\",\r\n  \"price\": 39.9\r\n },\r\n {\r\n  \"item\": \"sleeping bag\",\r\n  \"price\": 129\r\n },\r\n {\r\n  \"item\": \"camp stove\",\r\n  \"price\": 310\r\n },\r\n {\r\n  \"item\": \"compass\",\r\n  \"price\": 15.5\r\n },\r\n {\r\n  \"item\": \"first aid kit\",\r\n  \"price\": 0.99\r\n }\r\n]\n\n--- tmp/r.py ---\nimport json,sys\nd=open('prices.db','rb').read()\ndef varint(b,i):\n    v=0\n    for k in range(9):\n        c=b[i+k]\n        if k==8: return (v<<8)|c,i+9\n        v=(v<<7)|(c&0x7f)\n        if c<0x80: return v,i+k+1\nn=int.from_bytes(d[3:5],'big');rows=[]\nfor j in range(n):\n    p=int.from_bytes(d[8+2*j:10+2*j],'big')\n    ln,i=varint(d,p);rid,i=varint(d,i);h0=i;hl,i=varint(d,i);ts=[]\n    while i<h0+hl: t,i=varint(d,i);ts.append(t)\n    vals=[];q=h0+hl\n    for t in ts:\n        if t==0: vals.append(None)\n        elif 1<=t<=6: s=[0,1,2,3,4,6,8][t];vals.append(int.from_bytes(d[q:q+s],'big',signed=True));q+=s\n        elif t==7: import struct;vals.append(struct.unpack('>d',d[q:q+8])[0]);q+=8\n        elif t in(8,9): vals.append(t-8)\n        elif t>=13 and t%2: s=(t-13)//2;vals.append(d[q:q+s].decode());q+=s\n    print(rid,vals);rows.append((rid,vals))\nrows.sort()\njson.dump([{\"item\":v[-2],\"price\":v[-1]} for r,v in rows],open('recovered.json','w'),ensure_ascii=False,indent=1)\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd \\\"$PWD\\\"; ls -la; python -c \\\"\\nd=open('prices.db','rb').read();print(len(d),d[:16],d[16:20].hex(),d[28:32].hex())\\\"\" ok -> \"total 5\\ndrwxr-xr-x 1 <USER> 197121    0 Nov  3 23:54 .\\ndrwxr-xr-x 1 <USER> 197121    0 Nov  3 23:54 ..\\n-rw-r--r-- 1 <USER> 197121  394 Nov  3 23:54 AGENTS.md\\n-rw-r--r-- 1 <USER> 197121 4096 Nov  3 23:54 prices.db\\n4096 b'\\\\r\\\\x00\\\\x00\\\\x00\\\\n\\\\x0f=\\\\x00\\\\x0f\\\\xf1\\\\x0f\\\\xe3\\\\x0f\\\\xcb\\\\x0f\\\\xbd' 0fad0f93 00000000\\nShell cwd was reset to <HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-ex70b24[... 11 chars cut by the benchmark]\"\n[step 1] shell \"cat AGENTS.md; mkdir -p tmp; cat > tmp/r.py <<'E'\\nimport json,sys\\nd=open('prices.db','rb').read()\\ndef varint(b,i):\\n    v=0\\n    for k in range(9):\\n        c=b[i+k]\\n        if k==8: return (v<<8)|c,i+9\\n        v=(v<<7)|(c&0x7f)\\n        if c<0x80: return v,i+k+1\\nn=int.from_bytes(d[3:5],'big');rows=[]\\nfor j in range(n):\\n    p=int.from_bytes(d[8+2*j:10+2*j],'big')\\n    ln,i=varint(d,p);rid,i=varint(d,i);h0=i;hl,i=varint(d,i);ts=[]\\n    while i<h0+hl: t,i=varint(d,i);ts.append(t)\\n    vals=[];q=h0+hl\\n    for t in ts:\\n        if t==0: vals.append(None)\\n        elif 1<=t<=6: s=[0,1,2,3,4,6,8][t];vals.append(int.from_bytes(d[q:q+s],'big',signed=True));q+=s\\n        elif t==7: import struct;vals.append(struct.unpack('>d',d[q:q+8])[0]);q+=8\\n        elif t in(8,9): vals.append(t-8)\\n        elif t>=13 and t%2: s=(t-13)//2;vals.append(d[q:q+s].decode());q+=s\\n    print(rid,vals);rows.append((rid,vals))\\nrows.sort()\\njson.dump([{\\\"item\\\":v[-2],\\\"price\\\":v[-1]} for r,v in rows],open('recovered.json','w'),ensure_ascii=False,indent=1)\\nE\\npython -I tmp/r.py; cat recovered.json\" ok -> \"Use any skill, tool or MCP server you have. Write local files only inside this directory.\\nYou may read installed tools and skills outside it, but not other task workspaces, runs or benchmark answers.\\nOther programs run on this machine: stop only the processes you started, by their id, never by name.\\nDo not print credentials, environment variables or personal data: this session is published.\\n1 [Non[... 877 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   true
+  ],
+  [
+   "rows with fractional prices recovered",
+   true
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   true
+  ],
+  [
+   "no row that is not in the table",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 3,
+  "tool_calls": 2,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1379,
+  "reasoning_tokens": 122
+ },
+ "deliverables": [],
+ "render": null
+}

@@ -60,6 +60,10 @@ RANKED_WITH_NOTE = ("Bench 2.0 to 2.4 runs stay in this ranking (#139, #151, #15
                     "docs/SCORING.md).\n")
 # #146: runs the owner keeps on the board without ranking them, by bundle name, with why.
 OBSERVED_RUNS: dict[str, str] = {
+    # Owner (2026-11-04): replaced by a rerun of the same setup on bench 2.5.2.
+    "2026-11-03_claude_claude-opus-5-5_low_0756f921": (
+        "Opus 5.5 low on bench 2.4.0, replaced in the ranking by the same setup rerun on 2.5.2 "
+        "(2026-11-03_claude_claude-opus-5-5_low_eb72035c), graded with the 2.5 checks."),
     # #164: the validation run of the 2.5 checks, kept on the board with its reason.
     "2026-11-03_claude_claude-opus-5-5_low_01327b0c": (
         "Opus 5.5 low on a 2.5.0 pre-release commit (529a84d), before the final fetch-evidence rules and four "

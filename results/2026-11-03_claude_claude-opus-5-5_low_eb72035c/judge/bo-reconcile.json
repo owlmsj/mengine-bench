@@ -1,0 +1,48 @@
+{
+ "task_id": "bo-reconcile",
+ "prompts": [
+  "Finance has to chase June's receivables. The invoices, the bank statement and our reconciliation notes are in {WS}/backoffice. What do we still have to collect or fix? Record it in {WS}/result.json: unpaid and duplicated (invoice ids) and mismatched (id, invoiced, paid)."
+ ],
+ "answers": [
+  "**[goal]** Find what is still to collect or fix on June receivables and write it to `./result.json`.\n\n**[action]** I wrote a script (`tmp/r.py`) that matches each bank line to an invoice by the id in the memo. Memos use three formats: `inv1007`, `INV-1015` and `invoice 1023`. Lines with no invoice id are skipped: the fee, the CDB interest and the \"PIX received unidentified 1099\" line.\n\n**[result]** `result.json`:\n- **Unpaid:** INV-1008, INV-1030, INV-1033\n- **Duplicated:** INV-1015 (paid twice, 1904.29 on 06-05 and again on 06-17 with the memo \"resend\")\n- **Mismatched:**\n  - INV-1021: invoiced 21320.36, paid 21070.36 (250.00 short)\n  - INV-1036: invoiced 8619.16, paid 7757.24 (861.92 short)\n\n**How I know it's right:** every invoice id in the bank memos exists in `invoices.csv`. All other invoices were paid once, for exactly the invoiced amount. The three categories don't overlap, as the README requires.\n\n**Assumptions:**\n- I treated \"unidentified 1099\" as unidentifiable, as the README says, and did not read it as INV-1099. No INV-1099 exists anyway.\n- Amounts are compared exactly, to the cent.\n\n**[next]**\n- Collect the three unpaid invoices and the two shortfalls.\n- Refund or credit the second INV-1015 payment.\n- Find out who sent the unidentified 1500.00 PIX.\n\nI opened no browser tabs or apps."
+ ],
+ "diff": "A result.json\nA tmp/r.py\n\n--- result.json ---\n{\r\n  \"unpaid\": [\r\n    \"INV-1008\",\r\n    \"INV-1030\",\r\n    \"INV-1033\"\r\n  ],\r\n  \"duplicated\": [\r\n    \"INV-1015\"\r\n  ],\r\n  \"mismatched\": [\r\n    {\r\n      \"id\": \"INV-1021\",\r\n      \"invoiced\": 21320.36,\r\n      \"paid\": 21070.36\r\n    },\r\n    {\r\n      \"id\": \"INV-1036\",\r\n      \"invoiced\": 8619.16,\r\n      \"paid\": 7757.24\r\n    }\r\n  ]\r\n}\n\n--- tmp/r.py ---\nimport csv,re,json,sys\ninv={r['id']:r['amount'] for r in csv.DictReader(open('backoffice/invoices.csv',encoding='utf-8'))}\npays={}\nfor r in csv.DictReader(open('backoffice/bank_statement_june.csv',encoding='utf-8')):\n    m=re.search(r'(?:inv-?|invoice )(\\d{4})',r['memo'],re.I)\n    if not m: continue\n    pays.setdefault('INV-'+m[1],[]).append(r['amount'])\nout={'unpaid':[i for i in inv if i not in pays],'duplicated':[i for i in inv if len(pays.get(i,[]))>1],\n 'mismatched':[{'id':i,'invoiced':float(inv[i]),'paid':float(pays[i][0])} for i in inv if len(pays.get(i,[]))==1 and pays[i][0]!=inv[i]]}\nprint([k for k in pays if k not in inv])\njson.dump(out,open('result.json','w'),indent=2);print(json.dumps(out))\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd backoffice; ls -la; for f in *; do echo \\\"== $f\\\"; head -c 3000 \\\"$f\\\"; done\" ok -> \"total 9\\ndrwxr-xr-x 1 <USER> 197121    0 Nov  3 23:47 .\\ndrwxr-xr-x 1 <USER> 197121    0 Nov  3 23:47 ..\\n-rw-r--r-- 1 <USER> 197121  396 Nov  3 23:47 README.md\\n-rw-r--r-- 1 <USER> 197121 1772 Nov  3 23:47 bank_statement_june.csv\\n-rw-r--r-- 1 <USER> 197121 1667 Nov  3 23:47 invoices.csv\\n== README.md\\n# How we reconcile receivables\\n\\n- The bank memo cites the invoice in different for[... 3885 chars cut by the benchmark]\"\n[step 1] shell \"mkdir -p tmp; cat > tmp/r.py <<'E'\\nimport csv,re,json,sys\\ninv={r['id']:r['amount'] for r in csv.DictReader(open('backoffice/invoices.csv',encoding='utf-8'))}\\npays={}\\nfor r in csv.DictReader(open('backoffice/bank_statement_june.csv',encoding='utf-8')):\\n    m=re.search(r'(?:inv-?|invoice )(\\\\d{4})',r['memo'],re.I)\\n    if not m: continue\\n    pays.setdefault('INV-'+m[1],[]).append(r['amount'])\\nout={'unpaid':[i for i in inv if i not in pays],'duplicated':[i for i in inv if len(pays.get(i,[]))>1],\\n 'mismatched':[{'id':i,'invoiced':float(inv[i]),'paid':float(pays[i][0])} for i in inv if len(pays.get(i,[]))==1 and pays[i][0]!=inv[i]]}\\nprint([k for k in pays if k not in inv])\\njson.dump(out,open('result.json','w'),indent=2);print(json.dumps(out))\\nE\\npython -I tmp/r.py\" ok -> \"[]\\r\\n{\\\"unpaid\\\": [\\\"INV-1008\\\", \\\"INV-1030\\\", \\\"INV-1033\\\"], \\\"duplicated\\\": [\\\"INV-1015\\\"], \\\"mismatched\\\": [{\\\"id\\\": \\\"INV-1021\\\", \\\"invoiced\\\": 21320.36, \\\"paid\\\": 21070.36}, {\\\"id\\\": \\\"INV-1036\\\", \\\"invoiced\\\": 8619.16, \\\"paid\\\": 7757.24}]}\\nShell cwd was reset to <WORKSPACE>\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "unpaid invoices",
+   true
+  ],
+  [
+   "duplicated payments",
+   true
+  ],
+  [
+   "mismatched amounts",
+   true
+  ],
+  [
+   "invoiced vs paid on mismatches",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 3,
+  "tool_calls": 2,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1120,
+  "reasoning_tokens": 33
+ },
+ "deliverables": [],
+ "render": null
+}

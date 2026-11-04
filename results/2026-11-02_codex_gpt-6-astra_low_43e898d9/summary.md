@@ -2,35 +2,35 @@
 
 | Score | Correct % | Solved | Judge | Speed | Time | Cost | Tokens |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **59.0** | 81.0 | 14/20 | 69.2 | 0.0 | 33 min 08 s | n/a | 2.00M |
+| **57.7** | 81.0 | 14/20 | 68.8 | 0.0 | 33 min 08 s | n/a | 2.00M |
 
 - Judge: claude-opus-5-5@xhigh, rubric 2.5
 - Config: harness=codex default clean install; service_tier=fast; personal_instructions=none
 - Machine: Windows 11, AMD Ryzen 9 8945HS w/ Radeon 780M Graphics (16 threads), 31.3 GB RAM, GPU NVIDIA GeForce RTX 4070 Laptop GPU (8 GB)
 - Run: 2026-11-02, started 2026-11-03T02:21:49Z; bench at 5e5aa6e24c77; submitter owlmsj
 
-| task | status | correct | checks | judge | time | cost (USD) | turns | tools | generated | reasoning | first write |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| ds-ab-playtest | ok | 100% | 4/4 | 92 | 1 min 06 s | - | 1 | 5 | 1.9k | 0.1k | - |
-| bo-pnl-runway | ok | 100% | 5/5 | 88 | 1 min 58 s | - | 1 | 4 | 2.9k | 0.1k | - |
-| bo-reconcile | ok | 100% | 4/4 | 86 | 28.1 s | - | 1 | 3 | 0.8k | 0.0k | - |
-| cmp-handoff | ok | 100% | 11/11 | 87 | 48.3 s | - | 2 | 8 | 1.1k | 0.0k | - |
-| cfg-source-drift | ok | 100% | 3/3 | 100 | 29.1 s | - | 1 | 3 | 0.6k | 0.0k | - |
-| doc-lab-pdf | ok | 100% | 6/6 | 78 | 38.9 s | - | 1 | 4 | 1.2k | 0.0k | - |
-| ds-sql-funnel | timeout (timeout) | 0% | 0/3 | 0 | 1 min 30 s | - | 0 | 0 | - | - | - |
-| ue-packaged-bug | timeout (timeout) | 20% | 1/5 | 15 | 1 min 30 s | - | 0 | 2 | - | - | - |
-| git-merge-conflict | ok | 100% | 6/6 | 92 | 39.5 s | - | 1 | 5 | 1.3k | 0.0k | - |
-| infra-gpu-fit | ok | 100% | 6/6 | 84 | 28.4 s | - | 1 | 2 | 1.0k | 0.0k | - |
-| ir-server-logs | ok | 100% | 6/6 | 87 | 30.9 s | - | 1 | 4 | 0.8k | 0.0k | - |
-| gd-integration-repo | ok | 100% | 8/8 | 91 | 55.8 s | - | 1 | 8 | 2.0k | 0.1k | - |
-| rs-lock-bug | ok | 100% | 6/6 | 86 | 58.7 s | - | 1 | 4 | 1.9k | 0.1k | - |
-| sec-leak-fix | timeout (timeout) | 100% | 8/8 | 79 | 1 min 30 s | - | 0 | 3 | - | - | - |
-| hw-stutter-tuning | timeout (timeout) | 0% | 0/6 | 0 | 1 min 30 s | - | 0 | 0 | - | - | - |
-| ts-plugin-bug | timeout (timeout) | 0% | 2/7 | 0 | 1 min 00 s | - | 0 | 0 | - | - | - |
-| web-mondrian-landing | timeout (timeout) | 100% | 10/10 | 86 | 5 min 00 s | - | 0 | 7 | - | - | - |
-| 3d-print-homage | ok | 100% | 11/11 | 84 | 4 min 30 s | - | 1 | 11 | 7.2k | 0.7k | - |
-| web-plan-ranking | ok | 100% | 8/8 | 69 | 2 min 36 s | - | 1 | 7 | 4.4k | 0.1k | - |
-| web-word-universe | ok | 100% | 8/8 | 80 | 5 min 01 s | - | 1 | 12 | 9.4k | 0.3k | - |
+| task | status | correct | checks | judge | time | cost (USD) | turns | tools | tool s | generated | thinking | first write |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ds-ab-playtest | ok | 100% | 4/4 | 88 | 1 min 06 s | - | 1 | 5 | - | 1.9k | 0.1k | - |
+| bo-pnl-runway | ok | 100% | 5/5 | 86 | 1 min 58 s | - | 1 | 4 | - | 2.9k | 0.1k | - |
+| bo-reconcile | ok | 100% | 4/4 | 85 | 28.1 s | - | 1 | 3 | - | 0.8k | 0.0k | - |
+| cmp-handoff | ok | 100% | 11/11 | 91 | 48.3 s | - | 2 | 8 | - | 1.1k | 0.0k | - |
+| cfg-source-drift | ok | 100% | 3/3 | 100 | 29.1 s | - | 1 | 3 | - | 0.6k | 0.0k | - |
+| doc-lab-pdf | ok | 100% | 6/6 | 75 | 38.9 s | - | 1 | 4 | - | 1.2k | 0.0k | - |
+| ds-sql-funnel | timeout (timeout) | 0% | 0/3 | 0 | 1 min 30 s | - | 0 | 0 | - | - | - | - |
+| ue-packaged-bug | timeout (timeout) | 20% | 1/5 | 10 | 1 min 30 s | - | 0 | 2 | - | - | - | - |
+| git-merge-conflict | ok | 100% | 6/6 | 93 | 39.5 s | - | 1 | 5 | - | 1.3k | 0.0k | - |
+| infra-gpu-fit | ok | 100% | 6/6 | 81 | 28.4 s | - | 1 | 2 | - | 1.0k | 0.0k | - |
+| ir-server-logs | ok | 100% | 6/6 | 88 | 30.9 s | - | 1 | 4 | - | 0.8k | 0.0k | - |
+| gd-integration-repo | ok | 100% | 8/8 | 93 | 55.8 s | - | 1 | 8 | - | 2.0k | 0.1k | - |
+| rs-lock-bug | ok | 100% | 6/6 | 87 | 58.7 s | - | 1 | 4 | - | 1.9k | 0.1k | - |
+| sec-leak-fix | timeout (timeout) | 100% | 8/8 | 81 | 1 min 30 s | - | 0 | 3 | - | - | - | - |
+| hw-stutter-tuning | timeout (timeout) | 0% | 0/6 | 0 | 1 min 30 s | - | 0 | 0 | - | - | - | - |
+| ts-plugin-bug | timeout (timeout) | 0% | 2/7 | 0 | 1 min 00 s | - | 0 | 0 | - | - | - | - |
+| web-mondrian-landing | timeout (timeout) | 100% | 10/10 | 83 | 5 min 00 s | - | 0 | 7 | - | - | - | - |
+| 3d-print-homage | ok | 100% | 11/11 | 82 | 4 min 30 s | - | 1 | 11 | - | 7.2k | 0.7k | - |
+| web-plan-ranking | ok | 100% | 8/8 | 69 | 2 min 36 s | - | 1 | 7 | - | 4.4k | 0.1k | - |
+| web-word-universe | ok | 100% | 8/8 | 83 | 5 min 01 s | - | 1 | 12 | - | 9.4k | 0.3k | - |
 
 ## Failed checks
 
