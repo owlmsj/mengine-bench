@@ -283,3 +283,21 @@ def test_the_brief_does_not_hand_over_the_cause() -> None:
 def test_a_correct_answer_in_the_chat_alone_earns_nothing(tmp_path: Path) -> None:
     ws = _fresh(tmp_path)
     assert not _cfg_check(ws, ["I set fast-coder to 262144 in models.json and ran gen.py"]).passed
+
+
+@pytest.mark.parametrize("excluded", [".venv", "__pycache__", ".git", "node_modules"])
+@pytest.mark.parametrize("parent", ["", "nested"])
+def test_excluded_tree_links_do_not_reject_delivery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                   excluded: str, parent: str) -> None:
+    # #164: ignored environments/caches are not part of the executed project copy.
+    ws = _fresh(tmp_path)
+    _cfg_reference(ws)
+    ignored = ws / parent / excluded
+    write(ignored, "escape", "ignored")
+    original_resolve = Path.resolve
+
+    def resolve_link(path: Path, strict: bool = False) -> Path:
+        return tmp_path.parent / "outside" if path == ignored / "escape" else original_resolve(path, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", resolve_link)
+    assert _cfg_check(ws, [""]).passed

@@ -4,6 +4,8 @@ The owner's rule is that a generated file is never the place to fix a value: the
 copies are rebuilt from it. The gold runs the original generator on the delivered source, so editing the source and
 running the generator passes, and so does editing the source and patching every copy by hand to the same result.
 The delivered gen.py must also still rebuild those same configs (#164), so a broken generator fails one check.
+The grader runs delivered code with the runner's authority, like other tasks' hidden tests;
+an OS sandbox for all grader executions is a separate issue (#164).
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ CFG_OLD_CONTEXT = 131072
 CFG_OUTPUTS = ("out/opencode.json", "out/codex.toml", "out/claude.json")
 CFG_GEN_LIMIT_S = 60
 CFG_GEN_OUTPUT_LIMIT = 64 * 1024
+CFG_COPY_EXCLUSIONS = (".git", "__pycache__", ".venv", "node_modules")
 
 CFG_SOURCE = """{
   "models": [
@@ -131,7 +134,7 @@ def _cfg_generate_delivered(ws: Path) -> dict[str, str]:
         try:
             _cfg_check_links(ws)
             shutil.copytree(ws, root, symlinks=True,
-                            ignore=shutil.ignore_patterns(".git", "__pycache__", ".venv", "node_modules"))
+                            ignore=shutil.ignore_patterns(*CFG_COPY_EXCLUSIONS))
             # #164: an absolute internal link must point into the copy, never back into the delivery.
             absolute_links = [(link, root / link.resolve().relative_to(ws.resolve())) for link in root.rglob("*")
                               if link.is_symlink() and link.readlink().is_absolute()]
@@ -148,11 +151,14 @@ def _cfg_generate_delivered(ws: Path) -> dict[str, str]:
 
 
 def _cfg_check_links(root: Path) -> None:
-    # #164: preserve links while copying, but reject any read/write route outside the private project.
+    # #164: validate exactly the copied tree; ignored environments may legitimately link outside it.
     resolved_root = root.resolve()
-    for path in root.rglob("*"):
-        if not path.resolve().is_relative_to(resolved_root):
-            raise ValueError(saw(path.relative_to(root).as_posix(), "a symlink resolving inside the project"))
+    for directory, subdirs, files in os.walk(root):
+        subdirs[:] = [name for name in subdirs if name not in CFG_COPY_EXCLUSIONS]
+        included = (Path(directory) / name for name in subdirs + files if name not in CFG_COPY_EXCLUSIONS)
+        escaping = next((path for path in included if not path.resolve().is_relative_to(resolved_root)), None)
+        if escaping is not None:
+            raise ValueError(saw(escaping.relative_to(root).as_posix(), "a symlink resolving inside the project"))
 
 
 def _cfg_generator_environment(root: Path) -> dict[str, str]:
