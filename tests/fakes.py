@@ -7,6 +7,24 @@ here from harmless fragments and carries the marker "FAKE".
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from pathlib import Path
+
+from mengine_bench.judge import JudgeContext, TaskVerdict
+
+
+class FakeCalibrationJudge:
+    """In-process votes, including the attachments the official packet path supplies."""
+
+    def __init__(self, scores: list[int | None]) -> None:
+        self.scores = iter(scores)
+        self.seen: list[tuple[JudgeContext, tuple[str, ...]]] = []
+
+    def grade(self, context: JudgeContext, workdir: Path, images: Mapping[str, Path] | None = None,
+              note: str = "", deliverable_images: Mapping[str, Path] | None = None) -> TaskVerdict:
+        self.seen.append((context, tuple(images or deliverable_images or {})))
+        return TaskVerdict(next(self.scores), "fixture vote")
+
 MARKER = "FAKE"
 _DASHES = "-" * 5
 _PEM_LABEL = " ".join(["PRIVATE", "KEY"])

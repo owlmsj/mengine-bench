@@ -179,7 +179,7 @@ def test_the_system_prompt_travels_apart_from_the_evidence(tmp_path: Path) -> No
 
 
 def test_the_system_prompt_fits_a_command_line_and_names_the_rubric() -> None:
-    assert len(JUDGE_SYSTEM_PROMPT) < 8000 and "rubric 2.5" in JUDGE_SYSTEM_PROMPT
+    assert len(JUDGE_SYSTEM_PROMPT) < 8000 and "rubric 2.6" in JUDGE_SYSTEM_PROMPT
     for rule in ("answer_discipline", "do not infer the harness", "cut by the benchmark", "exact sum"):
         assert rule in JUDGE_SYSTEM_PROMPT, rule
 

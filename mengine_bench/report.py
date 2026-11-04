@@ -44,6 +44,10 @@ class TaskDetail(TypedDict):
     # #161: site pages left open (None: not a site task or not counted) and processes the runner killed.
     left_open_tabs: NotRequired[int | None]
     left_running: NotRequired[list[dict[str, object]]]
+    # #177: killed too, but the agent never named them in a shell command (a harness helper): never a failed check.
+    left_running_unattributed: NotRequired[list[dict[str, object]]]
+    outside_writes: NotRequired[list[str]]
+    outside_unmeasured: NotRequired[str | None]
 
 
 @dataclass(frozen=True)
@@ -85,6 +89,9 @@ def _task_entry(score: TaskScore, detail: TaskDetail) -> dict[str, object]:
         "id": score.task_id, "status": score.status, "error": detail["error"], "flags": detail["flags"],
         "checkpoints": detail.get("checkpoints", []),
         "left_open_tabs": detail.get("left_open_tabs"), "left_running": detail.get("left_running", []),
+        "left_running_unattributed": detail.get("left_running_unattributed", []),
+        "outside_writes": detail.get("outside_writes", []),
+        "outside_unmeasured": detail.get("outside_unmeasured"),
         "c": score.correctness, "solved": score.solved, "checks": detail["checks"],
         # Set by `mengine-bench judge` on review (#23): one rubric vote per task.
         "judge": score.judge, "judge_rationale": None, "judge_errors": [],

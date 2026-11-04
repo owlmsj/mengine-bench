@@ -48,10 +48,15 @@ TASKS_THAT_CAME_AND_WENT = TASKS_CHANGED_SINCE_1_5 | TASKS_CHANGED_IN_2_0 | TASK
 RANKED_WITH_CURRENT: dict[str, frozenset[str]] = {"2.1": frozenset({"2.0"}), "2.2": frozenset({"2.0", "2.1"}),
                                                   "2.3": frozenset({"2.0", "2.1", "2.2"}),
                                                   "2.4": frozenset({"2.0", "2.1", "2.2", "2.3"}),
-                                                  "2.5": frozenset({"2.0", "2.1", "2.2", "2.3", "2.4"})}
-RANKED_WITH_NOTE = ("Bench 2.0 to 2.4 runs stay in this ranking (#139, #151, #153, #161, #164), marked with their "
-                    "version, and every Score here uses the 2.5 weights.\nA marked row was graded without the 2.5 checks "
-                    "(fetched sources, workspace writes, render composition and more, #164). 2.2\nadded three tasks (txt-regex-log, ds-sqlite-recover, py-async-cancel) and 2.3 added "
+                                                  "2.5": frozenset({"2.0", "2.1", "2.2", "2.3", "2.4"}),
+                                                  # #185: 2.6 changes no task, prompt or limit; the rows stay by the same rule.
+                                                  "2.6": frozenset({"2.0", "2.1", "2.2", "2.3", "2.4", "2.5"})}
+# #185: a rubric bump used to unrank every run until it was judged again (about 380 Opus xhigh votes for 2.6). The
+# older rubric's votes stay ranked until the owner re-judges, marked on the row as "(rubric 2.5)".
+RANKED_RUBRICS: dict[str, frozenset[str]] = {"2.6": frozenset({"2.5"})}
+RANKED_WITH_NOTE = ("Bench 2.0 to 2.5 runs stay in this ranking (#139, #151, #153, #161, #164, #185), marked with their "
+                    "version, and every Score here uses the 2.5 weights, unchanged in 2.6.\nA row marked 2.4 or older was graded without the 2.5 checks "
+                    "(fetched sources, workspace writes and more, #164); a row marked \"rubric 2.5\" keeps its 2.5 judge votes until it is judged again (#185). 2.2\nadded three tasks (txt-regex-log, ds-sqlite-recover, py-async-cancel) and 2.3 added "
                     f"{len(TASKS_ADDED_IN_2_3)}\n({', '.join(sorted(TASKS_ADDED_IN_2_3))}), so a row marked 2.0 or 2.1 "
                     f"covers 20 tasks, a row marked 2.2 covers 23\nand a row marked 2.3 covers {23 + len(TASKS_ADDED_IN_2_3)}, "
                     "without the 2.4 check that cu-social-cycle and cu-webmail\nclose the tabs and apps they opened "
@@ -148,8 +153,20 @@ def is_complete_run(result: dict[str, object]) -> bool:
     return len(ids) == len(set(ids)) and set(ids) == expected
 
 
+def _infra_reason(result: dict[str, object]) -> str | None:
+    from mengine_bench.runner.infra_faults import infra_fault
+
+    for task in result.get("tasks", []):
+        if task.get("status") == "infra":
+            signature = infra_fault(task.get("flags", [])) or "host refusal"
+            return f"infra fault on {task['id']}: {signature}; rerun that task"
+    return None
+
+
 def unranked_reason(result: dict[str, object]) -> str | None:
     """Why a run is not ranked, or None when it is."""
+    if reason := _infra_reason(result):
+        return reason
     if major_minor(result.get("bench_version")) not in ranked_versions():
         ranked = " and ".join(f"{version}.x" for version in sorted(ranked_versions(), key=_version_key))
         return f"older bench {result.get('bench_version')}; only bench {ranked} runs are ranked"
@@ -159,10 +176,17 @@ def unranked_reason(result: dict[str, object]) -> str | None:
     if not isinstance(judge, dict):
         return "waiting for the judge (`mengine-bench judge`)"
     used = f"{judge.get('agent')} {judge.get('model')}@{judge.get('effort')} rubric {judge.get('rubric')}"
-    official = f"claude {OFFICIAL_JUDGE_MODEL}@{OFFICIAL_JUDGE_EFFORT} rubric {RUBRIC_VERSION}"
-    if used != official:
+    rubrics = ", ".join(sorted(ranked_rubrics(), key=_version_key))
+    official = f"claude {OFFICIAL_JUDGE_MODEL}@{OFFICIAL_JUDGE_EFFORT} rubric {rubrics}"
+    accepted = {f"claude {OFFICIAL_JUDGE_MODEL}@{OFFICIAL_JUDGE_EFFORT} rubric {rubric}" for rubric in ranked_rubrics()}
+    if used not in accepted:
         return f"judged by {used}; only {official} judges are ranked"
     return None
+
+
+def ranked_rubrics() -> frozenset[str]:
+    """The judge rubrics ranked together: the current one and any older one kept until a re-judge (#185)."""
+    return frozenset({RUBRIC_VERSION}) | RANKED_RUBRICS.get(RUBRIC_VERSION, frozenset())
 
 
 def _history_version(result: dict[str, object]) -> str | None:
@@ -260,7 +284,12 @@ def _row(rank: int, entry: RankedBundle) -> str:
 def _run_cell(entry: RankedBundle) -> str:
     version = major_minor(entry.result.get("bench_version"))
     link = f"[run]({entry.summary_link})"
-    return link if version == major_minor(__version__) else f"{link} (bench {version})"
+    marks = [] if version == major_minor(__version__) else [f"bench {version}"]
+    judge = entry.result.get("judge")
+    rubric = judge.get("rubric") if isinstance(judge, dict) else None
+    if rubric is not None and str(rubric) != RUBRIC_VERSION:
+        marks.append(f"rubric {rubric}")
+    return link if not marks else f"{link} ({', '.join(marks)})"
 
 
 def _table(rows: Iterable[RankedBundle]) -> str:
@@ -287,6 +316,7 @@ def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
     unranked: list[tuple[str, str]] = []
     history: dict[str, list[RankedBundle]] = {}
     observed: list[RankedBundle] = []
+    observation_notes: dict[str, str] = dict(OBSERVED_RUNS)
     for result_file in sorted(results_dir.glob(f"*/{RESULT_NAME}")):
         bundle = result_file.parent
         result = json.loads(result_file.read_text(encoding="utf-8"))
@@ -296,7 +326,9 @@ def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
         score = totals.get("score") if older is not None else current_score(totals)
         entry = RankedBundle(result=result, summary_link=_link(bundle / SUMMARY_NAME, link_base),
                              tool_s=bundle_tool_s(bundle, result), score=score)
-        if bundle.name in OBSERVED_RUNS:
+        if infra_reason := _infra_reason(result):
+            observation_notes[bundle.name] = infra_reason
+        if bundle.name in observation_notes:
             observed.append(entry)
         elif older is not None:
             history.setdefault(older, []).append(entry)
@@ -309,7 +341,7 @@ def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
     sections = [LEADERBOARD_HEADER, *note, _table(ranked) if ranked else "No results yet.\n", COST_LEGEND,
                 *tie_note([entry.result for entry in ranked])]
     if observed:
-        notes = "\n".join(f"- {Path(entry.summary_link).parent.name}: {OBSERVED_RUNS[Path(entry.summary_link).parent.name]}"
+        notes = "\n".join(f"- {Path(entry.summary_link).parent.name}: {observation_notes[Path(entry.summary_link).parent.name]}"
                           for entry in observed)
         sections.append("## Observations (not ranked)\n\n" + _table(sorted(observed, key=_by_score)) + "\n" + notes + "\n")
     for version in sorted(history, key=_version_key, reverse=True):

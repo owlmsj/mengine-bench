@@ -13,6 +13,9 @@ name only in result.json `config.personal_instructions`, never a block.
 
 from __future__ import annotations
 
+import re
+import shutil
+import subprocess
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
@@ -73,3 +76,20 @@ def blocking_problems(scratch: Path, work: Path, temp: Path | None = None) -> li
     """Every reason this run must not start; empty when it may."""
     temp = Path(tempfile.gettempdir()) if temp is None else temp
     return [f"earlier run left on disk: {path}" for path in leftover_runs(scratch, work, temp)]
+
+
+def toolchain_problems() -> list[str]:
+    """#185: missing build tools block a run before any agent starts."""
+    problems = [f"{name} missing" for name in ("cargo", "node", "git") if shutil.which(name) is None]
+    node = shutil.which("node")
+    if node is None:
+        return problems
+    try:
+        result = subprocess.run([node, "--version"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return [*problems, f"node version unavailable: {error}; expected >= 22.18"]
+    version = result.stdout.strip()
+    match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", version)
+    if result.returncode or match is None or tuple(map(int, match.groups())) < (22, 18, 0):
+        problems.append(f"node version {version!r}; expected >= 22.18")
+    return problems

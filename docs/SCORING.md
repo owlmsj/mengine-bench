@@ -1,4 +1,4 @@
-# Scoring (bench 2.5)
+# Scoring (bench 2.6)
 
 A run of an agent (harness + model + configuration) gets three numbers folded into
 the Score, and a Cost kept apart.
@@ -14,8 +14,11 @@ the Score, and a Cost kept apart.
 | **Thinking, Tools, Tool s** | Reasoning tokens, tool calls, and the median seconds per tool call where the harness times each call (opencode, AGY, Claude Code event stamps; `-` on Codex, never estimated). Statistics only, no points (#162). |
 
 The formulas live in `mengine_bench/scoring.py`. Runs compare when they ran the
-same bench major.minor (2.0.x). A patch release changes no task or brief; a workspace safety rule may change. When it changes how a run is judged or
-scored, every ranked run is judged again from its bundle (`mengine-bench judge --again`), so none has to run again. Rankings of older versions stay in LEADERBOARD.md as history, with the Scores of their own formula.
+same bench major.minor (2.0.x), or an older minor the owner kept ranked by decision (`RANKED_WITH_CURRENT`, #139), marked on
+its row. A patch release changes no task or brief; a workspace safety rule may change. When a release changes how a run is
+judged, every ranked run is judged again from its bundle on the next release train (`mengine-bench judge --again`,
+CONTRIBUTING), so none has to run again; until then its row is marked with the rubric it was judged by (#185). When a
+patch changes a check, a run that kept its workspace is regraded (`mengine-bench regrade`). Rankings of older versions stay in LEADERBOARD.md as history, with the Scores of their own formula.
 Bench 1.8 changed only the weights (#122): Speed 0.25 and Judge 0.15, from 0.15 and 0.25 in 1.7; tasks and briefs are those of 1.7.
 Bench 2.0 keeps the 1.8 weights and changes the tasks (#124): 20 instead of 15.
 Bench 2.1 changes only the time limits (#137): each is the slowest finished time in the eight published 2.0
@@ -46,7 +49,9 @@ cu-webmail gain the scored check "closed the tabs and apps it opened": no site p
 the agent is done, and nothing the task started is left running. On every task the runner then kills what the task
 left running (a process born during the task whose parent links lead back to the runner; never one that existed
 before the task or was born from one) and records it as `left_running`, with `left_open_tabs` on the site tasks; a
-page told the task is over blanks itself. The 2.0 to 2.3 runs stay in the ranking, each row marked with its version.
+page told the task is over blanks itself. From 2.6 (#177) a killed process counts against the agent only when its
+executable name (without `.exe`, any case) appears in a shell command the agent ran; any other, such as a `sleep.exe`
+the harness's own shell started, is killed and noted as `left_running_unattributed`, never a failed check. The 2.0 to 2.3 runs stay in the ranking, each row marked with its version.
 Bench 2.5 (#164) hardens the checks after an audit of two runs found the judge calibrated (55 of 56 votes within 8
 points of an auditor's) and the checks lenient. Correct moves 0.1 of the Score to Judge (0.5 and 0.25, Speed stays
 0.25). Checks may now read the run's tool calls: web-fact-search and web-plan-ranking count a source only when it
@@ -54,7 +59,10 @@ was fetched: a fetch counts from a fetch or browser tool's input or a URL writte
 (curl, wget, Invoke-WebRequest, `python -c`, `node -e`), matched by host; a script file the agent writes and runs is
 not evidence, since the trace cannot show what it fetched.
 Codex opened-page results with `turn<N>view<M>` references also count as fetched URLs; search snippets do not (#171).
-Every task gains the gate "nothing written outside the workspace". 3d-print-homage scores its
+Every task gains the gate "nothing written outside the workspace". The gate compares snapshots of the task's
+parent and run directories before and after each step, so only changes left in the final state fail it (#185, #183).
+Transient use of `../` appears in `outside_path_uses`, a statistic the judge sees, and does not fail the gate.
+3d-print-homage scores its
 render's composition against the print. Leniencies the audit and a review of every grader found are fixed, each
 with the wrong answer that used to pass as a test. The 2.0 to 2.4 runs stay ranked, each row marked with its
 version, graded without these checks; the leaderboard recomputes every ranked Score with the 2.5 weights from the
@@ -67,7 +75,39 @@ skipped files leave a task note, and evidence still passes the bundle privacy sc
 
 Bench 2.5.2 (#171, #172): fix Codex opened-view fetch evidence and web/MCP judge input; no tasks or prompts change.
 
-A run is one sample and runs are not repeated, so ties come from the published tasks: draw the tasks again with
+Bench 2.6 (#185) stabilizes the process without touching a task, prompt or limit; its parts, each with its issue:
+- Regradable bundles. New bundles keep each task's final graded workspace in `workspace/<task>.tar.gz`, up to 20 MiB compressed, 200 MiB expanded and 20,000 members, preserving regular files and `.git` while excluding symlinks, `target/`, `node_modules/`, `.venv/` and `__pycache__/`. Workspace text receives the same redaction as transcripts and deliverables; binary bytes stay unchanged. Exact strings found by the privacy scanner in a fresh task fixture are exempt from workspace redaction and leak counts for that task only. Archives receive the same privacy scan as human evidence and are never judge input; owner names and numeric owner IDs are cleared from tar headers while modification times are kept. An oversized workspace leaves a task note instead of an archive; oversized archives are rejected before reading members or extracting files. `mengine-bench regrade results/<run>` reruns current checks and gates using that workspace, saved answers, transcripts and recorded runtime observations, without running an agent, and records previous correctness and checks in `graded_with`. Task status (`ok`, `timeout`, `crash`, `infra`) is a runtime fact and is not reclassified by regrade; recorded steps preserve timeout partial credit. Tasks without an archive retain their grade with a note; totals, `summary.md` and judge packet checks/status are refreshed (previous packet checks/status stay in `checks_graded_with`), and Score remains unavailable until judged. This mechanism does not change the ranking rule or complete missing tasks.
+- Status `infra` (#181): a known host refusal (an upload the browser extension refused, a filesystem snapshot the runner
+  could not take) marks the task, keeps its grade and makes the run an observation until that task is rerun. Claude Code
+  runs with `--add-dir <workspace>` so the Claude in Chrome extension may upload workspace files; preflight checks
+  cargo, node and git.
+- Leftover attribution (#177): a process the task left running fails the cleanup check only when the agent named its
+  executable in a shell command; a harness helper is killed and noted.
+- The workspace gate reads the final state of the task's parent and run directories (#183): a file created and removed
+  during the task is not a failure; transient `../` use shows in `outside_path_uses`, which the judge sees.
+- 3d-print-homage: the blue-layout similarity to the print is a note, no longer a scored check. Measured on the 18
+  published renders, no cutoff separated judge votes >= 65 from <= 55 (a 73 at 0.305, a 62 at 0.574); the judge's
+  rendered criterion carries composition.
+- Judge input (#176): Claude Code and Codex structured web-search results show the count and first five titles/domains
+  (`6 results:` in both contract fixtures). opencode shows harness text clipped at 400 characters
+  (`[... 166 chars cut by the benchmark]` in its fixture); the AGY fixture has no result text and shows
+  `(results not in the harness stream)`. A contract fixture per harness (Claude Code, Codex, opencode, AGY)
+  asserts that each recorded tool kind reaches the judge log.
+- Rubric 2.6 (#184): visual tasks get the page rendered in the states the brief asks for (`state-<name>.png`), task
+  notes from the benchmark, tighter rendered bands, and a render or browser check of the page counts as verification.
+- Noise and calibration: `analyze` groups ranked and observed reruns by agent, model, effort, a hash of the published
+  config and bench major.minor, computed on read without changing `result.json`.
+  For each setup with two or more runs it reports max-min and sample standard deviation of Score, Correct %, Judge
+  and Time. For each comparison with the previous run, the largest observed Score spread excluding the run being
+  evaluated gates regression warnings. Other setups and earlier runs of the same setup supply that floor;
+  there is no warning inside it, or before an independent pair exists (`not measured`).
+  `mengine-bench judge-calibrate --votes <file> <bundleA> <bundleB>` reads the bench-audit owner's exported scores,
+  re-votes those packets with the official judge and reports mean absolute difference, the count beyond 8 and the rubric.
+  It never modifies the bundles, saves `docs/judge-calibration/<date>-<rubric>.md` only with `--write`, and exits 1
+  when the count exceeds an explicitly supplied `--max-beyond`.
+  
+
+Separately, ties come from the published tasks: draw the tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
 a tie. This shows how much the order rests on this set of tasks; it says nothing about the noise between two runs of one agent.
 `mengine-bench analyze` prints the shares, the points each part of the Score moves and the tasks that separate runs. No agent runs.
@@ -85,6 +125,9 @@ untouched", or the page file exists).
   half of the task; a gate that guards the tests still does. The task shows its status, counts its full time and
   is never Solved. A reply already given when the limit hits counts as the reply. With nothing written or
   said, there is nothing for the checks to credit.
+- `infra` (2.6): a known host refusal in the stream or an unavailable filesystem snapshot marks an `ok` or
+  `timeout` task as infrastructure failure. Checks and Correct remain as graded, with no extra discount or credit;
+  any run containing an `infra` task is an observation, not ranked, until that task is rerun. `crash` stays `crash`.
 - Each prompt states the limit, 1 to 7 min per step, and that the folder and the reply are graded as they
   stand when time runs out. Load a local model before the run: a cold load counts against the first task.
 - **Solved** = the agent finished, and every gate and every check passed.
@@ -121,7 +164,7 @@ would reward one route over another. "Not seen" can simply be a different route.
 `mengine-bench judge results/<run>` (maintainer only) runs one judge, Claude
 `claude-opus-5-5` at effort `xhigh`, exactly once per task. A call that fails or
 returns invalid JSON is retried; if a task still has no vote, nothing is written.
-Rubric 2.5 grades what the checks cannot see. The check results are shown to
+Rubric 2.6 grades what the checks cannot see. The check results are shown to
 the judge as context with the instruction not to re-score correctness. Its rules and
 anchors travel in a system prompt, and every vote comes with its three subscores, which
 must add up to the score.
@@ -130,7 +173,7 @@ must add up to the score.
 | --- | --- |
 | Reasoning and execution: understood the problem, chose a sound strategy of its own, carried it out simply and reproducibly. Any valid route can earn full marks. | 40 |
 | Deliverable and presentation: the problem is solved, nothing invented, and the final message says what was found, the assumptions and any limit left open. Format is never a defect. | 30 |
-| Quality assurance: an independent check of its own result; on a task that only asks for a few facts, answer discipline (none in 2.0); on pages, the rendered look | 30 |
+| Quality assurance: an independent check of its own result; on a task that only asks for a few facts, answer discipline (none in 2.0); on pages, the rendered look, where a render or browser check of the delivered page counts as verification under reasoning and execution (2.6) | 30 |
 
 The plan is judged from the actions: a written plan earns nothing by itself.
 
@@ -140,6 +183,16 @@ judge sees three frames, each from a fresh load after about 1, 4 and 8 seconds o
 a reference page, made by Opus 5.5 xhigh for the same brief, which sets the bar and stays fixed so a grade does not move when a new run comes out. A frame that fails is
 tried up to 3 times; if it keeps failing, the judge votes on the other frames, or without images when none rendered, and
 the bundle records it. With no browser at all, nothing is judged.
+
+Rubric 2.6 (#184) adds two task inputs, both fixed in the catalog. A page whose brief asks for a state declares it
+(`judge_states`, a name and a fixed query): web-word-universe opens `?word=saudade` and `?word=floresta`. Each state is
+one more frame, `state-<name>.png` after about 4 seconds, rendered the same way from the page stored in the bundle, never
+from the workspace, so `judge --again` sees what the first vote saw; it is kept as `judge/<task>-state-<name>.png`, and a
+state frame that keeps failing is noted like any other frame. Each visual task also carries two lines of judge notes
+(`judge_notes`) naming what its brief values most, never the method or the answer; the judge reads them as trusted
+text. The rendered bands are tighter: 27-30 finished with every state the brief asks for working, 20-26 one or two
+visible defects or one state weak, 10-19 unfinished, off brief or landing only (a state the brief asks for is missing or
+inert), 0-9 broken.
 
 The judge reads the task prompt, the check results, the final answers, each page whole, the agent's other changes
 and one tool log with the same shape for every harness. It does not read the raw stream, which carries the model id.

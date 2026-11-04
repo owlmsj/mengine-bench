@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tarfile
 from dataclasses import replace
 from pathlib import Path
 
@@ -21,11 +22,126 @@ WAV_BYTES = b"RIFF\xff\x00WAVE human audio evidence"
 PDF_BYTES = b"%PDF-1.7\nHuman-only form contents\n%%EOF"
 
 
+def test_workspace_archive_preserves_files_and_scans_members(tmp_path: Path) -> None:
+    ws = tmp_path / "workspace"
+    (ws / ".git").mkdir(parents=True)
+    (ws / ".git/HEAD").write_bytes(b"ref: refs/heads/main\n")
+    (ws / "target").mkdir()
+    (ws / "target/ignored").write_bytes(b"build")
+    raw = b"\xff\x00" + fake_secret("github").encode()
+    (ws / "output.bin").write_bytes(raw)
+    results = {"date": "2026-01-01", "agent": {"name": "fake", "model": "fake"},
+               "run_id": "workspace", "tasks": [{"id": "test", "flags": []}]}
+    from unittest.mock import patch
+    with patch("mengine_bench.bundle.render_summary", return_value="summary"):
+        bundle = write_bundle(results, tmp_path / "bundles", {}, PathScope(workspaces=(ws,)),
+                              workspaces={"test": ws})
+    with tarfile.open(bundle / "workspace/test.tar.gz") as archive:
+        assert set(archive.getnames()) == {".git/HEAD", "output.bin"}
+        assert archive.extractfile("output.bin").read() == raw
+    assert "workspace/test.tar.gz/output.bin" in bundle_leaks(bundle, LocalNames())
+
+
+def test_workspace_compressed_cap_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mengine_bench import bundle
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / "file").write_bytes(b"content")
+    monkeypatch.setattr(bundle, "WORKSPACE_BYTES", 1)
+    target = tmp_path / "archive.tar.gz"
+    notes = bundle._write_workspace(target, ws)
+    assert len(notes) == 1 and notes[0].startswith("workspace not kept: ") and notes[0].endswith(" MiB")
+    assert not target.exists()
+
+
+def test_workspace_headers_remove_owner_identity_and_keep_mtime(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mengine_bench.bundle import _write_workspace
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / "text").write_bytes(b"hello")
+    (ws / "binary").write_bytes(b"\xff\x00")
+    original = tarfile.TarFile.gettarinfo
+    def identified(archive: tarfile.TarFile, *args: object, **kwargs: object) -> tarfile.TarInfo:
+        member = original(archive, *args, **kwargs)
+        member.uid, member.gid = 123, 456
+        member.uname, member.gname = "fixture-owner", "fixture-group"
+        member.mtime = 1234567890
+        return member
+    monkeypatch.setattr(tarfile.TarFile, "gettarinfo", identified)
+    target = tmp_path / "archive.tar.gz"
+    assert _write_workspace(target, ws) == []
+    with tarfile.open(target) as archive:
+        members = archive.getmembers()
+    assert len(members) == 2
+    for member in members:
+        assert (member.uname, member.gname, member.uid, member.gid) == ("", "", 0, 0)
+        assert member.mtime == 1234567890
+
+
+@pytest.mark.parametrize("limit", ["WORKSPACE_EXPANDED_BYTES", "WORKSPACE_MEMBERS"])
+def test_workspace_expansion_budget_before_compression(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, limit: str) -> None:
+    from mengine_bench import bundle
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / "first").write_bytes(b"1234")
+    (ws / "second").write_bytes(b"5678")
+    monkeypatch.setattr(bundle, limit, 1, raising=False)
+    target = tmp_path / "archive.tar.gz"
+    notes = bundle._write_workspace(target, ws)
+    assert notes and notes[0].startswith("workspace not kept: ")
+    assert "expected at most" in notes[0]
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("limit", ["WORKSPACE_EXPANDED_BYTES", "WORKSPACE_MEMBERS"])
+def test_workspace_scan_rejects_expansion_budget(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, limit: str) -> None:
+    import io
+    from mengine_bench import bundle
+    (tmp_path / "workspace").mkdir()
+    with tarfile.open(tmp_path / "workspace/unknown.tar.gz", "w:gz") as archive:
+        for name in ("first", "second"):
+            member = tarfile.TarInfo(name)
+            member.size = 4
+            archive.addfile(member, io.BytesIO(b"1234"))
+    monkeypatch.setattr(bundle, limit, 1, raising=False)
+    with pytest.raises(ValueError, match="expected at most"):
+        bundle_leaks(tmp_path, LocalNames())
+
+
 def _evidence_task() -> EvalTask:
     return EvalTask(id="human-evidence", category="media", provenance="test", summary="test",
                     setup=lambda ws: None, steps=(Step("Create media files."),),
                     check=lambda ws, answers: CheckResult(checks=[("created", True)]),
                     reference=lambda ws: [], evidence=("out/audio.wav", "out/form.pdf"))
+
+
+def test_workspace_fixture_exceptions_are_exact_and_task_local(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mengine_bench import bundle as bundling
+    planted = fake_secret("github")
+    fixture = f"dev@dropgame.invalid\n{planted}\n"
+    def setup(ws: Path) -> None:
+        (ws / "fixture.txt").write_text(fixture, encoding="utf-8", newline="")
+    task = replace(_evidence_task(), setup=setup)
+    monkeypatch.setattr(catalog, "task_by_id", lambda task_id: task if task_id == task.id else None)
+    monkeypatch.setattr(bundling, "render_summary", lambda result: "summary")
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    setup(ws)
+    (ws / "agent.txt").write_text("invented@private.invalid\n" + planted + "EXTRA", encoding="utf-8", newline="")
+    results = {"date": "2026-01-01", "agent": {"name": "fake", "model": "fake"}, "run_id": "fixture",
+               "tasks": [{"id": task.id}, {"id": "other"}]}
+    bundle = write_bundle(results, tmp_path / "bundles", {}, PathScope(),
+                          workspaces={task.id: ws, "other": ws})
+    with tarfile.open(bundle / "workspace" / f"{task.id}.tar.gz") as archive:
+        assert archive.extractfile("fixture.txt").read().decode() == fixture
+        assert archive.extractfile("agent.txt").read() == b"[REDACTED:email]\n[REDACTED:github]"
+    with tarfile.open(bundle / "workspace/other.tar.gz") as archive:
+        assert archive.extractfile("fixture.txt").read() == b"[REDACTED:email]\n[REDACTED:github]\n"
+    assert bundle_leaks(bundle, LocalNames()) == {}
 
 
 @pytest.mark.parametrize("native_paths", [False, True])

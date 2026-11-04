@@ -1,4 +1,4 @@
-"""Rubric 2.5 judge, driven by a fake judge command: one vote per task, retried only when the call or JSON fails."""
+"""Rubric 2.6 judge, driven by a fake judge command: one vote per task, retried only when the call or JSON fails."""
 
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ def test_parse_rejects_malformed_or_out_of_range(reply: str) -> None:
 
 def test_rubric_grades_the_complement_of_the_checks() -> None:
     prompt = build_judge_prompt(CONTEXT, screenshot=False)
-    assert RUBRIC_VERSION == "2.5" and "rubric 2.5" in JUDGE_SYSTEM_PROMPT
+    assert RUBRIC_VERSION == "2.6" and "rubric 2.6" in JUDGE_SYSTEM_PROMPT
     for needle in ("approach (0-40): the reasoning and the execution", "any valid route can earn full marks",
                    "deliverable (0-30): the problem in the brief is solved and presented", "Format is free",
                    "verification (0-30)", "Never re-score", '"score"'):
@@ -84,6 +84,35 @@ def test_visual_rubric_scores_the_rendered_look_from_the_screenshot() -> None:
                    "goes blank after loading", "fresh load"):
         assert needle in JUDGE_SYSTEM_PROMPT, needle
     assert "a single still image" not in JUDGE_SYSTEM_PROMPT
+
+
+def test_rubric_2_6_grades_the_page_states_and_keeps_verification_on_pages() -> None:
+    # #184: a browser check of ?word=saudade earned nothing, and two pages of very different finish shared 10-19.
+    for needle in ("a render or browser check of the delivered page counts as verification",
+                   "Frames named state-<name>.png show the page in a state the brief asks for",
+                   "27-30: finished and on brief, and every state the brief asks for works.",
+                   "20-26: one or two visible defects, or one state weak.",
+                   "landing only: a state the brief asks for is missing or inert.",
+                   "a finished page with one weak state is 26, not 27",
+                   "the task notes, the check results"):
+        assert needle in JUDGE_SYSTEM_PROMPT, needle
+
+
+def test_the_message_carries_the_task_notes_and_names_each_state_frame() -> None:
+    from dataclasses import replace
+
+    from mengine_bench.core import JudgeState
+
+    context = replace(CONTEXT, notes="Find a word and see its relations.",
+                      states=(JudgeState("word-saudade", "?word=saudade"), JudgeState("word-mar", "?word=mar")))
+    images = ("frame-1s.png", "screenshot.png", "state-word-saudade.png", "reference.png")
+    prompt = build_judge_prompt(context, screenshot=True, images=images)
+    notes = prompt.index("## Task notes from the benchmark (trusted)\nFind a word and see its relations.")
+    assert prompt.index("## Task prompt(s)") < notes < prompt.index("## Agent final answer(s)")
+    assert ("Attached images, in this order: frame-1s.png, screenshot.png, state-word-saudade.png, reference.png.\n\n"
+            "state-word-saudade.png is the page opened with ?word=saudade") in prompt
+    assert "state-word-mar.png" not in prompt, "a state frame that did not render is not named"
+    assert "Task notes" not in build_judge_prompt(CONTEXT, screenshot=False)
 
 
 def test_one_vote_retried_only_on_invalid_replies(fake_agent: FakeAgent, tmp_path: Path) -> None:
@@ -178,3 +207,28 @@ def test_an_image_deliverable_is_stored_byte_for_byte(tmp_path: Path) -> None:
     (tmp_path / "cover.png").write_bytes(image)
     _write_deliverables(tmp_path / "out", {"cover.png": tmp_path / "cover.png"}, PathScope(names=LocalNames()))
     assert (tmp_path / "out" / "cover.png").read_bytes() == image
+
+
+@pytest.mark.parametrize(("name", "query"), [("Word", "?word=a"), ("w", "word=a"), ("w", "?"), ("w", "?a b"), ("", "?a=1")])
+def test_a_judge_state_needs_a_plain_name_and_a_url_query(name: str, query: str) -> None:
+    from mengine_bench.core import JudgeState
+
+    with pytest.raises(ValueError, match="expected"):
+        JudgeState(name, query)
+
+
+def test_judge_states_need_a_page_and_judge_notes_stay_short() -> None:
+    from dataclasses import replace
+
+    from mengine_bench import catalog
+    from mengine_bench.core import JudgeState
+
+    page = next(task for task in catalog.all_tasks() if task.id == "web-mondrian-landing")
+    plain = next(task for task in catalog.all_tasks() if task.render_target is None)
+    replace(page, judge_states=(JudgeState("a", "?x=1"),), judge_notes="one\ntwo\nthree")
+    with pytest.raises(ValueError, match="expected an HTML deliverable"):
+        replace(plain, judge_states=(JudgeState("a", "?x=1"),))
+    with pytest.raises(ValueError, match="expected unique names"):
+        replace(page, judge_states=(JudgeState("a", "?x=1"), JudgeState("a", "?x=2")))
+    with pytest.raises(ValueError, match="expected at most 3"):
+        replace(page, judge_notes="1\n2\n3\n4")

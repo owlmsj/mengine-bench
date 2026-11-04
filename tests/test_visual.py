@@ -186,6 +186,28 @@ def test_render_waits_the_virtual_time_it_is_given(tmp_path: Path) -> None:
     assert png.read_text(encoding="utf-8") == "--virtual-time-budget=8000"
 
 
+URL_BROWSER = r"""
+import sys
+from pathlib import Path
+[shot] = [arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--screenshot=")]
+Path(shot).write_text(sys.argv[-1], encoding="utf-8")
+"""
+
+
+def test_render_opens_the_page_with_the_query_of_a_judge_state(tmp_path: Path) -> None:
+    # #184: the judge sees the page in the state the brief asks for, such as ?word=saudade.
+    script = tmp_path / "fakes" / "browser.py"
+    script.parent.mkdir()
+    script.write_text(URL_BROWSER, encoding="utf-8")
+    html = write(tmp_path, "page.html", "<html></html>")
+    png = tmp_path / "shot.png"
+    browser = [sys.executable, "-I", str(script)]
+    assert visual.render_headless(html, png, 4000, browser_argv=browser, query="?word=saudade") == visual.RENDERED
+    assert png.read_text(encoding="utf-8") == html.resolve().as_uri() + "?word=saudade"
+    assert visual.render_headless(html, png, 4000, browser_argv=browser) == visual.RENDERED
+    assert png.read_text(encoding="utf-8") == html.resolve().as_uri()
+
+
 FAILING_BROWSER = r"""
 import sys
 sys.stderr.write("[0101/000000.0:FATAL:zygote_host_impl_linux.cc] No usable sandbox!\n")

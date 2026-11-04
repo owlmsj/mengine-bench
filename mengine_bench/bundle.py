@@ -18,15 +18,18 @@ from __future__ import annotations
 import gzip
 import io
 import json
+import os
 import re
 import shutil
 import stat
 import subprocess
+import tarfile
+import tempfile
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 
 from mengine_bench.redact import (
-    LocalNames, PathScope, find_leaks, local_names, redact_paths, redact_text, redact_value,
+    LocalNames, PathScope, find_leaks, find_leak_strings, leak_matches, local_names, redact_paths, redact_text, redact_value,
 )
 from mengine_bench.report import render_summary
 
@@ -34,6 +37,10 @@ RESULT_NAME = "result.json"
 SUMMARY_NAME = "summary.md"
 JUDGE_DIR = "judge"
 EVIDENCE_FILE_BYTES = 5 * 1024 * 1024
+WORKSPACE_BYTES = 20 * 1024 * 1024
+WORKSPACE_EXPANDED_BYTES = 200 * 1024 * 1024
+WORKSPACE_MEMBERS = 20_000
+WORKSPACE_EXCLUDED = frozenset({"target", "node_modules", ".venv", "__pycache__"})
 _STEP_FILE = re.compile(r"^step-(?P<label>.+)\.(?P<stream>stdout|stderr)\.txt$")
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -71,7 +78,18 @@ def run_scope(work: Path, names: LocalNames | None = None) -> PathScope:
     return PathScope(workspaces=workspaces, workdirs=(work,), names=local_names() if names is None else names)
 
 
-def public_text(text: str, scope: PathScope) -> str:
+def public_text(text: str, scope: PathScope, allowed: frozenset[str] = frozenset()) -> str:
+    if allowed:
+        matches = sorted((match for _, match in leak_matches(text, scope.names)
+                          if match.group() in allowed), key=lambda match: (match.start(), -match.end()))
+        parts: list[str] = []
+        offset = 0
+        for match in matches:
+            if match.start() < offset:
+                continue
+            parts.extend((public_text(text[offset:match.start()], scope), match.group()))
+            offset = match.end()
+        return "".join(parts) + public_text(text[offset:], scope)
     return redact_text(redact_paths(text, scope))
 
 
@@ -103,7 +121,8 @@ def public_json(value: object, scope: PathScope) -> object:
 def write_bundle(results: MutableMapping[str, object], out_root: Path, transcripts: Mapping[str, Path],
                  scope: PathScope, packets: Mapping[str, Mapping[str, object]] | None = None,
                  deliverables: Mapping[str, Mapping[str, Path]] | None = None,
-                 evidence: Mapping[str, Mapping[str, Path]] | None = None) -> Path:
+                 evidence: Mapping[str, Mapping[str, Path]] | None = None,
+                 workspaces: Mapping[str, Path] | None = None) -> Path:
     """Write the bundle for `results`; `transcripts` maps a task id to its raw transcript dir,
     `packets` holds the judge evidence; `deliverables` and human-only `evidence` map task ids to {relative path: file}."""
     agent = results["agent"]
@@ -130,6 +149,11 @@ def write_bundle(results: MutableMapping[str, object], out_root: Path, transcrip
         _write_deliverables(bundle_dir / JUDGE_DIR / task_id, files, scope)
     for task in tasks:
         notes = _write_evidence(bundle_dir / "evidence" / task["id"], (evidence or {}).get(task["id"], {}), scope)
+        workspace = (workspaces or {}).get(task["id"])
+        if workspace is not None:
+            allowed = _fixture_strings(task["id"], scope.names)
+            notes.extend(_write_workspace(bundle_dir / "workspace" / f"{task['id']}.tar.gz", workspace,
+                                          scope, allowed))
         if notes:
             task.setdefault("flags", []).extend(notes)
     public = public_json(results, scope)
@@ -139,6 +163,109 @@ def write_bundle(results: MutableMapping[str, object], out_root: Path, transcrip
     (bundle_dir / SUMMARY_NAME).write_text(public_text(render_summary(public), scope), encoding="utf-8",
                                            newline="\n")
     return bundle_dir
+
+
+def _linked(path: Path) -> bool:
+    return path.is_symlink() or bool(getattr(path.lstat(), "st_file_attributes", 0)
+                                     & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def _fixture_strings(task_id: str, names: LocalNames) -> frozenset[str]:
+    from mengine_bench import catalog
+    task = catalog.task_by_id(task_id)
+    if task is None:
+        return frozenset()
+    found: set[str] = set()
+    scratch = REPO_ROOT / "tmp"
+    scratch.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="bundle-fixture-", dir=scratch) as temporary:
+        workspace = Path(temporary)
+        task.setup(workspace)
+        for path in workspace.rglob("*"):
+            if not path.is_file() or _linked(path):
+                continue
+            try:
+                text = path.read_bytes().decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            if "\x00" not in text:
+                found.update(find_leak_strings(text, names))
+    return frozenset(found)
+
+
+def _write_workspace(target: Path, workspace: Path, scope: PathScope = PathScope(),
+                     allowed: frozenset[str] = frozenset()) -> list[str]:
+    """#185: redact text grader inputs; preserve binary files for the publication scan."""
+    compressed = io.BytesIO()
+    try:
+        if _linked(workspace):
+            return ["workspace not kept: symlink or junction"]
+        sources = _workspace_files(workspace)
+        expanded = 0
+        with gzip.GzipFile(fileobj=compressed, mode="wb", mtime=0) as zipped:
+            with tarfile.open(fileobj=zipped, mode="w|", dereference=True) as archive:
+                for source in sources:
+                    with source.open("rb") as stream:
+                        raw = stream.read(WORKSPACE_EXPANDED_BYTES - expanded + 1)
+                    _workspace_budget(len(sources), expanded + len(raw))
+                    try:
+                        text = raw.decode("utf-8") if b"\x00" not in raw else None
+                    except UnicodeDecodeError:
+                        text = None
+                    if text is not None:
+                        raw = public_text(text, scope, allowed).encode("utf-8")
+                    expanded += len(raw)
+                    _workspace_budget(len(sources), expanded)
+                    def publish_member(member: tarfile.TarInfo) -> None:
+                        member.uname = member.gname = ""
+                        member.uid = member.gid = 0
+                        member.size = len(raw)
+                        # #185: supply redacted bytes here; returning None prevents add from copying raw text.
+                        archive.addfile(member, io.BytesIO(raw))
+                        return None
+                    archive.add(source, arcname=source.relative_to(workspace).as_posix(),
+                                recursive=False, filter=publish_member)
+        size = compressed.tell()
+        if size > WORKSPACE_BYTES:
+            return [f"workspace not kept: {size / (1024 * 1024):.2f} MiB"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(compressed.getvalue())
+    except (OSError, ValueError) as error:
+        return [f"workspace not kept: {str(error) if isinstance(error, ValueError) else type(error).__name__}"]
+    return []
+
+
+def _workspace_budget(count: int, expanded: int) -> None:
+    if count > WORKSPACE_MEMBERS or expanded > WORKSPACE_EXPANDED_BYTES:
+        raise ValueError(f"received workspace with {count} members and {expanded} expanded bytes; "
+                         f"expected at most {WORKSPACE_MEMBERS} members and {WORKSPACE_EXPANDED_BYTES} expanded bytes")
+
+
+def _workspace_files(workspace: Path) -> list[Path]:
+    sources: list[Path] = []
+    expanded = 0
+    for root, directories, files in os.walk(workspace, followlinks=False):
+        directories[:] = sorted(name for name in directories
+                                if name not in WORKSPACE_EXCLUDED and not _linked(Path(root) / name))
+        for name in sorted(files):
+            source = Path(root) / name
+            if _linked(source) or not stat.S_ISREG(source.stat().st_mode):
+                continue
+            expanded += source.stat().st_size
+            sources.append(source)
+            _workspace_budget(len(sources), expanded)
+    return sources
+
+
+def workspace_members(archive: tarfile.TarFile) -> list[tarfile.TarInfo]:
+    """Validate expansion before any member is read or extracted (#185)."""
+    members: list[tarfile.TarInfo] = []
+    expanded = 0
+    for member in archive:
+        expanded += member.size
+        members.append(member)
+        _workspace_budget(len(members), expanded)
+    return members
 
 
 def _evidence_file_problem(source: Path, workspace: Path) -> str | None:
@@ -225,6 +352,19 @@ def bundle_leaks(bundle_dir: Path, names: LocalNames) -> dict[str, dict[str, int
         if not path.is_file():
             continue
         relative = path.relative_to(bundle_dir)
+        if relative.parts[0] == "workspace" and path.name.endswith(".tar.gz"):
+            allowed = _fixture_strings(path.name.removesuffix(".tar.gz"), names)
+            with tarfile.open(path, "r:gz") as archive:
+                for member in workspace_members(archive):
+                    if not member.isfile():
+                        continue
+                    stream = archive.extractfile(member)
+                    assert stream is not None
+                    text = _without_png_pixels(stream.read()).decode("utf-8", errors="replace")
+                    leaks = find_leaks(member.name + "\n" + text, names, allowed)
+                    if leaks:
+                        found[f"{relative.as_posix()}/{member.name}"] = leaks
+            continue
         raw = path.read_bytes()
         # #165: evidence is opaque bytes even with a .gz name; scan its text chunks like image deliverables.
         if path.suffix == ".gz" and relative.parts[0] != "evidence":

@@ -305,6 +305,8 @@ TASKS = [
         setup=_landing_setup, check=_landing_check,
         reference=lambda ws: _ship(ws, LANDING, LANDING_REFERENCE),
         timeout_s=300, deliverables=(LANDING,),
+        judge_notes=("The brief values a page that speaks Mondrian's visual language while a visitor learns the painter, the\n"
+                     "year, the movement and why the work matters, with nothing claimed beyond the fact sheet and a way to read more."),
         checkpoints=checkpoints(("read the fact sheet", r"FACTSHEET"), ("wrote the page", r"landing.{1,4}index\.html"), OPENED),
         steps=(Step("We need a landing page, {WS}/landing/index.html in a single file, for the story of Piet Mondrian's "
                     "\"Composition with Red, Blue and Yellow\" (1930). The facts are in {WS}/FACTSHEET.md, and nothing beyond "
@@ -318,6 +320,8 @@ TASKS = [
         summary="Turn a famous public-domain woodblock print into a 3D wallpaper that anyone who knows the print recognizes.",
         setup=_print_setup, check=_scene_check, reference=_scene_reference,
         timeout_s=420, deliverables=(SCENE,),
+        judge_notes=("The brief values recognition at a glance: the print's composition, palette and subjects, rebuilt as a\n"
+                     "low poly 3D scene made in code with some gentle motion, not the print pasted in as a texture."),
         checkpoints=checkpoints(("wrote the scene", r"scene.{1,4}index\.html"), OPENED, WROTE_RESULT),
         steps=(Step("A client loves the woodblock print attached, also in {WS}/print.jpg; it is in the public domain. They "
                     "want a 3D wallpaper that copies it: its composition, its palette and its subjects, so anyone who knows "

@@ -119,6 +119,14 @@ HTTP) as a note, never a grade. A harness without a browser scores what it deliv
 - **opencode and AGY**: whatever browser MCP server or tool their own configuration provides (for example a
   Playwright MCP server); the bench adds none.
 
+Claude Code receives `--add-dir <absolute workspace>` so Claude in Chrome can read workspace uploads; for Codex,
+the owner must enable **Allow access to file URLs** under the ChatGPT extension details in Edge.
+A known host upload refusal becomes `infra`: the run is an observation until that task is rerun; the live upload
+probe and browser-setting verification remain owner actions, not part of this preflight (#181, #185).
+
+Preflight requires cargo, git and Node >= 22.18; `--allow-missing-toolchain` records missing tools in config and
+continues, while a missing Chromium browser only warns that page checks will be left out.
+
 ### Or let your agent do it
 
 Paste this into a new session of the agent you want to measure:
@@ -144,7 +152,7 @@ Report only values copied from command output. Never print credentials.
 - **Everything its harness gives it** is allowed: shell, web, browsers, MCP servers, skills, subagents. Every step's prompt says so, and asks the agent to close the browser tabs, windows and apps it opened before it finishes. Reading the reference, the hidden tests or a published answer is not: the run gets rejected.
 - **Personal instructions count as configuration.** `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.config/opencode/AGENTS.md`, `~/.gemini/GEMINI.md` and any `CLAUDE.md` or `AGENTS.md` above the temp dir are recorded by name and shown on the leaderboard. Move them aside for a plain run.
 - **Memory across sessions is off inside the bench, on Codex and Claude** (`--disable memories`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY`). Daily use keeps it on. It carries earlier runs into this one, the same leak as an earlier workspace left on disk.
-- **Rankings compare the same bench version.** Older rankings stay on the leaderboard as history, with the Scores of their own formula.
+- **Rankings compare the same bench version**, or an older minor the owner kept ranked, marked on its row (a row marked "rubric 2.5" waits for its re-judge). Older rankings stay on the leaderboard as history, with the Scores of their own formula.
 
 ## Privacy
 
@@ -161,7 +169,8 @@ projects, so skim `results/<run>/` before you submit.
 - A timeout or a crash with nothing written has nothing to grade. The only retry is for a task whose model never
   replied before the limit (#144): it runs once more from scratch, and its flags say so.
 - Time depends on your machine and network, and Cost is an estimate.
-- A machine without Rust, Node.js or git fails the checks of the tasks that need them, and a harness without web
+- A machine without cargo, git or Node.js 22.18 or later does not start a run; with `--allow-missing-toolchain`
+  the missing tools are recorded in config and the tasks that need them fail their checks. A harness without web
   search or fetch scores only what it delivers on `web-plan-ranking`.
 
 ## Develop

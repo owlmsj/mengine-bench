@@ -113,13 +113,14 @@ def _changes(runs: list[dict[str, object]]) -> str:
 
 def test_changes_warn_about_regressions_and_name_only_affected_tasks() -> None:
     previous, latest = _dated_run("2026-10-30"), _dated_run("2026-10-31")
-    latest["config"]["personal_instructions"] = ["different instructions"]
     latest["bench_version"] = "1.5.1"
     task = latest["tasks"][0]
     task.update(agent_s=40.0, judge=73, tokens={"input": 126})
     task["checks"][0]["ok"] = False
-    latest["totals"].update(time_s=45.0 * len(IDS), judge=73, tokens={"input": 1260})
-    changes = _changes([latest, previous])
+    latest["totals"].update(score=90, time_s=45.0 * len(IDS), judge=73, tokens={"input": 1260})
+    baseline = _dated_run("2026-10-29")
+    baseline["totals"]["score"] = 96
+    changes = _changes([latest, previous, baseline])
     assert changes.count("codex repeat/low") == 1
     assert "2026-10-30 -> 2026-10-31" in changes
     assert f"Time: {30 * len(IDS)} -> {45 * len(IDS)}" in changes
@@ -135,15 +136,23 @@ def test_changes_do_not_warn_at_thresholds_or_for_improvements() -> None:
     latest["totals"].update(time_s=30.0 * len(IDS) * 1.25, judge=74, tokens={"input": 1250})
     latest["tasks"][0].update(agent_s=37.5, judge=74, tokens={"input": 125})
     latest["tasks"][1].update(agent_s=1.0, judge=100, tokens={"input": 1})
-    assert _changes([previous, latest]).strip() == "No warnings."
+    baseline = _dated_run("2026-10-29")
+    assert _changes([baseline, previous, latest]).strip() == "No warnings."
+    for before, after in zip(previous["tasks"][:2], latest["tasks"][:2], strict=True):
+        assert analyze._regression_warnings(before, after, "agent_s", noise_floor=0) == []
+    before = {key: value for key, value in previous["totals"].items() if key != "score"}
+    after = {key: value for key, value in latest["totals"].items() if key != "score"}
+    assert analyze._regression_warnings(before, after, "time_s", noise_floor=0) == []
 
 
-@pytest.mark.parametrize("different", ["agent", "model", "effort", "config", "version"])
+@pytest.mark.parametrize("different", ["agent", "model", "effort", "config", "instructions", "version"])
 def test_changes_require_the_same_combination_and_bench_major_minor(different: str) -> None:
     previous, latest = _dated_run("2026-10-30"), _dated_run("2026-10-31")
     latest["tasks"][0]["checks"][0]["ok"] = False
     if different == "config":
         latest["config"]["provider"] = "other"
+    elif different == "instructions":
+        latest["config"]["personal_instructions"] = ["different instructions"]
     elif different == "version":
         latest["bench_version"] = "1.6.0"
     else:
@@ -161,3 +170,106 @@ def test_changes_compare_only_the_latest_pair_by_started_at() -> None:
     latest["started_at"] = "2026-10-30T10:00:00Z"
     latest["agent"]["version"] = "new CLI version"
     assert _changes([latest, oldest, previous]).strip() == "No warnings."
+    oldest["totals"]["score"], previous["totals"]["score"], latest["totals"]["score"] = 100, 90, 70
+    changes = _changes([latest, oldest, previous])
+    assert "2026-10-30T09:00:00Z -> 2026-10-30T10:00:00Z" in changes
+    assert "check failed" not in changes
+
+
+def test_setup_key_uses_full_published_config_and_bench_minor_without_mutation() -> None:
+    original = _dated_run("2026-10-30")
+    before = deepcopy(original)
+    same = deepcopy(original)
+    same["config"] = dict(reversed(list(same["config"].items())))
+    same["bench_version"] = "1.5.9"
+    same["agent"]["version"] = "different executable version"
+    assert analyze.setup_key(original) == analyze.setup_key(same)
+    assert original == before
+    for field in ("model", "effort", "name"):
+        different = deepcopy(original)
+        different["agent"][field] = "different"
+        assert analyze.setup_key(original) != analyze.setup_key(different)
+    same["config"]["personal_instructions"] = ["published instruction"]
+    assert analyze.setup_key(original) != analyze.setup_key(same)
+    same = deepcopy(original)
+    same["bench_version"] = "1.6.0"
+    assert analyze.setup_key(original) != analyze.setup_key(same)
+
+
+def test_analysis_reads_same_setup_reruns_including_observations(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    results = tmp_path / "results"
+    snapshots: dict[Path, bytes] = {}
+    for name, score, seconds in (("ranked", 80.0, 100.0), ("observed", 84.0, 120.0), ("other", 60.0, 90.0)):
+        bundle = _write_result(results, name, score, model="different" if name == "other" else "repeat")
+        file = bundle / "result.json"
+        result = json.loads(file.read_text(encoding="utf-8"))
+        result["tasks"] = _run("fixture")["tasks"]
+        result["totals"]["time_s"] = seconds
+        file.write_text(json.dumps(result), encoding="utf-8")
+        snapshots[file] = file.read_bytes()
+    monkeypatch.setitem(leaderboard.OBSERVED_RUNS, "observed", "fixture observation")
+    assert cli.main(["analyze", "--results", str(results)]) == 0
+    report = capsys.readouterr().out
+    assert "## Same setup, several runs" in report
+    assert "| Score | 4.0 | 2.8 |" in report
+    assert "| Correct % | 4.0 | 2.8 |" in report
+    assert "| Judge | 4.0 | 2.8 |" in report
+    assert "| Time (s) | 20.0 | 14.1 |" in report
+    assert "noise floor: 4.0 Score points" in report
+    assert all(file.read_bytes() == content for file, content in snapshots.items())
+
+
+def test_noise_floor_is_not_measured_without_a_same_setup_pair() -> None:
+    report = analyze.render_analysis([_run("a"), _run("b")], "1.5")
+    assert "noise floor: not measured (no setup has two runs)" in report
+
+
+def test_noise_floor_uses_the_largest_score_spread_and_distinguishes_unmeasured_from_zero() -> None:
+    first, second = _dated_run("2026-10-30"), _dated_run("2026-10-31")
+    first["totals"]["score"], second["totals"]["score"] = 80, 84
+    other_first, other_second = deepcopy(first), deepcopy(second)
+    other_first["agent"]["model"] = other_second["agent"]["model"] = "other"
+    other_second["totals"]["score"] = 90
+    assert analyze.score_noise_floor([first]) is None
+    assert analyze.score_noise_floor([first, deepcopy(first)]) == 0
+    assert analyze.score_noise_floor([first, second, other_first, other_second]) == 10
+
+
+def test_pair_inside_global_score_noise_floor_generates_no_warning() -> None:
+    previous, latest = _dated_run("2026-10-30"), _dated_run("2026-10-31")
+    latest["totals"].update(score=98, judge=60, time_s=2000, tokens={"input": 2000})
+    latest["tasks"][0]["checks"][0]["ok"] = False
+    noisier_first, noisier_second = deepcopy(previous), deepcopy(previous)
+    noisier_first["agent"]["model"] = noisier_second["agent"]["model"] = "noisier"
+    noisier_second["totals"]["score"] = 90
+    noisier_baseline = deepcopy(noisier_second)
+    noisier_baseline["date"] = "2026-10-29"
+    noisier_second["date"] = "2026-10-31"
+    assert _changes([previous, latest, noisier_baseline, noisier_first, noisier_second]).strip() == "No warnings."
+
+
+@pytest.mark.parametrize("latest_score, warns", [(20, True), (98, False)])
+def test_latest_run_does_not_set_its_own_noise_floor(latest_score: float, warns: bool) -> None:
+    runs = [_dated_run(f"2026-10-{day}") for day in (29, 30, 31)]
+    for run, score in zip(runs, (100, 99, latest_score), strict=True):
+        run["totals"]["score"] = score
+    changes = _changes(runs)
+    if warns:
+        assert "Score: 99 -> 20" in changes
+        assert "2026-10-30 -> 2026-10-31" in changes
+    else:
+        assert changes.strip() == "No warnings."
+
+
+def test_first_pair_cannot_measure_its_own_noise_floor() -> None:
+    previous, latest = _dated_run("2026-10-30"), _dated_run("2026-10-31")
+    latest["totals"]["score"] = 20
+    assert _changes([previous, latest]).strip() == "noise floor: not measured"
+
+
+def test_regression_warning_requires_a_measured_floor_and_a_drop_strictly_beyond_it() -> None:
+    previous, latest = {"score": 80, "judge": 80}, {"score": 76, "judge": 60}
+    assert analyze._regression_warnings(previous, latest, "time_s", noise_floor=None) == []
+    assert analyze._regression_warnings(previous, latest, "time_s", noise_floor=4) == []
+    assert "Score: 80 -> 76" in analyze._regression_warnings(previous, latest, "time_s", noise_floor=3)

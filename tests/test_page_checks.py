@@ -166,7 +166,9 @@ def test_production_grading_includes_composition(tmp_path: Path, monkeypatch: py
         task_run._grade(task, record)
     else:
         cli._gold_problem(task, tmp_path)
-    assert (visual.COMPOSITION_CHECK, render == "reference") in results[0].checks
+    # #185: the similarity is a note for humans, never a scored check.
+    assert visual.COMPOSITION_CHECK not in dict(results[0].checks)
+    assert any(note.startswith(visual.COMPOSITION_CHECK) for note in results[0].notes)
 
 
 def _flat_png(color: tuple[int, int, int]) -> bytes:
@@ -183,12 +185,15 @@ def _flat_png(color: tuple[int, int, int]) -> bytes:
     (_flat_png((239, 227, 198)), False),
     (_flat_png((31, 58, 107)), False),
 ], ids=["judge reference", "audited opus spire", "audited sonnet pillar", "blank cream", "flat blue"])
-def test_the_homage_render_keeps_the_print_composition(tmp_path: Path, png: bytes, passes: bool) -> None:
+def test_the_homage_render_similarity_is_a_note_never_a_point(tmp_path: Path, png: bytes, passes: bool) -> None:
+    # #185 (2.6): on 18 published renders no cutoff separated the judge's votes, so the number is reported, not scored.
     result = CheckResult()
     probe = lambda html: visual.PageProbe(visual.RENDERED, (), len(png), png)  # noqa: E731
     visual.add_page_checks(result, _page(tmp_path), probe, composition=PRINT)
-    assert result.checks[-1] == (visual.COMPOSITION_CHECK, passes)
-    assert passes or "received" in result.details[visual.COMPOSITION_CHECK]
+    assert visual.COMPOSITION_CHECK not in dict(result.checks)
+    note = next(note for note in result.notes if note.startswith(visual.COMPOSITION_CHECK))
+    similarity = float(note.split(": ")[1].split(" ")[0])
+    assert (similarity >= visual.COMPOSITION_MIN) == passes
 
 
 def test_the_composition_margins_hold() -> None:
@@ -215,4 +220,5 @@ def test_the_gold_scene_renders_with_the_print_composition(tmp_path: Path) -> No
     task.reference(tmp_path)
     result = CheckResult()
     visual.add_page_checks(result, tmp_path / task.render_target, composition=PRINT)
-    assert result.checks == [(SCRIPT_ERROR, True), (DRAWS, True), (visual.COMPOSITION_CHECK, True)], result.details
+    assert result.checks == [(SCRIPT_ERROR, True), (DRAWS, True)], result.details
+    assert any(note.startswith(visual.COMPOSITION_CHECK) for note in result.notes)

@@ -5,12 +5,18 @@ a process born during the task window whose recorded ancestry reaches this runne
 before the task, or was born from one (the owner's browser opening a tab renderer, another session's build),
 is never touched. A process whose parent died before it was observed has no known ancestry and is spared:
 killing must never guess.
+
+#177: the harness itself (Claude Code, its Git Bash wrapper) also starts helpers under the runner, such as a
+`sleep.exe` the agent never asked for. Everything found is killed, but only a process the agent named in one of its
+shell commands (`attribute`) counts against it; the rest is a note.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import threading
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import psutil
@@ -24,9 +30,22 @@ MAX_DEPTH = 64
 class LeftProcess:
     name: str
     pid: int
+    # Joined psutil cmdline, "" when access is denied; kept in memory only, since a command line can hold secrets.
+    cmdline: str = ""
+    # True until run_task resolves it with `attribute`: an unresolved leftover keeps the 2.4 rule and counts.
+    attributed: bool = True
 
     def record(self) -> dict[str, object]:
         return {"name": self.name, "pid": self.pid}
+
+
+def attribute(left: LeftProcess, agent_commands: Sequence[str]) -> bool:
+    """#177: True when the executable's base name (no `.exe`, any case) is a word in one of the agent's commands."""
+    base = re.split(r"[\\/]", left.name)[-1].lower().removesuffix(".exe")
+    if not base:
+        return False
+    word = re.compile(rf"(?<![\w.-]){re.escape(base)}(?:\.exe)?(?![\w-])", re.IGNORECASE)
+    return any(word.search(command) for command in agent_commands)
 
 
 def _started() -> dict[int, float]:
@@ -103,9 +122,16 @@ class TaskWindow:
         found = []
         for proc in left:
             try:
-                found.append(LeftProcess(proc.name(), proc.pid))
+                found.append(LeftProcess(proc.name(), proc.pid, _cmdline(proc)))
                 proc.kill()
             except psutil.Error:
                 continue
         psutil.wait_procs(left, timeout=KILL_WAIT_S)
         return found
+
+
+def _cmdline(proc: psutil.Process) -> str:
+    try:
+        return " ".join(proc.cmdline())
+    except psutil.Error:
+        return ""

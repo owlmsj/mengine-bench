@@ -19,7 +19,8 @@ from dataclasses import dataclass
 
 from mengine_bench.runner.agents import Usage
 
-STATUSES = ("ok", "timeout", "crash")
+# #181 #185: `infra` is a host refusal (runner/infra_faults.py): graded and timed as delivered, never Solved.
+STATUSES = ("ok", "timeout", "crash", "infra")
 # #164: an audit found the judge calibrated (55 of 56 votes within 8 points) and the checks lenient, so 2.5 moves
 # 0.1 from Correct to Judge.
 CORRECT_SHARE = 0.5

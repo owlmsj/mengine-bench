@@ -17,9 +17,11 @@ from mengine_bench.analyze import render_analysis
 from mengine_bench.anchors import MIN_GAP, run_anchors
 from mengine_bench.bundle import bundle_leaks, run_scope, write_bundle
 from mengine_bench.bundle_judge import judge_bundle
+from mengine_bench.judge_calibrate import calibrate, parse_votes
 from mengine_bench.core import EvalTask, remove_tree, scratch_root
 from mengine_bench.leaderboard import build_leaderboard, judged_runs, major_minor
-from mengine_bench.preflight import blocking_problems, personal_instructions
+from mengine_bench.visual import find_browser
+from mengine_bench.preflight import blocking_problems, personal_instructions, toolchain_problems
 from mengine_bench.redact import LocalNames, local_names
 from mengine_bench.report import (
     SUMMARIES_BEGIN, SUMMARIES_END, cost_text, render_task_summaries, render_tasks_table, replace_tasks_table,
@@ -62,8 +64,11 @@ def _parser() -> argparse.ArgumentParser:
                      help="after a clean run, open the pull request with the bundle (needs gh, logged in)")
     run.add_argument("--work", type=Path, help="workspace root, kept after the run (default: a temp dir, removed "
                                                "once the bundle is written)")
+    run.add_argument("--allow-missing-toolchain", action="store_true", help="record missing toolchains in config and continue")
     run.add_argument("--dry-run", action="store_true", help="print the plan and the preflight findings; run nothing")
     sub.add_parser("list", help="list the tasks")
+    regrade = sub.add_parser("regrade", help="rerun current checks from bundled workspaces without an agent")
+    regrade.add_argument("bundle", type=Path)
     board = sub.add_parser("leaderboard", help="rank results/*/result.json into LEADERBOARD.md")
     board.add_argument("--results", type=Path, default=Path("results"))
     board.add_argument("--output", type=Path, default=Path("LEADERBOARD.md"))
@@ -78,6 +83,12 @@ def _parser() -> argparse.ArgumentParser:
     judge.add_argument("--again", action="store_true", help="replace the votes of a bundle that is already judged")
     sub.add_parser("judge-anchors", help="after a rubric or judge model change: vote two reference solutions and "
                                          "two untouched workspaces (four votes, no agent run, writes nothing)")
+    calibration = sub.add_parser("judge-calibrate", help="compare owner audit votes with fresh official judge votes")
+    calibration.add_argument("--votes", type=Path, required=True)
+    calibration.add_argument("bundleA", type=Path)
+    calibration.add_argument("bundleB", type=Path)
+    calibration.add_argument("--max-beyond", type=int, help="fail when more than N votes differ by over 8 (default: no limit)")
+    calibration.add_argument("--write", action="store_true", help="save docs/judge-calibration/<date>-<rubric>.md")
     study = sub.add_parser("analyze", help="what separates the published runs: tasks, score parts, ties (no agent run)")
     study.add_argument("--results", type=Path, default=Path("results"))
     study.add_argument("--version", help="bench major.minor (default: the current one)")
@@ -112,6 +123,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         for task in catalog.all_tasks():
             print(f"{task.id}\t{task.category}\t{task.summary}")
         return 0
+    if args.command == "regrade":
+        from mengine_bench.regrade import regrade_bundle
+        try:
+            regrade_bundle(args.bundle)
+        except (OSError, ValueError) as error:
+            print(f"regrade: FAILED: {error}")
+            return 1
+        print("regrade: updated result.json and summary.md")
+        return 0
     if args.command == "leaderboard":
         return _leaderboard(args)
     if args.command == "selftest":
@@ -124,9 +144,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _judge(args)
     if args.command == "judge-anchors":
         return _judge_anchors()
+    if args.command == "judge-calibrate":
+        return _judge_calibrate(args)
     if args.command == "analyze":
         return _analyze(args.results, args.version or major_minor(__version__))
     return _run(args)
+
+
+def _judge_calibrate(args: argparse.Namespace) -> int:
+    try:
+        if args.max_beyond is not None and args.max_beyond < 0:
+            raise ValueError(f"received --max-beyond {args.max_beyond}; expected a nonnegative integer")
+        votes = parse_votes(args.votes.read_text(encoding="utf-8-sig"))
+        judge = RubricJudge(make_agent("claude", DEFAULT_JUDGE_MODEL, DEFAULT_JUDGE_EFFORT, None))
+        report, beyond = calibrate(votes, (args.bundleA, args.bundleB), judge)
+        if args.write:
+            from mengine_bench.judge import RUBRIC_VERSION
+            target = Path("docs/judge-calibration") / f"{datetime.now().date().isoformat()}-{RUBRIC_VERSION}.md"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(report, encoding="utf-8", newline="\n")
+    except (ValueError, OSError) as error:
+        print(f"judge-calibrate: FAILED: {error}")
+        return 1
+    sys.stdout.write(report)
+    return int(args.max_beyond is not None and beyond > args.max_beyond)
 
 
 def _analyze(results: Path, version: str) -> int:
@@ -197,6 +238,15 @@ def _run(args: argparse.Namespace) -> int:
     # could read the gold checks in mengine_bench/tasks.
     scratch = scratch_root()
     work = (args.work or scratch / "runs" / stamp).resolve()
+    missing = toolchain_problems()
+    for problem in missing:
+        print(f"preflight: {problem}")
+    if find_browser() is None:
+        print("preflight warning: Chromium browser missing; page checks will be left out")
+    if args.allow_missing_toolchain:
+        config["allow_missing_toolchain"] = missing
+    if missing and not args.allow_missing_toolchain and not args.dry_run:
+        raise SystemExit("error: " + "; ".join(missing) + "; install toolchains or use --allow-missing-toolchain")
     problems = blocking_problems(scratch, work)
     for problem in problems:
         print(f"preflight: {problem}")
@@ -208,7 +258,8 @@ def _run(args: argparse.Namespace) -> int:
         plan = {"agent": args.agent, "model": args.model, "effort": args.effort,
                 "judge": "on review (maintainer: mengine-bench judge)", "tasks": [task.id for task in tasks],
                 "dry_run": True, "launches": 0,
-                "preflight": "clean" if not problems else f"blocked by {len(problems)} earlier run(s)",
+                "preflight": "blocked by missing toolchains" if missing and not args.allow_missing_toolchain else (
+                    "clean" if not problems else f"blocked by {len(problems)} earlier run(s)"),
                 "config": config}
         print(json.dumps(plan))
         return 0
@@ -224,7 +275,7 @@ def _run(args: argparse.Namespace) -> int:
     transcripts = {task.id: work / task.id / "transcripts" for task in tasks}
     scope = run_scope(work, local_names().allowing(args.submitter))
     bundle = write_bundle(results, args.out, transcripts, scope, evidence.packets, evidence.deliverables,
-                          evidence.evidence)
+                          evidence.evidence, evidence.workspaces)
     totals = results["totals"]
     assert isinstance(totals, dict)
     print(f"correct {totals['correct']}% solved {totals['solved']}/{totals['total']} time "

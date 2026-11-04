@@ -1,17 +1,17 @@
 """`mengine-bench analyze`: what separates runs, read from published results (#82). No agent runs.
 
-Runs are not repeated, so the order is tested another way: draw the tasks again with replacement, many
-times, and count how often one run keeps its lead. That shows how much the order rests on this set of tasks.
-It says nothing about the noise between two runs of the same agent.
+Task resampling tests how much the order rests on this task set. Same-setup reruns separately measure
+run-to-run noise; without a repeated setup that floor is not measured.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from statistics import mean, median
+from statistics import mean, median, stdev
 
 from mengine_bench.report import time_text
 from mengine_bench.scoring import CORRECT_SHARE, JUDGE_SHARE, SPEED_SHARE, combined_score, speed_points
@@ -29,6 +29,52 @@ INPUT_TOKEN_INCREASE_LIMIT = 0.25
 JUDGE_DROP_LIMIT = 6
 
 Run = Mapping[str, object]
+
+
+def setup_key(result: Run) -> str:
+    """Published setup identity, computed on read; patch and executable versions are not setup changes (#185)."""
+    agent = result["agent"]
+    assert isinstance(agent, dict)
+    config = json.dumps(result.get("config") or {}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    digest = hashlib.sha256(config.encode("utf-8")).hexdigest()[:12]
+    minor = ".".join(str(result.get("bench_version")).split(".")[:2])
+    return f"{agent.get('name')}/{agent.get('model')}/{agent.get('effort')}/{digest}/{minor}"
+
+
+def _setup_groups(runs: Sequence[Run]) -> dict[str, list[Run]]:
+    groups: dict[str, list[Run]] = {}
+    for run in runs:
+        groups.setdefault(setup_key(run), []).append(run)
+    return {key: group for key, group in groups.items() if len(group) > 1}
+
+
+def _metric_values(runs: Sequence[Run], metric: str) -> list[float]:
+    values = [run["totals"].get(metric) for run in runs]  # type: ignore[union-attr]
+    return [float(value) for value in values if isinstance(value, (int, float))]
+
+
+def score_noise_floor(runs: Sequence[Run]) -> float | None:
+    """The largest measured Score range among same-setup reruns, or no measurement."""
+    scores = [_metric_values(group, "score") for group in _setup_groups(runs).values()]
+    spreads = [max(values) - min(values) for values in scores if len(values) > 1]
+    return max(spreads) if spreads else None
+
+
+def _noise_section(runs: Sequence[Run]) -> list[str]:
+    lines = ["## Same setup, several runs", ""]
+    groups = _setup_groups(runs)
+    for key, group in sorted(groups.items()):
+        lines.extend([f"Setup `{key}` ({len(group)} runs)", "", "| metric | max-min | sample stdev |",
+                      "| --- | --- | --- |"])
+        for label, metric in (("Score", "score"), ("Correct %", "correct"), ("Judge", "judge"), ("Time (s)", "time_s")):
+            values = _metric_values(group, metric)
+            spread = f"{max(values) - min(values):.1f} | {stdev(values):.1f}" if len(values) > 1 else "not measured | not measured"
+            lines.append(f"| {label} | {spread} |")
+        lines.append("")
+    floor = score_noise_floor(runs)
+    lines.append(f"noise floor: {floor:.1f} Score points" if floor is not None else
+                 "noise floor: not measured (no setup has two runs)")
+    return lines
 
 
 @dataclass(frozen=True)
@@ -127,10 +173,18 @@ def _pairs_table(runs: Sequence[Run]) -> list[str]:
     return lines
 
 
-def _regression_warnings(previous: Run, latest: Run, time_key: str) -> list[str]:
+def _regression_warnings(previous: Run, latest: Run, time_key: str, noise_floor: float | None = None) -> list[str]:
+    if noise_floor is None:
+        return []
+    old_score, new_score = previous.get("score"), latest.get("score")
+    if isinstance(old_score, (int, float)) and isinstance(new_score, (int, float)):
+        if old_score - new_score <= noise_floor:
+            return []
     passed = {check["name"] for check in previous.get("checks", []) if check.get("ok") is True}
     warnings = [f"check failed: {check['name']}" for check in latest.get("checks", [])
                 if check.get("ok") is False and check["name"] in passed]
+    if isinstance(old_score, (int, float)) and isinstance(new_score, (int, float)):
+        warnings.append(f"Score: {old_score:g} -> {new_score:g}")
     old_tokens, new_tokens = previous.get("tokens") or {}, latest.get("tokens") or {}
     metrics = (("Time", previous.get(time_key), latest.get(time_key), TIME_INCREASE_LIMIT),
                ("Judge", previous.get("judge"), latest.get("judge"), None),
@@ -144,14 +198,14 @@ def _regression_warnings(previous: Run, latest: Run, time_key: str) -> list[str]
     return warnings
 
 
-def _changed_tasks(previous: Run, latest: Run) -> list[str]:
+def _changed_tasks(previous: Run, latest: Run, noise_floor: float) -> list[str]:
     old_tasks = {task["id"]: task for task in previous["tasks"]}
     lines = []
     for task in latest["tasks"]:
         before = old_tasks.get(task["id"])
         if before is None:
             continue
-        warnings = _regression_warnings(before, task, "agent_s")
+        warnings = _regression_warnings(before, task, "agent_s", noise_floor)
         if warnings:
             lines.append(f"  - {task['id']}: {'; '.join(warnings)}")
     return lines
@@ -162,34 +216,37 @@ def _run_date(run: Run) -> str:
 
 
 def _changes_section(runs: Sequence[Run]) -> list[str]:
-    groups: dict[tuple[str, str, str, str, str], list[Run]] = {}
+    groups: dict[str, list[Run]] = {}
     for run in runs:
         if not _run_date(run):
             continue
-        agent, config = run["agent"], run.get("config") or {}
-        config_text = json.dumps({key: value for key, value in config.items() if key != "personal_instructions"},
-                                 sort_keys=True)
-        key = (".".join(str(run.get("bench_version")).split(".")[:2]), str(agent.get("name")),
-               str(agent.get("model")), str(agent.get("effort")), config_text)
-        groups.setdefault(key, []).append(run)
+        groups.setdefault(setup_key(run), []).append(run)
     lines = ["## Changes since the last run", ""]
     repeated = [key for key, group in groups.items() if len(group) > 1]
+    measured = False
     for key in repeated:
         previous, latest = sorted(groups[key], key=_run_date)[-2:]
-        warnings = _regression_warnings(previous["totals"], latest["totals"], "time_s")
-        tasks = _changed_tasks(previous, latest)
-        if not warnings and not tasks:
+        if len(_metric_values([previous, latest], "score")) < 2:
             continue
-        _, agent, model, effort, config = key
-        lines.append(f"- {agent} {model}/{effort}, config {config} ({_run_date(previous)} -> {_run_date(latest)})")
-        lines.extend([f"  - Run: {'; '.join(warnings)}"] if warnings else [])
-        lines.extend(tasks)
+        # The run being tested cannot supply evidence for its own noise floor (#185, #94).
+        noise_floor = score_noise_floor([run for run in runs if run is not latest])
+        measured |= noise_floor is not None
+        warnings = _regression_warnings(previous["totals"], latest["totals"], "time_s", noise_floor)
+        if not warnings:
+            continue
+        agent = latest["agent"]
+        lines.append(f"- {agent.get('name')} {agent.get('model')}/{agent.get('effort')}, setup {key} "
+                     f"({_run_date(previous)} -> {_run_date(latest)})")
+        lines.append(f"  - Run: {'; '.join(warnings)}")
+        assert noise_floor is not None
+        lines.extend(_changed_tasks(previous, latest, noise_floor))
     if len(lines) == 2:
-        lines.append("No warnings." if repeated else "No repeated combinations to compare.")
+        lines.append("No repeated combinations to compare." if not repeated else
+                     "No warnings." if measured else "noise floor: not measured")
     return lines
 
 
 def render_analysis(runs: Sequence[Run], version: str) -> str:
     sections = [[f"# Bench {version}: {len(runs)} judged runs"], _parts_table(runs), _tasks_table(runs), _pairs_table(runs),
-                _changes_section(runs)]
+                _noise_section(runs), _changes_section(runs)]
     return "\n\n".join("\n".join(section) for section in sections) + "\n"

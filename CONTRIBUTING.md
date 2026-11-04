@@ -68,8 +68,9 @@ Consulting the reference, the hidden tests or a published answer, from this repo
 rejected on transcript review.
 
 Adding, removing or changing a task, prompt or check is a new bench minor
-version (1.7.0), and a new catalog is a major one (2.0.0): runs of different
-minor versions are never ranked together. Add every id that came or went to
+version (1.7.0), and a new catalog is a major one (2.0.0). Runs of an older minor stay ranked only by an explicit
+owner decision recorded in `RANKED_WITH_CURRENT` (#139, #185), each row marked with its version; otherwise they move
+to history. Add every id that came or went to
 `TASKS_THAT_CAME_AND_WENT` in `mengine_bench/leaderboard.py`, or the older
 complete runs drop out of the leaderboard history.
 
@@ -101,3 +102,24 @@ a local Chromium-family browser (Edge, Chrome or Chromium, or
 `MENGINE_BENCH_BROWSER`); never run it as root. If `git push` to the
 contributor's branch is refused (the PR does not allow maintainer edits), merge
 first and land the LEADERBOARD.md commit in a pull request of your own.
+
+## Maintainer: releasing a bench version
+
+Fixes are cheap and runs are not, so versions ship in trains, not per fix (#185). There is no CI by decision (#11):
+the checklist below is the gate, run by the maintainer on the release branch.
+
+- **Cadence.** At most one minor per week. Between trains `main` stays releasable and carries no version bump; the
+  bump is one pull request whose body holds this checklist with its outputs.
+- **Patch** (2.6.x): grader or runner fixes that change no task, prompt or limit. Published runs that kept their
+  workspaces are regraded with `mengine-bench regrade results/<run>`, never run again.
+- **Minor** (2.7.0): a task, prompt, limit, check or rubric change. The catalog changes only on a train, and a
+  candidate waits in `docs/CANDIDATES.md` until then.
+- **Checklist**, in order, every output quoted in the PR:
+  1. `uv run pytest -q` green on the release branch (load-sensitive tests run alone when the host is busy).
+  2. Rubric or judge input changed: `mengine-bench judge-calibrate` against the owner's audit votes, mean and count
+     beyond 8 points not worse than the recorded baseline; then `RUBRIC_VERSION` bumped.
+  3. bench-audit (`.claude/skills/bench-audit`) on two published runs with the release's checks.
+  4. One validation run per harness family (Claude Code, Codex, opencode) on the release branch, kept as an
+     observation, never ranked.
+  5. Ranked runs regraded (patch) or re-judged once (rubric change), `mengine-bench leaderboard` regenerated,
+     the SCORING.md paragraph for the version written, `tasks-doc` regenerated when a task moved.

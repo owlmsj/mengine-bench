@@ -17,8 +17,11 @@ def _snapshot_error(error: OSError) -> None:
 def outside_snapshot(workspace: Path, root: Path) -> dict[str, FileStamp]:
     """Do not follow links or read contents; tool installations may be read freely.
 
-    This detects surviving changes in task-owned directories, not writes anywhere
-    on the host or files created and removed between snapshots (#164).
+    The gate compares the task's parent and run directories before and after each
+    step; only changes left in the final state fail it (#164, #185, #183).
+    Files created and removed between snapshots are invisible by design. Transient
+    use of ../ is a judge-visible outside_path_uses statistic, not a gate failure.
+    Writes elsewhere on the host are outside this snapshot's scope.
     """
     stamps: dict[str, FileStamp] = {}
     for label, parent in (("parent", workspace.parent), ("run", root)):

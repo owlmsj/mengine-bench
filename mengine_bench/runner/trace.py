@@ -288,3 +288,14 @@ def fetch_actions(trace: Sequence[ToolCall]) -> list[set[str]]:
 
 def fetched_urls(trace: Sequence[ToolCall]) -> set[str]:
     return {url_key(url) for action in fetch_actions(trace) for url in action if url_key(url)}
+
+
+def shell_commands(trace: Sequence[ToolCall]) -> list[str]:
+    """Command text of every shell call, failed ones included: what the agent asked the host to run (#177)."""
+    commands = []
+    for call in trace:
+        if call.name.lower() not in _SHELLS:
+            continue
+        command = call.inputs.get("command", call.inputs.get("cmd", call.inputs.get("CommandLine", "")))
+        commands.append(" ".join(map(str, command)) if isinstance(command, list) else str(command))
+    return commands

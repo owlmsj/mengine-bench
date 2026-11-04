@@ -21,6 +21,8 @@ def isolated_preflight(monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest
     # Launcher behavior is isolated in test_safe_runner.py; keep fake-agent tests in process.
     monkeypatch.setattr(cli, "relaunch_run", lambda argv: None)
     monkeypatch.setattr(cli, "personal_instructions", lambda *args, **kwargs: [])
+    monkeypatch.setattr(cli, "toolchain_problems", lambda: [])
+    monkeypatch.setattr(cli, "find_browser", lambda: "fake-browser")
     monkeypatch.setattr(cli, "blocking_problems", lambda *args, **kwargs: [])
     monkeypatch.setenv("MENGINE_BENCH_SCRATCH", str(tmp_path_factory.mktemp("scratch")))
     # Grading runs a page in a real browser (#82); tests/test_page_checks.py covers it with fakes.

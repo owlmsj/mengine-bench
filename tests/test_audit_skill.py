@@ -90,3 +90,19 @@ def test_a_run_without_harness_cost_shows_the_list_price_estimate_178(tmp_path: 
     assert data["runs"][1]["totals"]["cost"].startswith("~$")
     assert data["rows"][0]["b"]["cost"].startswith("~$"), data["rows"][0]["b"]["cost"]
     assert data["runs"][0]["totals"]["cost"] == "$1.50", "an exact harness cost stays exact"
+
+
+def test_pages_and_files_open_inside_the_page_never_in_a_new_tab_182(tmp_path: Path) -> None:
+    # #182: artifact files are served only inside the viewer; a target=_blank link to them is refused by claude.ai.
+    a, b = _bundle(tmp_path, "run-a", 80), _bundle(tmp_path, "run-b", 60)
+    (a / "evidence" / "voice" / "dossier.md").write_text("# notes", encoding="utf-8")
+    rows = [{"task": "voice", "brief": "speak", "a": _side(), "b": _side(), "better": "tie"},
+            {"task": "landing", "brief": "page", "a": _side(), "b": _side(), "better": "tie"}]
+    (tmp_path / "g1.json").write_text(json.dumps(rows), encoding="utf-8")
+    config = {"rows": ["g1.json"], "runs": [{"key": "a", "label": "A", "bundle": str(a)}, {"key": "b", "label": "B", "bundle": str(b)}]}
+    (tmp_path / "audit.json").write_text(json.dumps(config), encoding="utf-8")
+    _build_module().build(tmp_path / "audit.json", tmp_path / "site")
+    html = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
+    script = html.split("<script>", 1)[1]
+    assert 'target="_blank"' not in script, "no asset opens in a new tab"
+    assert "data-full=" in script and "requestFullscreen" in script and "data-file=" in script
