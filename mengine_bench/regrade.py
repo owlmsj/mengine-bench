@@ -50,6 +50,9 @@ def _regrade_task(bundle: Path, row: dict[str, object], version: str) -> None:
         row.setdefault("flags", []).append("regrade skipped: workspace not kept")
         return
     task = catalog.task_by_id(task_id)
+    if task is None:
+        row.setdefault("flags", []).append("regrade skipped: task absent from current catalog")
+        return
     with tempfile.TemporaryDirectory(prefix="mengine-bench-regrade-") as temporary:
         workspace = Path(temporary) / "workspace"
         workspace.mkdir()

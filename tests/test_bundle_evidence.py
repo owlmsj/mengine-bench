@@ -42,6 +42,18 @@ def test_workspace_archive_preserves_files_and_scans_members(tmp_path: Path) -> 
     assert "workspace/test.tar.gz/output.bin" in bundle_leaks(bundle, LocalNames())
 
 
+def test_workspace_compressed_cap_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mengine_bench import bundle
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / "file").write_bytes(b"content")
+    monkeypatch.setattr(bundle, "WORKSPACE_BYTES", 1)
+    target = tmp_path / "archive.tar.gz"
+    notes = bundle._write_workspace(target, ws)
+    assert len(notes) == 1 and notes[0].startswith("workspace not kept: ") and notes[0].endswith(" MiB")
+    assert not target.exists()
+
+
 def _evidence_task() -> EvalTask:
     return EvalTask(id="human-evidence", category="media", provenance="test", summary="test",
                     setup=lambda ws: None, steps=(Step("Create media files."),),
