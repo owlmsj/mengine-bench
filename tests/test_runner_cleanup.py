@@ -18,6 +18,7 @@ from conftest import FakeAgent
 from mengine_bench.core import CheckResult, EvalTask, Step
 from mengine_bench.runner import site as site_module
 from mengine_bench.runner.agents import CmdAgent
+from mengine_bench.runner.leftovers import LeftProcess, attribute
 from mengine_bench.runner.site import end_pages, serve_site
 from mengine_bench.runner.task_run import CLEANUP_CHECK, CLOSE_NOTE, run_task
 
@@ -219,3 +220,13 @@ def test_the_summary_shows_what_a_task_left_open_only_when_it_did() -> None:
     assert "## Left open" in summary and "- `cu-x`: 2 tab(s) open; still running: node.exe (42)" in summary
     assert "Left open" not in _summary_of(left_open_tabs=0, left_running=[])
     assert "Left open" not in _summary_of()
+
+
+@pytest.mark.parametrize(("name", "commands", "expected"), [
+    # #177: the harness's Git Bash started sleep.exe; the agent only ran curl (and a PowerShell cmdlet is no sleep.exe).
+    ("sleep.exe", ["curl -s http://127.0.0.1:8000/inbox", "Start-Sleep -Seconds 2"], False),
+    ("python.exe", ["cd site && python server.py"], True),
+    ("Node.EXE", ['"C:/Program Files/nodejs/node.exe" serve.js'], True),
+])
+def test_a_leftover_counts_only_when_the_agent_named_it(name: str, commands: list[str], expected: bool) -> None:
+    assert attribute(LeftProcess(name, 1), commands) is expected
