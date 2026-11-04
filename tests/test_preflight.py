@@ -81,3 +81,32 @@ def test_opencode_does_not_publish_claude_global_instructions(tmp_path: Path) ->
     assert '~/.config/opencode/AGENTS.md' in found
     assert 'AGENTS.md above the workspaces' in found
     assert '~/.claude/CLAUDE.md' not in found
+
+
+@pytest.mark.parametrize("version,expected", [("v22.18.0", []), ("v24.0.0", []),
+    ("v22.17.9", ["node version 'v22.17.9'; expected >= 22.18"]),
+    ("bad", ["node version 'bad'; expected >= 22.18"])])
+def test_toolchain_node_version(monkeypatch, version, expected) -> None:
+    from types import SimpleNamespace
+    monkeypatch.setattr(preflight.shutil, "which", lambda name: name)
+    monkeypatch.setattr(preflight.subprocess, "run", lambda *a, **k: SimpleNamespace(stdout=version, returncode=0))
+    assert preflight.toolchain_problems() == expected
+
+
+def test_missing_toolchains(monkeypatch) -> None:
+    monkeypatch.setattr(preflight.shutil, "which", lambda name: None)
+    assert preflight.toolchain_problems() == ["cargo missing", "node missing", "git missing"]
+
+
+def test_cli_toolchain_block_and_waiver(monkeypatch, capsys) -> None:
+    from mengine_bench import cli
+    monkeypatch.setattr(cli, "toolchain_problems", lambda: ["cargo missing"])
+    monkeypatch.setattr(cli, "find_browser", lambda: None)
+    argv = ["run", "--agent", "codex", "--model", "fake", "--tasks", "ds-ab-playtest"]
+    with pytest.raises(SystemExit, match="cargo missing"):
+        cli.main(argv)
+    assert "page checks will be left out" in capsys.readouterr().out
+    assert cli.main([*argv, "--dry-run", "--allow-missing-toolchain"]) == 0
+    import json
+    plan = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert plan["config"]["allow_missing_toolchain"] == ["cargo missing"]

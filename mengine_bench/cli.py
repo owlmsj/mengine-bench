@@ -19,7 +19,8 @@ from mengine_bench.bundle import bundle_leaks, run_scope, write_bundle
 from mengine_bench.bundle_judge import judge_bundle
 from mengine_bench.core import EvalTask, remove_tree, scratch_root
 from mengine_bench.leaderboard import build_leaderboard, judged_runs, major_minor
-from mengine_bench.preflight import blocking_problems, personal_instructions
+from mengine_bench.visual import find_browser
+from mengine_bench.preflight import blocking_problems, personal_instructions, toolchain_problems
 from mengine_bench.redact import LocalNames, local_names
 from mengine_bench.report import (
     SUMMARIES_BEGIN, SUMMARIES_END, cost_text, render_task_summaries, render_tasks_table, replace_tasks_table,
@@ -62,6 +63,7 @@ def _parser() -> argparse.ArgumentParser:
                      help="after a clean run, open the pull request with the bundle (needs gh, logged in)")
     run.add_argument("--work", type=Path, help="workspace root, kept after the run (default: a temp dir, removed "
                                                "once the bundle is written)")
+    run.add_argument("--allow-missing-toolchain", action="store_true", help="record missing toolchains in config and continue")
     run.add_argument("--dry-run", action="store_true", help="print the plan and the preflight findings; run nothing")
     sub.add_parser("list", help="list the tasks")
     regrade = sub.add_parser("regrade", help="rerun current checks from bundled workspaces without an agent")
@@ -208,6 +210,15 @@ def _run(args: argparse.Namespace) -> int:
     # could read the gold checks in mengine_bench/tasks.
     scratch = scratch_root()
     work = (args.work or scratch / "runs" / stamp).resolve()
+    missing = toolchain_problems()
+    for problem in missing:
+        print(f"preflight: {problem}")
+    if find_browser() is None:
+        print("preflight warning: Chromium browser missing; page checks will be left out")
+    if args.allow_missing_toolchain:
+        config["allow_missing_toolchain"] = missing
+    if missing and not args.allow_missing_toolchain and not args.dry_run:
+        raise SystemExit("error: " + "; ".join(missing) + "; install toolchains or use --allow-missing-toolchain")
     problems = blocking_problems(scratch, work)
     for problem in problems:
         print(f"preflight: {problem}")
@@ -219,7 +230,8 @@ def _run(args: argparse.Namespace) -> int:
         plan = {"agent": args.agent, "model": args.model, "effort": args.effort,
                 "judge": "on review (maintainer: mengine-bench judge)", "tasks": [task.id for task in tasks],
                 "dry_run": True, "launches": 0,
-                "preflight": "clean" if not problems else f"blocked by {len(problems)} earlier run(s)",
+                "preflight": "blocked by missing toolchains" if missing and not args.allow_missing_toolchain else (
+                    "clean" if not problems else f"blocked by {len(problems)} earlier run(s)"),
                 "config": config}
         print(json.dumps(plan))
         return 0
