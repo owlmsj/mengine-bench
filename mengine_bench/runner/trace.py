@@ -52,11 +52,27 @@ def _event_calls(event: Mapping[str, object], failures: set[str]) -> list[ToolCa
         if subtype == "mcp_tool_call":
             return [_call(item.get("tool"), item.get("arguments"), failed=failed)]
         if subtype == "web_search":
-            return [_call("web", _mapping(item.get("action")))]
+            action = dict(_mapping(item.get("action")))
+            action["opened_urls"] = codex_opened_urls(item)
+            return [_call("web", action, failed=failed)]
     step = _mapping(event.get("step_update"))
     if step.get("step_type") == "tool" and step.get("state") != "ACTIVE":
         return [_call(step.get("tool_name"), _mapping(step.get("tool_info")).get("parameters"), failed=step.get("state") != "DONE")]
     return []
+
+
+def codex_opened_urls(item: Mapping[str, object]) -> list[str]:
+    """Structured opened views are fetch evidence; search snippets are not (#171)."""
+    action = _mapping(item.get("action"))
+    if action.get("type") not in {"open_page", "open"}:
+        return []
+    urls = [str(action["url"])] if url_key(action.get("url")) else []
+    results = item.get("results")
+    for row in results if isinstance(results, list) else []:
+        result = _mapping(row)
+        if re.fullmatch(r"turn[0-9]+view[0-9]+", str(result.get("ref_id", ""))) and url_key(result.get("url")):
+            urls.append(str(result["url"]))
+    return list(dict.fromkeys(urls))
 
 
 def tool_trace(streams: Sequence[str], workspace: Path | None = None,
@@ -239,7 +255,7 @@ def _javascript_urls(source: str) -> set[str]:
 
 
 def fetch_actions(trace: Sequence[ToolCall]) -> list[set[str]]:
-    """Fetch inputs only; output labels and reconstructed scripts are not evidence (#164)."""
+    """Fetch inputs and structured opened views; never agent-written output labels (#171)."""
     actions: list[set[str]] = []
     for call in trace:
         name = call.name.lower()
@@ -259,6 +275,9 @@ def fetch_actions(trace: Sequence[ToolCall]) -> list[set[str]]:
                 found.update(str(row.get("ref_id")) for row in opened if isinstance(row, dict) and url_key(row.get("ref_id")))
             if inputs.get("type") in {"open_page", "open"} and url_key(inputs.get("url")):
                 found.add(str(inputs["url"]))
+            opened_urls = inputs.get("opened_urls")
+            if isinstance(opened_urls, list):
+                found.update(str(url) for url in opened_urls if url_key(url))
         if "browser" in name or "cua" in name:
             found.update(_javascript_urls(str(inputs.get("code", inputs.get("script", "")))))
             if "click" in name:
