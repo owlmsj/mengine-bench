@@ -113,7 +113,7 @@ def _graded(task_id: str, tmp_path: Path) -> tuple[object, task_run.TaskRunRecor
 
 
 def test_grading_records_a_failure_with_its_reason(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(task_run, "add_page_checks", lambda result, html: result.add(SCRIPT_ERROR, False, "Uncaught Error: boom"))
+    monkeypatch.setattr(task_run, "add_page_checks", lambda result, html, **kwargs: result.add(SCRIPT_ERROR, False, "Uncaught Error: boom"))
     task, record = _graded("web-mondrian-landing", tmp_path)
     assert record.check is not None and not record.check.passed
     failed = [check for check in _detail(task, record)["checks"] if not check["ok"]]
@@ -121,7 +121,7 @@ def test_grading_records_a_failure_with_its_reason(tmp_path: Path, monkeypatch: 
 
 
 def test_a_note_about_the_machine_reaches_the_flags(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(task_run, "add_page_checks", lambda result, html: result.notes.append("page not run: no browser"))
+    monkeypatch.setattr(task_run, "add_page_checks", lambda result, html, **kwargs: result.notes.append("page not run: no browser"))
     task, record = _graded("3d-print-homage", tmp_path)
     assert record.check is not None and record.check.passed
     assert _detail(task, record)["flags"] == ["page not run: no browser"]
@@ -141,6 +141,32 @@ def test_a_task_without_a_page_runs_no_browser(tmp_path: Path, monkeypatch: pyte
 PRINT = visual.COMPOSITION_PRINTS["3d-print-homage"]
 FIXTURES = Path(__file__).parent / "fixtures" / "print-homage"
 JUDGE_REFERENCE = Path(visual.__file__).parent / "assets" / "references" / "3d-print-homage.png"
+
+
+@pytest.mark.parametrize("caller", ["runner", "selftest"])
+@pytest.mark.parametrize("render", ["reference", "audited-opus-spire.png", "audited-sonnet-pillar.png"])
+def test_production_grading_includes_composition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                caller: str, render: str) -> None:
+    from mengine_bench import cli
+    from mengine_bench.runner import task_run
+
+    task = next(item for item in catalog.all_tasks() if item.id == "3d-print-homage")
+    png = (JUDGE_REFERENCE if render == "reference" else FIXTURES / render).read_bytes()
+    results: list[CheckResult] = []
+
+    def page_checks(result: CheckResult, html: Path, *, composition: Path | None = None) -> None:
+        visual.add_page_checks(result, html, lambda path: visual.PageProbe(visual.RENDERED, (), len(png), png),
+                               composition=composition)
+        results.append(result)
+
+    monkeypatch.setattr(task_run if caller == "runner" else cli, "add_page_checks", page_checks)
+    if caller == "runner":
+        task.setup(tmp_path)
+        record = task_run.TaskRunRecord(task.id, workspace=tmp_path, answers=task.reference(tmp_path))
+        task_run._grade(task, record)
+    else:
+        cli._gold_problem(task, tmp_path)
+    assert (visual.COMPOSITION_CHECK, render == "reference") in results[0].checks
 
 
 def _flat_png(color: tuple[int, int, int]) -> bytes:

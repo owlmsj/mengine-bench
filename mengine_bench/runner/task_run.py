@@ -34,7 +34,7 @@ from mengine_bench.runner.site import SITE_PLACEHOLDER, SiteFailed, end_pages, s
 from mengine_bench.runner.stats import RunStats, merge_stats, stream_stats
 from mengine_bench.runner.trace import tool_trace
 from mengine_bench.runner.workspace_gate import WORKSPACE_WRITE_GATE, outside_changes, outside_snapshot
-from mengine_bench.visual import add_page_checks
+from mengine_bench.visual import COMPOSITION_PRINTS, add_page_checks
 
 # Browser user-data dirs an agent left in the workspace; their cache files can
 # stay locked by a live browser, and they are never part of the solution.
@@ -357,7 +357,7 @@ def _grade(task: EvalTask, record: TaskRunRecord) -> None:
         if record.outside_writes and record.outside_unmeasured is None:
             record.check.details[WORKSPACE_WRITE_GATE] = saw(sorted(set(record.outside_writes)), "no filesystem changes outside the workspace")
         if task.render_target is not None:
-            add_page_checks(record.check, record.workspace / task.render_target)
+            add_page_checks(record.check, record.workspace / task.render_target, composition=COMPOSITION_PRINTS.get(task.id))
     except (ValueError, RuntimeError, OSError) as error:
         record.error = f"{record.error or ''} grading failed: {error}".strip()
         record.status = "crash"
