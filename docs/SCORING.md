@@ -1,5 +1,13 @@
 # Scoring (bench 2.5)
 
+## Bench 2.6: regradable bundles
+
+New bundles keep each task's final graded workspace in `workspace/<task>.tar.gz`, up to 20 MiB compressed, preserving regular files and `.git` while excluding symlinks, `target/`, `node_modules/`, `.venv/` and `__pycache__/`.
+Workspace bytes receive the same privacy scan as human evidence and are never judge input; an oversized workspace leaves a task note instead of an archive.
+`mengine-bench regrade results/<run>` reruns current checks and gates using that workspace, saved answers, transcripts and recorded runtime observations, without running an agent, and records previous correctness and checks in `graded_with`.
+Tasks without an archive retain their grade with a note; totals and `summary.md` are refreshed, and Score remains unavailable until judged.
+This mechanism does not change the ranking rule or complete missing tasks.
+
 A run of an agent (harness + model + configuration) gets three numbers folded into
 the Score, and a Cost kept apart.
 
