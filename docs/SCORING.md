@@ -58,6 +58,11 @@ with the wrong answer that used to pass as a test. The 2.0 to 2.4 runs stay rank
 version, graded without these checks; the leaderboard recomputes every ranked Score with the 2.5 weights from the
 run's own published Correct %, Judge and Speed, so no run is judged again and no number is edited by hand.
 
+Bench 2.5.1: tasks can declare human-only `evidence`, stored as verbatim bytes under
+`evidence/<task>/<relative path>` and excluded from judge input. This keeps media-voice's WAV and file-media-edit's
+crop and filled PDF for owner review. Only regular workspace files without symlinks are kept, up to 5 MiB each;
+skipped files leave a task note, and evidence still passes the bundle privacy scan. No prompts or checks change.
+
 A run is one sample and runs are not repeated, so ties come from the published tasks: draw the tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
 a tie. This shows how much the order rests on this set of tasks; it says nothing about the noise between two runs of one agent.

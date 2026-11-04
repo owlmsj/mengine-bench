@@ -19,7 +19,12 @@ def test_runner_command_copies_refreshes_and_preserves_arguments(tmp_path: Path)
     timestamp = renamed.stat().st_mtime_ns
     safe_runner.runner_command(argv, str(base))
     assert renamed.stat().st_mtime_ns == timestamp
+    # #168: same size and the same mtime as v1, as two writes inside the clock's granularity give; filecmp's
+    # (size, mtime) cache then called the files equal and the runner kept the old interpreter.
+    stamp = base.stat().st_mtime_ns
     base.write_bytes(b'python-v2')
+    import os
+    os.utime(base, ns=(stamp, stamp))
     safe_runner.runner_command(argv, str(base))
     assert renamed.read_bytes() == b'python-v2'
 

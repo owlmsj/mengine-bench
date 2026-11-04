@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import filecmp
 import os
 import shutil
 import subprocess
@@ -16,7 +15,8 @@ RUN_CODE = "import sys; from mengine_bench.cli import main; sys.exit(main(sys.ar
 def runner_command(argv: Sequence[str], base_executable: str) -> list[str]:
     base = Path(base_executable).resolve()
     runner = base.with_name("mengine-bench-runner.exe")
-    if not runner.is_file() or not filecmp.cmp(base, runner, shallow=False):
+    # #168: compare bytes; filecmp caches by (size, mtime) and called a same-size, same-mtime upgrade equal.
+    if not runner.is_file() or runner.read_bytes() != base.read_bytes():
         shutil.copyfile(base, runner)
     return [str(runner), "-c", RUN_CODE, *argv]
 

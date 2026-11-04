@@ -7,9 +7,10 @@ Layout:
         transcripts/<task>.jsonl.gz  raw agent output per step
         judge/<task>.json            judge evidence for `mengine-bench judge`
         judge/<task>/<file>          each declared deliverable, verbatim after redaction
+        evidence/<task>/<file>       human-only media, verbatim bytes, privacy scanned
 
-Everything in a bundle is public once merged, so every text passes the secret
-and local-path redaction first.
+Everything in a bundle is public once merged. Text passes secret and local-path
+redaction; opaque media stays verbatim and still passes the privacy scan (#165).
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import io
 import json
 import re
 import shutil
+import stat
 import subprocess
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
@@ -31,6 +33,7 @@ from mengine_bench.report import render_summary
 RESULT_NAME = "result.json"
 SUMMARY_NAME = "summary.md"
 JUDGE_DIR = "judge"
+EVIDENCE_FILE_BYTES = 5 * 1024 * 1024
 _STEP_FILE = re.compile(r"^step-(?P<label>.+)\.(?P<stream>stdout|stderr)\.txt$")
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -99,9 +102,10 @@ def public_json(value: object, scope: PathScope) -> object:
 
 def write_bundle(results: MutableMapping[str, object], out_root: Path, transcripts: Mapping[str, Path],
                  scope: PathScope, packets: Mapping[str, Mapping[str, object]] | None = None,
-                 deliverables: Mapping[str, Mapping[str, Path]] | None = None) -> Path:
+                 deliverables: Mapping[str, Mapping[str, Path]] | None = None,
+                 evidence: Mapping[str, Mapping[str, Path]] | None = None) -> Path:
     """Write the bundle for `results`; `transcripts` maps a task id to its raw transcript dir,
-    `packets` holds the judge evidence and `deliverables` maps a task id to {relative path: file}."""
+    `packets` holds the judge evidence; `deliverables` and human-only `evidence` map task ids to {relative path: file}."""
     agent = results["agent"]
     tasks = results["tasks"]
     assert isinstance(agent, dict) and isinstance(tasks, list)
@@ -124,6 +128,10 @@ def write_bundle(results: MutableMapping[str, object], out_root: Path, transcrip
             newline="\n")
     for task_id, files in (deliverables or {}).items():
         _write_deliverables(bundle_dir / JUDGE_DIR / task_id, files, scope)
+    for task in tasks:
+        notes = _write_evidence(bundle_dir / "evidence" / task["id"], (evidence or {}).get(task["id"], {}), scope)
+        if notes:
+            task.setdefault("flags", []).extend(notes)
     public = public_json(results, scope)
     assert isinstance(public, dict)
     (bundle_dir / RESULT_NAME).write_text(json.dumps(public, indent=2, ensure_ascii=False) + "\n",
@@ -131,6 +139,47 @@ def write_bundle(results: MutableMapping[str, object], out_root: Path, transcrip
     (bundle_dir / SUMMARY_NAME).write_text(public_text(render_summary(public), scope), encoding="utf-8",
                                            newline="\n")
     return bundle_dir
+
+
+def _evidence_file_problem(source: Path, workspace: Path) -> str | None:
+    relative = source.relative_to(workspace)
+    ancestors = [source, *(source.parents[index] for index in range(len(relative.parts)))]
+    if any(path.is_symlink() or getattr(path.lstat(), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+           for path in ancestors):
+        return "symlink or junction"
+    if not source.resolve().is_relative_to(workspace.resolve()):
+        return "file outside the workspace"
+    if not source.is_file():
+        return "missing or nonregular file"
+    if source.stat().st_size > EVIDENCE_FILE_BYTES:
+        return f"file of {source.stat().st_size} bytes"
+    return None
+
+
+def _write_evidence(target: Path, files: Mapping[str, Path], scope: PathScope) -> list[str]:
+    """#165: preserve human media bytes; unsafe or oversized files leave public skip notes."""
+    notes: list[str] = []
+    for relative, source in files.items():
+        try:
+            workspace = next((root for root in scope.workspaces if source.is_relative_to(root)), None)
+            problem = "file outside the workspace" if workspace is None else _evidence_file_problem(source, workspace)
+            dest = target / relative
+            if not dest.resolve().is_relative_to(target.resolve()):
+                problem = "path outside the evidence directory"
+            if problem:
+                raise ValueError(problem)
+            # Bound the read too, since the agent could have left a writer running (#165).
+            with source.open("rb") as stream:
+                raw = stream.read(EVIDENCE_FILE_BYTES + 1)
+            if len(raw) > EVIDENCE_FILE_BYTES:
+                raise ValueError(f"file of more than {EVIDENCE_FILE_BYTES} bytes")
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(raw)
+        except (OSError, ValueError) as error:
+            received = str(error) if isinstance(error, ValueError) else type(error).__name__
+            notes.append(f"evidence {relative!r} skipped: received {received}; expected a regular workspace file "
+                         f"without symlinks, at most {EVIDENCE_FILE_BYTES} bytes")
+    return notes
 
 
 def _write_deliverables(target: Path, files: Mapping[str, Path], scope: PathScope) -> None:
@@ -175,8 +224,12 @@ def bundle_leaks(bundle_dir: Path, names: LocalNames) -> dict[str, dict[str, int
     for path in sorted(bundle_dir.rglob("*")):
         if not path.is_file():
             continue
-        raw = gzip.decompress(path.read_bytes()) if path.suffix == ".gz" else path.read_bytes()
+        relative = path.relative_to(bundle_dir)
+        raw = path.read_bytes()
+        # #165: evidence is opaque bytes even with a .gz name; scan its text chunks like image deliverables.
+        if path.suffix == ".gz" and relative.parts[0] != "evidence":
+            raw = gzip.decompress(raw)
         leaks = find_leaks(_without_png_pixels(raw).decode("utf-8", errors="replace"), names)
         if leaks:
-            found[path.relative_to(bundle_dir).as_posix()] = leaks
+            found[relative.as_posix()] = leaks
     return found

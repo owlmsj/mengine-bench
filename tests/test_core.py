@@ -32,6 +32,7 @@ def make_task(**overrides: object) -> EvalTask:
 def test_task_has_no_suite_weight_or_par_and_no_deliverables_by_default() -> None:
     task = make_task()
     assert task.deliverables == ()
+    assert task.evidence == ()
     for removed in ("suites", "weight", "par_s"):
         assert not hasattr(task, removed)
     with pytest.raises(TypeError):
@@ -40,6 +41,16 @@ def test_task_has_no_suite_weight_or_par_and_no_deliverables_by_default() -> Non
 
 def test_task_keeps_declared_deliverables() -> None:
     assert make_task(deliverables=("site/index.html",)).deliverables == ("site/index.html",)
+
+
+def test_task_keeps_declared_evidence() -> None:
+    assert make_task(evidence=("out/audio.wav",)).evidence == ("out/audio.wav",)
+
+
+@pytest.mark.parametrize("relative", ["", "/outside.wav", "\\outside.wav", "../outside.wav", "out/../audio.wav"])
+def test_task_rejects_evidence_outside_workspace(relative: str) -> None:
+    with pytest.raises(ValueError, match="received evidence .*expected workspace-relative paths"):
+        make_task(evidence=(relative,))
 
 
 def test_task_requires_steps() -> None:

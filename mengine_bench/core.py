@@ -170,6 +170,8 @@ class EvalTask:
     checkpoints: tuple[Checkpoint, ...] = ()
     # A stdlib server module the runner starts on 127.0.0.1 for the task; the prompt names it as {SITE} (#153).
     site: str | None = None
+    # #165: media kept for human review, never decoded into the judge prompt.
+    evidence: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.steps:
@@ -181,9 +183,10 @@ class EvalTask:
         if resumed:
             raise ValueError(f"task {self.id!r} received steps {resumed} that continue a session; "
                              f"expected fresh_session=True on every step after the first")
-        bad = [rel for rel in self.deliverables if not rel or rel.startswith(("/", "\\")) or ".." in rel.split("/")]
-        if bad:
-            raise ValueError(f"task {self.id!r} received deliverables {bad}; expected workspace-relative paths")
+        for kind, paths in (("deliverables", self.deliverables), ("evidence", self.evidence)):
+            bad = [rel for rel in paths if not rel or rel.startswith(("/", "\\")) or ".." in rel.split("/")]
+            if bad:
+                raise ValueError(f"task {self.id!r} received {kind} {bad}; expected workspace-relative paths")
 
     @property
     def render_target(self) -> str | None:

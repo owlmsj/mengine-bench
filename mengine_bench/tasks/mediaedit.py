@@ -379,6 +379,7 @@ TASKS: list[EvalTask] = [EvalTask(
     check=_media_check,
     reference=_media_reference,
     timeout_s=90,
+    evidence=(MEDIA_PHOTO_OUT, MEDIA_FORM_OUT),
     checkpoints=checkpoints(("read the details", r"event-details"), ("made the feed photo", r"feed-photo"),
                             ("filled the permit", r"permit-filled")),
 )]
