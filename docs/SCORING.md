@@ -80,7 +80,17 @@ skipped files leave a task note, and evidence still passes the bundle privacy sc
 
 Bench 2.5.2 (#171, #172): fix Codex opened-view fetch evidence and web/MCP judge input; no tasks or prompts change.
 
-A run is one sample and runs are not repeated, so ties come from the published tasks: draw the tasks again with
+Bench 2.6 (#185): `analyze` groups ranked and observed reruns by agent, model, effort, a hash of the published
+config and bench major.minor, computed on read without changing `result.json`.
+For each setup with two or more runs it reports max-min and sample standard deviation of Score, Correct %, Judge
+and Time; the largest observed Score spread gates regression warnings, with no warning inside that floor and
+`not measured` before a pair exists.
+`mengine-bench judge-calibrate --votes <file> <bundleA> <bundleB>` reads the bench-audit owner's exported scores,
+re-votes those packets with the official judge and reports mean absolute difference, the count beyond 8 and the rubric.
+It never modifies the bundles, saves `docs/judge-calibration/<date>-<rubric>.md` only with `--write`, and exits 1
+when the count exceeds an explicitly supplied `--max-beyond`.
+
+Separately, ties come from the published tasks: draw the tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
 a tie. This shows how much the order rests on this set of tasks; it says nothing about the noise between two runs of one agent.
 `mengine-bench analyze` prints the shares, the points each part of the Score moves and the tasks that separate runs. No agent runs.
