@@ -173,6 +173,16 @@ def test_python_inline_fetch_requires_a_literal_url() -> None:
     assert not fetched_urls([ToolCall("shell", {"command": command})])
 
 
+def test_a_heredoc_piped_into_python_or_node_is_executed_code_164() -> None:
+    # #164 advisor pass 3: `python - <<EOF` runs its body; a heredoc written to a file does not.
+    python = "python - <<'PY'\nimport urllib.request\nurllib.request.urlopen('https://example.org/source')\nPY"
+    node = "node <<'JS'\nfetch('https://example.net/page')\nJS"
+    written = "cat > lookup.py <<'PY'\nimport urllib.request\nurllib.request.urlopen('https://example.com/x')\nPY"
+    assert fetched_urls([ToolCall("shell", {"command": python})]) == {"example.org/source"}
+    assert fetched_urls([ToolCall("shell", {"command": node})]) == {"example.net/page"}
+    assert not fetched_urls([ToolCall("shell", {"command": written})])
+
+
 def test_host_matching_only_normalizes_case_and_www() -> None:
     trace = [ToolCall("WebFetch", {"url": "https://WWW.Example.org./source"})]
     assert fetched_hosts(trace) == {"example.org."}

@@ -122,6 +122,9 @@ def test_a_renamed_copy_in_a_subfolder_and_european_writing_pass(tmp_path: Path)
     "Earlier we quoted the total EUR 1,205.77.",
     "We do not confirm the quoted total of EUR 1,205.77.",
     "We cannot confirm the quoted total of EUR 1,205.77.",
+    # #164 advisor pass 3: an adverb stays inside the negation.
+    "We cannot yet confirm the quoted total of EUR 1,205.77.",
+    "We do not fully confirm the total of EUR 1,205.77.",
     '> We confirm EUR 1,205.77.',
 ])
 def test_a_denied_or_contradictory_total_fails(tmp_path: Path, body: str) -> None:

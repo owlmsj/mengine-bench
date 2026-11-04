@@ -123,16 +123,20 @@ def _funnel_counts(got: object, platform: str) -> dict[str, object]:
 
 def _answer_drops(answer: str) -> list[tuple[str, str]]:
     text = re.sub(r"[`*]", "", answer.lower())
+    # #164: Markdown emphasis (_pc_) hides the platform; underscores inside step names stay.
+    text = re.sub(r"(?<![a-z0-9])_+|_+(?![a-z0-9])", "", text)
     for phrase, token in ((r"steam\s+deck", "steamdeck"), (r"tutorial\s+complete", "tutorial_complete"),
                           (r"first\s+match", "first_match")):
         text = re.sub(phrase, token, text)
     # #164: only this explicit assertion form is graded; uncertain or negated prose must pass.
     pattern = (r"\b(?P<platform>pc|steamdeck)\b(?:(?!\b(?:pc|steamdeck)\b).)*?"
                r"\bbiggest[ _]drop\s*(?:is\b|=|:)\s*"
-               r"(?P<step>install|tutorial_complete|first_match|purchase)\b")
+               r"(?P<step>install|tutorial_complete|first_match|purchase)\b"
+               # #164: a transition "first_match -> purchase" names the step after the arrow.
+               r"(?:\s*(?:->|\u2192|to)\s*(?P<to>install|tutorial_complete|first_match|purchase)\b)?")
     negation = r"\b(?:not|no|never|neither|nor|cannot|without)\b|n['\u2019]t\b"
     clauses = re.split(r"[.!?;\n]", text)
-    return [(match["platform"], match["step"]) for clause in clauses
+    return [(match["platform"], match["to"] or match["step"]) for clause in clauses
             if not re.search(negation, clause) for match in re.finditer(pattern, clause)]
 
 

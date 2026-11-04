@@ -58,6 +58,9 @@ def test_sonnet_funnel_contradiction(tmp_path: Path) -> None:
     "PC's biggest drop is not purchase but first_match.",
     "PC does not have its biggest drop at first_match; it is purchase.",
     "PC: biggest drop is first_match, not purchase.",
+    # #164 advisor pass 3: a transition names the step after the arrow.
+    "PC: biggest drop is first_match -> purchase.",
+    "PC: biggest drop is first_match \u2192 purchase.",
 ])
 def test_funnel_allows_omission_and_valid_wording(tmp_path: Path, answer: str) -> None:
     funnel._funnel_reference(tmp_path)
@@ -70,6 +73,9 @@ def test_funnel_allows_omission_and_valid_wording(tmp_path: Path, answer: str) -
     "PC: biggest drop is purchase. PC: biggest drop is first_match.",
     "PC: biggest_drop = first_match.",
     "PC: biggest drop: tutorial_complete.",
+    # #164 advisor pass 3: Markdown emphasis must not hide the platform.
+    "_PC_: biggest drop is first_match.",
+    "__PC__: biggest drop is first_match.",
 ])
 def test_funnel_rejects_explicit_wrong_drop(tmp_path: Path, answer: str) -> None:
     funnel._funnel_reference(tmp_path)

@@ -147,7 +147,9 @@ def _webmail_states_total(text: str) -> bool:
             before, after = clause[:match.start()], clause[match.end():]
             prefix = re.split(r",|\band\b|\bincluding\b", before, flags=re.I)[-1]
             # #164: negation scopes over the amount's noun phrase, not just its currency.
-            noun_phrase = r"(?:(?:the|an?|earlier|previous|invoice|total|amount|of|previously|quoted|as|confirm(?:ed)?)\s+)*"
+            # #164: adverbs ("cannot yet confirm") stay inside the negation's scope.
+            noun_phrase = (r"(?:(?:the|an?|earlier|previous|invoice|total|amount|of|previously|quoted|as|confirm(?:ed)?"
+                           r"|yet|still|fully|currently|now|really)\s+)*")
             denied = re.search(r"\b(?:not|never|cannot|can't|can\u2019t|isn't|isn\u2019t|wasn't|wasn\u2019t)\s*" + noun_phrase
                                + r"(?:EUR\s*|\u20ac\s*)?$", prefix, re.I)
             denied_after = re.match(r"\s*(?:EUR|\u20ac)?\s*(?:is|was)\s+not\b", after, re.I)

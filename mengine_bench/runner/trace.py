@@ -152,7 +152,13 @@ _DOWNLOADS = {"curl", "curl.exe", "wget", "wget.exe", "invoke-webrequest", "invo
 
 def _shell_urls(command: str) -> set[str]:
     found: set[str] = set()
-    # #164: written files and heredoc bodies cannot establish input-only fetch evidence.
+    # #164: a heredoc piped straight into an interpreter is executed code, so its literal fetches count;
+    # a heredoc written to a file is not evidence (the trace cannot show when or whether it ran).
+    for here in _HEREDOC.finditer(command):
+        if re.search(r"(?:^|[\s;&|(])(?:python[\d.]*|python\.exe|py)(?:\s+-[A-Za-z]+)*(?:\s+-)?\s*$", here["head"]):
+            found |= _python_urls(here["body"])
+        elif re.search(r"(?:^|[\s;&|(])node(?:\.exe)?(?:\s+-)?\s*$", here["head"]):
+            found |= _javascript_urls(here["body"])
     command = _HEREDOC.sub("", command)
     command = _HERESTRING.sub("", command)
     command = re.sub(r"[A-Za-z]:\\[^\s'\"]+", lambda match: match[0].replace("\\", "/"), command)
