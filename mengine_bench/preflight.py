@@ -13,6 +13,7 @@ name only in result.json `config.personal_instructions`, never a block.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -93,3 +94,43 @@ def toolchain_problems() -> list[str]:
     if result.returncode or match is None or tuple(map(int, match.groups())) < (22, 18, 0):
         problems.append(f"node version {version!r}; expected >= 22.18")
     return problems
+
+
+TMP_WARNING = "could not find /tmp"
+
+
+def git_bash() -> Path | None:
+    """The Git Bash the Windows harnesses run tools with: CLAUDE_CODE_GIT_BASH_PATH, else bin/bash.exe beside git."""
+    named = os.environ.get("CLAUDE_CODE_GIT_BASH_PATH")
+    if named:
+        return Path(named)
+    git = shutil.which("git")
+    if git is None:
+        return None
+    # git may be Git/cmd/git.exe or Git/mingw64/bin/git.exe; the bash lives in Git/bin either way.
+    for folder in Path(git).resolve().parents:
+        if (folder / "bin" / "bash.exe").is_file():
+            return folder / "bin" / "bash.exe"
+    return None
+
+
+def shell_problems(bash: Path | None = None) -> list[str]:
+    """#189: Git Bash without a usable /tmp blocks a run.
+
+    A long-lived MSYS process keeps the shared mount table alive; when it started while TEMP pointed at a directory
+    since deleted, every new bash warns "could not find /tmp" and the agent under test has no /tmp (156 warnings and
+    a hung task in one Opus run). The owner fixes the host: end the stale process or recreate the directory.
+    """
+    bash = git_bash() if bash is None else bash
+    if bash is None:
+        return []
+    try:
+        result = subprocess.run([str(bash), "-c", "mount | grep ' /tmp '; test -d /tmp"], capture_output=True,
+                                text=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return [f"Git Bash check failed: {error}; expected `bash -c 'test -d /tmp'` to run"]
+    if result.returncode == 0 and TMP_WARNING not in result.stderr:
+        return []
+    mounted = result.stdout.strip().split(" on /tmp")[0] or "no /tmp mount"
+    return [f"Git Bash has no usable /tmp (mounted from {mounted!r}); expected an existing directory: end the stale "
+            "MSYS processes (bash, ssh) that pin the mount table, or create that directory, then run again"]

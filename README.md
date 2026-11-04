@@ -124,6 +124,10 @@ the owner must enable **Allow access to file URLs** under the ChatGPT extension 
 A known host upload refusal becomes `infra`: the run is an observation until that task is rerun; the live upload
 probe and browser-setting verification remain owner actions, not part of this preflight (#181, #185).
 
+On Windows the preflight also runs the Git Bash the harnesses use and refuses to start when it has no usable
+`/tmp` (#189): a long-lived MSYS process pins a mount table whose `/tmp` points at a deleted directory, so every
+tool call of the agent warns `could not find /tmp`. End that process (bash, ssh) or recreate the directory it names.
+
 Preflight requires cargo, git and Node >= 22.18; `--allow-missing-toolchain` records missing tools in config and
 continues, while a missing Chromium browser only warns that page checks will be left out.
 
