@@ -66,10 +66,12 @@ def test_command_reuses_packet_rendering_writes_only_on_request_and_enforces_lim
     fake = FakeCalibrationJudge([88, 79, 60, 90] * 3)
     monkeypatch.setattr(cli, "RubricJudge", lambda agent: fake)
     budgets: list[int] = []
+    queries: list[str] = []
 
-    def render(html: Path, png: Path, budget_ms: int) -> str:
+    def render(html: Path, png: Path, budget_ms: int, query: str = "") -> str:
         assert html.read_text(encoding="utf-8") == "<html>fixture</html>"
         budgets.append(budget_ms)
+        queries.append(query)
         png.parent.mkdir(parents=True, exist_ok=True)
         png.write_bytes(b"fixture frame")
         return visual.RENDERED
@@ -89,6 +91,7 @@ def test_command_reuses_packet_rendering_writes_only_on_request_and_enforces_lim
     assert cli.main([*argv, "--max-beyond", "1"]) == 0
     assert agent_args == [("claude", "claude-opus-5-5", "xhigh", None)] * 3
     assert budgets == [1000, 4000, 8000] * 6
+    assert queries == [""] * 18
     assert fake.seen[2][1] == ("frame-1s.png", "frame-4s.png", "screenshot.png", "reference.png")
     assert fake.seen[0][0].answers == ("stored answer",)
     assert _snapshot(bundles) == before
