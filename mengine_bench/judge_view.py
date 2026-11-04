@@ -12,6 +12,7 @@ import json
 import re
 from collections.abc import Iterator, Mapping
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from mengine_bench.runner.agents import agy_tool_result, split_jsonl
 from mengine_bench.runner.trace import codex_opened_urls
@@ -19,6 +20,11 @@ from mengine_bench.runner.trace import codex_opened_urls
 # A harness may write its scripts inside shell commands; most of those fit here (#70).
 INPUT_CHARS = 1_500
 OUTPUT_CHARS = 400
+# A search shows its count and first results, else the judge reads it as empty (#176).
+SEARCH_RESULTS = 5
+RESULT_TITLE_CHARS = 80
+SEARCH_OUTPUT_CHARS = 700
+SEARCH_NOT_RECORDED = "(results not in the harness stream)"
 FIRST_CALLS = 20
 LAST_CALLS = 40
 NO_CALLS = "(no tool calls)"
@@ -30,7 +36,7 @@ _KINDS = {"bash": "shell", "shell": "shell", "powershell": "shell", "run_command
           "edit": "edit", "edit_file": "edit", "replace_file_content": "edit", "multi_replace_file_content": "edit",
           "sed_file": "edit", "notebook_edit": "edit", "multiedit": "edit", "notebookedit": "edit", "apply_patch": "edit",
           "patch": "edit", "grep": "search", "glob": "search", "grep_search": "search", "find_by_name": "search",
-          "list_dir": "search"}
+          "list_dir": "search", "websearch": "web_search", "search_web": "web_search", "webfetch": "fetch"}
 _OPENCODE = {"step_start", "step_finish", "tool_use"}
 _CODEX = {"turn.started", "turn.completed", "item.completed"}
 _CLAUDE = {"assistant", "user"}
@@ -46,8 +52,10 @@ def _clip(text: str, limit: int) -> str:
 
 def _kind(name: str) -> str:
     low = name.lower()
-    if "browser" in low or "computer" in low:
+    if "browser" in low or "computer" in low or "chrome" in low:
         return "browser"
+    if low.startswith("mcp__"):
+        return "mcp_tool_call"
     return _KINDS.get(low, "other")
 
 
@@ -63,12 +71,31 @@ def _input_text(kind: str, payload: object) -> str:
     return payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 
-def _line(step: int, kind: str, payload: object, ok: bool, output: object) -> str:
+def _line(step: int, kind: str, payload: object, ok: bool, output: object, limit: int = OUTPUT_CHARS) -> str:
     text = output if isinstance(output, str) else "" if output is None else json.dumps(output, ensure_ascii=False)
     shown = _clip(_HARNESS_FILE.sub(HARNESS_FILE_MARK, _input_text(kind, payload)), INPUT_CHARS)
-    result = _clip(_HARNESS_FILE.sub(HARNESS_FILE_MARK, text).strip(), OUTPUT_CHARS)
+    result = _clip(_HARNESS_FILE.sub(HARNESS_FILE_MARK, text).strip(), limit)
     return (f"[step {step}] {kind} {json.dumps(shown, ensure_ascii=False)} {'ok' if ok else 'failed'} -> "
             f"{json.dumps(result, ensure_ascii=False)}")
+
+
+def _search_results(rows: list[Mapping[str, object]]) -> str:
+    """`N results: title (domain); ...` for the first few rows (#176)."""
+    labels = []
+    for row in rows[:SEARCH_RESULTS]:
+        url = str(row.get("url") or "")
+        domain = str(row.get("domain") or urlsplit(url).hostname or "")
+        title = _clip(" ".join(str(row.get("title") or "").split()), RESULT_TITLE_CHARS)
+        labels.append(f"{title} ({domain})" if title and domain and title != domain else title or url or domain)
+    count = f"{len(rows)} result{'' if len(rows) == 1 else 's'}"
+    return f"{count}: " + "; ".join(labels) if labels else count
+
+
+def _search_line(step: int, kind: str, payload: object, ok: bool, rows: object, fallback: object) -> str:
+    """A search with its result list; the harness text when the stream has no list, never a bare empty output."""
+    if isinstance(rows, list):
+        return _line(step, kind, payload, ok, _search_results([_mapping(row) for row in rows]), SEARCH_OUTPUT_CHARS)
+    return _line(step, kind, payload, ok, fallback or SEARCH_NOT_RECORDED)
 
 
 def _opencode_calls(step: int, events: list[dict[str, object]]) -> Iterator[str]:
@@ -79,7 +106,11 @@ def _opencode_calls(step: int, events: list[dict[str, object]]) -> Iterator[str]
         state = _mapping(part.get("state"))
         exit_code = _mapping(_mapping(state.get("metadata")).get("metadata")).get("exit")
         ok = state.get("status") != "error" and exit_code in (None, 0)
-        yield _line(step, _kind(str(part.get("tool") or "")), state.get("input"), ok, state.get("output"))
+        kind = _kind(str(part.get("tool") or ""))
+        if kind == "web_search":
+            yield _search_line(step, kind, state.get("input"), ok, None, state.get("output"))
+            continue
+        yield _line(step, kind, state.get("input"), ok, state.get("output"))
 
 
 def _codex_calls(step: int, events: list[dict[str, object]]) -> Iterator[str]:
@@ -102,13 +133,14 @@ def _codex_calls(step: int, events: list[dict[str, object]]) -> Iterator[str]:
             opened = codex_opened_urls(item)
             if opened:
                 action["opened_urls"] = opened
-            yield _line(step, "web_search", action, ok, "")
+            web_kind = "fetch" if action.get("type") in {"open_page", "open"} else "web_search"
+            yield _search_line(step, web_kind, action, ok, item.get("results"), "")
         elif kind == "mcp_tool_call":
             name = f"{item.get('server', '')}.{item.get('tool', '')}"
             # The text only: a result's `_meta` names the harness.
             result = _mapping(item.get("result"))
-            yield _line(step, "mcp_tool_call", {"tool": name, "arguments": item.get("arguments")},
-                        ok, _blocks_text(result.get("content")))
+            yield _line(step, "browser" if _kind(name) == "browser" else "mcp_tool_call",
+                        {"tool": name, "arguments": item.get("arguments")}, ok, _blocks_text(result.get("content")))
 
 
 def _blocks_text(content: object) -> str:
@@ -118,13 +150,27 @@ def _blocks_text(content: object) -> str:
     return " ".join(str(_mapping(block).get("text") or "") for block in blocks)
 
 
+def _claude_links(event: Mapping[str, object]) -> list[object] | None:
+    """WebSearch links from `tool_use_result.results[].content`; the model's text holds them as a JSON dump (#176)."""
+    found = _mapping(event.get("tool_use_result")).get("results")
+    if not isinstance(found, list):
+        return None
+    blocks = [_mapping(entry).get("content") for entry in found]
+    return [link for block in blocks if isinstance(block, list) for link in block]
+
+
 def _claude_calls(step: int, events: list[dict[str, object]]) -> Iterator[str]:
     results: dict[str, Mapping[str, object]] = {}
+    links: dict[str, list[object] | None] = {}
     for event in events:
         content = _mapping(event.get("message")).get("content")
-        if event.get("type") == "user" and isinstance(content, list):
-            results.update({str(_mapping(block).get("tool_use_id")): _mapping(block) for block in content
-                            if _mapping(block).get("type") == "tool_result"})
+        if event.get("type") != "user" or not isinstance(content, list):
+            continue
+        blocks = [_mapping(block) for block in content if _mapping(block).get("type") == "tool_result"]
+        results.update({str(block.get("tool_use_id")): block for block in blocks})
+        # `tool_use_result` belongs to the event, so it names a call only when the event holds one result.
+        if len(blocks) == 1:
+            links[str(blocks[0].get("tool_use_id"))] = _claude_links(event)
     for event in events:
         content = _mapping(event.get("message")).get("content")
         if event.get("type") != "assistant" or not isinstance(content, list):
@@ -133,8 +179,13 @@ def _claude_calls(step: int, events: list[dict[str, object]]) -> Iterator[str]:
             if block.get("type") != "tool_use":
                 continue
             result = results.get(str(block.get("id")), {})
-            yield _line(step, _kind(str(block.get("name") or "")), block.get("input"), not result.get("is_error"),
-                        _blocks_text(result.get("content")))
+            kind = _kind(str(block.get("name") or ""))
+            text = _blocks_text(result.get("content"))
+            if kind == "web_search":
+                yield _search_line(step, kind, block.get("input"), not result.get("is_error"),
+                                   links.get(str(block.get("id"))), text)
+                continue
+            yield _line(step, kind, block.get("input"), not result.get("is_error"), text)
 
 
 def _agy_calls(step: int, events: list[dict[str, object]]) -> Iterator[str]:
@@ -145,7 +196,11 @@ def _agy_calls(step: int, events: list[dict[str, object]]) -> Iterator[str]:
         info = _mapping(update.get("tool_info"))
         exit_code, output = agy_tool_result(info)
         ok = update.get("state") == "DONE" and exit_code in (None, 0)
-        yield _line(step, _kind(str(update.get("tool_name") or "")), info.get("parameters"), ok, output)
+        kind = _kind(str(update.get("tool_name") or ""))
+        if kind == "web_search":
+            yield _search_line(step, kind, info.get("parameters"), ok, None, output)
+            continue
+        yield _line(step, kind, info.get("parameters"), ok, output)
 
 
 def stream_calls(step: int, stdout: str) -> list[str] | None:
