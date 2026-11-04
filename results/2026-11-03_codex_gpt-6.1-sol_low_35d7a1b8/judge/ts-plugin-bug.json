@@ -1,0 +1,61 @@
+{
+ "task_id": "ts-plugin-bug",
+ "prompts": [
+  "Users of our harness plugins report that tool.after hooks run out of order, that sometimes a hook never runs, and that a failing hook is silently ignored. The hook bus and the plugin are in {WS}; the README there says how the bus must behave. Fix the bus. Its public API stays as it is, the tests in {WS}/test stay as they are, and package.json takes no dependencies."
+ ],
+ "answers": [
+  "[goal]\nFix hook execution per README; assume concurrent emits remain independent.\n\n[action]\nReplaced async `forEach` with an awaited loop over a subscription snapshot. Public API, `./test`, and package.json unchanged. Added separate regression tests.\n\n[result]\nFound two causes: ignored callback promises and mutation of the live handler array. All four regressions failed before the fix. Afterward, `npm test` reported:\n```text\nℹ tests 6\nℹ suites 0\nℹ pass 6\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\n```\nTests cover ordering, completion, subscription changes, identical error propagation, stopping after failure, and plugin redaction.\n\n[next]\nComplete. No browser tabs, windows, or apps opened."
+ ],
+ "diff": "A bus.regression.test.ts\nM src/bus.ts\n\n--- bus.regression.test.ts ---\nimport { test } from 'node:test';\nimport assert from 'node:assert/strict';\nimport { HookBus } from './src/bus.ts';\nimport { registerAuditPlugin } from './src/plugin.ts';\n\ntest('sequential completion and subscription snapshot', async () => {\n  const bus = new HookBus();\n  const seen: string[] = [];\n  let offSecond: () => void = () => {};\n  const offFirst = bus.on('event', async () => {\n    offFirst();\n    offSecond();\n    bus.on('event', () => { seen.push('late'); });\n    await new Promise(resolve => setTimeout(resolve, 5));\n    seen.push('first');\n  });\n  offSecond = bus.on('event', () => { seen.push('second'); });\n  await bus.emit('event', null);\n  assert.deepEqual(seen, ['first', 'second']);\n  await bus.emit('event', null);\n  assert.deepEqual(seen, ['first', 'second', 'late']);\n});\n\nfor (const asynchronous of [false, true]) {\n  test(`propagates identical error and stops, async=${asynchronous}`, async () => {\n    const bus = new HookBus();\n    const failure = new Error('hook failure');\n    let continued = false;\n    bus.on('event', asynchronous ? async () => { throw failure; } : () => { throw failure; });\n    bus.on('event', () => { continued = true; });\n    await assert.rejects(bus.emit('event', null), error => error === failure);\n    assert.equal(continued, false);\n  });\n}\n\ntest('audit plugin redacts before logging across emits', async () => {\n  const bus = new HookBus();\n  const audit: string[] = [];\n  registerAuditPlugin(bus, audit);\n  await bus.emit('tool.after', { tool: 'read', output: 'password=secret' });\n  await bus.emit('tool.after', { tool: 'write', output: 'password=other' });\n  assert.deepEqual(audit, ['notice: tool output is audited', 'read: password=[redacted]', 'write: password=[redacted]']);\n});\r\n\r\n\n\n--- src/bus.ts ---\n/**\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\n * handlers run one after another in subscription order, emit resolves after all of them,\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\n */\n\nexport type Handler<T> = (payload: T) => void | Promise<void>;\n\nexport class HookBus {\n  private handlers: Map<string, Handler<unknown>[]> = new Map();\n\n  /** Subscribes a handler to an event; returns the function that unsubscribes it. */\n  on<T>(event: string, handler: Handler<T>): () => void {\n    const list = this.handlers.get(event) ?? [];\n    list.push(handler as Handler<unknown>);\n    this.handlers.set(event, list);\n    return () => {\n      const index = list.indexOf(handler as Handler<unknown>);\n      if (index >= 0) {\n        list.splice(index, 1);\n      }\n    };\n  }\n\n  /** Runs the handlers of an event with the payload. */\n  async emit<T>(event: string, payload: T): Promise<void> {\n    const snapshot = [...(this.handlers.get(event) ?? [])];\n    for (const handler of snapshot) {\n      await handler(payload);\n    }\n  }\n\n  /** How many handlers an event has. */\n  count(event: string): number {\n    return (this.handlers.get(event) ?? []).length;\n  }\n}\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"Get-ChildItem -Force; Get-Content README*; Get-Content package.json; rg --files -g '\"'!node_modules/**'\"' -g '\"'!.git/**'\"'\"\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command 'Get-Content src/bus.ts; Get-Content src/plugin.ts; Get-Content test/bus.test.ts; Get-Content AGENTS.md; git status --short; Get-CimInstance Win32_OperatingSystem | Select-Object Fr\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"New-Item -ItemType Directory -Force tmp | Out-Null; @'\nimport { test } from 'node:test';\nimport assert from 'node:assert/strict';\nimport { HookBus } from '../src/bus.ts';\nimport { \n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command '$busSource = Get-Content src/bus.ts -Raw; $busSource = $busSource.Replace('\"'const list = this.handlers.get(event) ?? [];' + \\\"\"'`r`n\" + '\"'    list.forEach(async (handler) => {' +\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command '$busSource = Get-Content src/bus.ts -Raw; $busSource = $busSource -replace '\"'const list = this.handlers.get\\\\(event\\\\) \\\\?\\\\? \\\\[\\\\];\\\\s*list.forEach\\\\(async \\\\(handler\\\\) => \\\\{\\\n\nStream tail:\n(payload\\\\\\\\);\\\\\\\\s*\\\\\\\\}\\\\\\\\);', \\\\\\\"const snapshot = [...(this.handlers.get(event) ?? [])];\\\"'`n    for (const handler of snapshot) {`n      await handler(payload);`n    }\\\"; [System.IO.File]::WriteAllText((Join-Path $PWD '\\\"'src/bus.ts'), \\\"'$busSource); npm test; Get-Content src/bus.ts'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_6\",\"type\":\"command_execution\",\"command\":\"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command '$busSource = Get-Content src/bus.ts -Raw; $busSource = $busSource -replace '\\\"'const list = this.handlers.get\\\\\\\\(event\\\\\\\\) \\\\\\\\?\\\\\\\\? \\\\\\\\[\\\\\\\\];\\\\\\\\s*list.forEach\\\\\\\\(async \\\\\\\\(handler\\\\\\\\) => \\\\\\\\{\\\\\\\\s*await handler\\\\\\\\(payload\\\\\\\\);\\\\\\\\s*\\\\\\\\}\\\\\\\\);', \\\\\\\"const snapshot = [...(this.handlers.get(event) ?? [])];\\\"'`n    for (const handler of snapshot) {`n      await handler(payload);`n    }\\\"; [System.IO.File]::WriteAllText((Join-Path $PWD '\\\"'src/bus.ts'), \\\"'$busSource); npm test; Get-Content src/bus.ts'\",\"aggregated_output\":\"\\n> harness-hooks@0.3.0 test\\n> node --test\\n\\n✔ sequential completion and subscription snapshot (16.6771ms)\\n✔ propagates identical error and stops, async=false (0.4958ms)\\n✔ propagates identical error and stops, async=true (0.1116ms)\\n✔ audit plugin redacts before logging across emits (29.7359ms)\\n✔ emit calls a subscribed handler with the payload (0.8573ms)\\n✔ unsubscribe removes the handler (0.1223ms)\\nℹ tests 6\\nℹ suites 0\\nℹ pass 6\\nℹ fail 0\\nℹ cancelled 0\\nℹ skipped 0\\nℹ todo 0\\nℹ duration_ms 132.6009\\n/**\\r\\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\\r\\n * handlers run one after another in subscription order, emit resolves after all of them,\\r\\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\\r\\n */\\r\\n\\r\\nexport type Handler<T> = (payload: T) => void | Promise<void>;\\r\\n\\r\\nexport class HookBus {\\r\\n  private handlers: Map<string, Handler<unknown>[]> = new Map();\\r\\n\\r\\n  /** Subscribes a handler to an event; returns the function that unsubscribes it. */\\r\\n  on<T>(event: string, handler: Handler<T>): () => void {\\r\\n    const list = this.handlers.get(event) ?? [];\\r\\n    list.push(handler as Handler<unknown>);\\r\\n    this.handlers.set(event, list);\\r\\n    return () => {\\r\\n      const index = list.indexOf(handler as Handler<unknown>);\\r\\n      if (index >= 0) {\\r\\n        list.splice(index, 1);\\r\\n      }\\r\\n    };\\r\\n  }\\r\\n\\r\\n  /** Runs the handlers of an event with the payload. */\\r\\n  async emit<T>(event: string, payload: T): Promise<void> {\\r\\n    const snapshot = [...(this.handlers.get(event) ?? [])];\\r\\n    for (const handler of snapshot) {\\r\\n      await handler(payload);\\r\\n    }\\r\\n  }\\r\\n\\r\\n  /** How many handlers an event has. */\\r\\n  count(event: string): number {\\r\\n    return (this.handlers.get(event) ?? []).length;\\r\\n  }\\r\\n}\\r\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_7\",\"type\":\"agent_message\",\"text\":\"[goal]\\nFix hook execution per README; assume concurrent emits remain independent.\\n\\n[action]\\nReplaced async `forEach` with an awaited loop over a subscription snapshot. Public API, `./test`, and package.json unchanged. Added separate regression tests.\\n\\n[result]\\nFound two causes: ignored callback promises and mutation of the live handler array. All four regressions failed before the fix. Afterward, `npm test` reported:\\n```text\\nℹ tests 6\\nℹ suites 0\\nℹ pass 6\\nℹ fail 0\\nℹ cancelled 0\\nℹ skipped 0\\nℹ todo 0\\n```\\nTests cover ordering, completion, subscription changes, identical error propagation, stopping after failure, and plugin redaction.\\n\\n[next]\\nComplete. No browser tabs, windows, or apps opened.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":131374,\"cached_input_tokens\":123776,\"cache_write_input_tokens\":0,\"output_tokens\":1524,\"reasoning_output_tokens\":32}}\n",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "package.json takes no dependencies",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hidden handlers run in subscription order",
+   true
+  ],
+  [
+   "hidden emit resolves after every handler",
+   true
+  ],
+  [
+   "hidden a failing handler rejects emit",
+   true
+  ],
+  [
+   "hidden a handler that unsubscribes itself does not stop the others",
+   true
+  ],
+  [
+   "hidden the audit plugin redacts before it logs",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 5,
+  "tool_errors": 2,
+  "shell_commands": 5,
+  "shell_failures": 2,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 2,
+  "generated_tokens": 1524,
+  "reasoning_tokens": 32,
+  "largest_turn_tokens": 1524
+ },
+ "deliverables": [],
+ "render": null
+}
