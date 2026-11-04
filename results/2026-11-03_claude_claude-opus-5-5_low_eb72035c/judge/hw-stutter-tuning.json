@@ -1,0 +1,56 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "**[goal]** Find what causes the hitches on arena-01 and which setting changes fix them, without touching the GPU link speed or BIOS overclock settings.\n\n**[action]** Parsed `capture/presentmon.csv` (8238 frames) and lined it up second by second with `capture/sensors.csv`. Wrote `result.json`; it is valid JSON (`json.tool` printed `ok`). Nothing was applied to this machine, and no browser or app was opened.\n\n**[result]**\n- avg_fps 137.29 (1000 / mean MsBetweenPresents); low_1pct_fps 45.36 (1000 / p99 frame time).\n- **Cause:** power saving (ASPM L1) on the GPU's PCIe port. Every frame over 20 ms falls in seconds 2, 6, 10 ... 58, every 4 seconds. Those are exactly the seconds where the sensor log shows the GPU link in `L1`. Waking the link back up stalls the frame.\n- **Ruled out:**\n  - Defender scan (MsMpEng at 43-45 s, DPC latency about 420 us): no hitches in those seconds.\n  - Disk bursts (13, 27, 52 s): no hitches in those seconds either.\n- **Change:** `pcie_aspm_rp1_gpu` from `L1` to `disabled` in BIOS. This is allowed: the link stays Gen5 x4 and XMP, PBO and core ratio are untouched.\n\n**[next]** Assumptions:\n- p99 is the nearest-rank value; another percentile method could shift the 1% low slightly.\n- The evidence is correlation in the timing only. I have no after-fix capture. To confirm, the owner should record one minute in the same replay after the change: frames over 20 ms should be gone and the 1% low should come up."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\"avg_fps\": 137.29, \"low_1pct_fps\": 45.36,\n \"cause\": \"PCIe ASPM L1 on the GPU root port (rp1): the GPU link drops to L1 every 4 s (sensor seconds 2,6,...,58) and every frame >20 ms falls in exactly those seconds; L1 exit latency stalls presents. Defender scan at 43-45 s and disk bursts cause no hitches.\",\n \"changes\": [{\"setting\": \"pcie_aspm_rp1_gpu\", \"from\": \"L1\", \"to\": \"disabled\"}]}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd ..; ls; for f in *; do [ -f \\\"$f\\\" ] && { echo \\\"== $f\\\"; head -c 1500 \\\"$f\\\"; echo; }; done\" failed -> \"Exit code 1\\nworkspace\"\n[step 1] shell \"ls -la; for f in *; do echo \\\"== $f\\\"; head -c 2000 \\\"$f\\\"; echo; done\" ok -> \"total 9\\ndrwxr-xr-x 1 <USER> 197121    0 Nov  3 23:54 .\\ndrwxr-xr-x 1 <USER> 197121    0 Nov  3 23:54 ..\\n-rw-r--r-- 1 <USER> 197121  394 Nov  3 23:54 AGENTS.md\\n-rw-r--r-- 1 <USER> 197121  774 Nov  3 23:54 NOTES.md\\ndrwxr-xr-x 1 <USER> 197121    0 Nov  3 23:54 capture\\n-rw-r--r-- 1 <USER> 197121 2429 Nov  3 23:54 settings.json\\n== AGENTS.md\\nUse any skill, tool or MCP server you h[... 3315 chars cut by the benchmark]\"\n[step 1] shell \"tail -c 500 settings.json; ls capture; for f in capture/*; do echo \\\"== $f\\\"; head -3 \\\"$f\\\"; wc -l \\\"$f\\\"; done\" ok -> \"000)\\\",\\n      \\\"where\\\": \\\"BIOS\\\"\\n    },\\n    {\\n      \\\"setting\\\": \\\"cpu_pbo\\\",\\n      \\\"value\\\": \\\"enabled\\\",\\n      \\\"where\\\": \\\"BIOS\\\"\\n    },\\n    {\\n      \\\"setting\\\": \\\"cpu_core_ratio\\\",\\n      \\\"value\\\": \\\"auto\\\",\\n      \\\"where\\\": \\\"BIOS\\\"\\n    },\\n    {\\n      \\\"setting\\\": \\\"gpu_low_latency_mode\\\",\\n      \\\"value\\\": \\\"on\\\",\\n      \\\"where\\\": \\\"Driver\\\"\\n    },\\n    {\\n      \\\"setting\\\": \\\"vsync\\\",\\n      \\\"value\\\": \\\"off\\\",\\n      \\\"where\\\": \\\"Game\\\"\\n    },\\n[... 904 chars cut by the benchmark]\"\n[step 1] shell \"python -I -c \\\"\\nimport csv,statistics as s\\nr=list(csv.DictReader(open('capture/presentmon.csv')))\\nm=sorted(float(x['MsBetweenPresents']) for x in r)\\nprint(1000/s.mean(m),1000/m[int(0.99*len(m))-1], len(m))\\nsp=[int(float(x['TimeInSeconds'])) for x in r if float(x['MsBetweenPresents'])>20]\\nprint(sorted(set(sp)))\\\"; cat capture/sensors.csv | awk -F, '$5!=\\\"L0\\\"||$7>200||$8>30'\" ok -> \"137.28571999702498 45.355587808418 8238\\r\\n[2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58]\\r\\ntime_s,cpu_clock_mhz,cpu_util_pct,gpu_clock_mhz,gpu_pcie_link_state,gpu_pcie_link_speed,dpc_latency_us,disk_active_pct,top_cpu_process\\n2,5270,31,2754,L1,Gen5 x4,40,3,Arena.exe\\n6,5380,35,2744,L1,Gen5 x4,77,4,Arena.exe\\n10,5450,36,2743,L1,Gen5 x4,84,5,Arena.exe\\n13,5422,37,2731,L0,Gen5 x4,44,92,Arena.e[... 829 chars cut by the benchmark]\"\n[step 1] shell \"cat > result.json <<'E'\\n{\\\"avg_fps\\\": 137.29, \\\"low_1pct_fps\\\": 45.36,\\n \\\"cause\\\": \\\"PCIe ASPM L1 on the GPU root port (rp1): the GPU link drops to L1 every 4 s (sensor seconds 2,6,...,58) and every frame >20 ms falls in exactly those seconds; L1 exit latency stalls presents. Defender scan at 43-45 s and disk bursts cause no hitches.\\\",\\n \\\"changes\\\": [{\\\"setting\\\": \\\"pcie_aspm_rp1_gpu\\\", \\\"from\\\": \\\"L1\\\", \\\"to\\\": \\\"disabled\\\"}]}\\nE\\npython -I -m json.tool result.json >/dev/null && echo ok\" ok -> \"ok\\nShell cwd was reset to <WORKSPACE>\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 5,
+  "tool_errors": 1,
+  "shell_commands": 5,
+  "shell_failures": 1,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1548,
+  "reasoning_tokens": 125
+ },
+ "deliverables": [],
+ "render": null
+}

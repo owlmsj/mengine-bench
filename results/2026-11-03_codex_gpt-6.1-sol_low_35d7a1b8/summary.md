@@ -2,7 +2,7 @@
 
 | Score | Correct % | Solved | Judge | Speed | Time | Cost | Tokens |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **73.8** | 96.6 | 25/28 | 82.0 | 20.6 | 24 min 50 s | n/a | 5.60M |
+| **73.7** | 96.6 | 25/28 | 81.7 | 20.6 | 24 min 50 s | n/a | 5.60M |
 
 - Judge: claude-opus-5-5@xhigh, rubric 2.5
 - Config: harness=codex; tier=0; role=default; service_tier=fast; personal_instructions=~/.codex/AGENTS.md
@@ -11,34 +11,34 @@
 
 | task | status | correct | checks | judge | time | cost (USD) | turns | tools | tool s | generated | thinking | first write |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| py-async-cancel | ok | 100% | 6/6 | 93 | 41.5 s | - | 1 | 8 | - | 1.9k | 0.1k | - |
-| ds-ab-playtest | ok | 100% | 5/5 | 88 | 41.6 s | - | 1 | 4 | - | 2.1k | 0.1k | - |
+| py-async-cancel | ok | 100% | 6/6 | 92 | 41.5 s | - | 1 | 8 | - | 1.9k | 0.1k | - |
+| ds-ab-playtest | ok | 100% | 5/5 | 91 | 41.6 s | - | 1 | 4 | - | 2.1k | 0.1k | - |
 | bo-pnl-runway | ok | 100% | 6/6 | 84 | 1 min 08 s | - | 1 | 5 | - | 3.4k | 0.1k | - |
-| bo-reconcile | ok | 100% | 5/5 | 83 | 25.0 s | - | 1 | 4 | - | 1.1k | 0.0k | - |
-| cmp-handoff | ok | 100% | 12/12 | 86 | 32.8 s | - | 2 | 5 | - | 1.0k | 0.0k | - |
-| cfg-source-drift | ok | 100% | 5/5 | 87 | 29.7 s | - | 1 | 7 | - | 0.9k | 0.0k | - |
-| doc-lab-pdf | ok | 100% | 7/7 | 73 | 33.2 s | - | 1 | 6 | - | 1.1k | 0.0k | - |
+| bo-reconcile | ok | 100% | 5/5 | 91 | 25.0 s | - | 1 | 4 | - | 1.1k | 0.0k | - |
+| cmp-handoff | ok | 100% | 12/12 | 83 | 32.8 s | - | 2 | 5 | - | 1.0k | 0.0k | - |
+| cfg-source-drift | ok | 100% | 5/5 | 91 | 29.7 s | - | 1 | 7 | - | 0.9k | 0.0k | - |
+| doc-lab-pdf | ok | 100% | 7/7 | 68 | 33.2 s | - | 1 | 6 | - | 1.1k | 0.0k | - |
 | ds-sql-funnel | ok | 100% | 5/5 | 90 | 32.0 s | - | 1 | 4 | - | 1.4k | 0.0k | - |
 | ue-packaged-bug | ok | 100% | 6/6 | 85 | 38.3 s | - | 1 | 6 | - | 1.7k | 0.1k | - |
-| git-merge-conflict | ok | 100% | 7/7 | 85 | 1 min 00 s | - | 1 | 7 | - | 2.8k | 0.2k | - |
-| infra-gpu-fit | ok | 100% | 7/7 | 79 | 17.3 s | - | 1 | 2 | - | 0.8k | 0.0k | - |
-| ir-server-logs | ok | 100% | 7/7 | 87 | 22.9 s | - | 1 | 4 | - | 0.9k | 0.0k | - |
-| gd-integration-repo | ok | 100% | 10/10 | 90 | 53.7 s | - | 1 | 10 | - | 2.5k | 0.2k | - |
-| media-voice | ok | 100% | 4/4 | 92 | 19.2 s | - | 1 | 3 | - | 0.6k | 0.0k | - |
-| file-media-edit | ok | 100% | 10/10 | 63 | 45.9 s | - | 1 | 6 | - | 1.7k | 0.0k | - |
-| txt-regex-log | ok | 100% | 5/5 | 97 | 33.5 s | - | 1 | 3 | - | 1.6k | 0.2k | - |
-| rs-lock-bug | ok | 100% | 9/9 | 94 | 51.1 s | - | 1 | 6 | - | 2.3k | 0.1k | - |
-| sec-leak-fix | ok | 100% | 10/10 | 86 | 48.5 s | - | 1 | 5 | - | 2.3k | 0.3k | - |
-| cu-social-cycle | ok | 44% | 6/11 | 37 | 47.6 s | - | 1 | 10 | - | 1.5k | 0.2k | - |
+| git-merge-conflict | ok | 100% | 7/7 | 87 | 1 min 00 s | - | 1 | 7 | - | 2.8k | 0.2k | - |
+| infra-gpu-fit | ok | 100% | 7/7 | 77 | 17.3 s | - | 1 | 2 | - | 0.8k | 0.0k | - |
+| ir-server-logs | ok | 100% | 7/7 | 84 | 22.9 s | - | 1 | 4 | - | 0.9k | 0.0k | - |
+| gd-integration-repo | ok | 100% | 10/10 | 92 | 53.7 s | - | 1 | 10 | - | 2.5k | 0.2k | - |
+| media-voice | ok | 100% | 4/4 | 91 | 19.2 s | - | 1 | 3 | - | 0.6k | 0.0k | - |
+| file-media-edit | ok | 100% | 10/10 | 62 | 45.9 s | - | 1 | 6 | - | 1.7k | 0.0k | - |
+| txt-regex-log | ok | 100% | 5/5 | 93 | 33.5 s | - | 1 | 3 | - | 1.6k | 0.2k | - |
+| rs-lock-bug | ok | 100% | 9/9 | 90 | 51.1 s | - | 1 | 6 | - | 2.3k | 0.1k | - |
+| sec-leak-fix | ok | 100% | 10/10 | 88 | 48.5 s | - | 1 | 5 | - | 2.3k | 0.3k | - |
+| cu-social-cycle | ok | 44% | 6/11 | 34 | 47.6 s | - | 1 | 10 | - | 1.5k | 0.2k | - |
 | ds-sqlite-recover | ok | 100% | 6/6 | 88 | 31.1 s | - | 1 | 3 | - | 1.4k | 0.1k | - |
-| hw-stutter-tuning | ok | 100% | 7/7 | 89 | 34.0 s | - | 1 | 5 | - | 1.5k | 0.1k | - |
+| hw-stutter-tuning | ok | 100% | 7/7 | 90 | 34.0 s | - | 1 | 5 | - | 1.5k | 0.1k | - |
 | ts-plugin-bug | ok | 100% | 8/8 | 89 | 34.2 s | - | 1 | 5 | - | 1.5k | 0.0k | - |
-| web-mondrian-landing | ok | 100% | 11/11 | 87 | 1 min 15 s | - | 1 | 6 | - | 4.1k | 0.2k | - |
-| 3d-print-homage | ok | 100% | 13/13 | 83 | 2 min 42 s | - | 1 | 10 | - | 7.5k | 1.0k | - |
-| web-fact-search | ok | 86% | 7/8 | 56 | 33.5 s | - | 1 | 6 | - | 1.0k | 0.0k | - |
-| cu-webmail | ok (write routes (observation only): {"origin": "http://127.0.0.1:65039", "sec-fetch-dest": "empty", "sec-fetch-mode": "cors", "sec-fetch-site": "same-origin", "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36 Edg/156."}) | 100% | 9/9 | 89 | 40.2 s | - | 1 | 11 | - | 1.3k | 0.1k | - |
-| web-plan-ranking | ok | 75% | 7/9 | 61 | 1 min 53 s | - | 1 | 10 | - | 5.5k | 0.6k | - |
-| web-word-universe | ok | 100% | 9/9 | 75 | 3 min 46 s | - | 1 | 21 | - | 10.1k | 1.2k | - |
+| web-mondrian-landing | ok | 100% | 11/11 | 85 | 1 min 15 s | - | 1 | 6 | - | 4.1k | 0.2k | - |
+| 3d-print-homage | ok | 100% | 13/13 | 86 | 2 min 42 s | - | 1 | 10 | - | 7.5k | 1.0k | - |
+| web-fact-search | ok | 86% | 7/8 | 68 | 33.5 s | - | 1 | 6 | - | 1.0k | 0.0k | - |
+| cu-webmail | ok (write routes (observation only): {"origin": "http://127.0.0.1:65039", "sec-fetch-dest": "empty", "sec-fetch-mode": "cors", "sec-fetch-site": "same-origin", "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36 Edg/156."}) | 100% | 9/9 | 85 | 40.2 s | - | 1 | 11 | - | 1.3k | 0.1k | - |
+| web-plan-ranking | ok | 75% | 7/9 | 48 | 1 min 53 s | - | 1 | 10 | - | 5.5k | 0.6k | - |
+| web-word-universe | ok | 100% | 9/9 | 76 | 3 min 46 s | - | 1 | 21 | - | 10.1k | 1.2k | - |
 
 ## Failed checks
 
