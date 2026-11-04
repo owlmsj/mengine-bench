@@ -379,3 +379,18 @@ def test_the_summary_has_thinking_tools_and_tool_seconds_per_task_162() -> None:
                                          "checks": [], "stats": {**stats, "tool_s_median": None}}]})
     assert "| turns | tools | tool s | generated | thinking | first write |" in summary
     assert "| 4 | 9 | 1.2 | 3.0k | 1.2k | - |" in summary and "| 4 | 9 | - | 3.0k | 1.2k | - |" in summary
+
+
+def test_infra_run_is_an_observation(tmp_path: Path) -> None:
+    results = tmp_path / "results"
+    bundle = _write_result(results, "infra", 99.0)
+    path = bundle / "result.json"
+    result = json.loads(path.read_text())
+    signature = "only files this session is allowed to read can be uploaded"
+    result["tasks"][0].update(status="infra", flags=[f"infra fault: {signature}; rerun that task"])
+    path.write_text(json.dumps(result))
+    reason = f"infra fault on {result['tasks'][0]['id']}: {signature}; rerun that task"
+    assert leaderboard.unranked_reason(result) == reason
+    board = leaderboard.build_leaderboard(results, tmp_path)
+    assert board.ranked == 0 and "## Observations (not ranked)" in board.markdown
+    assert reason in board.markdown

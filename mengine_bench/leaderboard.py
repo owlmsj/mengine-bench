@@ -148,8 +148,20 @@ def is_complete_run(result: dict[str, object]) -> bool:
     return len(ids) == len(set(ids)) and set(ids) == expected
 
 
+def _infra_reason(result: dict[str, object]) -> str | None:
+    from mengine_bench.runner.infra_faults import infra_fault
+
+    for task in result.get("tasks", []):
+        if task.get("status") == "infra":
+            signature = infra_fault(task.get("flags", [])) or "host refusal"
+            return f"infra fault on {task['id']}: {signature}; rerun that task"
+    return None
+
+
 def unranked_reason(result: dict[str, object]) -> str | None:
     """Why a run is not ranked, or None when it is."""
+    if reason := _infra_reason(result):
+        return reason
     if major_minor(result.get("bench_version")) not in ranked_versions():
         ranked = " and ".join(f"{version}.x" for version in sorted(ranked_versions(), key=_version_key))
         return f"older bench {result.get('bench_version')}; only bench {ranked} runs are ranked"
@@ -287,6 +299,7 @@ def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
     unranked: list[tuple[str, str]] = []
     history: dict[str, list[RankedBundle]] = {}
     observed: list[RankedBundle] = []
+    observation_notes: dict[str, str] = dict(OBSERVED_RUNS)
     for result_file in sorted(results_dir.glob(f"*/{RESULT_NAME}")):
         bundle = result_file.parent
         result = json.loads(result_file.read_text(encoding="utf-8"))
@@ -296,7 +309,9 @@ def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
         score = totals.get("score") if older is not None else current_score(totals)
         entry = RankedBundle(result=result, summary_link=_link(bundle / SUMMARY_NAME, link_base),
                              tool_s=bundle_tool_s(bundle, result), score=score)
-        if bundle.name in OBSERVED_RUNS:
+        if infra_reason := _infra_reason(result):
+            observation_notes[bundle.name] = infra_reason
+        if bundle.name in observation_notes:
             observed.append(entry)
         elif older is not None:
             history.setdefault(older, []).append(entry)
@@ -309,7 +324,7 @@ def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
     sections = [LEADERBOARD_HEADER, *note, _table(ranked) if ranked else "No results yet.\n", COST_LEGEND,
                 *tie_note([entry.result for entry in ranked])]
     if observed:
-        notes = "\n".join(f"- {Path(entry.summary_link).parent.name}: {OBSERVED_RUNS[Path(entry.summary_link).parent.name]}"
+        notes = "\n".join(f"- {Path(entry.summary_link).parent.name}: {observation_notes[Path(entry.summary_link).parent.name]}"
                           for entry in observed)
         sections.append("## Observations (not ranked)\n\n" + _table(sorted(observed, key=_by_score)) + "\n" + notes + "\n")
     for version in sorted(history, key=_version_key, reverse=True):

@@ -210,7 +210,9 @@ def _public_error(error: str | None, record: TaskRunRecord) -> str | None:
 def _correctness(record: TaskRunRecord) -> float:
     if record.check is None:
         return 0.0
-    return record.check.partial_score if record.status in ("timeout", "crash") else record.check.score
+    stopped = record.status in ("timeout", "crash") or (
+        record.status == "infra" and any(step.status == "timeout" for step in record.steps))
+    return record.check.partial_score if stopped else record.check.score
 
 
 def _outcome(task: EvalTask, record: TaskRunRecord) -> TaskOutcome:

@@ -391,3 +391,43 @@ def test_opencode_answer_is_only_the_last_step(finish: list[dict[str, object]]) 
     assert partial_answer(stream) == 'final answer'
     if not finish:
         assert parsed.usage.cost_source == 'partial'
+
+
+@pytest.mark.parametrize("status", ["ok", "timeout", "crash"])
+@pytest.mark.parametrize("signature", ["only files this session is allowed to read can be uploaded",
+    "fileChooser.setFiles failed", "filesystem snapshot unavailable"])
+def test_host_refusal_stream_preserves_grade(tmp_path: Path, status: str, signature: str) -> None:
+    from mengine_bench import catalog, run_command
+    from mengine_bench.core import CheckResult
+    from mengine_bench.runner import task_run
+    task = catalog.all_tasks()[0]
+    expected = CheckResult(checks=[("delivered", True)], mandatory=[("page", False)], waived_at_limit=("page",))
+    from dataclasses import replace
+    task = replace(task, check=lambda *a: expected)
+    record = task_run.TaskRunRecord(task.id, status=status, workspace=tmp_path,
+        streams=[json.dumps({"type": "tool_result", "content": signature})],
+        steps=[task_run.StepRecord(0, 1, None if status == "timeout" else 0, status)])
+    before = run_command._correctness(task_run.TaskRunRecord(task.id, status=status, check=expected))
+    task_run._grade(task, record)
+    assert record.status == ("crash" if status == "crash" else "infra")
+    assert run_command._correctness(record) == before
+    if status != "crash":
+        assert signature in record.notes[-1]
+
+
+def test_snapshot_note_is_infra_without_stream_refusal(tmp_path: Path) -> None:
+    from dataclasses import replace
+    from mengine_bench import catalog
+    from mengine_bench.core import CheckResult
+    from mengine_bench.runner.task_run import TaskRunRecord, _grade
+    task = replace(catalog.all_tasks()[0], check=lambda *args: CheckResult(checks=[("ok", True)]))
+    record = TaskRunRecord(task.id, workspace=tmp_path, outside_unmeasured="filesystem snapshot unavailable: OSError")
+    _grade(task, record)
+    assert record.status == "infra"
+    assert record.check.score == 1.0
+    assert "filesystem snapshot unavailable" in record.notes[-1]
+
+
+def test_ordinary_agent_error_is_not_infra() -> None:
+    from mengine_bench.runner.infra_faults import infra_fault
+    assert infra_fault(["file not found", "permission denied", "upload failed"]) is None
