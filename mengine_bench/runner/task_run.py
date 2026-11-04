@@ -23,16 +23,16 @@ import shutil
 import tempfile
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from mengine_bench.core import CheckResult, EvalTask, TraceCheck, saw
 from mengine_bench.runner import process
 from mengine_bench.runner.agents import Agent, AgentError, Usage, sum_usage, partial_answer
-from mengine_bench.runner.leftovers import LeftProcess, TaskWindow
+from mengine_bench.runner.leftovers import LeftProcess, TaskWindow, attribute
 from mengine_bench.runner.site import SITE_PLACEHOLDER, SiteFailed, end_pages, serve_site
 from mengine_bench.runner.stats import RunStats, merge_stats, stream_stats
-from mengine_bench.runner.trace import tool_trace
+from mengine_bench.runner.trace import shell_commands, tool_trace
 from mengine_bench.runner.workspace_gate import WORKSPACE_WRITE_GATE, outside_changes, outside_snapshot
 from mengine_bench.visual import COMPOSITION_PRINTS, add_page_checks
 
@@ -376,12 +376,22 @@ def _grade(task: EvalTask, record: TaskRunRecord, original_workspace: Path | Non
 
 
 def add_cleanup_check(task: EvalTask, record: TaskRunRecord) -> None:
-    """#161: a site task scores closing its tabs and apps; an uncounted tab is a note, never a lost point."""
+    """#161: a site task scores closing its tabs and apps; an uncounted tab is a note, never a lost point.
+
+    #177: a leftover the agent never named in a shell command (a harness helper) is a note on every task, never a fail.
+    """
+    # #177: the agent's commands come from the step streams, the same trace the checks read (_grade).
+    commands = shell_commands(tool_trace(record.streams))
+    record.left_running = [replace(left, attributed=attribute(left, commands)) for left in record.left_running]
+    unattributed = [left for left in record.left_running if not left.attributed]
+    if unattributed:
+        listed = ", ".join(f"{left.name} ({left.pid})" for left in unattributed)
+        record.notes.append(f"left running, not attributed: {listed}")
     if task.site is None or record.check is None:
         return
     if record.left_open_tabs is None:
         record.notes.append("open tabs not counted")
         return
-    names = ", ".join(sorted({left.name for left in record.left_running}))
+    names = ", ".join(sorted({left.name for left in record.left_running if left.attributed}))
     detail = f"{record.left_open_tabs} tab(s) still open" + (f"; still running: {names}" if names else "")
-    record.check.add(CLEANUP_CHECK, record.left_open_tabs == 0 and not record.left_running, detail)
+    record.check.add(CLEANUP_CHECK, record.left_open_tabs == 0 and not names, detail)

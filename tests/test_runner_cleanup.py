@@ -20,7 +20,7 @@ from mengine_bench.runner import site as site_module
 from mengine_bench.runner.agents import CmdAgent
 from mengine_bench.runner.leftovers import LeftProcess, attribute
 from mengine_bench.runner.site import end_pages, serve_site
-from mengine_bench.runner.task_run import CLEANUP_CHECK, CLOSE_NOTE, run_task
+from mengine_bench.runner.task_run import CLEANUP_CHECK, CLOSE_NOTE, TaskRunRecord, add_cleanup_check, run_task
 
 SITE = "site_counter"
 DETACHED = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP) if sys.platform == "win32" else 0
@@ -230,3 +230,40 @@ def test_the_summary_shows_what_a_task_left_open_only_when_it_did() -> None:
 ])
 def test_a_leftover_counts_only_when_the_agent_named_it(name: str, commands: list[str], expected: bool) -> None:
     assert attribute(LeftProcess(name, 1), commands) is expected
+
+
+def _claude_stream(*commands: str) -> str:
+    """A Claude Code stream-json step holding one Bash call per command."""
+    return "\n".join(json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": f"t{index}", "name": "Bash", "input": {"command": command}}]}})
+        for index, command in enumerate(commands))
+
+
+def _site_record(left: LeftProcess, *commands: str) -> TaskRunRecord:
+    record = TaskRunRecord(task_id="site-tab", check=_one_check(), left_open_tabs=0, left_running=[left])
+    record.streams.append(_claude_stream(*commands))
+    return record
+
+
+SITE_TASK = EvalTask(id="site-tab", category="test", provenance="test", summary="t", setup=_site_setup,
+                     steps=(Step("Visit {SITE}."),), check=lambda ws, answers: _one_check(),
+                     reference=lambda ws: [""], site=SITE)
+
+
+def test_a_harness_sleep_the_agent_never_ran_is_a_note_not_a_failed_check() -> None:
+    # #177: eb72035c cu-webmail failed on sleep.exe (pid 11868) with 0 mentions of sleep in its transcript.
+    record = _site_record(LeftProcess("sleep.exe", 11868), "curl -s -c jar.txt http://127.0.0.1:8000/login")
+    add_cleanup_check(SITE_TASK, record)
+    assert record.check is not None and dict(record.check.checks)[CLEANUP_CHECK] is True
+    assert "left running, not attributed: sleep.exe (11868)" in record.notes
+    from mengine_bench.run_command import _detail
+    detail = _detail(SITE_TASK, record)
+    assert detail["left_running"] == [] and detail["left_running_unattributed"] == [{"name": "sleep.exe", "pid": 11868}]
+
+
+def test_a_server_the_agent_started_and_left_fails_the_check() -> None:
+    record = _site_record(LeftProcess("python.exe", 4242), "python server.py")
+    add_cleanup_check(SITE_TASK, record)
+    assert record.check is not None and dict(record.check.checks)[CLEANUP_CHECK] is False
+    assert record.check.details[CLEANUP_CHECK].endswith("still running: python.exe")
+    assert not any("not attributed" in note for note in record.notes)
