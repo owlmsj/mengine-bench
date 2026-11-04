@@ -29,7 +29,7 @@ from pathlib import Path
 from mengine_bench.core import CheckResult, EvalTask, TraceCheck, saw
 from mengine_bench.runner import process
 from mengine_bench.runner.agents import Agent, AgentError, Usage, sum_usage, partial_answer
-from mengine_bench.runner.infra_faults import infra_fault
+from mengine_bench.runner.infra_faults import task_infra_fault
 from mengine_bench.runner.leftovers import LeftProcess, TaskWindow, attribute
 from mengine_bench.runner.site import SITE_PLACEHOLDER, SiteFailed, end_pages, serve_site
 from mengine_bench.runner.stats import RunStats, merge_stats, stream_stats
@@ -374,7 +374,7 @@ def _grade(task: EvalTask, record: TaskRunRecord, original_workspace: Path | Non
         record.error = f"{record.error or ''} grading failed: {error}".strip()
         record.status = "crash"
     record.grading_s = time.monotonic() - started
-    fault = infra_fault([*record.streams, record.outside_unmeasured or ""])
+    fault = task_infra_fault(record.streams, record.outside_unmeasured)
     if record.status in ("ok", "timeout") and fault:
         record.status = "infra"
         record.notes.append(f"infra fault: {fault}; rerun that task")

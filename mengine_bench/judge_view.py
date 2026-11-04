@@ -243,3 +243,26 @@ def transcript_streams(path: Path) -> list[str]:
             if record.get("stream") == "stdout":
                 streams[str(record.get("step"))] = str(record.get("text") or "")
     return [streams[step] for step in sorted(streams, key=lambda name: (len(name), name))]
+
+
+def _tool_output_texts(events: list[dict[str, object]]) -> Iterator[str]:
+    """The whole output of each tool call, per harness shape, never the model's own text (#185)."""
+    for event in events:
+        update = _mapping(event.get("step_update"))
+        if update.get("step_type") == "tool":
+            yield agy_tool_result(_mapping(update.get("tool_info")))[1]
+        part = _mapping(event.get("part"))
+        if event.get("type") == "tool_use":
+            yield str(_mapping(part.get("state")).get("output") or "")
+        item = _mapping(event.get("item"))
+        if event.get("type") == "item.completed" and item.get("type") in ("command_execution", "mcp_tool_call"):
+            yield str(item.get("aggregated_output") or "") + _blocks_text(_mapping(item.get("result")).get("content"))
+        content = _mapping(event.get("message")).get("content")
+        if event.get("type") == "user" and isinstance(content, list):
+            yield from (_blocks_text(_mapping(block).get("content")) for block in content
+                        if _mapping(block).get("type") == "tool_result")
+
+
+def tool_outputs(streams: list[str]) -> list[str]:
+    """Every tool call's full output across the steps (no OUTPUT_CHARS clip), for host-refusal detection."""
+    return [text for stdout in streams for text in _tool_output_texts(split_jsonl(stdout)) if text]

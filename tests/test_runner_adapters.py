@@ -393,9 +393,18 @@ def test_opencode_answer_is_only_the_last_step(finish: list[dict[str, object]]) 
         assert parsed.usage.cost_source == 'partial'
 
 
+def _claude_tool_result(output: str) -> str:
+    """One Claude Code browser call whose tool result is `output`."""
+    call = {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "u1", "name": "mcp__browser__upload_file", "input": {"path": "cover.png"}}]}}
+    result = {"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "u1", "content": [{"type": "text", "text": output}], "is_error": True}]}}
+    return "\n".join(map(json.dumps, (call, result)))
+
+
 @pytest.mark.parametrize("status", ["ok", "timeout", "crash"])
 @pytest.mark.parametrize("signature", ["only files this session is allowed to read can be uploaded",
-    "fileChooser.setFiles failed", "filesystem snapshot unavailable"])
+    "fileChooser.setFiles failed"])
 def test_host_refusal_stream_preserves_grade(tmp_path: Path, status: str, signature: str) -> None:
     from mengine_bench import catalog, run_command
     from mengine_bench.core import CheckResult
@@ -405,7 +414,7 @@ def test_host_refusal_stream_preserves_grade(tmp_path: Path, status: str, signat
     from dataclasses import replace
     task = replace(task, check=lambda *a: expected)
     record = task_run.TaskRunRecord(task.id, status=status, workspace=tmp_path,
-        streams=[json.dumps({"type": "tool_result", "content": signature})],
+        streams=[_claude_tool_result(f"Error: {signature}")],
         steps=[task_run.StepRecord(0, 1, None if status == "timeout" else 0, status)])
     before = run_command._correctness(task_run.TaskRunRecord(task.id, status=status, check=expected))
     task_run._grade(task, record)
@@ -431,3 +440,43 @@ def test_snapshot_note_is_infra_without_stream_refusal(tmp_path: Path) -> None:
 def test_ordinary_agent_error_is_not_infra() -> None:
     from mengine_bench.runner.infra_faults import infra_fault
     assert infra_fault(["file not found", "permission denied", "upload failed"]) is None
+
+
+# #185: the assistant's prose naming a refusal (a fix it made) is not a host refusal; only a tool's output is.
+PROSE_EVENTS = (
+    {"type": "assistant", "message": {"content": [{"type": "text", "text": "fixed the fileChooser.setFiles failed error"}]}},
+    {"type": "item.completed", "item": {"type": "agent_message",
+                                        "text": "only files this session is allowed to read can be uploaded, so I copied it"}},
+)
+
+
+@pytest.mark.parametrize("event", PROSE_EVENTS)
+def test_signature_in_model_prose_is_not_infra(event: dict[str, object]) -> None:
+    from mengine_bench.runner.infra_faults import task_infra_fault
+    assert task_infra_fault([json.dumps(event)], None) is None
+
+
+def test_signature_in_a_tool_output_is_infra_for_each_harness() -> None:
+    from mengine_bench.runner.infra_faults import task_infra_fault
+    signature = "fileChooser.setFiles failed"
+    codex = json.dumps({"type": "item.completed", "item": {"type": "mcp_tool_call", "server": "playwright",
+        "tool": "browser_file_upload", "status": "failed", "result": {"content": [{"type": "text", "text": signature}]}}})
+    opencode = json.dumps({"type": "tool_use", "part": {"tool": "bash", "state": {"status": "error",
+        "input": {"command": "node up.js"}, "output": signature}}})
+    agy = json.dumps({"event": "step_update", "step_update": {"step_type": "tool", "state": "DONE",
+        "tool_name": "run_command", "tool_info": {"output": signature}}})
+    for stream in (_claude_tool_result(signature), codex, opencode, agy):
+        assert task_infra_fault([stream], None) == signature, stream
+
+
+def test_tool_outputs_are_whole_not_clipped() -> None:
+    from mengine_bench.judge_view import OUTPUT_CHARS, tool_outputs
+    long = "x" * (OUTPUT_CHARS * 3) + " fileChooser.setFiles failed"
+    assert tool_outputs([_claude_tool_result(long)]) == [long]
+
+
+def test_snapshot_signature_counts_from_the_runner_field_not_the_stream() -> None:
+    from mengine_bench.runner.infra_faults import task_infra_fault
+    note = "filesystem snapshot unavailable: OSError at ."
+    assert task_infra_fault([], note) == "filesystem snapshot unavailable"
+    assert task_infra_fault([_claude_tool_result(note)], None) is None
