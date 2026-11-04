@@ -166,9 +166,10 @@ def _detail(task: EvalTask, record: TaskRunRecord) -> TaskDetail:
     check = record.check
     checks: list[dict[str, object]] = []
     if check is not None:
-        for name, ok in [*check.mandatory, *check.checks]:
+        rows = [(True, name, ok) for name, ok in check.mandatory] + [(False, name, ok) for name, ok in check.checks]
+        for mandatory, name, ok in rows:
             reason = {"detail": check.details[name]} if name in check.details else {}
-            checks.append({"name": name, "ok": ok, "mandatory": (name, ok) in check.mandatory, **reason})
+            checks.append({"name": name, "ok": ok, "mandatory": mandatory, **reason})
     notes = [] if check is None else check.notes
     return TaskDetail(
         steps=[{"index": s.index, "wall_s": round(s.wall_s, 2), "exit_code": s.exit_code, "status": s.status,
