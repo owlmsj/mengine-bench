@@ -50,7 +50,9 @@ page told the task is over blanks itself. The 2.0 to 2.3 runs stay in the rankin
 Bench 2.5 (#164) hardens the checks after an audit of two runs found the judge calibrated (55 of 56 votes within 8
 points of an auditor's) and the checks lenient. Correct moves 0.1 of the Score to Judge (0.5 and 0.25, Speed stays
 0.25). Checks may now read the run's tool calls: web-fact-search and web-plan-ranking count a source only when it
-was fetched. Every task gains the gate "nothing written outside the workspace". 3d-print-homage scores its
+was fetched: a fetch counts from a fetch or browser tool's input or a URL written in an executed fetch command
+(curl, wget, Invoke-WebRequest, `python -c`, `node -e`), matched by host; a script file the agent writes and runs is
+not evidence, since the trace cannot show what it fetched. Every task gains the gate "nothing written outside the workspace". 3d-print-homage scores its
 render's composition against the print. Leniencies the audit and a review of every grader found are fixed, each
 with the wrong answer that used to pass as a test. The 2.0 to 2.4 runs stay ranked, each row marked with its
 version, graded without these checks; the leaderboard recomputes every ranked Score with the 2.5 weights from the
