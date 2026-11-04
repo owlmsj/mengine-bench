@@ -9,12 +9,12 @@ import tempfile
 from pathlib import Path
 
 from mengine_bench import __version__, catalog
-from mengine_bench.bundle import RESULT_NAME, SUMMARY_NAME, public_json, public_text
+from mengine_bench.bundle import REPO_ROOT, RESULT_NAME, SUMMARY_NAME, public_json, public_text
 from mengine_bench.redact import PathScope, local_names
 from mengine_bench.report import render_summary
 from mengine_bench.run_command import _correctness, _detail
 from mengine_bench.runner.leftovers import LeftProcess
-from mengine_bench.runner.task_run import TaskRunRecord, _grade, add_cleanup_check
+from mengine_bench.runner.task_run import StepRecord, TaskRunRecord, _grade, add_cleanup_check
 from mengine_bench.scoring import TaskOutcome, score_run
 
 
@@ -53,11 +53,16 @@ def _regrade_task(bundle: Path, row: dict[str, object], version: str) -> None:
     if task is None:
         row.setdefault("flags", []).append("regrade skipped: task absent from current catalog")
         return
-    with tempfile.TemporaryDirectory(prefix="mengine-bench-regrade-") as temporary:
+    scratch = REPO_ROOT / "tmp"
+    scratch.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="mengine-bench-regrade-", dir=scratch) as temporary:
         workspace = Path(temporary) / "workspace"
         workspace.mkdir()
         _extract(archive, workspace)
         record = TaskRunRecord(task_id=task_id, status=str(row["status"]), workspace=workspace,
+                               steps=[StepRecord(index=step["index"], wall_s=step["wall_s"],
+                                                 exit_code=step["exit_code"], status=step["status"])
+                                      for step in row.get("steps", [])],
                                answers=list(row["answers"]), streams=_streams(bundle, row),
                                outside_writes=list(row.get("outside_writes", [])),
                                outside_unmeasured=row.get("outside_unmeasured"),
@@ -66,6 +71,7 @@ def _regrade_task(bundle: Path, row: dict[str, object], version: str) -> None:
         _grade(task, record)
         if record.error:
             raise ValueError(f"received failed grading for {task_id!r}: {record.error}; expected completed checks")
+        record.status = str(row["status"])
         add_cleanup_check(task, record)
         detail = _detail(task, record)
         scope = PathScope(workspaces=(workspace,), names=local_names())

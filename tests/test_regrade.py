@@ -47,6 +47,32 @@ def test_regrade_reproduces_fresh_bundle(fresh_bundle: Path, monkeypatch: pytest
     assert after["totals"]["score"] is None
 
 
+@pytest.mark.parametrize("status", ["timeout", "infra"])
+def test_regrade_preserves_timeout_partial_credit_and_runtime(
+        fresh_bundle: Path, monkeypatch: pytest.MonkeyPatch, status: str) -> None:
+    from mengine_bench.regrade import _regrade_task
+    from mengine_bench.run_command import _detail
+    from mengine_bench.runner.task_run import TaskRunRecord, _grade
+    result = read_result(fresh_bundle)
+    row = result["tasks"][0]
+    row.update(status=status, c=0.5, solved=False,
+               steps=[{"index": 0, "wall_s": 12.5, "exit_code": None, "status": "timeout"}])
+    lookup = catalog.task_by_id
+    monkeypatch.setattr(catalog, "task_by_id", lambda task_id: replace(
+        lookup(task_id), check=lambda ws, answers: CheckResult(checks=[("first", True)],
+            mandatory=[("finished", False)], waived_at_limit=("finished",))))
+    task = catalog.task_by_id(row["id"])
+    baseline = TaskRunRecord(task_id=task.id, status=status, workspace=fresh_bundle)
+    _grade(task, baseline)
+    row["checks"] = _detail(task, baseline)["checks"]
+    original = json.dumps(row, sort_keys=True).encode()
+    _regrade_task(fresh_bundle, row, result["bench_version"])
+    assert row["c"] == 0.5
+    row.pop("graded_with")
+    row.pop("grading_version")
+    assert json.dumps(row, sort_keys=True).encode() == original
+
+
 def test_regrade_uses_current_check_and_records_history(fresh_bundle: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     before = read_result(fresh_bundle)
     original_lookup = catalog.task_by_id
