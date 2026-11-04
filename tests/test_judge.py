@@ -178,3 +178,28 @@ def test_an_image_deliverable_is_stored_byte_for_byte(tmp_path: Path) -> None:
     (tmp_path / "cover.png").write_bytes(image)
     _write_deliverables(tmp_path / "out", {"cover.png": tmp_path / "cover.png"}, PathScope(names=LocalNames()))
     assert (tmp_path / "out" / "cover.png").read_bytes() == image
+
+
+@pytest.mark.parametrize(("name", "query"), [("Word", "?word=a"), ("w", "word=a"), ("w", "?"), ("w", "?a b"), ("", "?a=1")])
+def test_a_judge_state_needs_a_plain_name_and_a_url_query(name: str, query: str) -> None:
+    from mengine_bench.core import JudgeState
+
+    with pytest.raises(ValueError, match="expected"):
+        JudgeState(name, query)
+
+
+def test_judge_states_need_a_page_and_judge_notes_stay_short() -> None:
+    from dataclasses import replace
+
+    from mengine_bench import catalog
+    from mengine_bench.core import JudgeState
+
+    page = next(task for task in catalog.all_tasks() if task.id == "web-mondrian-landing")
+    plain = next(task for task in catalog.all_tasks() if task.render_target is None)
+    replace(page, judge_states=(JudgeState("a", "?x=1"),), judge_notes="one\ntwo\nthree")
+    with pytest.raises(ValueError, match="expected an HTML deliverable"):
+        replace(plain, judge_states=(JudgeState("a", "?x=1"),))
+    with pytest.raises(ValueError, match="expected unique names"):
+        replace(page, judge_states=(JudgeState("a", "?x=1"), JudgeState("a", "?x=2")))
+    with pytest.raises(ValueError, match="expected at most 3"):
+        replace(page, judge_notes="1\n2\n3\n4")

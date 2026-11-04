@@ -151,6 +151,24 @@ class TraceCheck:
 Check = Callable[[Path, Sequence[str]], CheckResult] | TraceCheck
 Reference = Callable[[Path], list[str]]
 
+JUDGE_STATE_NAME = r"[a-z0-9][a-z0-9-]*"
+
+
+@dataclass(frozen=True)
+class JudgeState:
+    """A page state the brief asks for, shown to the judge as one more frame of the stored page (#184)."""
+
+    # The frame is attached as state-<name>.png and kept in the bundle as judge/<task>-state-<name>.png.
+    name: str
+    # Appended to the page URL as is, such as "?word=saudade".
+    query: str
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(JUDGE_STATE_NAME, self.name):
+            raise ValueError(f"received judge state name {self.name!r}; expected lowercase letters, digits and dashes")
+        if not self.query.startswith("?") or len(self.query) < 2 or any(c.isspace() or c == "#" for c in self.query):
+            raise ValueError(f"received judge state query {self.query!r}; expected a URL query such as '?word=saudade'")
+
 
 @dataclass(frozen=True)
 class EvalTask:
@@ -172,6 +190,10 @@ class EvalTask:
     site: str | None = None
     # #165: media kept for human review, never decoded into the judge prompt.
     evidence: tuple[str, ...] = ()
+    # #184: two or three lines on what the brief values most, never the method or the answer; trusted judge input.
+    judge_notes: str = ""
+    # #184: states of the rendered page the judge sees as extra frames; needs an HTML deliverable.
+    judge_states: tuple[JudgeState, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.steps:
@@ -187,6 +209,18 @@ class EvalTask:
             bad = [rel for rel in paths if not rel or rel.startswith(("/", "\\")) or ".." in rel.split("/")]
             if bad:
                 raise ValueError(f"task {self.id!r} received {kind} {bad}; expected workspace-relative paths")
+        self._check_judge_inputs()
+
+    def _check_judge_inputs(self) -> None:
+        if self.judge_states and self.render_target is None:
+            raise ValueError(f"task {self.id!r} received judge_states {[s.name for s in self.judge_states]} with "
+                             f"deliverables {list(self.deliverables)}; expected an HTML deliverable to render them on")
+        names = [state.name for state in self.judge_states]
+        if len(set(names)) != len(names):
+            raise ValueError(f"task {self.id!r} received judge_states {names}; expected unique names")
+        if len(self.judge_notes.splitlines()) > 3:
+            raise ValueError(f"task {self.id!r} received {len(self.judge_notes.splitlines())} lines of judge_notes; "
+                             f"expected at most 3")
 
     @property
     def render_target(self) -> str | None:
