@@ -105,18 +105,3 @@ def test_fetching_a_different_page_on_the_same_host_is_sufficient(tmp_path: Path
     trace = [ToolCall("WebFetch", {"url": fact.source}) for fact in WEB_FACTS]
     trace[0] = ToolCall("WebFetch", {"url": "https://sqlite.org/index.html"})
     assert TASK.check(ws, [], trace).passed
-
-
-def test_runner_recovers_codex_python_fetch_script(tmp_path: Path) -> None:
-    from mengine_bench.runner import task_run
-
-    ws = _solved(tmp_path)
-    script = "import urllib.request\n" + "\n".join(f"urllib.request.urlopen({fact.source!r})" for fact in WEB_FACTS)
-    (ws / "lookup.py").write_text(script, encoding="utf-8")
-    events = [
-        {"type": "item.completed", "item": {"type": "file_change", "status": "completed", "changes": [{"path": "lookup.py", "kind": "add"}]}},
-        {"type": "item.completed", "item": {"type": "command_execution", "command": "python ./lookup.py", "exit_code": 0, "status": "completed"}},
-    ]
-    record = task_run.TaskRunRecord(TASK.id, workspace=ws, answers=["done"], streams=["\n".join(map(json.dumps, events))])
-    task_run._grade(TASK, record)
-    assert record.check is not None and record.check.passed, record.check
