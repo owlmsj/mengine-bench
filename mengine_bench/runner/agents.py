@@ -387,7 +387,8 @@ class ClaudeAgent:
         argv = [_executable("claude"), "-p", "--chrome", "--output-format", "stream-json", "--verbose", "--model", self.model]
         if self.effort:
             argv += ["--effort", self.effort]
-        argv += ["--permission-mode", "bypassPermissions"]
+        # #181 / mengine#561: --add-dir verified in installed Claude Code 2.1.318 binary.
+        argv += ["--permission-mode", "bypassPermissions", "--add-dir", str(workspace.resolve())]
         return Invocation(argv=argv, stdin_text=prompt, env={"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"},
                           final_event='{"type":"result"')
 
