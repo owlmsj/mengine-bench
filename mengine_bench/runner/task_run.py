@@ -365,7 +365,8 @@ def _grade(task: EvalTask, record: TaskRunRecord) -> None:
         else:
             record.check.mandatory.append((WORKSPACE_WRITE_GATE, not record.outside_writes))
         if record.outside_writes and record.outside_unmeasured is None:
-            record.check.details[WORKSPACE_WRITE_GATE] = saw(sorted(set(record.outside_writes)), "no filesystem changes outside the workspace")
+            record.check.details[WORKSPACE_WRITE_GATE] = saw(sorted(set(record.outside_writes)),
+                "no filesystem changes outside the workspace, in the task's parent and run directories")
         if task.render_target is not None:
             add_page_checks(record.check, record.workspace / task.render_target, composition=COMPOSITION_PRINTS.get(task.id))
     except (ValueError, RuntimeError, OSError) as error:

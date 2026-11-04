@@ -29,6 +29,7 @@ def test_workspace_gate_scores_sibling_writes_zero(tmp_path: Path, monkeypatch: 
     assert ("no writes outside the task workspace", not outside) in record.check.mandatory
     if outside:
         assert "received" in record.check.details["no writes outside the task workspace"]
+        assert "outside the workspace, in the task's parent and run directories" in record.check.details["no writes outside the task workspace"]
 
 
 @pytest.mark.parametrize("action", ["read", "modify", "delete", "run-write", "timeout", "crash", "first-step"])
