@@ -186,3 +186,16 @@ def test_a_heredoc_piped_into_python_or_node_is_executed_code_164() -> None:
 def test_host_matching_only_normalizes_case_and_www() -> None:
     trace = [ToolCall("WebFetch", {"url": "https://WWW.Example.org./source"})]
     assert fetched_hosts(trace) == {"example.org."}
+
+
+def test_codex_opened_views_from_web_fact_search_171() -> None:
+    # Minimal structured item from 2026-11-03_codex_gpt-6.1-sol_low_35d7a1b8.
+    item = json.loads((Path(__file__).parent / "fixtures/codex_open_views.json").read_text())
+    snippet = {"url": "https://snippet.example/source", "ref_id": "turn0search0"}
+    item["results"].append(snippet)
+    search = {"type": "web_search", "action": {"type": "search", "query": "release"}, "results": [snippet]}
+    stream = "\n".join(json.dumps({"type": "item.completed", "item": value}) for value in (item, search))
+    trace = tool_trace([stream])
+    assert fetched_hosts(trace) == {"sqlite.org", "postgresql.org", "unicode.org"}
+    assert "unicode.org/versions/Unicode15.0.0" in fetched_urls(trace)
+    assert len(trace) == 2

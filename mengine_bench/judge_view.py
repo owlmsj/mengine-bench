@@ -14,6 +14,7 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 from mengine_bench.runner.agents import agy_tool_result, split_jsonl
+from mengine_bench.runner.trace import codex_opened_urls
 
 # A harness may write its scripts inside shell commands; most of those fit here (#70).
 INPUT_CHARS = 1_500
@@ -94,11 +95,20 @@ def _codex_calls(step: int, events: list[dict[str, object]]) -> Iterator[str]:
             changes = item.get("changes")
             paths = [_mapping(change).get("path") for change in changes] if isinstance(changes, list) else []
             yield _line(step, "edit", ", ".join(str(path) for path in paths), ok, "")
-        elif kind in ("mcp_tool_call", "web_search"):
-            name = f"{item.get('server', '')}_{item.get('tool', kind)}"
+        elif kind == "web_search":
+            action = dict(_mapping(item.get("action")))
+            if item.get("query") and not (action.get("query") or action.get("queries")):
+                action["query"] = item["query"]
+            opened = codex_opened_urls(item)
+            if opened:
+                action["opened_urls"] = opened
+            yield _line(step, "web_search", action, ok, "")
+        elif kind == "mcp_tool_call":
+            name = f"{item.get('server', '')}.{item.get('tool', '')}"
             # The text only: a result's `_meta` names the harness.
             result = _mapping(item.get("result"))
-            yield _line(step, _kind(name), item.get("arguments") or item.get("query"), ok, _blocks_text(result.get("content")))
+            yield _line(step, "mcp_tool_call", {"tool": name, "arguments": item.get("arguments")},
+                        ok, _blocks_text(result.get("content")))
 
 
 def _blocks_text(content: object) -> str:
