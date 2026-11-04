@@ -15,6 +15,60 @@ from mengine_bench.tasks.security import AGENT, FAKE_TOKEN, FIXED_CONFIG
 TARFILE_ADD = "        packed.add(folder, arcname=Path(folder).name)\n"
 
 
+@pytest.mark.parametrize("body", [
+    "    return 200\n",
+    "    log.info('upload credential: %s', token)\n",
+    "    print(token)\n",
+])
+def test_a_broken_http_client_fails(tmp_path: Path, body: str) -> None:
+    ws = _solved(tmp_path)
+    _replace(ws, "backup_agent.py", "    request = urllib.request.Request",
+             body + "    request = urllib.request.Request")
+    result = security._sec_check(ws, [""])
+    assert result.failed() == ["hidden the HTTP client uploads without leaking the token"], result.details
+
+
+@pytest.mark.parametrize(("old", "new"), [
+    ("data=path.read_bytes()", "data=b''"),
+    ('f"Bearer {token}"', '"Bearer wrong"'),
+    ("return response.status", "return 200"),
+])
+def test_http_upload_contract_breakage_fails(tmp_path: Path, old: str, new: str) -> None:
+    ws = _solved(tmp_path)
+    _replace(ws, "backup_agent.py", old, new)
+    result = security._sec_check(ws, [""])
+    assert result.failed() == ["hidden the HTTP client uploads without leaking the token"], result.details
+
+
+@pytest.mark.parametrize("https_only", [False, True])
+def test_an_http_client_implementation_also_passes(tmp_path: Path, https_only: bool) -> None:
+    ws = _solved(tmp_path)
+    source = (ws / "backup_agent.py").read_text(encoding="utf-8")
+    start, end = source.index("def send_archive("), source.index("def upload(")
+    alternate = '''def send_archive(path: Path, url: str, token: str) -> int:
+    import http.client
+    from urllib.parse import urlsplit
+    parsed = urlsplit(url)
+    client = http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection
+    connection = client(parsed.hostname, parsed.port, timeout=10)
+    try:
+        connection.request("POST", parsed.path, body=path.read_bytes(),
+                           headers={"Authorization": f"Bearer {token}"})
+        return connection.getresponse().status
+    finally:
+        connection.close()
+
+
+'''
+    if https_only:
+        alternate = alternate.replace(
+            'http.client.HTTPSConnection if parsed.scheme == "https" else http.client.HTTPConnection',
+            "http.client.HTTPSConnection")
+    write(ws, "backup_agent.py", source[:start] + alternate + source[end:])
+    result = security._sec_check(ws, [""])
+    assert result.passed, (result.failed(), result.details)
+
+
 def _task() -> object:
     return next(task for task in catalog.all_tasks() if task.id == "sec-leak-fix")
 

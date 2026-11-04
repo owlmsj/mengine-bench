@@ -246,3 +246,21 @@ def test_a_cargo_target_folder_stays_out_of_the_judge_view(tmp_path: Path) -> No
     write(tmp_path, "src/lib.rs", "x")
     write(tmp_path, "target/debug/huge.bin", "x")
     assert set(snapshot(tmp_path)) == {"src/lib.rs"}
+
+
+def test_a_noop_transfer_fails(tmp_path: Path) -> None:
+    rust._rs_setup(tmp_path)
+    wrong = ONE_LOCK.replace(
+        "        *state.scores.get_mut(&from).unwrap() -= points;\n"
+        "        *state.scores.get_mut(&to).unwrap() += points;\n", "")
+    assert wrong != ONE_LOCK
+    write(tmp_path, "src/lib.rs", wrong)
+    result = rust._rs_check(tmp_path, [""])
+    assert set(result.failed()) == {"hidden asymmetric transfers move points", "hidden the visible score example passes"}
+
+
+def test_comments_in_an_empty_dependency_table_pass(tmp_path: Path) -> None:
+    ws = _rs_solved(tmp_path)
+    write(ws, "Cargo.toml", rust.CARGO_TOML + "# Standard library only.\n")
+    result = rust._rs_check(ws, [""])
+    assert result.passed, (result.failed(), result.details)
