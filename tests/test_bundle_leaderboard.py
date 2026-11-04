@@ -125,7 +125,7 @@ def _write_result(results: Path, name: str, score: float | None, *, model: str =
     result = {
         "date": "2026-10-19", "bench_version": bench_version, "submitter": "dquill",
         "agent": {"name": "codex", "model": model, "effort": "high", "version": "codex-cli 0.162.1"},
-        "judge": {"agent": "claude", "model": "claude-opus-5-5", "effort": "xhigh", "rubric": "2.5"} if judged else None,
+        "judge": {"agent": "claude", "model": "claude-opus-5-5", "effort": "xhigh", "rubric": leaderboard.RUBRIC_VERSION} if judged else None,
         "config": {"personal_instructions": [], "provider": "openai", "mcp": "none"},
         "environment": {"os": "Linux 6", "cpu": "AMD Ryzen 9 7950X", "cpu_count": 32, "ram_gb": 62.6,
                         "gpu": "NVIDIA GeForce RTX 4090 (24 GB)"},
@@ -201,21 +201,26 @@ def test_2_0_to_2_4_runs_stay_ranked_in_2_5_with_their_marks_161_164(tmp_path: P
     _write_result(results, "v21", 85.0, model="v21-model", bench_version="2.1.1", task_ids=old_ids)
     _write_result(results, "v22", 80.0, model="v22-model", bench_version="2.2.0", task_ids=v22_ids)
     _write_result(results, "v23", 75.0, model="v23-model", bench_version="2.3.1")
-    _write_result(results, "v24", 70.0, model="v24-model")
+    _write_result(results, "v24", 70.0, model="v24-model", bench_version="2.4.0")
+    _write_result(results, "v25", 65.0, model="v25-model", bench_version="2.5.2")
+    _write_result(results, "v26", 60.0, model="v26-model")
     _write_result(results, "v21-short", 99.0, model="short-model", bench_version="2.1.1", task_ids=old_ids[1:])
     _write_result(results, "v17", 99.0, model="v17-model", bench_version="1.7.3", task_ids=[TASK])
     board = leaderboard.build_leaderboard(results, tmp_path)
-    assert board.ranked == 5
+    assert board.ranked == 7
     text = board.markdown
-    assert "Bench 2.0 to 2.4 runs stay in this ranking (#139, #151, #153, #161, #164)" in text
+    assert "Bench 2.0 to 2.5 runs stay in this ranking (#139, #151, #153, #161, #164, #185)" in text
     assert "a row marked 2.3 covers 28, without the 2.4 check" in " ".join(text.split())
-    order = [text.index(mark) for mark in ("v21-model", "v22-model", "v23-model", "v24-model", "## Not ranked")]
+    order = [text.index(mark) for mark in ("v21-model", "v22-model", "v23-model", "v24-model", "v25-model", "v26-model",
+                                           "## Not ranked")]
     assert order == sorted(order)
     assert "[run](results/v20/summary.md) (bench 2.0) |" in text
     assert "[run](results/v21/summary.md) (bench 2.1) |" in text
     assert "[run](results/v22/summary.md) (bench 2.2) |" in text
     assert "[run](results/v23/summary.md) (bench 2.3) |" in text
-    assert "[run](results/v24/summary.md) |" in text
+    assert "[run](results/v24/summary.md) (bench 2.4) |" in text
+    assert "[run](results/v25/summary.md) (bench 2.5) |" in text
+    assert "[run](results/v26/summary.md) |" in text
     assert "## Bench 2.0 (history)" not in text and "## Bench 2.1 (history)" not in text
     assert [name for name, _ in board.unranked] == ["results/v17", "results/v21-short"]
 
@@ -273,7 +278,7 @@ def test_the_current_table_recomputes_score_with_todays_weights_and_history_keep
 def test_bench_is_version_2_5_2() -> None:
     import tomllib
     pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
-    assert __version__ == pyproject["project"]["version"] == "2.5.2"
+    assert __version__ == pyproject["project"]["version"] == "2.6.0"
 
 
 def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:
@@ -287,7 +292,8 @@ def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 0
     assert board.unranked == [("results/cheap-judge",
-                               "judged by claude claude-haiku-5-5@xhigh rubric 2.5; only claude claude-opus-5-5@xhigh rubric 2.5 judges are ranked")]
+                               f"judged by claude claude-haiku-5-5@xhigh rubric {leaderboard.RUBRIC_VERSION}; only claude "
+                               f"claude-opus-5-5@xhigh rubric {', '.join(sorted(leaderboard.ranked_rubrics()))} judges are ranked")]
 
 
 @pytest.mark.parametrize("field,value", [("agent", "cmd"), ("rubric", "1.0")])
@@ -396,3 +402,19 @@ def test_infra_run_is_an_observation(tmp_path: Path) -> None:
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 0 and "## Observations (not ranked)" in board.markdown
     assert reason in board.markdown
+
+
+def test_a_run_judged_with_the_kept_older_rubric_is_ranked_and_marked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # #185: a rubric bump no longer empties the ranking; the older rubric's votes stay ranked, marked on the row.
+    results = tmp_path / "results"
+    older = leaderboard.RUBRIC_VERSION
+    _write_result(results, "kept", 88.0)  # judged with the rubric current at write time
+    monkeypatch.setattr(leaderboard, "RUBRIC_VERSION", "9.9")
+    monkeypatch.setattr(leaderboard, "RANKED_RUBRICS", {"9.9": frozenset({older})})
+    board = leaderboard.build_leaderboard(results, tmp_path)
+    assert board.ranked == 1 and board.unranked == []
+    assert f"(rubric {older})" in board.markdown
+    monkeypatch.setattr(leaderboard, "RANKED_RUBRICS", {})
+    board = leaderboard.build_leaderboard(results, tmp_path)
+    assert board.ranked == 0
+    assert board.unranked[0][1].endswith("; only claude claude-opus-5-5@xhigh rubric 9.9 judges are ranked")
