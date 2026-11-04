@@ -268,10 +268,10 @@ def test_the_current_table_recomputes_score_with_todays_weights_and_history_keep
     assert leaderboard.current_score({"correct": 80.0, "judge": None, "speed": 0.0}) is None
 
 
-def test_bench_is_version_2_5_x() -> None:
+def test_bench_is_version_2_5_1() -> None:
     import tomllib
     pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
-    assert __version__ == pyproject["project"]["version"] and __version__.startswith("2.5.")
+    assert __version__ == pyproject["project"]["version"] == "2.5.1"
 
 
 def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:

@@ -223,7 +223,8 @@ def _run(args: argparse.Namespace) -> int:
     results = run_tasks(tasks, agent, settings, work, evidence)
     transcripts = {task.id: work / task.id / "transcripts" for task in tasks}
     scope = run_scope(work, local_names().allowing(args.submitter))
-    bundle = write_bundle(results, args.out, transcripts, scope, evidence.packets, evidence.deliverables)
+    bundle = write_bundle(results, args.out, transcripts, scope, evidence.packets, evidence.deliverables,
+                          evidence.evidence)
     totals = results["totals"]
     assert isinstance(totals, dict)
     print(f"correct {totals['correct']}% solved {totals['solved']}/{totals['total']} time "

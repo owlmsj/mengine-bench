@@ -92,4 +92,5 @@ TASKS: list[EvalTask] = [EvalTask(
     checkpoints=checkpoints(("used a speech engine", r"System\.Speech|SpeechSynthesizer|\bsay\b|espeak|tts"),
                             ("wrote the audio", r"announcement\.wav")),
     timeout_s=60,
+    evidence=(WAV,),
 )]

@@ -45,11 +45,12 @@ class RunSettings:
 
 @dataclass
 class JudgeEvidence:
-    """What `write_bundle` stores for the maintainer's judge, per task id."""
+    """What `write_bundle` stores for the judge and human review, per task id."""
 
     packets: dict[str, dict[str, object]] = field(default_factory=dict)
     # Workspace-relative deliverable path -> its file in the run's workspace.
     deliverables: dict[str, dict[str, Path]] = field(default_factory=dict)
+    evidence: dict[str, dict[str, Path]] = field(default_factory=dict)
 
 
 def run_tasks(tasks: Sequence[EvalTask], agent: Agent, settings: RunSettings, work: Path,
@@ -71,6 +72,8 @@ def run_tasks(tasks: Sequence[EvalTask], agent: Agent, settings: RunSettings, wo
             detail = _detail(task, record)
             evidence.packets[task.id] = _judge_packet(task, record, work / task.id)
             evidence.deliverables[task.id] = _deliverables(task, record)
+            evidence.evidence[task.id] = ({rel: record.workspace / rel for rel in task.evidence}
+                                          if record.workspace is not None else {})
         except Exception as error:  # noqa: BLE001 - one task must not abort the run
             record, detail = _crashed_task(task, record, error)
             evidence.packets[task.id] = _crash_packet(task, record)
@@ -114,8 +117,12 @@ def _judge_context(task: EvalTask, record: TaskRunRecord, root: Path) -> JudgeCo
         listed = "\n".join(f"$ {command[:300]}" for command in commands[-COMMANDS_SHOWN:])
         tail = f"Shell commands the agent ran (last {COMMANDS_SHOWN}):\n{listed}\n\nStream tail:\n{tail}"
     checks = () if record.check is None else (*record.check.mandatory, *record.check.checks)
+    # #165: a PDF can be valid UTF-8; exclude human evidence before the diff decodes file bodies.
+    excluded = {Path(rel) for rel in task.evidence}
+    before = {rel: raw for rel, raw in record.initial_files.items() if Path(rel) not in excluded}
+    after = {rel: raw for rel, raw in after.items() if Path(rel) not in excluded}
     return JudgeContext(task_id=task.id, prompts=tuple(step.prompt for step in task.steps),
-                        answers=tuple(record.answers), diff=workspace_diff(record.initial_files, after),
+                        answers=tuple(record.answers), diff=workspace_diff(before, after),
                         transcript_tail=tail, checks=tuple(checks), status=record.status,
                         stats=stats_summary(stats_record(record.stats)))
 
