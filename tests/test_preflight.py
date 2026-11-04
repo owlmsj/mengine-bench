@@ -110,3 +110,31 @@ def test_cli_toolchain_block_and_waiver(monkeypatch, capsys) -> None:
     import json
     plan = json.loads(capsys.readouterr().out.splitlines()[-1])
     assert plan["config"]["allow_missing_toolchain"] == ["cargo missing"]
+
+
+def test_git_bash_without_tmp_blocks_with_the_mounted_path_189(monkeypatch) -> None:
+    from types import SimpleNamespace
+    stale = "C:/Users/o/Code/mengine-bench/tmp/zerg-1793814340766940600-17972/tmp"
+    monkeypatch.setattr(preflight.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        stdout=f"{stale} on /tmp type ntfs (binary,noacl,posix=0,usertemp)\n",
+        stderr="bash.exe: warning: could not find /tmp, please create!\n", returncode=1))
+    [problem] = preflight.shell_problems(Path("bash.exe"))
+    assert "Git Bash has no usable /tmp" in problem and stale in problem and "stale" in problem
+    monkeypatch.setattr(preflight.subprocess, "run", lambda *a, **k: SimpleNamespace(
+        stdout="C:/Users/o/AppData/Local/Temp on /tmp type ntfs (binary,noacl,posix=0,usertemp)\n", stderr="",
+        returncode=0))
+    assert preflight.shell_problems(Path("bash.exe")) == []
+
+
+def test_cli_blocks_on_a_broken_git_bash_without_waiver_189(monkeypatch, capsys) -> None:
+    import json
+    from mengine_bench import cli
+    monkeypatch.setattr(cli, "toolchain_problems", lambda: [])
+    monkeypatch.setattr(cli, "shell_problems", lambda: ["Git Bash has no usable /tmp (mounted from 'x')"])
+    argv = ["run", "--agent", "codex", "--model", "fake", "--tasks", "ds-ab-playtest"]
+    with pytest.raises(SystemExit, match="no usable /tmp"):
+        cli.main([*argv, "--allow-missing-toolchain"])
+    assert "preflight: Git Bash has no usable /tmp" in capsys.readouterr().out
+    assert cli.main([*argv, "--dry-run"]) == 0
+    plan = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert plan["preflight"] == "blocked by the shell"

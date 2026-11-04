@@ -21,7 +21,7 @@ from mengine_bench.judge_calibrate import calibrate, parse_votes
 from mengine_bench.core import EvalTask, remove_tree, scratch_root
 from mengine_bench.leaderboard import build_leaderboard, judged_runs, major_minor
 from mengine_bench.visual import find_browser
-from mengine_bench.preflight import blocking_problems, personal_instructions, toolchain_problems
+from mengine_bench.preflight import blocking_problems, personal_instructions, shell_problems, toolchain_problems
 from mengine_bench.redact import LocalNames, local_names
 from mengine_bench.report import (
     SUMMARIES_BEGIN, SUMMARIES_END, cost_text, render_task_summaries, render_tasks_table, replace_tasks_table,
@@ -247,6 +247,12 @@ def _run(args: argparse.Namespace) -> int:
         config["allow_missing_toolchain"] = missing
     if missing and not args.allow_missing_toolchain and not args.dry_run:
         raise SystemExit("error: " + "; ".join(missing) + "; install toolchains or use --allow-missing-toolchain")
+    # #189: a Git Bash without /tmp is a host fault every tool call of the agent would carry; no waiver.
+    shell = shell_problems()
+    for problem in shell:
+        print(f"preflight: {problem}")
+    if shell and not args.dry_run:
+        raise SystemExit("error: " + "; ".join(shell))
     problems = blocking_problems(scratch, work)
     for problem in problems:
         print(f"preflight: {problem}")
@@ -259,6 +265,7 @@ def _run(args: argparse.Namespace) -> int:
                 "judge": "on review (maintainer: mengine-bench judge)", "tasks": [task.id for task in tasks],
                 "dry_run": True, "launches": 0,
                 "preflight": "blocked by missing toolchains" if missing and not args.allow_missing_toolchain else (
+                    "blocked by the shell" if shell else
                     "clean" if not problems else f"blocked by {len(problems)} earlier run(s)"),
                 "config": config}
         print(json.dumps(plan))
