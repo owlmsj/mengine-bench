@@ -49,20 +49,19 @@ RANKED_WITH_CURRENT: dict[str, frozenset[str]] = {"2.1": frozenset({"2.0"}), "2.
                                                   "2.3": frozenset({"2.0", "2.1", "2.2"}),
                                                   "2.4": frozenset({"2.0", "2.1", "2.2", "2.3"}),
                                                   "2.5": frozenset({"2.0", "2.1", "2.2", "2.3", "2.4"}),
-                                                  # #185: 2.6 changes no task, prompt or limit; the rows stay by the same rule.
-                                                  "2.6": frozenset({"2.0", "2.1", "2.2", "2.3", "2.4", "2.5"})}
+                                                  # #185: 2.6 changes no task, prompt or limit. #187 (owner, 2026-11-04): the
+                                                  # 20- and 23-task rows (2.0 to 2.2) move to history; one catalog per ranking.
+                                                  "2.6": frozenset({"2.3", "2.4", "2.5"})}
 # #185: a rubric bump used to unrank every run until it was judged again (about 380 Opus xhigh votes for 2.6). The
 # older rubric's votes stay ranked until the owner re-judges, marked on the row as "(rubric 2.5)".
 RANKED_RUBRICS: dict[str, frozenset[str]] = {"2.6": frozenset({"2.5"})}
-RANKED_WITH_NOTE = ("Bench 2.0 to 2.5 runs stay in this ranking (#139, #151, #153, #161, #164, #185), marked with their "
-                    "version, and every Score here uses the 2.5 weights, unchanged in 2.6.\nA row marked 2.4 or older was graded without the 2.5 checks "
-                    "(fetched sources, workspace writes and more, #164); a row marked \"rubric 2.5\" keeps its 2.5 judge votes until it is judged again (#185). 2.2\nadded three tasks (txt-regex-log, ds-sqlite-recover, py-async-cancel) and 2.3 added "
-                    f"{len(TASKS_ADDED_IN_2_3)}\n({', '.join(sorted(TASKS_ADDED_IN_2_3))}), so a row marked 2.0 or 2.1 "
-                    f"covers 20 tasks, a row marked 2.2 covers 23\nand a row marked 2.3 covers {23 + len(TASKS_ADDED_IN_2_3)}, "
-                    "without the 2.4 check that cu-social-cycle and cu-webmail\nclose the tabs and apps they opened "
-                    "(a 2.4 or 2.5 row has it). 2.1 only shortened the time limits (#137): a row\nmarked 2.0 ran with "
-                    "the longer 2.0 limits (worst case 76 min, against 49.5 min in 2.1 and 52.5 min in 2.2; 2.3 in "
-                    "docs/SCORING.md).\n")
+RANKED_WITH_NOTE = ("Bench 2.3 to 2.5 runs stay in this ranking (#153, #161, #164, #185, #187): they ran the same "
+                    f"{23 + len(TASKS_ADDED_IN_2_3)}-task catalog, each row marked with its version, and every Score here uses "
+                    "the 2.5 weights, unchanged in 2.6.\nA row marked 2.4 or older was graded without the 2.5 checks (fetched "
+                    "sources, workspace writes and more, #164); a row marked 2.3 also lacks the 2.4 check that cu-social-cycle "
+                    "and cu-webmail\nclose the tabs and apps they opened; a row marked \"rubric 2.5\" keeps its 2.5 judge votes "
+                    "until it is judged again (#185).\nThe bench 2.0 to 2.2 runs (20 and 23 tasks) moved to history on "
+                    "2026-11-04 (#187), with the Scores of their own version.\n")
 # #146: runs the owner keeps on the board without ranking them, by bundle name, with why.
 OBSERVED_RUNS: dict[str, str] = {
     # Owner (2026-11-04): replaced by a rerun of the same setup on bench 2.5.2.
@@ -74,10 +73,7 @@ OBSERVED_RUNS: dict[str, str] = {
         "Opus 5.5 low on a 2.5.0 pre-release commit (529a84d), before the final fetch-evidence rules and four "
         "parser fixes of #164; it validated the new checks (every failure checked by hand was real), so it is "
         "shown, not ranked."),
-    "2026-11-02_codex_gpt-6-astra_low_43e898d9": (
-        "clean Codex, Astra low, Fast. The model never replied on ds-sql-funnel, hw-stutter-tuning and ts-plugin-bug "
-        "(the stream ends at turn.started); two reruns stalled the same way, the #144 retry too, while a short prompt "
-        "on the same login answered in 5 s. Kept as the most complete of three attempts, not ranked."),
+    # #187: the clean Codex Astra run of 2026-11-02 (#146: three tasks never answered) is bench 2.1 history now.
 }
 # #162: one Cost column, and thinking tokens, tool calls and the median seconds per tool call.
 COLUMNS = ("#", "Score", "Correct %", "Solved", "Judge", "Speed", "Time", "Timeouts", "Cost", "Tokens", "Generated",

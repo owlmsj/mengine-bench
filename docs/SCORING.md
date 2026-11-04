@@ -106,6 +106,9 @@ Bench 2.6 (#185) stabilizes the process without touching a task, prompt or limit
   It never modifies the bundles, saves `docs/judge-calibration/<date>-<rubric>.md` only with `--write`, and exits 1
   when the count exceeds an explicitly supplied `--max-beyond`.
   
+- Ranking (#187, owner 2026-11-04): one catalog per ranking. The bench 2.0 to 2.2 rows (20 and 23 tasks) moved
+  to history with the Scores of their own version; the 2.3 to 2.5 rows (the same 28-task catalog) stay ranked,
+  marked with their version and, until re-judged, their rubric.
 
 Separately, ties come from the published tasks: draw the tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
