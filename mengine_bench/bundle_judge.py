@@ -149,6 +149,14 @@ def _render_frame(html: Path, png: Path, budget_ms: int, render: Renderer) -> st
     return status
 
 
+def vote_packet(bundle: Path, task_id: str, packet: JudgePacket, judge: RubricJudge, workdir: Path,
+                render: Renderer | None = None) -> TaskVerdict:
+    """One official vote outside the bundle, shared with calibration (#185)."""
+    if packet.render is None:
+        return judge.grade(packet.context, workdir / "judge", deliverable_images=packet.images)
+    return _render_verdict(bundle, task_id, packet, judge, workdir, render or render_headless)
+
+
 def judge_bundle(bundle: Path, judge_agent: Agent, render: Renderer | None = None, again: bool = False) -> dict[str, object]:
     """Judge every task, rescore, and rewrite result.json and summary.md; raises ValueError, writing nothing,
     when the bundle is already judged (unless `again`), lacks evidence, or a task ends without a vote."""
@@ -165,11 +173,9 @@ def judge_bundle(bundle: Path, judge_agent: Agent, render: Renderer | None = Non
         for task_id, packet in packets.items():
             print(f"[{task_id}] judging", flush=True)
             workdir = Path(tmp) / task_id
+            verdicts[task_id] = vote_packet(bundle, task_id, packet, judge, workdir, render)
             if packet.render is None:
-                verdicts[task_id] = judge.grade(packet.context, workdir / "judge", deliverable_images=packet.images)
                 continue
-            verdicts[task_id] = _render_verdict(bundle, task_id, packet, judge, workdir,
-                                                render or render_headless)
             for _, suffix, _ in JUDGE_FRAMES:
                 shot = _frame_path(workdir, suffix)
                 frames[f"{task_id}{suffix}.png"] = shot.read_bytes() if shot.is_file() else None

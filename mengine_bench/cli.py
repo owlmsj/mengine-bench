@@ -17,6 +17,7 @@ from mengine_bench.analyze import render_analysis
 from mengine_bench.anchors import MIN_GAP, run_anchors
 from mengine_bench.bundle import bundle_leaks, run_scope, write_bundle
 from mengine_bench.bundle_judge import judge_bundle
+from mengine_bench.judge_calibrate import calibrate, parse_votes
 from mengine_bench.core import EvalTask, remove_tree, scratch_root
 from mengine_bench.leaderboard import build_leaderboard, judged_runs, major_minor
 from mengine_bench.visual import find_browser
@@ -82,6 +83,12 @@ def _parser() -> argparse.ArgumentParser:
     judge.add_argument("--again", action="store_true", help="replace the votes of a bundle that is already judged")
     sub.add_parser("judge-anchors", help="after a rubric or judge model change: vote two reference solutions and "
                                          "two untouched workspaces (four votes, no agent run, writes nothing)")
+    calibration = sub.add_parser("judge-calibrate", help="compare owner audit votes with fresh official judge votes")
+    calibration.add_argument("--votes", type=Path, required=True)
+    calibration.add_argument("bundleA", type=Path)
+    calibration.add_argument("bundleB", type=Path)
+    calibration.add_argument("--max-beyond", type=int, help="fail when more than N votes differ by over 8 (default: no limit)")
+    calibration.add_argument("--write", action="store_true", help="save docs/judge-calibration/<date>-<rubric>.md")
     study = sub.add_parser("analyze", help="what separates the published runs: tasks, score parts, ties (no agent run)")
     study.add_argument("--results", type=Path, default=Path("results"))
     study.add_argument("--version", help="bench major.minor (default: the current one)")
@@ -137,9 +144,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _judge(args)
     if args.command == "judge-anchors":
         return _judge_anchors()
+    if args.command == "judge-calibrate":
+        return _judge_calibrate(args)
     if args.command == "analyze":
         return _analyze(args.results, args.version or major_minor(__version__))
     return _run(args)
+
+
+def _judge_calibrate(args: argparse.Namespace) -> int:
+    try:
+        if args.max_beyond is not None and args.max_beyond < 0:
+            raise ValueError(f"received --max-beyond {args.max_beyond}; expected a nonnegative integer")
+        votes = parse_votes(args.votes.read_text(encoding="utf-8-sig"))
+        judge = RubricJudge(make_agent("claude", DEFAULT_JUDGE_MODEL, DEFAULT_JUDGE_EFFORT, None))
+        report, beyond = calibrate(votes, (args.bundleA, args.bundleB), judge)
+        if args.write:
+            from mengine_bench.judge import RUBRIC_VERSION
+            target = Path("docs/judge-calibration") / f"{datetime.now().date().isoformat()}-{RUBRIC_VERSION}.md"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(report, encoding="utf-8", newline="\n")
+    except (ValueError, OSError) as error:
+        print(f"judge-calibrate: FAILED: {error}")
+        return 1
+    sys.stdout.write(report)
+    return int(args.max_beyond is not None and beyond > args.max_beyond)
 
 
 def _analyze(results: Path, version: str) -> int:
