@@ -46,7 +46,9 @@ cu-webmail gain the scored check "closed the tabs and apps it opened": no site p
 the agent is done, and nothing the task started is left running. On every task the runner then kills what the task
 left running (a process born during the task whose parent links lead back to the runner; never one that existed
 before the task or was born from one) and records it as `left_running`, with `left_open_tabs` on the site tasks; a
-page told the task is over blanks itself. The 2.0 to 2.3 runs stay in the ranking, each row marked with its version.
+page told the task is over blanks itself. From 2.6 (#177) a killed process counts against the agent only when its
+executable name (without `.exe`, any case) appears in a shell command the agent ran; any other, such as a `sleep.exe`
+the harness's own shell started, is killed and noted as `left_running_unattributed`, never a failed check. The 2.0 to 2.3 runs stay in the ranking, each row marked with its version.
 Bench 2.5 (#164) hardens the checks after an audit of two runs found the judge calibrated (55 of 56 votes within 8
 points of an auditor's) and the checks lenient. Correct moves 0.1 of the Score to Judge (0.5 and 0.25, Speed stays
 0.25). Checks may now read the run's tool calls: web-fact-search and web-plan-ranking count a source only when it
