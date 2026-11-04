@@ -18,10 +18,12 @@ from __future__ import annotations
 import gzip
 import io
 import json
+import os
 import re
 import shutil
 import stat
 import subprocess
+import tarfile
 from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 
@@ -34,6 +36,8 @@ RESULT_NAME = "result.json"
 SUMMARY_NAME = "summary.md"
 JUDGE_DIR = "judge"
 EVIDENCE_FILE_BYTES = 5 * 1024 * 1024
+WORKSPACE_BYTES = 20 * 1024 * 1024
+WORKSPACE_EXCLUDED = frozenset({"target", "node_modules", ".venv", "__pycache__"})
 _STEP_FILE = re.compile(r"^step-(?P<label>.+)\.(?P<stream>stdout|stderr)\.txt$")
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -103,7 +107,8 @@ def public_json(value: object, scope: PathScope) -> object:
 def write_bundle(results: MutableMapping[str, object], out_root: Path, transcripts: Mapping[str, Path],
                  scope: PathScope, packets: Mapping[str, Mapping[str, object]] | None = None,
                  deliverables: Mapping[str, Mapping[str, Path]] | None = None,
-                 evidence: Mapping[str, Mapping[str, Path]] | None = None) -> Path:
+                 evidence: Mapping[str, Mapping[str, Path]] | None = None,
+                 workspaces: Mapping[str, Path] | None = None) -> Path:
     """Write the bundle for `results`; `transcripts` maps a task id to its raw transcript dir,
     `packets` holds the judge evidence; `deliverables` and human-only `evidence` map task ids to {relative path: file}."""
     agent = results["agent"]
@@ -130,6 +135,9 @@ def write_bundle(results: MutableMapping[str, object], out_root: Path, transcrip
         _write_deliverables(bundle_dir / JUDGE_DIR / task_id, files, scope)
     for task in tasks:
         notes = _write_evidence(bundle_dir / "evidence" / task["id"], (evidence or {}).get(task["id"], {}), scope)
+        workspace = (workspaces or {}).get(task["id"])
+        if workspace is not None:
+            notes.extend(_write_workspace(bundle_dir / "workspace" / f"{task['id']}.tar.gz", workspace))
         if notes:
             task.setdefault("flags", []).extend(notes)
     public = public_json(results, scope)
@@ -139,6 +147,37 @@ def write_bundle(results: MutableMapping[str, object], out_root: Path, transcrip
     (bundle_dir / SUMMARY_NAME).write_text(public_text(render_summary(public), scope), encoding="utf-8",
                                            newline="\n")
     return bundle_dir
+
+
+def _linked(path: Path) -> bool:
+    return path.is_symlink() or bool(getattr(path.lstat(), "st_file_attributes", 0)
+                                     & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def _write_workspace(target: Path, workspace: Path) -> list[str]:
+    """#185: preserve grader inputs verbatim, with the same publication scan as #165 evidence."""
+    compressed = io.BytesIO()
+    try:
+        if _linked(workspace):
+            return ["workspace not kept: symlink or junction"]
+        with gzip.GzipFile(fileobj=compressed, mode="wb", mtime=0) as zipped:
+            with tarfile.open(fileobj=zipped, mode="w|") as archive:
+                for root, directories, files in os.walk(workspace, followlinks=False):
+                    directories[:] = sorted(name for name in directories
+                                            if name not in WORKSPACE_EXCLUDED and not _linked(Path(root) / name))
+                    for name in sorted(files):
+                        source = Path(root) / name
+                        if _linked(source) or not stat.S_ISREG(source.stat().st_mode):
+                            continue
+                        archive.add(source, arcname=source.relative_to(workspace).as_posix(), recursive=False)
+        size = compressed.tell()
+        if size > WORKSPACE_BYTES:
+            return [f"workspace not kept: {size / (1024 * 1024):.2f} MiB"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(compressed.getvalue())
+    except (OSError, ValueError) as error:
+        return [f"workspace not kept: {type(error).__name__}"]
+    return []
 
 
 def _evidence_file_problem(source: Path, workspace: Path) -> str | None:
@@ -225,6 +264,18 @@ def bundle_leaks(bundle_dir: Path, names: LocalNames) -> dict[str, dict[str, int
         if not path.is_file():
             continue
         relative = path.relative_to(bundle_dir)
+        if relative.parts[0] == "workspace" and path.name.endswith(".tar.gz"):
+            with tarfile.open(path, "r:gz") as archive:
+                for member in archive:
+                    if not member.isfile():
+                        continue
+                    stream = archive.extractfile(member)
+                    assert stream is not None
+                    text = _without_png_pixels(stream.read()).decode("utf-8", errors="replace")
+                    leaks = find_leaks(member.name + "\n" + text, names)
+                    if leaks:
+                        found[f"{relative.as_posix()}/{member.name}"] = leaks
+            continue
         raw = path.read_bytes()
         # #165: evidence is opaque bytes even with a .gz name; scan its text chunks like image deliverables.
         if path.suffix == ".gz" and relative.parts[0] != "evidence":

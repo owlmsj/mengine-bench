@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tarfile
 from dataclasses import replace
 from pathlib import Path
 
@@ -19,6 +20,26 @@ from mengine_bench.redact import LocalNames, PathScope
 
 WAV_BYTES = b"RIFF\xff\x00WAVE human audio evidence"
 PDF_BYTES = b"%PDF-1.7\nHuman-only form contents\n%%EOF"
+
+
+def test_workspace_archive_preserves_files_and_scans_members(tmp_path: Path) -> None:
+    ws = tmp_path / "workspace"
+    (ws / ".git").mkdir(parents=True)
+    (ws / ".git/HEAD").write_bytes(b"ref: refs/heads/main\n")
+    (ws / "target").mkdir()
+    (ws / "target/ignored").write_bytes(b"build")
+    raw = fake_secret("github").encode()
+    (ws / "output.bin").write_bytes(raw)
+    results = {"date": "2026-01-01", "agent": {"name": "fake", "model": "fake"},
+               "run_id": "workspace", "tasks": [{"id": "test", "flags": []}]}
+    from unittest.mock import patch
+    with patch("mengine_bench.bundle.render_summary", return_value="summary"):
+        bundle = write_bundle(results, tmp_path / "bundles", {}, PathScope(workspaces=(ws,)),
+                              workspaces={"test": ws})
+    with tarfile.open(bundle / "workspace/test.tar.gz") as archive:
+        assert set(archive.getnames()) == {".git/HEAD", "output.bin"}
+        assert archive.extractfile("output.bin").read() == raw
+    assert "workspace/test.tar.gz/output.bin" in bundle_leaks(bundle, LocalNames())
 
 
 def _evidence_task() -> EvalTask:

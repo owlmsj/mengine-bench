@@ -52,6 +52,7 @@ class JudgeEvidence:
     # Workspace-relative deliverable path -> its file in the run's workspace.
     deliverables: dict[str, dict[str, Path]] = field(default_factory=dict)
     evidence: dict[str, dict[str, Path]] = field(default_factory=dict)
+    workspaces: dict[str, Path] = field(default_factory=dict)
 
 
 def run_tasks(tasks: Sequence[EvalTask], agent: Agent, settings: RunSettings, work: Path,
@@ -79,6 +80,8 @@ def run_tasks(tasks: Sequence[EvalTask], agent: Agent, settings: RunSettings, wo
             record, detail = _crashed_task(task, record, error)
             evidence.packets[task.id] = _crash_packet(task, record)
         details[task.id] = detail
+        if record.workspace is not None:
+            evidence.workspaces[task.id] = record.workspace
         outcomes.append(_outcome(task, record))
         correct = _correctness(record)
         print(f"[{task.id}] {record.status} c={correct:.2f} t={record.agent_s:.1f}s", flush=True)
