@@ -1,0 +1,68 @@
+{
+ "task_id": "sec-leak-fix",
+ "prompts": [
+  "We want to publish the backup service in {WS} as open source, and the security review blocks it. The API token must not be in the code or in any log, and nothing typed in the web form may ever run as a command. The service must keep working as the README describes, and the tests in {WS}/tests stay as they are."
+ ],
+ "answers": [
+  "**[goal]** Get the backup service through the security review for open source: no API token in the code or logs, and nothing typed in the form ever runs as a command. Behavior per the README, tests left as they are.\n\n**[action]**\n- `config.py`: deleted the hardcoded `API_TOKEN` (`bk_live_...`).\n- `backup_agent.py`:\n  - `upload()` now reads the token from `BACKUP_TOKEN` each time it runs, as the README says. If the variable is missing it raises an error that names the variable but not the token.\n  - The log line no longer includes the token.\n  - `archive_folder()` now uses Python's `tarfile` instead of `subprocess.run(f\"tar ... {folder}\", shell=True)`, so no shell is ever started. Form input is only treated as a path, and a path that is not an existing folder is rejected with a `ValueError` showing the value received.\n- `send_archive` keeps its signature. `tests/` is unchanged.\n\n**[result]**\n- `python -m unittest` passed: `Ran 1 test in 0.012s` / `OK`.\n- Searching every `.py` file for `bk_live|subprocess|API_TOKEN` finds nothing, so no token, shell call or old config name is left.\n- Assumptions:\n  - Archives stay at `archives/<name>.tar.gz` with the folder name as the top entry.\n  - Users may still type any existing folder path. Limiting backups to certain folders was not in the brief.\n- Not covered: there is no test that feeds the form something like `docs; rm -rf x`. I didn't add one because `tests/` had to stay as it is. The fix holds by construction, since nothing in the code starts a shell anymore.\n\n**[next]** The old token was in the code in plain text, so treat it as leaked: revoke it and issue a new one before publishing. If this folder's history ever goes into git, clean the token out of that history too. I opened no browser tabs or apps."
+ ],
+ "diff": "M backup_agent.py\nM config.py\n\n--- backup_agent.py ---\n\"\"\"Backup agent: packs a folder chosen in the intranet web form and uploads it to the backup API.\"\"\"\r\n\r\nfrom __future__ import annotations\r\n\r\nimport logging\r\nimport os\r\nimport tarfile\r\nimport urllib.request\r\nfrom pathlib import Path\r\n\r\nimport config\r\n\r\nlog = logging.getLogger(\"backup_agent\")\r\n\r\n\r\ndef archive_folder(folder: str, out_dir: str = config.ARCHIVE_DIR) -> Path:\r\n    \"\"\"Packs `folder` into `out_dir/<folder name>.tar.gz` and returns the archive path.\"\"\"\r\n    out = Path(out_dir)\r\n    out.mkdir(parents=True, exist_ok=True)\r\n    target = out / (Path(folder).name + \".tar.gz\")\r\n    source = Path(folder)\r\n    if not source.is_dir():\r\n        raise ValueError(f\"folder must be an existing directory, got {folder!r}\")\r\n    # tarfile instead of a shell: form input is never interpreted as a command.\r\n    with tarfile.open(target, \"w:gz\") as packed:\r\n        packed.add(source, arcname=source.name)\r\n    return target\r\n\r\n\r\ndef send_archive(path: Path, url: str, token: str) -> int:\r\n    \"\"\"Uploads one archive to the backup API and returns the HTTP status.\"\"\"\r\n    request = urllib.request.Request(url, data=path.read_bytes(), method=\"POST\",\r\n                                     headers={\"Authorization\": f\"Bearer {token}\"})\r\n    with urllib.request.urlopen(request, timeout=30) as response:\r\n        return response.status\r\n\r\n\r\ndef upload(path: Path) -> int:\r\n    token = os.environ.get(\"BACKUP_TOKEN\")\r\n    if not token:\r\n        raise RuntimeError(\"BACKUP_TOKEN environment variable is not set; expected the backup API token\")\r\n    log.info(\"uploading %s\", path)\r\n    return send_archive(path, config.API_URL, token)\r\n\r\n\r\ndef handle_form(form: dict[str, str]) -> int:\r\n    \"\"\"Web form handler: backs up the folder the user typed.\"\"\"\r\n    archive = archive_folder(form[\"folder\"])\r\n    log.info(\"archived %s\", archive)\r\n    return upload(archive)\r\n\n\n--- config.py ---\n\"\"\"Settings for the backup agent.\"\"\"\r\n\r\nAPI_URL = \"https://backup.example.invalid/v1/upload\"\r\n# The API token is read from the BACKUP_TOKEN environment variable (see README).\r\nARCHIVE_DIR = \"archives\"\r\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd \\\"<WORKSPACE>\\\"; ls -R | head -30; cat README* ; cat *.py | head -150\" ok -> \".:\\nAGENTS.md\\nREADME.md\\nbackup_agent.py\\nconfig.py\\ntests\\n\\n./tests:\\n__init__.py\\ntest_backup_agent.py\\n# backup-agent\\n\\nBacks up a folder of the office file server: the intranet web form posts the folder path, the agent packs it into\\na `.tar.gz` under `archives/` and uploads it to the backup API.\\n\\n- `handle_form(form)` is the web form handler; `form[\\\"folder\\\"]` is the folder path exactly as the user type[... 2025 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\"; cat tests/test_backup_agent.py\" ok -> \"import os\\nimport tarfile\\nimport tempfile\\nimport unittest\\nfrom pathlib import Path\\nfrom unittest import mock\\n\\nos.environ.setdefault(\\\"BACKUP_TOKEN\\\", \\\"visible-test-token\\\")\\n\\nimport backup_agent\\n\\n\\nclass BackupAgentTest(unittest.TestCase):\\n    def setUp(self):\\n        self.home = os.getcwd()\\n        self.tmp = tempfile.TemporaryDirectory()\\n        os.chdir(self.tmp.name)\\n        Path(\\\"docs\\\").mkdir()\\n   [... 622 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\"\\npython - <<'EOF'\\nimport re\\np='backup_agent.py'; s=open(p).read()\\ns=s.replace(\\\"import subprocess\\\\n\\\",\\\"import os\\\\nimport tarfile\\\\n\\\")\\ns=s.replace('    subprocess.run(f\\\"tar -czf {target} {folder}\\\", shell=True, check=True)\\\\n',\\n'''    source = Path(folder)\\n    if not source.is_dir():\\n        raise ValueError(f\\\"folder must be an existing directory, got {folder!r}\\\")\\n    # tarfile instead of a shell: form input is never interpreted as a command.\\n    with tarfile.open(target, \\\"w:gz\\\") as packed:\\n        packed.add(source, arcname=source.name)\\n''')\\ns=s.replace('''    log.info(\\\"uploading %s with token %s\\\", path, config.API_TOKEN)\\n    return send_archive(path, config.API_URL, config.API_TOKEN)''','''    token = os.environ.get(\\\"BACKUP_TOKEN\\\")\\n    if not token:\\n        raise RuntimeError(\\\"BACKUP_TOKEN environment variable is not set; expected the backup API token\\\")\\n    log.info(\\\"uploading %s\\\", path)\\n    return send_archive(path, config.API_URL, token)''')\\nopen(p,'w').write(s)\\nc=open('config.py').read()\\nc=re.sub(r'API_TOKEN = .*\\\\n','# The API token is read from the BACKUP_TOKEN environment variable (see README).\\\\n',c)\\nopen('config.py','w').write(c)\\nEOF\\npython -m unittest 2>&1 | tail -3; grep -rn \\\"bk_live\\\\|subprocess\\\\|API_TOKEN\\\" --include=*.py .\" ok -> \"Ran 1 test in 0.012s\\r\\n\\r\\nOK\"",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hidden the HTTP client uploads without leaking the token",
+   true
+  ],
+  [
+   "hidden the upload uses the token from BACKUP_TOKEN",
+   true
+  ],
+  [
+   "hidden the token stays out of every log",
+   true
+  ],
+  [
+   "hidden a missing BACKUP_TOKEN raises a clear error",
+   true
+  ],
+  [
+   "hidden form input never runs as a command",
+   true
+  ],
+  [
+   "hidden a folder with spaces still archives",
+   true
+  ],
+  [
+   "the old token is out of every file",
+   true
+  ],
+  [
+   "the old token is out of the final answers",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 4,
+  "tool_calls": 3,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1568,
+  "reasoning_tokens": 43
+ },
+ "deliverables": [],
+ "render": null
+}

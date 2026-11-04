@@ -1,0 +1,52 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [
+  "[goal] Get the rows out of the truncated `prices.db` and into `./recovered.json`.\n\n[action] The file is 4096 bytes. Its 100-byte SQLite header is gone, and the first byte is `0d`, which marks a table leaf page. So the file is a single surviving data page. I wrote `tmp/r.py` to parse it by hand: it reads the page's cell pointers, then decodes each record's varint header and its values. I made three assumptions:\n- Column 1 is NULL in every record. That is how SQLite stores an `INTEGER PRIMARY KEY` id, so I treated it as the rowid.\n- Column 2 is `item` and column 3 is `price`.\n- Prices keep the type they were stored with: whole numbers stay integers and the others stay decimals.\n\n[result] I recovered 10 rows, rowids 1 to 10. The page header says it holds 10 cells (`0d00 0000 0a`), and all 10 decoded cleanly:\n```\n1 1 [None, 'trail map', 0]\n1 2 [None, 'matchbox', 1]\n1 3 [None, 'tent stake', 2.75]\n1 4 [None, 'lantern', 24]\n1 5 [None, 'rope coil', 18]\n1 6 [None, 'water filter', 39.9]\n1 7 [None, 'sleeping bag', 129]\n1 8 [None, 'camp stove', 310]\n1 9 [None, 'compass', 15.5]\n1 10 [None, 'first aid kit', 0.99]\n```\nEvery row was decoded from actual bytes in the file, and none were invented. The trail map's price of 0 and the matchbox's price of 1 are real values. SQLite stores the integers 0 and 1 as special type codes with no data bytes, which is why they look unusual. I didn't recover the table or column names; they would have been on the schema page, which is not in the file. Any rows that were on other pages were lost with the truncation.\n\n[next] None."
+ ],
+ "diff": "A recovered.json\nA tmp/r.py\n\n--- recovered.json ---\n[\r\n {\r\n  \"item\": \"trail map\",\r\n  \"price\": 0\r\n },\r\n {\r\n  \"item\": \"matchbox\",\r\n  \"price\": 1\r\n },\r\n {\r\n  \"item\": \"tent stake\",\r\n  \"price\": 2.75\r\n },\r\n {\r\n  \"item\": \"lantern\",\r\n  \"price\": 24\r\n },\r\n {\r\n  \"item\": \"rope coil\",\r\n  \"price\": 18\r\n },\r\n {\r\n  \"item\": \"water filter\",\r\n  \"price\": 39.9\r\n },\r\n {\r\n  \"item\": \"sleeping bag\",\r\n  \"price\": 129\r\n },\r\n {\r\n  \"item\": \"camp stove\",\r\n  \"price\": 310\r\n },\r\n {\r\n  \"item\": \"compass\",\r\n  \"price\": 15.5\r\n },\r\n {\r\n  \"item\": \"first aid kit\",\r\n  \"price\": 0.99\r\n }\r\n]\n\n--- tmp/r.py ---\nimport sys,json,struct\nd=open(sys.argv[1],'rb').read()\ndef varint(b,i):\n    v=0\n    for k in range(9):\n        c=b[i+k]\n        if k==8: return (v<<8)|c,i+9\n        v=(v<<7)|(c&0x7f)\n        if c<0x80: return v,i+k+1\n    return v,i+9\nps=4096\nout=[]\nfor p in range(0,len(d),ps):\n    off=0\n    pg=d[p:p+ps]\n    if len(pg)<off+8 or pg[off]!=13: continue\n    n=struct.unpack('>H',pg[off+3:off+5])[0]\n    for c in range(n):\n        try:\n            cp=struct.unpack('>H',pg[off+8+2*c:off+10+2*c])[0]\n            if cp==0 or cp>=len(pg): continue\n            ln,i=varint(pg,cp); rid,i=varint(pg,i)\n            h,j=varint(pg,i); he=i+h; ts=[]\n            while j<he: t,j=varint(pg,j); ts.append(t)\n            vals=[];k=he\n            for t in ts:\n                if t==0: vals.append(None)\n                elif t<=6:\n                    sz=[0,1,2,3,4,6,8][t]; vals.append(int.from_bytes(pg[k:k+sz],'big',signed=True)); k+=sz\n                elif t==7: vals.append(struct.unpack('>d',pg[k:k+8])[0]); k+=8\n                elif t in(8,9): vals.append(t-8)\n                elif t>=13 and t%2: sz=(t-13)//2; s=pg[k:k+sz]; k+=sz; assert len(s)==sz; vals.append(s.decode())\n                elif t>=12: sz=(t-12)//2; vals.append(pg[k:k+sz]); k+=sz\n            if k>len(pg): continue\n            print(p//ps+1,rid,vals,file=sys.stderr)\n            strs=[v for v in vals if isinstance(v,str)]; nums=[v for v in vals if isinstance(v,(int,float)) and not isinstance(v,bool)]\n            if strs and nums and not strs[0].startswith('CREATE'): out.append({\"item\":strs[0],\"price\":nums[-1]})\n        except Exception as e: pass\njson.dump(out,open(sys.argv[2],'w'),indent=1,ensure_ascii=False); print(len(d),ps,len(out))\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd \\\"$PWD\\\"; mkdir -p tmp; cat > tmp/r.py <<'EOF'\\nimport sys,json,struct\\nd=open(sys.argv[1],'rb').read()\\ndef varint(b,i):\\n    v=0\\n    for k in range(9):\\n        c=b[i+k]\\n        if k==8: return (v<<8)|c,i+9\\n        v=(v<<7)|(c&0x7f)\\n        if c<0x80: return v,i+k+1\\n    return v,i+9\\nps=struct.unpack('>H',d[16:18])[0]; ps=65536 if ps==1 else ps\\nout=[]\\nfor p in range(0,len(d),ps):\\n    off=100 if p==0 else 0\\n    pg=d[p:p+ps]\\n    if len(pg)<off+8 or pg[off]!=13: continue\\n    n=struct.unpack('>H',pg[off+3:off+5])[0]\\n    for c in range(n):\\n        try:\\n            cp=struct.unpack('>H',pg[off+8+2*c:off+10+2*c])[0]\\n            if cp==0 or cp>=len(pg): continue\\n            ln,i=varint(pg,cp); rid,i=varint(pg,i)\\n            h,j=varint(pg,i); he=i+h; ts=[]\\n            while j<he: t,j=varint(pg,j); ts.append(t)\\n            vals=[];k=he\\n            for t in ts:\\n                if t==0: vals.append(None)\\n                elif t<=6:\\n                    sz=[0,1,2,3,4,6,8][t]; vals.append(int.from_bytes(pg[k:k+sz],'big',signed=True)); k+=sz\\n                elif t==7: vals.append(struct.unpack('>d',pg[k:k+8])[0]); k+=8\\n                elif t in(8,9): vals.append(t-8)\\n                elif t>=13 and t%2: sz=(t-13)//2; s=pg[k:k+sz]; k+=sz\\n                    ; vals.append(s.decode()) if len(s)==sz else (_ for _ in ()).throw(ValueError)\\n                elif t>=12: sz=(t-12)//2; vals.append(pg[k:k+sz]); k+=sz\\n            if k>len(pg): continue\\n            print(p//ps+1,rid,vals,file=sys.stderr)\\n     [... 435 chars cut by the benchmark]\" ok -> \"File \\\"<WORKSPACE>\\\\tmp\\\\r.py\\\", line 33\\r\\n    ; vals.append(s.decode()) if len(s)==sz else (_ for _ in ()).throw(ValueError)\\r\\nIndentationError: unexpected indent\"\n[step 1] shell \"cd \\\"$PWD\\\"; python - <<'EOF'\\ns=open('tmp/r.py').read()\\ns=s.replace(\\\"\\\"\\\"s=pg[k:k+sz]; k+=sz\\n                    ; vals.append(s.decode()) if len(s)==sz else (_ for _ in ()).throw(ValueError)\\\"\\\"\\\",\\\"\\\"\\\"s=pg[k:k+sz]; k+=sz; assert len(s)==sz; vals.append(s.decode())\\\"\\\"\\\")\\nopen('tmp/r.py','w').write(s)\\nEOF\\npython -I tmp/r.py prices.db recovered.json 2>&1 | tail -40\" ok -> \"4096 4013 0\"\n[step 1] shell \"cd \\\"$PWD\\\"; sed -i 's/^ps=struct.*$/ps=4096/' tmp/r.py; python -I tmp/r.py prices.db recovered.json 2>&1 | tail -40; xxd prices.db | head -8\" ok -> \"4096 4096 0\\r\\n00000000: 0d00 0000 0a0f 3d00 0ff1 0fe3 0fcb 0fbd  ......=.........\\n00000010: 0fad 0f93 0f7f 0f6d 0f58 0f3d 0000 0000  .......m.X.=....\\n00000020: 0000 0000 0000 0000 0000 0000 0000 0000  ................\\n00000030: 0000 0000 0000 0000 0000 0000 0000 0000  ................\\n00000040: 0000 0000 0000 0000 0000 0000 0000 0000  ................\\n00000050: 0000 0000 0000 0000 0000 0000 0000 00[... 156 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"$PWD\\\"; sed -i 's/off=100 if p==0 else 0/off=0/' tmp/r.py; python -I tmp/r.py prices.db recovered.json 2>&1 | tail -15; cat recovered.json\" ok -> \"1 1 [None, 'trail map', 0]\\r\\n1 2 [None, 'matchbox', 1]\\r\\n1 3 [None, 'tent stake', 2.75]\\r\\n1 4 [None, 'lantern', 24]\\r\\n1 5 [None, 'rope coil', 18]\\r\\n1 6 [None, 'water filter', 39.9]\\r\\n1 7 [None, 'sleeping bag', 129]\\r\\n1 8 [None, 'camp stove', 310]\\r\\n1 9 [None, 'compass', 15.5]\\r\\n1 10 [None, 'first aid kit', 0.99]\\r\\n4096 4096 10\\r\\n[\\r\\n {\\r\\n  \\\"item\\\": \\\"trail map\\\",\\r\\n  \\\"price\\\": 0\\r\\n },\\r\\n {\\r\\n  \\\"item\\\": \\\"matchbox\\\",\\r\\n  \\\"[... 418 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   true
+  ],
+  [
+   "rows with fractional prices recovered",
+   true
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   true
+  ],
+  [
+   "no row that is not in the table",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 4,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2328,
+  "reasoning_tokens": 116
+ },
+ "deliverables": [],
+ "render": null
+}
