@@ -66,3 +66,27 @@ def test_a_row_missing_a_side_is_refused_with_the_task_named(tmp_path: Path) -> 
     (tmp_path / "audit.json").write_text(json.dumps(config), encoding="utf-8")
     with pytest.raises(SystemExit, match="'voice' missing \\['b'\\]"):
         _build_module().build(tmp_path / "audit.json", tmp_path / "site")
+
+
+def test_a_run_without_harness_cost_shows_the_list_price_estimate_178(tmp_path: Path) -> None:
+    # #178 (bench rule #162): exact cost when the harness reports it, else the list-price estimate, never n/a.
+    a, b = _bundle(tmp_path, "run-a", 80), _bundle(tmp_path, "run-b", 60)
+    result = json.loads((b / "result.json").read_text(encoding="utf-8"))
+    result["agent"] = {"name": "codex", "model": "gpt-6.1-sol", "effort": "low"}
+    result["config"] = {"service_tier": "fast"}
+    result["totals"].update(cost_usd=None, cost_basis="n/a",
+                            tokens={"input": 2_000_000, "cached_input": 1_500_000, "output": 100_000, "reasoning": 0})
+    for task in result["tasks"]:
+        task.update(cost_usd=None, tokens={"input": 1_000_000, "cached_input": 750_000, "output": 50_000, "reasoning": 0})
+    (b / "result.json").write_text(json.dumps(result), encoding="utf-8")
+    (tmp_path / "g1.json").write_text(json.dumps([{"task": "voice", "brief": "speak", "a": _side(), "b": _side(), "better": "tie"}]), encoding="utf-8")
+    config = {"rows": ["g1.json"], "runs": [{"key": "a", "label": "A", "bundle": str(a)}, {"key": "b", "label": "B", "bundle": str(b)}]}
+    (tmp_path / "audit.json").write_text(json.dumps(config), encoding="utf-8")
+    _build_module().build(tmp_path / "audit.json", tmp_path / "site")
+    html = (tmp_path / "site" / "index.html").read_text(encoding="utf-8")
+    data = json.loads(html.split("const DATA = ", 1)[1].split(";\nconst $", 1)[0])
+    from mengine_bench.leaderboard import run_cost_text
+    assert data["runs"][1]["totals"]["cost"] == run_cost_text(result) != "n/a"
+    assert data["runs"][1]["totals"]["cost"].startswith("~$")
+    assert data["rows"][0]["b"]["cost"].startswith("~$"), data["rows"][0]["b"]["cost"]
+    assert data["runs"][0]["totals"]["cost"] == "$1.50", "an exact harness cost stays exact"

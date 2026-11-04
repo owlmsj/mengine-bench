@@ -20,6 +20,9 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+from mengine_bench.leaderboard import run_cost_text
+from mengine_bench.prices import estimated_usd, price_text
+
 HERE = Path(__file__).resolve().parent
 ANSWER_CHARS = 4000
 AUDIO = {".wav", ".mp3", ".ogg", ".m4a"}
@@ -40,10 +43,16 @@ def mmss(seconds: object) -> str:
     return f"{whole // 60} min {whole % 60:02d} s"
 
 
-def money(value: object, basis: object) -> str:
-    if not isinstance(value, (int, float)):
-        return "n/a"
-    return f"{'' if basis == 'harness' else '~'}${value:.2f}"
+def task_cost(result: dict, task: dict) -> str:
+    """#178 (rule #162): the task's exact harness cost, else its list-price estimate, like the leaderboard."""
+    usd = task.get("cost_usd")
+    if isinstance(usd, (int, float)):
+        return f"${usd:.2f}"
+    per_task = {**result, "totals": {"tokens": task.get("tokens") or {}, "stats": task.get("stats") or {}}}
+    if price_text(per_task) == "$0.00 (local)":
+        return "$0.00 (local)"
+    estimate = estimated_usd(per_task)
+    return "n/a" if estimate is None else f"~${estimate:.2f}"
 
 
 def load_config(path: Path) -> dict:
@@ -119,13 +128,13 @@ def build(config_path: Path, out: Path) -> dict[str, str]:
         for key in keys:
             task = by_task[key].get(row["task"], {})
             answer = "\n\n".join(text for text in task.get("answers") or [] if text)
-            row[key].update(time=mmss(task.get("agent_s")), cost=money(task.get("cost_usd"), "harness"),
+            row[key].update(time=mmss(task.get("agent_s")), cost=task_cost(results[key], task),
                             answer=answer if len(answer) <= ANSWER_CHARS else answer[:ANSWER_CHARS] + " [...]",
                             rationale=task.get("judge_rationale") or "", parts=task.get("judge_parts") or {})
     for run in runs:
         totals = results[run["key"]]["totals"]
         run["totals"] = {"score": f"{totals.get('score') or 0:.1f}", "solved": totals.get("solved"),
-                         "time": mmss(totals.get("time_s")), "cost": money(totals.get("cost_usd"), totals.get("cost_basis")),
+                         "time": mmss(totals.get("time_s")), "cost": run_cost_text(results[run["key"]]),
                          "judge": f"{totals.get('judge') or 0:.1f}",
                          "real": sum(row[run["key"]]["really_correct"] == "yes" for row in rows),
                          "audit": f"{sum(float(row[run['key']]['my_judge']) for row in rows) / max(len(rows), 1):.1f}"}
