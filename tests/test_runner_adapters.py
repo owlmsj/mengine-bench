@@ -259,7 +259,7 @@ def test_agent_step_runs_with_pwd_set_to_the_workspace(tmp_path: Path, monkeypat
     workspace = tmp_path / "ws"
     workspace.mkdir()
     agent = CmdAgent(template="my-agent {prompt_file}", model="m", effort=None)
-    record = SimpleNamespace(steps=[])
+    record = SimpleNamespace(steps=[], outside_writes=[], outside_unmeasured=None)
     with pytest.raises(Exception, match="could not start agent"):
         task_run._invoke(agent, SimpleNamespace(timeout_s=5), workspace, tmp_path, 0, "do it", record, ())
     env = seen["env"]

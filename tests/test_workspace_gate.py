@@ -67,3 +67,31 @@ def test_outside_evidence_survives_lifecycle(tmp_path: Path, monkeypatch: pytest
     if action == "first-step":
         assert invoked == 2
 
+
+
+@pytest.mark.parametrize("when", ["before", "after"])
+def test_a_snapshot_the_runner_cannot_take_leaves_the_gate_unmeasured(tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+                                                                     when: str) -> None:
+    # #164: a filesystem snapshot that fails is an infra fault; it must never score the agent's task 0.
+    calls = 0
+    real = task_run.outside_snapshot
+
+    def flaky(workspace: Path, root: Path) -> dict[str, tuple[int, int, int]]:
+        nonlocal calls
+        calls += 1
+        if (when == "before" and calls == 1) or (when == "after" and calls == 2):
+            raise PermissionError("denied")
+        return real(workspace, root)
+
+    def invoke(argv: Sequence[str], cwd: Path, timeout_s: int, **kwargs: object) -> ProcessResult:
+        (cwd / "result.json").write_text("{}")
+        return ProcessResult("done", "", 0, False, 0.01)
+
+    monkeypatch.setattr(task_run, "outside_snapshot", flaky)
+    monkeypatch.setattr(task_run.process, "run_process", invoke)
+    task = EvalTask("fixture", "test", "#164", "fixture", lambda ws: None, (Step("finish"),),
+                    lambda ws, answers: CheckResult(checks=[("correct", True)]), lambda ws: [])
+    record = task_run.run_task(task, CmdAgent('["unused", "{prompt_file}"]', "fake", None), tmp_path / "run", fresh_root=tmp_path)
+    assert record.check is not None and record.check.score == 1.0
+    assert all(name != "no writes outside the task workspace" for name, _ in record.check.mandatory)
+    assert any("not measured" in note for note in record.check.notes), record.check.notes

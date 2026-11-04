@@ -101,6 +101,8 @@ class TaskRunRecord:
     left_open_tabs: int | None = None
     left_running: list[LeftProcess] = field(default_factory=list)
     outside_writes: list[str] = field(default_factory=list)
+    # #164: a snapshot the runner could not take is an infra fault: the gate goes unmeasured, never failed.
+    outside_unmeasured: str | None = None
 
     @property
     def usage(self) -> Usage | None:
@@ -293,11 +295,11 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: in
     prompt_file = prompts / f"step-{label}.md"
     prompt_file.write_text(prompt, encoding="utf-8")
     call = agent.invocation(prompt, prompt_file.resolve(), workspace.resolve(), attachments)
+    before: dict[str, tuple[int, int, int]] | None
     try:
         before = outside_snapshot(workspace, root)
-    except OSError:
-        record.outside_writes.append("filesystem snapshot unavailable")
-        raise
+    except OSError as error:
+        before, record.outside_unmeasured = None, f"filesystem snapshot unavailable: {error}"
     try:
         result = process.run_process(call.argv, workspace, task.timeout_s, stdin_text=call.stdin_text,
                                      env=_step_env(workspace, call.env), final_event=call.final_event)
@@ -306,10 +308,11 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: in
         raise StepFailed("crash", f"could not start agent {call.argv[0]!r}: {error}") from error
     finally:
         # #164: capture before settling removes sibling scratch files, including at timeout/crash.
-        try:
-            record.outside_writes.extend(outside_changes(before, outside_snapshot(workspace, root)))
-        except OSError:
-            record.outside_writes.append("filesystem snapshot unavailable")
+        if before is not None:
+            try:
+                record.outside_writes.extend(outside_changes(before, outside_snapshot(workspace, root)))
+            except OSError as error:
+                record.outside_unmeasured = f"filesystem snapshot unavailable: {error}"
     if result.reaped:
         print(f"[{task.id}] step {label}: killed {result.reaped} process(es) the agent left running", flush=True)
     if result.stopped_after_final:
@@ -347,8 +350,11 @@ def _grade(task: EvalTask, record: TaskRunRecord) -> None:
     try:
         record.check = (task.check(record.workspace, answers, tool_trace(record.streams))
                         if isinstance(task.check, TraceCheck) else task.check(record.workspace, answers))
-        record.check.mandatory.append((WORKSPACE_WRITE_GATE, not record.outside_writes))
-        if record.outside_writes:
+        if record.outside_unmeasured is not None:
+            record.check.notes.append(f"{WORKSPACE_WRITE_GATE}: not measured ({record.outside_unmeasured})")
+        else:
+            record.check.mandatory.append((WORKSPACE_WRITE_GATE, not record.outside_writes))
+        if record.outside_writes and record.outside_unmeasured is None:
             record.check.details[WORKSPACE_WRITE_GATE] = saw(sorted(set(record.outside_writes)), "no filesystem changes outside the workspace")
         if task.render_target is not None:
             add_page_checks(record.check, record.workspace / task.render_target)

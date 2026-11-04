@@ -188,8 +188,8 @@ def test_speed_only_pays_for_work_that_is_right() -> None:
     # An empty run that ends at once earned 15 points from Speed alone.
     assert combined_score(0.0, 0.0, speed_points(1.0)) == 0.0
     # With every check passing Speed counts in full (0.25 since bench 1.8, #122); at Correct 50 it counts half.
-    assert combined_score(100.0, 84.2, speed_points(337.0)) == 97.0
-    assert combined_score(50.0, 80.0, 100.0) == 54.5
+    assert combined_score(100.0, 84.2, speed_points(337.0)) == 95.4  # #164: 2.5 weights
+    assert combined_score(50.0, 80.0, 100.0) == 57.5  # #164: 2.5 weights
 
 
 def test_a_crash_is_graded_like_a_timeout_but_is_never_solved() -> None:
