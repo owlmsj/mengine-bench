@@ -54,6 +54,31 @@ def test_workspace_compressed_cap_writes_nothing(tmp_path: Path, monkeypatch: py
     assert not target.exists()
 
 
+def test_workspace_headers_remove_owner_identity_and_keep_mtime(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mengine_bench.bundle import _write_workspace
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / "text").write_bytes(b"hello")
+    (ws / "binary").write_bytes(b"\xff\x00")
+    original = tarfile.TarFile.gettarinfo
+    def identified(archive: tarfile.TarFile, *args: object, **kwargs: object) -> tarfile.TarInfo:
+        member = original(archive, *args, **kwargs)
+        member.uid, member.gid = 123, 456
+        member.uname, member.gname = "fixture-owner", "fixture-group"
+        member.mtime = 1234567890
+        return member
+    monkeypatch.setattr(tarfile.TarFile, "gettarinfo", identified)
+    target = tmp_path / "archive.tar.gz"
+    assert _write_workspace(target, ws) == []
+    with tarfile.open(target) as archive:
+        members = archive.getmembers()
+    assert len(members) == 2
+    for member in members:
+        assert (member.uname, member.gname, member.uid, member.gid) == ("", "", 0, 0)
+        assert member.mtime == 1234567890
+
+
 @pytest.mark.parametrize("limit", ["WORKSPACE_EXPANDED_BYTES", "WORKSPACE_MEMBERS"])
 def test_workspace_expansion_budget_before_compression(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch, limit: str) -> None:

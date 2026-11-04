@@ -203,7 +203,7 @@ def _write_workspace(target: Path, workspace: Path, scope: PathScope = PathScope
         sources = _workspace_files(workspace)
         expanded = 0
         with gzip.GzipFile(fileobj=compressed, mode="wb", mtime=0) as zipped:
-            with tarfile.open(fileobj=zipped, mode="w|") as archive:
+            with tarfile.open(fileobj=zipped, mode="w|", dereference=True) as archive:
                 for source in sources:
                     with source.open("rb") as stream:
                         raw = stream.read(WORKSPACE_EXPANDED_BYTES - expanded + 1)
@@ -212,13 +212,19 @@ def _write_workspace(target: Path, workspace: Path, scope: PathScope = PathScope
                         text = raw.decode("utf-8") if b"\x00" not in raw else None
                     except UnicodeDecodeError:
                         text = None
-                    member = archive.gettarinfo(source, arcname=source.relative_to(workspace).as_posix())
                     if text is not None:
                         raw = public_text(text, scope, allowed).encode("utf-8")
                     expanded += len(raw)
                     _workspace_budget(len(sources), expanded)
-                    member.size = len(raw)
-                    archive.addfile(member, io.BytesIO(raw))
+                    def publish_member(member: tarfile.TarInfo) -> None:
+                        member.uname = member.gname = ""
+                        member.uid = member.gid = 0
+                        member.size = len(raw)
+                        # #185: supply redacted bytes here; returning None prevents add from copying raw text.
+                        archive.addfile(member, io.BytesIO(raw))
+                        return None
+                    archive.add(source, arcname=source.relative_to(workspace).as_posix(),
+                                recursive=False, filter=publish_member)
         size = compressed.tell()
         if size > WORKSPACE_BYTES:
             return [f"workspace not kept: {size / (1024 * 1024):.2f} MiB"]
