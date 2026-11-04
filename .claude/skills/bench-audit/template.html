@@ -75,6 +75,8 @@ figcaption{font-size:.92rem;color:var(--muted)}
 audio{width:100%}
 iframe.live{width:100%;aspect-ratio:16/10;border:1px solid var(--line);border-radius:6px;background:#fff}
 .row-btn{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+figure.overlay{position:fixed;inset:0;z-index:50;border-radius:0;padding:max(10px,env(safe-area-inset-top,0px)) max(10px,env(safe-area-inset-right,0px)) max(10px,env(safe-area-inset-bottom,0px)) max(10px,env(safe-area-inset-left,0px));grid-template-rows:1fr auto auto;box-shadow:0 0 0 100vmax var(--bg)}
+figure.overlay iframe.live{aspect-ratio:auto;height:100%}
 .row-btn a,.files a{color:var(--a)}
 .tally{font-family:var(--mono);font-size:.95rem}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
@@ -187,22 +189,62 @@ function item(run, m) {
   if (m.kind === "audio") return `<figure><audio controls preload="none" src="${m.src}"></audio>${cap}</figure>`;
   if (m.kind === "image") return `<figure><img src="${m.src}" alt="${esc(run.label)}: ${esc(m.caption || "")}" loading="lazy">${cap}</figure>`;
   if (m.kind === "page") return `<figure>${m.shot ? `<img src="${m.shot}" alt="${esc(run.label)}: screenshot do judge" loading="lazy">` : ""}${cap}
-      <div class="row-btn"><button type="button" data-load="${m.src}">Interagir aqui</button><a href="${m.src}" target="_blank" rel="noopener">Abrir em tela cheia</a></div></figure>`;
-  return `<figure>${cap}<p class="files"><a href="${m.src}" target="_blank" rel="noopener">${esc(m.caption || m.src)}</a></p></figure>`;
+      <div class="row-btn"><button type="button" data-load="${m.src}">Interagir aqui</button><button type="button" data-full="${m.src}">Tela cheia</button></div></figure>`;
+  // #182: files open inside the page (text inline, others in a frame); a new-tab link is refused outside the viewer.
+  return `<figure>${cap}<div class="row-btn"><span class="mono">${esc(m.caption || m.src)}</span><button type="button" data-file="${m.src}">Ver aqui</button><button type="button" data-full="${m.src}">Tela cheia</button></div></figure>`;
 }
 function media() {
   $("#media").innerHTML = DATA.media.map(g => `<div style="display:grid;gap:8px"><h3 class="mono" style="margin:0;font-size:1rem">${esc(g.task)}</h3>${g.text ? `<p class="sub">${esc(g.text)}</p>` : ""}
     <div class="pair">${[A, B].map(run => `<div style="display:grid;gap:10px;min-width:0">${(g.items[run.key] || []).map(m => item(run, m)).join("") || `<p class="sub">${esc(run.label)}: nada guardado.</p>`}</div>`).join("")}</div></div>`).join("");
 }
+// #182: artifact files are served only inside the viewer, so a new-tab link is refused; load into the frame instead.
+function loadFrame(fig, src) {
+  const old = fig.querySelector("img, iframe");
+  const frame = document.createElement("iframe");
+  frame.src = src; frame.title = "Página entregue pelo agente"; frame.className = "live";
+  frame.setAttribute("allowfullscreen", "");
+  if (old) old.replaceWith(frame); else fig.prepend(frame);
+  return frame;
+}
+function closeOverlay() {
+  const open = document.querySelector("figure.overlay");
+  if (open) open.classList.remove("overlay");
+}
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeOverlay(); });
 document.addEventListener("click", e => {
   const load = e.target.closest("button[data-load]");
   if (load) {
-    const fig = load.closest("figure");
-    const old = fig.querySelector("img, iframe");
-    const frame = document.createElement("iframe");
-    frame.src = load.dataset.load; frame.title = "Página entregue pelo agente"; frame.className = "live";
-    if (old) old.replaceWith(frame); else fig.prepend(frame);
+    loadFrame(load.closest("figure"), load.dataset.load);
     load.textContent = "Recarregar"; return;
+  }
+  const file = e.target.closest("button[data-file]");
+  if (file) {
+    const fig = file.closest("figure");
+    const src = file.dataset.file;
+    if (/\.(md|txt|json|csv|log)$/i.test(src)) {
+      const old = fig.querySelector("pre.pre, iframe");
+      const pre = document.createElement("pre");
+      pre.className = "pre";
+      pre.textContent = "Carregando...";
+      if (old) old.replaceWith(pre); else fig.prepend(pre);
+      fetch(src).then(r => r.ok ? r.text() : Promise.reject(new Error(`HTTP ${r.status}`)))
+        .then(t => { pre.textContent = t; }, err => { pre.textContent = `Não foi possível abrir ${src}: ${err.message}`; });
+    } else {
+      loadFrame(fig, src);
+    }
+    file.textContent = "Recarregar"; return;
+  }
+  const full = e.target.closest("button[data-full]");
+  if (full) {
+    const fig = full.closest("figure");
+    if (fig.classList.contains("overlay")) { closeOverlay(); return; }
+    const frame = fig.querySelector("iframe") || loadFrame(fig, full.dataset.full);
+    const overlay = () => { closeOverlay(); fig.classList.add("overlay"); full.textContent = "Fechar tela cheia"; };
+    try {
+      const asked = frame.requestFullscreen ? frame.requestFullscreen() : null;
+      if (asked && asked.catch) asked.catch(overlay); else if (!asked) overlay();
+    } catch (err) { overlay(); }
+    return;
   }
   const f = e.target.closest("[data-f]");
   if (f) { document.querySelectorAll("[data-f]").forEach(b => b.setAttribute("aria-pressed", b === f)); tasks(f.dataset.f); return; }
