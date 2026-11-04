@@ -61,7 +61,7 @@ DRAWS_CHECK = "page draws something (screenshot not blank)"
 # Measured on Edge at 1440x900 (#82): an empty page 5,850 bytes, one h1 8,616, the plain reference scene 31,253,
 # and the smallest of 46 published pages 55,611.
 BLANK_PAGE_MAX_BYTES = 12_000
-COMPOSITION_CHECK = "render keeps the print's composition (blue layout)"
+COMPOSITION_CHECK = "blue-layout similarity to the print"
 # #164: the print a page must recompose, by task id; the rest of the visual tasks have no print to match.
 COMPOSITION_PRINTS = {"3d-print-homage": Path(__file__).resolve().parent / "assets" / "prints" / "great-wave.jpg"}
 # #164 calibration on the 15 judged renders of bench 2.2-2.4 (8 s frame; the 1 s and 4 s frames move it by <= 0.10):
@@ -69,6 +69,8 @@ COMPOSITION_PRINTS = {"3d-print-homage": Path(__file__).resolve().parent / "asse
 # scores <= 0.345 (the two audited ones 0.327 and 0.319), every one it gave >= 14 scores >= 0.438 except two
 # without a curl (a wave-less hump, r18, 0.305; a blue disc, r14, 0.311). 0.40 sits in that gap; a blank page
 # scores 0, a flat blue one 0.17.
+# #185 (2.6): on the 18 published renders no cutoff separates judge >= 65 from judge <= 55 (a 73 at 0.305, a 62 at
+# 0.574), so the similarity is a note the judge's rendered criterion carries, never a scored check.
 COMPOSITION_MIN = 0.40
 COMPOSITION_SIZE = (240, 150)
 COMPOSITION_GRID = (4, 3)
@@ -279,10 +281,10 @@ def add_page_checks(result: CheckResult, html: Path, probe: Callable[[Path], Pag
     if composition is None or not page.png:
         return
     # #164: token and palette checks gave 100% to a spire and to a pillar that the judge found unrecognisable.
+    # #185: measured on 18 published renders the cutoff crosses the judge both ways, so it is a note, not a point.
     similarity = round(composition_similarity(page.png, composition), 3)
-    result.add(COMPOSITION_CHECK, similarity >= COMPOSITION_MIN,
-               saw(similarity, f"a blue-layout similarity to {composition.name} of at least {COMPOSITION_MIN} "
-                               f"on a {COMPOSITION_GRID[0]}x{COMPOSITION_GRID[1]} grid"))
+    result.notes.append(f"{COMPOSITION_CHECK}: {similarity} against {composition.name} on a "
+                        f"{COMPOSITION_GRID[0]}x{COMPOSITION_GRID[1]} grid ({COMPOSITION_MIN} once scored; a note since 2.6)")
 
 
 def dump_page_dom(html: Path, query: str, browser_argv: Sequence[str] | None = None) -> tuple[str, str]:
