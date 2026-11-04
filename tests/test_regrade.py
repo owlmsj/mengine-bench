@@ -171,3 +171,24 @@ def test_unsafe_archive_is_rejected_without_rewriting(tmp_path: Path, name: str,
     with pytest.raises(ValueError, match="expected a regular file inside workspace"):
         _extract(archive_path, tmp_path / "workspace")
     assert not (tmp_path / "escape").exists()
+
+def test_regrade_refreshes_judge_packet_and_preserves_original(
+        fresh_bundle: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mengine_bench import bundle_judge
+    result = read_result(fresh_bundle)
+    row = result["tasks"][0]
+    packet_path = fresh_bundle / "judge" / f"{row['id']}.json"
+    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+    packet.update(checks=[["false failure", False]], status="crash")
+    packet_path.write_text(json.dumps(packet), encoding="utf-8")
+    assert cli.main(["regrade", str(fresh_bundle)]) == 0
+    updated = read_result(fresh_bundle)["tasks"][0]
+    refreshed = json.loads(packet_path.read_text(encoding="utf-8"))
+    expected = [(check["name"], check["ok"]) for check in updated["checks"]]
+    context = bundle_judge.read_packet(fresh_bundle, row["id"]).context
+    assert list(context.checks) == expected
+    assert context.status == row["status"]
+    assert refreshed["checks_graded_with"] == [{"checks": packet["checks"], "status": "crash"}]
+    for key in packet.keys() - {"checks", "status"}:
+        assert refreshed[key] == packet[key]
+

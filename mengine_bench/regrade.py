@@ -80,6 +80,14 @@ def _regrade_task(bundle: Path, row: dict[str, object], version: str) -> None:
                                                   "correct": row["c"], "checks": row["checks"]})
         row.update(c=_correctness(record), checks=checks, grading_version=__version__,
                    solved=record.status == "ok" and record.check is not None and record.check.passed)
+        packet_path = bundle / "judge" / f"{task_id}.json"
+        if packet_path.is_file():
+            packet = json.loads(packet_path.read_text(encoding="utf-8"))
+            packet.setdefault("checks_graded_with", []).append({"checks": packet["checks"],
+                                                                "status": packet.get("status", "ok")})
+            packet.update(checks=[[check["name"], check["ok"]] for check in checks], status=row["status"])
+            packet_path.write_text(json.dumps(packet, indent=1, ensure_ascii=False) + "\n",
+                                   encoding="utf-8", newline="\n")
 
 
 def regrade_bundle(bundle: Path) -> dict[str, object]:
