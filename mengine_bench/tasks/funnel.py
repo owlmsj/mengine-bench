@@ -123,6 +123,8 @@ def _funnel_counts(got: object, platform: str) -> dict[str, object]:
 
 def _answer_drops(answer: str) -> list[tuple[str, str]]:
     text = re.sub(r"[`*_]", " ", answer.lower())
+    # #164: normalize contracted negation before associating a drop with its step.
+    text = re.sub(r"\b(is|was)n['\u2019]t\b", r"\1 not", text)
     for phrase, token in ((r"steam\s*deck", "steamdeck"), (r"tutorial\s+complete", "tutorial_complete"),
                           (r"first\s+match", "first_match"), (r"biggest\s+drop", "biggest_drop")):
         text = re.sub(phrase, token, text)
@@ -133,14 +135,15 @@ def _answer_drops(answer: str) -> list[tuple[str, str]]:
     cue = r"\b(?:biggest_drop|(?:largest|greatest|steepest|worst)\s+drop(?:[ -]off)?|lowest\s+conversion|loses?\s+(?:the\s+)?most\s+players)\b"
     # #164: only explicit claims are scored; the brief allows a file-only answer.
     # Do not cross another named platform/step or sentence to infer an association.
-    gap = r"(?:(?!\b(?:pc|steamdeck|install|tutorial_complete|first_match|purchase|not)\b)[^.!?;]){0,80}?"
+    gap = r"(?:(?!\b(?:pc|steamdeck|install|tutorial_complete|first_match|purchase)\b)[^.!?;]){0,80}?"
+    affirmative_gap = r"(?:(?!\b(?:pc|steamdeck|install|tutorial_complete|first_match|purchase|not|never)\b)[^.!?;]){0,80}?"
     on_platform = r"\s+(?:on|for|in)\s+(?:the\s+)?" + platform
-    text = re.sub(r"\bnot\s+(?:install|tutorial_complete|first_match|purchase)\b\s*(?:but\s+)?", "", text)
-    patterns = (platform + gap + cue + gap + step,
-                cue + gap + platform + gap + step,
-                platform + gap + step + gap + r"\bis\b" + gap + cue,
-                step + gap + r"\bis\b" + gap + cue + on_platform,
-                cue + gap + step + on_platform)
+    text = re.sub(r"\b(?:not|never)\s+(?:install|tutorial_complete|first_match|purchase)\b\s*(?:but\s+)?", "", text)
+    patterns = (platform + gap + cue + affirmative_gap + step,
+                cue + affirmative_gap + platform + affirmative_gap + step,
+                platform + gap + step + affirmative_gap + r"\bis\b" + affirmative_gap + cue,
+                step + affirmative_gap + r"\bis\b" + affirmative_gap + cue + on_platform,
+                cue + affirmative_gap + step + on_platform)
     return [(match["platform"], match["step"]) for pattern in patterns for match in re.finditer(pattern, text)]
 
 

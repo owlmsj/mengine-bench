@@ -137,6 +137,7 @@ def _webmail_saved_pdfs(ws: Path) -> dict[str, str]:
 def _webmail_states_total(text: str) -> bool:
     """Accept the total in either number convention, excluding denials and competing confirmations."""
     correct = False
+    text = re.sub(r"(?m)^\s*>[^\n]*", "", text)
     # #164: a quoted or denied total is not a confirmation. Keep negation local so
     # unrelated statements ("not paid yet") and corrected subtotals stay valid.
     clauses = re.split(r"[;\n!?]|\.(?!\d)|\b(?:but|rather than)\b", text, flags=re.I)
@@ -144,14 +145,20 @@ def _webmail_states_total(text: str) -> bool:
         for match in re.finditer(r"\d[\d.,]*\d|\d", clause):
             got = number(match.group())
             before, after = clause[:match.start()], clause[match.end():]
-            denied = re.search(r"\b(?:not|isn't|isn\u2019t|wasn't|wasn\u2019t)\s*(?:EUR\s*|\u20ac\s*)?$", before, re.I)
+            prefix = re.split(r",|\band\b|\bincluding\b", before, flags=re.I)[-1]
+            # #164: negation scopes over the amount's noun phrase, not just its currency.
+            noun_phrase = r"(?:(?:the|an?|earlier|previous|invoice|total|amount|of|previously|quoted|as)\s+)*"
+            denied = re.search(r"\b(?:not|never|isn't|isn\u2019t|wasn't|wasn\u2019t)\s*" + noun_phrase
+                               + r"(?:EUR\s*|\u20ac\s*)?$", prefix, re.I)
             denied_after = re.match(r"\s*(?:EUR|\u20ac)?\s*(?:is|was)\s+not\b", after, re.I)
-            if denied or denied_after:
+            historical = re.search(r"\b(?:earlier|previous(?:ly)?|quoted|superseded)\b",
+                                   re.split(r"\bconfirm(?:ed)?\b", prefix, flags=re.I)[-1], re.I)
+            superseded = re.match(r"\s*(?:EUR|\u20ac)?\s*(?:is|was|has been)\s+(?:superseded|replaced|incorrect|wrong)\b", after, re.I)
+            if denied or denied_after or historical or superseded:
                 continue
             if got is not None and abs(got - INVOICE_TOTAL) < 0.005:
                 correct = True
                 continue
-            prefix = re.split(r",|\band\b|\bincluding\b", before, flags=re.I)[-1]
             line_item = re.search(r"\b(?:subtotal|VAT|tax)\b", prefix, re.I)
             confirms = re.search(r"\b(?:confirm(?:ed)?|total(?:\s+amount)?)\s*(?:is|of|for|:|=)?\s*"
                                  r"(?:EUR\s*|\u20ac\s*)?$", prefix, re.I)

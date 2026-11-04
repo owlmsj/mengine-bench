@@ -115,6 +115,12 @@ def test_a_renamed_copy_in_a_subfolder_and_european_writing_pass(tmp_path: Path)
     "We confirm EUR 996.50, rather than EUR 1,205.77.",
     "EUR 1,205.77 is not the invoice total. The total is EUR 996.50.",
     "The invoice total is EUR 1,205.77. We confirm the total is EUR 996.50.",
+    "The invoice total is not the amount of EUR 1,205.77. We confirm EUR 996.50.",
+    "Earlier we quoted EUR 1,205.77. We confirm EUR 996.50.",
+    '> We confirm EUR 1,205.77.\nWe confirm EUR 996.50.',
+    "The invoice total is not the amount of EUR 1,205.77.",
+    "Earlier we quoted the total EUR 1,205.77.",
+    '> We confirm EUR 1,205.77.',
 ])
 def test_a_denied_or_contradictory_total_fails(tmp_path: Path, body: str) -> None:
     def reply(ws: Path) -> None:
@@ -135,6 +141,11 @@ def test_a_denied_or_contradictory_total_fails(tmp_path: Path, body: str) -> Non
     "We have not paid yet; we confirm the invoice total of EUR 1,205.77.",
     "We confirm invoice LP-2026-0418, total EUR 1,205.77 for 20 prints.",
     "We confirm total EUR 1205.77 with EUR 0.00 outstanding.",
+    "We confirm EUR 1,205.77, not the earlier total of EUR 996.50.",
+    "We confirm EUR 1,205.77, not the invoice total previously quoted as EUR 996.50.",
+    "The earlier total of EUR 996.50 was superseded. We confirm EUR 1,205.77.",
+    '> The invoice total is EUR 996.50.\nWe confirm EUR 1,205.77.',
+    'The earlier quoted total was "EUR 996.50". We confirm EUR 1,205.77.',
 ])
 def test_total_confirmation_allows_corrections_and_line_items(body: str) -> None:
     assert webmail._webmail_states_total(body)
