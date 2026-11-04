@@ -137,7 +137,7 @@ def write_bundle(results: MutableMapping[str, object], out_root: Path, transcrip
         notes = _write_evidence(bundle_dir / "evidence" / task["id"], (evidence or {}).get(task["id"], {}), scope)
         workspace = (workspaces or {}).get(task["id"])
         if workspace is not None:
-            notes.extend(_write_workspace(bundle_dir / "workspace" / f"{task['id']}.tar.gz", workspace))
+            notes.extend(_write_workspace(bundle_dir / "workspace" / f"{task['id']}.tar.gz", workspace, scope))
         if notes:
             task.setdefault("flags", []).extend(notes)
     public = public_json(results, scope)
@@ -154,8 +154,8 @@ def _linked(path: Path) -> bool:
                                      & stat.FILE_ATTRIBUTE_REPARSE_POINT)
 
 
-def _write_workspace(target: Path, workspace: Path) -> list[str]:
-    """#185: preserve grader inputs verbatim, with the same publication scan as #165 evidence."""
+def _write_workspace(target: Path, workspace: Path, scope: PathScope = PathScope()) -> list[str]:
+    """#185: redact text grader inputs; preserve binary files for the publication scan."""
     compressed = io.BytesIO()
     try:
         if _linked(workspace):
@@ -169,7 +169,16 @@ def _write_workspace(target: Path, workspace: Path) -> list[str]:
                         source = Path(root) / name
                         if _linked(source) or not stat.S_ISREG(source.stat().st_mode):
                             continue
-                        archive.add(source, arcname=source.relative_to(workspace).as_posix(), recursive=False)
+                        raw = source.read_bytes()
+                        try:
+                            text = raw.decode("utf-8") if b"\x00" not in raw else None
+                        except UnicodeDecodeError:
+                            text = None
+                        member = archive.gettarinfo(source, arcname=source.relative_to(workspace).as_posix())
+                        if text is not None:
+                            raw = public_text(text, scope).encode("utf-8")
+                        member.size = len(raw)
+                        archive.addfile(member, io.BytesIO(raw))
         size = compressed.tell()
         if size > WORKSPACE_BYTES:
             return [f"workspace not kept: {size / (1024 * 1024):.2f} MiB"]

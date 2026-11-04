@@ -28,7 +28,7 @@ def test_workspace_archive_preserves_files_and_scans_members(tmp_path: Path) -> 
     (ws / ".git/HEAD").write_bytes(b"ref: refs/heads/main\n")
     (ws / "target").mkdir()
     (ws / "target/ignored").write_bytes(b"build")
-    raw = fake_secret("github").encode()
+    raw = b"\xff\x00" + fake_secret("github").encode()
     (ws / "output.bin").write_bytes(raw)
     results = {"date": "2026-01-01", "agent": {"name": "fake", "model": "fake"},
                "run_id": "workspace", "tasks": [{"id": "test", "flags": []}]}

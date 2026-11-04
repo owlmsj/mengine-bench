@@ -184,6 +184,11 @@ def test_deliverables_are_stored_verbatim_but_redacted(fake_agent: FakeAgent, tm
     stored = (bundle / "judge" / "web-mondrian-landing" / "landing" / "index.html").read_text(encoding="utf-8")
     assert "Composition with Red, Blue and Yellow" in stored and "[REDACTED:" in stored
     assert MARKER not in stored and str(tmp_path) not in stored
+    import tarfile
+    with tarfile.open(bundle / "workspace/web-mondrian-landing.tar.gz") as archive:
+        archived = archive.extractfile("landing/index.html").read().decode("utf-8")
+    assert fake_secret("github") not in archived and MARKER not in archived
+    assert archived.splitlines() == stored.splitlines()
     packet = json.loads((bundle / "judge" / "web-mondrian-landing.json").read_text(encoding="utf-8"))
     assert (packet["deliverables"], packet["render"]) == (["landing/index.html"], "landing/index.html")
 
