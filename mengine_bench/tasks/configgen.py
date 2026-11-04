@@ -9,21 +9,27 @@ The delivered gen.py must also still rebuild those same configs (#164), so a bro
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import tomllib
 from collections.abc import Sequence
 from pathlib import Path
+from typing import BinaryIO
 
 from mengine_bench.core import CheckResult, EvalTask, Step, checkpoints, read, saw, scratch_root, write
+from mengine_bench.runner.containment import new_scope, stop_session_group
 
 CFG_FAST_CODER = "fast-coder"
 CFG_WANTED_CONTEXT = 262144
 CFG_OLD_CONTEXT = 131072
 CFG_OUTPUTS = ("out/opencode.json", "out/codex.toml", "out/claude.json")
 CFG_GEN_LIMIT_S = 60
+CFG_GEN_OUTPUT_LIMIT = 64 * 1024
 
 CFG_SOURCE = """{
   "models": [
@@ -122,21 +128,99 @@ def _cfg_generate_delivered(ws: Path) -> dict[str, str]:
         root = Path(tmp) / "project"
         # A refactor may import sibling modules, so the whole project goes; the outputs do not, so a generator that
         # writes nothing cannot pass on the delivered copies.
-        shutil.copytree(ws, root, ignore=shutil.ignore_patterns(".git", "__pycache__", ".venv", "node_modules"))
-        for rel in CFG_OUTPUTS:
-            (root / rel).unlink(missing_ok=True)
+        try:
+            _cfg_check_links(ws)
+            shutil.copytree(ws, root, symlinks=True,
+                            ignore=shutil.ignore_patterns(".git", "__pycache__", ".venv", "node_modules"))
+            # #164: an absolute internal link must point into the copy, never back into the delivery.
+            absolute_links = [(link, root / link.resolve().relative_to(ws.resolve())) for link in root.rglob("*")
+                              if link.is_symlink() and link.readlink().is_absolute()]
+            for link, target in absolute_links:
+                link.unlink()
+                link.symlink_to(os.path.relpath(target, link.parent), target_is_directory=target.is_dir())
+            _cfg_check_links(root)
+            for rel in CFG_OUTPUTS:
+                (root / rel).unlink(missing_ok=True)
+        except (OSError, ValueError, RuntimeError):
+            return {}
         # As the README runs it (`python gen.py`): -I would also hide the script's own folder from its imports.
         return _cfg_run_generator(root, "-Es")
 
 
+def _cfg_check_links(root: Path) -> None:
+    # #164: preserve links while copying, but reject any read/write route outside the private project.
+    resolved_root = root.resolve()
+    for path in root.rglob("*"):
+        if not path.resolve().is_relative_to(resolved_root):
+            raise ValueError(saw(path.relative_to(root).as_posix(), "a symlink resolving inside the project"))
+
+
+def _cfg_generator_environment(root: Path) -> dict[str, str]:
+    environment = {"PATH": os.pathsep.join((str(Path(sys.executable).parent), os.defpath))}
+    if os.name == "nt":
+        if "SYSTEMROOT" in os.environ:
+            environment["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
+        temp = root.parent / "process-temp"
+        temp.mkdir(exist_ok=True)
+        environment.update(TEMP=str(temp), TMP=str(temp))
+    return environment
+
+
+def _cfg_drain_output(pipe: BinaryIO, captured: bytearray) -> None:
+    # #164: keep at most the diagnostic budget, even when the generator floods both output streams.
+    with pipe:
+        while chunk := pipe.read(4096):
+            remaining = CFG_GEN_OUTPUT_LIMIT - len(captured)
+            captured.extend(chunk[:remaining])
+
+
 def _cfg_run_generator(root: Path, isolation: str) -> dict[str, str]:
+    scope = new_scope()
+    proc: subprocess.Popen[bytes] | None = None
+    captured = bytearray()
+    reader: threading.Thread | None = None
+    completed = False
     try:
-        done = subprocess.run([sys.executable, isolation, str(root / CFG_GEN_FILE)], cwd=root, capture_output=True,
-                              text=True, timeout=CFG_GEN_LIMIT_S, check=False)
-    except subprocess.TimeoutExpired:
+        # #164: suspend/adopt/resume on Windows or a new POSIX session contains descendants before execution.
+        deadline = time.monotonic() + CFG_GEN_LIMIT_S
+        proc = subprocess.Popen([sys.executable, isolation, str(root / CFG_GEN_FILE)], cwd=root,
+                                env=_cfg_generator_environment(root), stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **scope.popen_kwargs)
+        scope.adopt(proc)
+        assert proc.stdout is not None
+        reader = threading.Thread(target=_cfg_drain_output, args=(proc.stdout, captured), daemon=True)
+        reader.start()
+        while proc.poll() is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                proc.wait(timeout=min(remaining, 0.05))
+            except subprocess.TimeoutExpired:
+                continue
+        completed = proc.poll() == 0
+    except OSError:
+        return {}
+    finally:
+        try:
+            if proc is not None:
+                stop_session_group(proc.pid)
+                scope.kill_all(proc.pid)
+                if proc.poll() is None:
+                    proc.kill()
+                proc.wait(timeout=5)
+            if reader is not None:
+                reader.join(timeout=1)
+        finally:
+            scope.close()
+    if not completed or (reader is not None and reader.is_alive()):
+        return {}
+    try:
+        _cfg_check_links(root)
+    except (OSError, ValueError, RuntimeError):
         return {}
     outputs = {rel: read(root, rel) for rel in CFG_OUTPUTS}
-    if done.returncode != 0 or any(text is None for text in outputs.values()):
+    if any(text is None for text in outputs.values()):
         return {}
     return {rel: text or "" for rel, text in outputs.items()}
 

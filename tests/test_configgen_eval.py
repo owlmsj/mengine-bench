@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import io
 import json
+import os
+import subprocess
+import time
 from pathlib import Path
 
+import psutil
 import pytest
 
 from mengine_bench import catalog
@@ -138,14 +143,135 @@ def test_a_delivery_whose_generator_no_longer_regenerates_fails(tmp_path: Path, 
     assert result.failed() == [OWN_GENERATOR], (result.failed(), result.details)
 
 
-def test_a_generator_split_into_modules_passes(tmp_path: Path) -> None:
+@pytest.mark.parametrize("entrypoint", [
+    "from render import main\n\nmain()\n",
+    "import subprocess\nsubprocess.run(['python', 'render.py'], check=True)\n",
+], ids=["sibling-import", "python-child"])
+def test_a_generator_split_into_modules_passes(tmp_path: Path, entrypoint: str) -> None:
     # #164: an equivalent refactor that imports a sibling module still regenerates the same configs.
     ws = _fresh(tmp_path)
     _cfg_reference(ws)
-    write(ws, "render.py", CFG_GEN.replace('if __name__ == "__main__":\n    main()\n', ""))
-    write(ws, "gen.py", "from render import main\n\nmain()\n")
+    write(ws, "render.py", CFG_GEN)
+    write(ws, "gen.py", entrypoint)
     result = _cfg_check(ws, [""])
     assert result.passed, (result.failed(), result.details)
+
+
+def test_delivered_generator_receives_only_minimal_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = _fresh(tmp_path)
+    _cfg_reference(ws)
+    monkeypatch.setenv("BENCH_TEST_SENTINEL", "synthetic-do-not-inherit")
+    allowed = {"PATH", "SYSTEMROOT", "TEMP", "TMP"} if os.name == "nt" else {"PATH", "LC_CTYPE"}
+    write(ws, "gen.py", "import os\nassert set(os.environ) <= " + repr(allowed) + "\n" + CFG_GEN)
+    assert _cfg_check(ws, [""]).passed
+
+
+def test_generator_depending_on_inherited_host_values_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # #164: this delivery previously passed by reading the grader's environment.
+    ws = _fresh(tmp_path)
+    _cfg_reference(ws)
+    monkeypatch.setenv("BENCH_TEST_SENTINEL", "synthetic-do-not-inherit")
+    write(ws, "gen.py", "import os\nassert os.environ.get('BENCH_TEST_SENTINEL') == 'synthetic-do-not-inherit'\n" + CFG_GEN)
+    assert _cfg_check(ws, [""]).failed() == [OWN_GENERATOR]
+
+
+def test_delivered_generator_runs_in_a_private_copy(tmp_path: Path) -> None:
+    ws = _fresh(tmp_path)
+    _cfg_reference(ws)
+    write(ws, "gen.py", "from pathlib import Path\nPath('private-marker').write_text('copy only')\n" + CFG_GEN)
+    assert _cfg_check(ws, [""]).passed
+    assert not (ws / "private-marker").exists()
+
+
+def test_noisy_valid_generator_passes_with_bounded_capture(tmp_path: Path) -> None:
+    ws = _fresh(tmp_path)
+    _cfg_reference(ws)
+    write(ws, "gen.py", "print('x' * (256 * 1024))\n" + CFG_GEN)
+    assert _cfg_check(ws, [""]).passed
+    captured = bytearray()
+    configgen._cfg_drain_output(io.BytesIO(b"x" * (256 * 1024)), captured)
+    assert captured == b"x" * configgen.CFG_GEN_OUTPUT_LIMIT
+
+
+@pytest.mark.parametrize("parent_exits", [False, True], ids=["timeout", "parent-exits"])
+def test_generator_children_do_not_survive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, parent_exits: bool) -> None:
+    monkeypatch.setattr(configgen, "CFG_GEN_LIMIT_S", 1.0)
+    write(tmp_path, "gen.py", "import subprocess, sys, time\nfrom pathlib import Path\n"
+          "child = subprocess.Popen([sys.executable, '-I', '-c', 'import time; time.sleep(120)'])\n"
+          "Path('child.pid').write_text(str(child.pid))\n" + ("" if parent_exits else "time.sleep(120)\n"))
+    started = time.monotonic()
+    try:
+        assert configgen._cfg_run_generator(tmp_path, "-Es") == {}
+        child_pid = int((tmp_path / "child.pid").read_text())
+        assert time.monotonic() - started < 5
+        assert not psutil.pid_exists(child_pid) or psutil.Process(child_pid).status() == psutil.STATUS_ZOMBIE
+    finally:
+        pid_file = tmp_path / "child.pid"
+        if pid_file.exists() and psutil.pid_exists(int(pid_file.read_text())):
+            psutil.Process(int(pid_file.read_text())).kill()
+
+
+@pytest.mark.parametrize("external", [False, True], ids=["internal", "escaping"])
+def test_project_symlinks_stay_inside_copy(tmp_path: Path, external: bool) -> None:
+    ws = tmp_path / "project"
+    ws.mkdir()
+    _fresh(ws)
+    _cfg_reference(ws)
+    target = tmp_path / "outside.py" if external else ws / "render.py"
+    target.write_text(CFG_GEN, encoding="utf-8")
+    (ws / "gen.py").unlink()
+    try:
+        (ws / "gen.py").symlink_to(os.path.relpath(target, ws))
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc.winerror if hasattr(exc, 'winerror') else exc.errno}")
+    result = _cfg_check(ws, [""])
+    assert result.passed is (not external)
+    if external:
+        assert result.failed() == [OWN_GENERATOR]
+
+
+def test_escaping_link_is_refused_before_copy_or_execution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # #164: exercise the refusal even on Windows hosts without symlink creation privileges.
+    ws = tmp_path / "project"
+    ws.mkdir()
+    write(ws, "escape.py", "raise AssertionError('must not execute')")
+    original_resolve = Path.resolve
+
+    def resolve_link(path: Path, strict: bool = False) -> Path:
+        return tmp_path / "external.py" if path == ws / "escape.py" else original_resolve(path, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", resolve_link)
+    assert configgen._cfg_generate_delivered(ws) == {}
+
+
+def test_copy_preserves_symlinks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    ws = _fresh(tmp_path)
+    _cfg_reference(ws)
+    original_copytree = configgen.shutil.copytree
+    seen: list[bool] = []
+
+    def copy_project(source: Path, destination: Path, *args: object, **kwargs: object) -> Path:
+        seen.append((args[0] if args else kwargs.get("symlinks")) is True)
+        return original_copytree(source, destination, *args, **kwargs)
+
+    monkeypatch.setattr(configgen.shutil, "copytree", copy_project)
+    assert configgen._cfg_generate_delivered(ws)
+    assert seen and all(seen)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows directory junction regression")
+def test_escaping_directory_junction_is_refused(tmp_path: Path) -> None:
+    # #164: junctions can escape copytree on Windows without symlink privileges.
+    ws = tmp_path / "project"
+    ws.mkdir()
+    _fresh(ws)
+    _cfg_reference(ws)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    done = subprocess.run(["cmd", "/c", "mklink", "/J", str(ws / "escape"), str(outside)],
+                          cwd=tmp_path, capture_output=True, check=False, timeout=5)
+    assert done.returncode == 0
+    assert _cfg_check(ws, [""]).failed() == [OWN_GENERATOR]
 
 
 def test_the_brief_does_not_hand_over_the_cause() -> None:
