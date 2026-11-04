@@ -1,0 +1,56 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "**[goal]** Find what makes arena-01 hitch and which setting changes fix it within the owner's limits (GPU link stays Gen5 x4, no BIOS overclock changes).\n\n**[action]** Analysed `capture/presentmon.csv` (8238 frames) and `capture/sensors.csv` using the owner's formulas. Lined up the frames over 20 ms against the GPU's PCIe link state, second by second.\n\n**[result]** `result.json` is written and passes a JSON syntax check.\n- avg_fps is 137.29 and low_1pct_fps is 45.35. Both were computed from the capture, not taken from the notes.\n- **Cause:** the PCIe link from the board to the GPU goes into its power-saving sleep state (ASPM L1) every 4 s. The sensor log shows it at seconds 2, 6, 10, 14 and so on up to 58. Every frame of 20 ms or more that I listed falls in exactly those seconds (about 21 to 23 ms each, at 2, 6, 10 and 14). Normal frames take about 7 ms. These slow frames are what drags the 1% low down.\n- **Change:** `pcie_aspm_rp1_gpu` from `L1` to `disabled`. This only turns off the link's power saving. Link speed and width stay Gen5 x4, and XMP, PBO and core ratio are untouched, so both constraints hold.\n- **Assumption:** the other settings stay as they are. Microsoft Defender's virus scanner (MsMpEng.exe) had a one-off burst at seconds 43 to 45 (DPC latency about 400 µs, disk 80 to 94%). That does not repeat every few seconds, so I left Defender out of the changes. I did not check whether it caused slow frames of its own.\n\n**[next]** To confirm, capture again after the change: the frames of over 20 ms every 4 s should be gone and the 1% low should be close to the average. Nothing was applied to this machine, and I opened no browser tabs or apps."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\"avg_fps\": 137.29, \"low_1pct_fps\": 45.35,\n \"cause\": \"PCIe ASPM L1 on the GPU root port (rp1): the GPU link drops to L1 every 4 s (sensor seconds 2,6,10,...,58) and each wake costs a burst of ~21-23 ms frames in exactly those seconds; this sets the 1% low. Link speed stays Gen5 x4.\",\n \"changes\": [{\"setting\": \"pcie_aspm_rp1_gpu\", \"from\": \"L1\", \"to\": \"disabled\"}]}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd ..; ls; cd workspace; ls; for f in ../*; do [ -f \\\"$f\\\" ] && { echo \\\"== $f\\\"; head -c 1500 \\\"$f\\\"; echo; }; done\" failed -> \"Exit code 1\\nworkspace\\nAGENTS.md\\nNOTES.md\\ncapture\\nsettings.json\"\n[step 1] shell \"cat NOTES.md settings.json; ls -la capture; for f in capture/*; do echo \\\"== $f\\\"; head -5 \\\"$f\\\"; wc -l \\\"$f\\\"; done\" ok -> \"# Owner notes - rig \\\"arena-01\\\"\\n\\nThe game hitches every few seconds even though the average frame rate looks fine.\\nCapture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\ntaken at the same time (same clock: second 0 of both files is the same instant).\\nsettings.json is a dump of the rig's current settings.\\n\\nHow we measure:\\n- Average FPS = frames presented divided by[... 3981 chars cut by the benchmark]\"\n[step 1] shell \"cd capture; cat sensors.csv | awk -F, '{print $1,$5,$7,$8,$9}' | tr '\\\\n' ';'; echo; python -I -c \\\"\\nimport csv\\nr=list(csv.DictReader(open('presentmon.csv')));m=sorted(float(x['MsBetweenPresents']) for x in r)\\nprint(len(r),1000/(sum(m)/len(m)),1000/m[int(0.99*len(m))])\\nprint([ (int(float(x['TimeInSeconds'])),x['MsBetweenPresents']) for x in r if float(x['MsBetweenPresents'])>20][:40])\\\"\" ok -> \"time_s gpu_pcie_link_state dpc_latency_us disk_active_pct top_cpu_process;0 L0 52 1 Arena.exe;1 L0 88 4 Arena.exe;2 L1 40 3 Arena.exe;3 L0 81 2 Arena.exe;4 L0 41 1 Arena.exe;5 L0 49 2 Arena.exe;6 L1 77 4 Arena.exe;7 L0 57 3 Arena.exe;8 L0 49 3 Arena.exe;9 L0 51 4 Arena.exe;10 L1 84 5 Arena.exe;11 L0 46 1 Arena.exe;12 L0 70 3 Arena.exe;13 L0 44 92 Arena.exe;14 L1 68 2 Arena.exe;15 L0 82 0 Arena.exe[... 1599 chars cut by the benchmark]\"\n[step 1] shell \"cd ..; cat > result.json <<'E'\\n{\\\"avg_fps\\\": 137.29, \\\"low_1pct_fps\\\": 45.35,\\n \\\"cause\\\": \\\"PCIe ASPM L1 on the GPU root port (rp1): the GPU link drops to L1 every 4 s (sensor seconds 2,6,10,...,58) and each wake costs a burst of ~21-23 ms frames in exactly those seconds; this sets the 1% low. Link speed stays Gen5 x4.\\\",\\n \\\"changes\\\": [{\\\"setting\\\": \\\"pcie_aspm_rp1_gpu\\\", \\\"from\\\": \\\"L1\\\", \\\"to\\\": \\\"disabled\\\"}]}\\nE\\npython -I -m json.tool result.json >/dev/null && echo ok\" ok -> \"ok\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 4,
+  "tool_errors": 1,
+  "shell_commands": 4,
+  "shell_failures": 1,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 1,
+  "generated_tokens": 1615,
+  "reasoning_tokens": 185
+ },
+ "deliverables": [],
+ "render": null
+}

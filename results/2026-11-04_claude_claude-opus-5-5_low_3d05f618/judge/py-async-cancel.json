@@ -1,0 +1,52 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [
+  "**[goal]** Add `run_tasks(tasks, max_concurrent)` to `./run.py`. It must never run more than `max_concurrent` jobs at once, and the jobs' cleanup code must still run when you press Ctrl+C.\n\n**[action]** I wrote `run.py` using only the standard library. It starts `max_concurrent` workers inside an `asyncio.TaskGroup`, and they all take tasks from one shared list. A task's callable is only called once a slot is free.\n\n**[assumptions]**\n- **Return value:** it returns the job results as a list, in the same order as the input tasks.\n- **Ctrl+C:** `asyncio.run` cancels the main task. The TaskGroup then cancels every running job and waits for it, so each job's `finally` block runs. After that, `KeyboardInterrupt` still reaches your script.\n- **A job raises an error:** the other running jobs are cancelled (their cleanup runs too), jobs not yet started never start, and the error comes out as an `ExceptionGroup`. It fails fast rather than finishing the rest of the batch.\n- **Bad `max_concurrent`:** anything other than a whole number of 1 or more raises `ValueError` showing the value it got.\n- **Input:** `tasks` can be any iterable. It is read into a list at the start.\n\n**[result]** I tested it with `tmp/t.py`, which sends a real SIGINT (the Ctrl+C signal) during a run. Output:\n```\n[0, 1, 2, 3, 4, 5, 6, 7, 8, 9] peak 3\nKeyboardInterrupt, cleaned 4\n```\n- **First line:** 10 jobs with a limit of 3. Results came back in order, and at most 3 jobs ran at the same time.\n- **Second line:** 10 five-second jobs with a limit of 4, interrupted after 0.2 s. All 4 running jobs ran their `finally` cleanup, and `KeyboardInterrupt` still reached the caller.\n\nNot tested: what happens when a job raises an error.\n\n**[next]** Nothing is required. I opened no browser tabs or apps."
+ ],
+ "diff": "A run.py\nA tmp/t.py\n\n--- run.py ---\n\"\"\"Bounded-concurrency async job runner (stdlib only, Python 3.11+).\"\"\"\nimport asyncio\nfrom collections.abc import Awaitable, Callable, Iterable\nfrom typing import Any\n\n\nasync def run_tasks(tasks: Iterable[Callable[[], Awaitable[Any]]], max_concurrent: int) -> list[Any]:\n    \"\"\"Run each zero-arg callable's awaitable, at most max_concurrent at once.\n\n    Returns results in input order. A job is only created (callable invoked)\n    when a slot is free. On the first failure, or on cancellation (Ctrl+C under\n    asyncio.run cancels the main task), all running jobs are cancelled and\n    awaited, so their finally/cleanup code runs; the error then propagates\n    (failures as ExceptionGroup via TaskGroup).\n    \"\"\"\n    if not isinstance(max_concurrent, int) or max_concurrent < 1:\n        raise ValueError(f\"max_concurrent must be an int >= 1, got {max_concurrent!r}\")\n    pending = list(enumerate(tasks))\n    results: list[Any] = [None] * len(pending)\n    feed = iter(pending)\n\n    async def worker() -> None:\n        for index, make_job in feed:\n            results[index] = await make_job()\n\n    async with asyncio.TaskGroup() as group:\n        for _ in range(min(max_concurrent, len(pending))):\n            group.create_task(worker())\n    return results\n\n\n--- tmp/t.py ---\nimport asyncio, sys, signal, os, threading\nsys.path.insert(0, '.')\nfrom run import run_tasks\ncur = peak = 0; cleaned = 0\ndef mk(i, d):\n    async def job():\n        global cur, peak, cleaned\n        cur += 1; peak = max(peak, cur)\n        try: await asyncio.sleep(d); return i\n        finally: cur -= 1; cleaned += 1\n    return job\nprint(asyncio.run(run_tasks([mk(i, .01) for i in range(10)], 3)), \"peak\", peak)\ncleaned = 0\nthreading.Timer(0.2, lambda: signal.raise_signal(signal.SIGINT)).start()\ntry: asyncio.run(run_tasks([mk(i, 5) for i in range(10)], 4))\nexcept KeyboardInterrupt: print(\"KeyboardInterrupt, cleaned\", cleaned)\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cat > run.py <<'EOF'\\n\\\"\\\"\\\"Bounded-concurrency async job runner (stdlib only, Python 3.11+).\\\"\\\"\\\"\\nimport asyncio\\nfrom collections.abc import Awaitable, Callable, Iterable\\nfrom typing import Any\\n\\n\\nasync def run_tasks(tasks: Iterable[Callable[[], Awaitable[Any]]], max_concurrent: int) -> list[Any]:\\n    \\\"\\\"\\\"Run each zero-arg callable's awaitable, at most max_concurrent at once.\\n\\n    Returns results in input order. A job is only created (callable invoked)\\n    when a slot is free. On the first failure, or on cancellation (Ctrl+C under\\n    asyncio.run cancels the main task), all running jobs are cancelled and\\n    awaited, so their finally/cleanup code runs; the error then propagates\\n    (failures as ExceptionGroup via TaskGroup).\\n    \\\"\\\"\\\"\\n    if not isinstance(max_concurrent, int) or max_concurrent < 1:\\n        raise ValueError(f\\\"max_concurrent must be an int >= 1, got {max_concurrent!r}\\\")\\n    pending = list(enumerate(tasks))\\n    results: list[Any] = [None] * len(pending)\\n    feed = iter(pending)\\n\\n    async def worker() -> None:\\n        for index, make_job in feed:\\n            results[index] = await make_job()\\n\\n    async with asyncio.TaskGroup() as group:\\n        for _ in range(min(max_concurrent, len(pending))):\\n            group.create_task(worker())\\n    return results\\nEOF\\nmkdir -p tmp; cat > tmp/t.py <<'EOF'\\nimport asyncio, sys, signal, os, threading\\nsys.path.insert(0, '.')\\nfrom run import run_tasks\\ncur = peak = 0; cleaned = 0\\ndef mk(i, d):\\n    async def job():\\n        global cur, peak[... 468 chars cut by the benchmark]\" ok -> \"[0, 1, 2, 3, 4, 5, 6, 7, 8, 9] peak 3\\r\\nKeyboardInterrupt, cleaned 4\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 2,
+  "tool_calls": 1,
+  "tool_errors": 0,
+  "shell_commands": 1,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1832,
+  "reasoning_tokens": 234
+ },
+ "deliverables": [],
+ "render": null
+}

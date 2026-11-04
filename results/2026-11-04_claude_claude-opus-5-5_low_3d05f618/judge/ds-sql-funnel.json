@@ -1,0 +1,48 @@
+{
+ "task_id": "ds-sql-funnel",
+ "prompts": [
+  "Product wants to know where players drop off on each platform. The data is in {WS}/analytics.db and our reporting rules are in {WS}/METRICS.md. Where do we lose the most players? Record it in {WS}/result.json: funnel (per platform, players at each step) and biggest_drop (per platform, the step)."
+ ],
+ "answers": [
+  "**[goal]** Find the step where each platform loses the most players, following the rules in METRICS.md, and record it in `result.json`.\n\n**[action]** I wrote a small Python script, `f.py`, that runs on `analytics.db`. Assumptions:\n- Test accounts (`is_test=1`) and events from players not in `users` are left out.\n- The steps run install → tutorial_complete → first_match → purchase.\n- A step counts only if it happens at or after the same player's previous step, using the first time that's true.\n- The biggest drop is the step with the lowest conversion (its players divided by the previous step's players), as METRICS.md defines it.\n\nThe data looked clean. Platforms are just `pc` and `steamdeck`, there are only the 4 event names, and every timestamp has the same 19-character format, so text ordering is time ordering.\n\n**[result]** Script output:\n```\n'pc': {'install': 470, 'tutorial_complete': 389, 'first_match': 326, 'purchase': 269}\n'steamdeck': {'install': 192, 'tutorial_complete': 128, 'first_match': 87, 'purchase': 61}\n'biggest_drop': {'pc': 'purchase', 'steamdeck': 'tutorial_complete'}\n```\n\n| Platform | Tutorial | First match | Purchase | Biggest drop |\n|---|---|---|---|---|\n| pc | 82.8% | 83.8% | 82.5% | purchase |\n| steamdeck | 66.7% | 68.0% | 70.1% | tutorial_complete |\n\n- **pc:** the most players are lost at purchase, but all three steps convert at nearly the same rate. Purchase is lowest by only 0.3 points, so the drop-off is spread fairly evenly.\n- **steamdeck:** the most players are lost at the tutorial. Steam Deck also loses more players than PC at every step, so it is the weaker platform overall.\n\n**How I know it's right:** the counts shrink at every step, as a funnel must. I worked out the conversion rates in the table by hand from the script's counts, and they agree with the step the script picked for each platform. `result.json` contains exactly these numbers. I opened no browser tabs or apps.\n\n**[next]** If you want to check the PC result, look at the purchase step. That's where PC's narrow 0.3-point margin over the other steps is decided."
+ ],
+ "diff": "A f.py\nA result.json\n\n--- f.py ---\nimport sqlite3,json\nc=sqlite3.connect('analytics.db')\nprint(c.execute(\"select platform,is_test,count(*) from users group by 1,2\").fetchall())\nprint(c.execute(\"select name,count(*) from events group by 1\").fetchall())\nprint(c.execute(\"select min(ts),max(ts),min(length(ts)),max(length(ts)) from events\").fetchall())\nS=['install','tutorial_complete','first_match','purchase']\nu={r[0]:r[1].strip().lower() for r in c.execute(\"select user_id,platform from users where is_test=0\")}\nev={}\nfor uid,n,ts in c.execute(\"select user_id,trim(lower(name)),ts from events order by ts\"):\n  if uid in u: ev.setdefault(uid,[]).append((ts,n))\nF={}\nfor uid,p in u.items():\n  F.setdefault(p,[0]*4); t=None; k=0\n  for ts,n in ev.get(uid,[]):\n    if k<4 and n==S[k] and (t is None or ts>=t): t=ts; F[p][k]+=1; k+=1\nres={\"funnel\":{p:dict(zip(S,v)) for p,v in sorted(F.items())},\"biggest_drop\":{p:S[1+min(range(3),key=lambda i:v[i+1]/v[i] if v[i] else 9)] for p,v in sorted(F.items())}}\njson.dump(res,open('result.json','w'),indent=1);print(res)\n\n\n--- result.json ---\n{\r\n \"funnel\": {\r\n  \"pc\": {\r\n   \"install\": 470,\r\n   \"tutorial_complete\": 389,\r\n   \"first_match\": 326,\r\n   \"purchase\": 269\r\n  },\r\n  \"steamdeck\": {\r\n   \"install\": 192,\r\n   \"tutorial_complete\": 128,\r\n   \"first_match\": 87,\r\n   \"purchase\": 61\r\n  }\r\n },\r\n \"biggest_drop\": {\r\n  \"pc\": \"purchase\",\r\n  \"steamdeck\": \"tutorial_complete\"\r\n }\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd \\\"<WORKSPACE>\\\"; cat METRICS.md; python -I -c \\\"\\nimport sqlite3;c=sqlite3.connect('analytics.db')\\nfor r in c.execute(\\\\\\\"select sql from sqlite_master\\\\\\\"):print(r[0])\\nfor t in [r[0] for r in c.execute(\\\\\\\"select name from sqlite_master where type='table'\\\\\\\")]:print(t,c.execute(f'select * from {t} limit 3').fetchall())\\\"\" ok -> \"# How we report the funnel\\n\\nSteps, in order: install, tutorial_complete, first_match, purchase.\\nA step counts only at or after the same player's previous step, with no time limit; its time is the first valid occurrence.\\nTest accounts and events from unknown players do not count.\\nA step's conversion is its players over the previous step's players. The biggest drop is the step with the lowest conver[... 381 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\"; cat > f.py <<'EOF'\\nimport sqlite3,json\\nc=sqlite3.connect('analytics.db')\\nprint(c.execute(\\\"select platform,is_test,count(*) from users group by 1,2\\\").fetchall())\\nprint(c.execute(\\\"select name,count(*) from events group by 1\\\").fetchall())\\nprint(c.execute(\\\"select min(ts),max(ts),min(length(ts)),max(length(ts)) from events\\\").fetchall())\\nS=['install','tutorial_complete','first_match','purchase']\\nu={r[0]:r[1].strip().lower() for r in c.execute(\\\"select user_id,platform from users where is_test=0\\\")}\\nev={}\\nfor uid,n,ts in c.execute(\\\"select user_id,trim(lower(name)),ts from events order by ts\\\"):\\n  if uid in u: ev.setdefault(uid,[]).append((ts,n))\\nF={}\\nfor uid,p in u.items():\\n  F.setdefault(p,[0]*4); t=None; k=0\\n  for ts,n in ev.get(uid,[]):\\n    if k<4 and n==S[k] and (t is None or ts>=t): t=ts; F[p][k]+=1; k+=1\\nres={\\\"funnel\\\":{p:dict(zip(S,v)) for p,v in sorted(F.items())},\\\"biggest_drop\\\":{p:S[1+min(range(3),key=lambda i:v[i+1]/v[i] if v[i] else 9)] for p,v in sorted(F.items())}}\\njson.dump(res,open('result.json','w'),indent=1);print(res)\\nEOF\\npython -I f.py\" ok -> \"[('pc', 0, 593), ('pc', 1, 21), ('steamdeck', 0, 273), ('steamdeck', 1, 13)]\\r\\n[('first_match', 479), ('install', 759), ('purchase', 441), ('tutorial_complete', 589)]\\r\\n[('2026-05-30 12:00:00', '2026-07-12 08:00:00', 19, 19)]\\r\\n{'funnel': {'pc': {'install': 470, 'tutorial_complete': 389, 'first_match': 326, 'purchase': 269}, 'steamdeck': {'install': 192, 'tutorial_complete': 128, 'first_match': 87, '[... 86 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "players per step on pc",
+   true
+  ],
+  [
+   "players per step on steamdeck",
+   true
+  ],
+  [
+   "biggest drop on each platform",
+   true
+  ],
+  [
+   "final answer does not contradict biggest drops",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 3,
+  "tool_calls": 2,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1767,
+  "reasoning_tokens": 134
+ },
+ "deliverables": [],
+ "render": null
+}

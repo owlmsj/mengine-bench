@@ -1,0 +1,60 @@
+{
+ "task_id": "ts-plugin-bug",
+ "prompts": [
+  "Users of our harness plugins report that tool.after hooks run out of order, that sometimes a hook never runs, and that a failing hook is silently ignored. The hook bus and the plugin are in {WS}; the README there says how the bus must behave. Fix the bus. Its public API stays as it is, the tests in {WS}/test stay as they are, and package.json takes no dependencies."
+ ],
+ "answers": [
+  "[goal] Make the hook bus behave the way the README describes: handlers run in order, every handler runs, and a failing handler makes `emit` fail.\n\n[action] The bug was in `src/bus.ts`, in `emit`. It used `list.forEach(async ...)`, which starts every handler at once and doesn't wait for any of them. So `emit` resolved before the handlers finished, which is why they ran out of order. It also never saw their errors, so a failing hook was silently ignored. And because it walked the live list, a handler that unsubscribed during an emit shifted the list and the next handler got skipped (the \"hook never runs\" report). The fix copies the current handler list when `emit` starts, then runs the handlers one at a time with `for ... of` and `await`. An error now goes straight back to the caller of `emit`, and the handlers after it don't run. The public API, the tests, `package.json` and `src/plugin.ts` are unchanged.\n\n[result] I checked with a throwaway script (since deleted). In it, handler `a` unsubscribes itself and waits 20 ms, `b` pushes, the third throws, and `c` would push. The output was `a,b,err:x 3`:\n- `a` finished before `b` started, so the order is right.\n- `b` still ran after `a` unsubscribed.\n- The error `x` made `emit` reject, and `c` never ran.\n- `3` handlers remained afterwards, so the unsubscribe counted from the next emit on.\n\n`npm test`: `ℹ pass 2` / `ℹ fail 0`.\n\nAssumptions: Node 24 runs the TypeScript directly, as the README says. If a handler is subscribed twice, its unsubscribe removes the first copy, which is the existing behaviour.\n\n[next] The two existing tests don't cover ordering, errors or unsubscribing during an emit. Since `./test` had to stay as it is, I added no regression test, and the only check of the new behaviour is the script above. I opened no browser tabs or apps."
+ ],
+ "diff": "M src/bus.ts\n\n--- src/bus.ts ---\n/**\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\n * handlers run one after another in subscription order, emit resolves after all of them,\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\n */\n\nexport type Handler<T> = (payload: T) => void | Promise<void>;\n\nexport class HookBus {\n  private handlers: Map<string, Handler<unknown>[]> = new Map();\n\n  /** Subscribes a handler to an event; returns the function that unsubscribes it. */\n  on<T>(event: string, handler: Handler<T>): () => void {\n    const list = this.handlers.get(event) ?? [];\n    list.push(handler as Handler<unknown>);\n    this.handlers.set(event, list);\n    return () => {\n      const index = list.indexOf(handler as Handler<unknown>);\n      if (index >= 0) {\n        list.splice(index, 1);\n      }\n    };\n  }\n\n  /** Runs the handlers of an event with the payload. */\n  async emit<T>(event: string, payload: T): Promise<void> {\n    // Snapshot: unsubscribes during this emit take effect from the next emit (README).\n    const snapshot = [...(this.handlers.get(event) ?? [])];\n    for (const handler of snapshot) {\n      await handler(payload);\n    }\n  }\n\n  /** How many handlers an event has. */\n  count(event: string): number {\n    return (this.handlers.get(event) ?? []).length;\n  }\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd \\\"<WORKSPACE>\\\"; ls -R | grep -v node_modules | head -30; cat README.md; cat package.json; find . -name \\\"*.js\\\" -not -path \\\"*/node_modules/*\\\" | grep -iv test | xargs cat\" ok -> \".:\\nAGENTS.md\\nREADME.md\\npackage.json\\nsrc\\ntest\\n\\n./src:\\nbus.ts\\nplugin.ts\\n\\n./test:\\nbus.test.ts\\n# harness-hooks\\n\\nThe hook bus our harness plugins use (OpenCode-style hooks such as `tool.before` and `tool.after`).\\nPlain TypeScript run by Node 24 directly (`npm test` runs `node --test`); no dependencies.\\n\\n## How the bus behaves\\n\\n- `bus.on(event, handler)` subscribes a handler and returns a function that [... 904 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\"; cat src/bus.ts; cat test/bus.test.ts | head -40\" ok -> \"/**\\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\\n * handlers run one after another in subscription order, emit resolves after all of them,\\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\\n */\\n\\nexport type Handler<T> = (payload: T) => void | Promise<void>;\\n\\nexport class HookBus {\\n  private handlers: Map<string, Ha[... 1473 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\"; node -e '\\nconst fs=require(\\\"fs\\\");let s=fs.readFileSync(\\\"src/bus.ts\\\",\\\"utf8\\\");\\ns=s.replace(`    const list = this.handlers.get(event) ?? [];\\n    list.forEach(async (handler) => {\\n      await handler(payload);\\n    });`,`    // Snapshot: unsubscribes during this emit take effect from the next emit (README).\\n    const snapshot = [...(this.handlers.get(event) ?? [])];\\n    for (const handler of snapshot) {\\n      await handler(payload);\\n    }`);fs.writeFileSync(\\\"src/bus.ts\\\",s)'\\ncat > tmp_check.ts <<'E'\\nimport { HookBus } from \\\"./src/bus.ts\\\";\\nconst b=new HookBus();const o:string[]=[];\\nconst off=b.on(\\\"e\\\",async()=>{off();await new Promise(r=>setTimeout(r,20));o.push(\\\"a\\\")});\\nb.on(\\\"e\\\",()=>{o.push(\\\"b\\\")});b.on(\\\"e\\\",()=>{throw new Error(\\\"x\\\")});b.on(\\\"e\\\",()=>{o.push(\\\"c\\\")});\\nawait b.emit(\\\"e\\\",1).catch(e=>o.push(\\\"err:\\\"+e.message));console.log(o.join(\\\",\\\"),b.count(\\\"e\\\"));\\nE\\nnode tmp_check.ts; rm tmp_check.ts; npm test 2>&1 | grep -E \\\"^# (pass|fail)\\\"\" ok -> \"a,b,err:x 3\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\"; npm test 2>&1 | tail -8\" ok -> \"ℹ tests 2\\nℹ suites 0\\nℹ pass 2\\nℹ fail 0\\nℹ cancelled 0\\nℹ skipped 0\\nℹ todo 0\\nℹ duration_ms 119.2977\"",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "package.json takes no dependencies",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hidden handlers run in subscription order",
+   true
+  ],
+  [
+   "hidden emit resolves after every handler",
+   true
+  ],
+  [
+   "hidden a failing handler rejects emit",
+   true
+  ],
+  [
+   "hidden a handler that unsubscribes itself does not stop the others",
+   true
+  ],
+  [
+   "hidden the audit plugin redacts before it logs",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 4,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1717,
+  "reasoning_tokens": 113
+ },
+ "deliverables": [],
+ "render": null
+}
