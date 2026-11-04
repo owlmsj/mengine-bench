@@ -242,13 +242,25 @@ def redact_paths(text: str, scope: PathScope) -> str:
     return text
 
 
-def find_leaks(text: str, names: LocalNames | None = None) -> dict[str, int]:
+def leak_matches(text: str, names: LocalNames | None = None) -> list[tuple[str, re.Match[str]]]:
+    """Exact scanner matches, including spans, for task fixture exceptions (#185)."""
+    patterns = [*SECRET_PATTERNS, ("email", _EMAIL), ("connector", _CONNECTOR),
+                *(("home path", pattern) for pattern in (_WINDOWS_HOME, _UNIX_HOME, _SLUG_HOME)),
+                *((kind, pattern) for kind, _, pattern in (names or LocalNames()).patterns())]
+    return [(kind, match) for kind, pattern in patterns for match in pattern.finditer(text)]
+
+
+def find_leak_strings(text: str, names: LocalNames | None = None) -> set[str]:
+    """Strings the privacy scanner would flag, never category counts (#185)."""
+    return {match.group() for _, match in leak_matches(text, names)}
+
+
+def find_leaks(text: str, names: LocalNames | None = None,
+               allowed: frozenset[str] = frozenset()) -> dict[str, int]:
     """Count per kind of what redaction should have removed: secret patterns,
     e-mail addresses, connector names, home paths, local names and secret env values (empty when clean)."""
-    counts = {kind: len(pattern.findall(text)) for kind, pattern in SECRET_PATTERNS}
-    counts["email"] = len(_EMAIL.findall(text))
-    counts["connector"] = len(_CONNECTOR.findall(text))
-    counts["home path"] = sum(len(pattern.findall(text)) for pattern in (_WINDOWS_HOME, _UNIX_HOME, _SLUG_HOME))
-    for kind, _, pattern in (names or LocalNames()).patterns():
-        counts[kind] = counts.get(kind, 0) + len(pattern.findall(text))
-    return {kind: count for kind, count in counts.items() if count}
+    counts: dict[str, int] = {}
+    for kind, match in leak_matches(text, names):
+        if match.group() not in allowed:
+            counts[kind] = counts.get(kind, 0) + 1
+    return counts

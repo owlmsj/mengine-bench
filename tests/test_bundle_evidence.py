@@ -61,6 +61,32 @@ def _evidence_task() -> EvalTask:
                     reference=lambda ws: [], evidence=("out/audio.wav", "out/form.pdf"))
 
 
+def test_workspace_fixture_exceptions_are_exact_and_task_local(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from mengine_bench import bundle as bundling
+    planted = fake_secret("github")
+    fixture = f"dev@dropgame.invalid\n{planted}\n"
+    def setup(ws: Path) -> None:
+        (ws / "fixture.txt").write_text(fixture, encoding="utf-8", newline="")
+    task = replace(_evidence_task(), setup=setup)
+    monkeypatch.setattr(catalog, "task_by_id", lambda task_id: task if task_id == task.id else None)
+    monkeypatch.setattr(bundling, "render_summary", lambda result: "summary")
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    setup(ws)
+    (ws / "agent.txt").write_text("invented@private.invalid\n" + planted + "EXTRA", encoding="utf-8", newline="")
+    results = {"date": "2026-01-01", "agent": {"name": "fake", "model": "fake"}, "run_id": "fixture",
+               "tasks": [{"id": task.id}, {"id": "other"}]}
+    bundle = write_bundle(results, tmp_path / "bundles", {}, PathScope(),
+                          workspaces={task.id: ws, "other": ws})
+    with tarfile.open(bundle / "workspace" / f"{task.id}.tar.gz") as archive:
+        assert archive.extractfile("fixture.txt").read().decode() == fixture
+        assert archive.extractfile("agent.txt").read() == b"[REDACTED:email]\n[REDACTED:github]"
+    with tarfile.open(bundle / "workspace/other.tar.gz") as archive:
+        assert archive.extractfile("fixture.txt").read() == b"[REDACTED:email]\n[REDACTED:github]\n"
+    assert bundle_leaks(bundle, LocalNames()) == {}
+
+
 @pytest.mark.parametrize("native_paths", [False, True])
 def test_fake_run_preserves_bytes_and_keeps_evidence_out_of_judge(
         fake_agent: FakeAgent, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, native_paths: bool) -> None:
