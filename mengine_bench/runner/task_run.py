@@ -285,6 +285,16 @@ def _step_env(workspace: Path, extra: Mapping[str, str] | None) -> dict[str, str
     return env
 
 
+def _snapshot_note(error: OSError, workspace: Path) -> str:
+    # #164: exception messages can contain host paths; publish only a bounded relative location.
+    location = "."
+    if error.filename:
+        path = Path(error.filename).absolute()
+        if path.is_relative_to(workspace.parent.absolute()):
+            location = Path(os.path.relpath(path, workspace)).as_posix()
+    return f"filesystem snapshot unavailable: {type(error).__name__} at {location}"
+
+
 def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: int, prompt: str,
             record: TaskRunRecord, attachments: tuple[str, ...]) -> str:
     label = str(index)
@@ -299,7 +309,7 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: in
     try:
         before = outside_snapshot(workspace, root)
     except OSError as error:
-        before, record.outside_unmeasured = None, f"filesystem snapshot unavailable: {error}"
+        before, record.outside_unmeasured = None, _snapshot_note(error, workspace)
     try:
         result = process.run_process(call.argv, workspace, task.timeout_s, stdin_text=call.stdin_text,
                                      env=_step_env(workspace, call.env), final_event=call.final_event)
@@ -312,7 +322,7 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: in
             try:
                 record.outside_writes.extend(outside_changes(before, outside_snapshot(workspace, root)))
             except OSError as error:
-                record.outside_unmeasured = f"filesystem snapshot unavailable: {error}"
+                record.outside_unmeasured = _snapshot_note(error, workspace)
     if result.reaped:
         print(f"[{task.id}] step {label}: killed {result.reaped} process(es) the agent left running", flush=True)
     if result.stopped_after_final:

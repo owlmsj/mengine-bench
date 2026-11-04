@@ -80,7 +80,7 @@ def test_a_snapshot_the_runner_cannot_take_leaves_the_gate_unmeasured(tmp_path: 
         nonlocal calls
         calls += 1
         if (when == "before" and calls == 1) or (when == "after" and calls == 2):
-            raise PermissionError("denied")
+            raise PermissionError(13, f"denied at {workspace}", str(workspace.parent / "blocked"))
         return real(workspace, root)
 
     def invoke(argv: Sequence[str], cwd: Path, timeout_s: int, **kwargs: object) -> ProcessResult:
@@ -95,3 +95,6 @@ def test_a_snapshot_the_runner_cannot_take_leaves_the_gate_unmeasured(tmp_path: 
     assert record.check is not None and record.check.score == 1.0
     assert all(name != "no writes outside the task workspace" for name, _ in record.check.mandatory)
     assert any("not measured" in note for note in record.check.notes), record.check.notes
+    assert record.outside_unmeasured == "filesystem snapshot unavailable: PermissionError at ../blocked"
+    assert str(tmp_path) not in str(record.check.notes)
+
