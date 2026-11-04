@@ -119,6 +119,14 @@ HTTP) as a note, never a grade. A harness without a browser scores what it deliv
 - **opencode and AGY**: whatever browser MCP server or tool their own configuration provides (for example a
   Playwright MCP server); the bench adds none.
 
+Claude Code receives `--add-dir <absolute workspace>` so Claude in Chrome can read workspace uploads; for Codex,
+the owner must enable **Allow access to file URLs** under the ChatGPT extension details in Edge.
+A known host upload refusal becomes `infra`: the run is an observation until that task is rerun; the live upload
+probe and browser-setting verification remain owner actions, not part of this preflight (#181, #185).
+
+Preflight requires cargo, git and Node >= 22.18; `--allow-missing-toolchain` records missing tools in config and
+continues, while a missing Chromium browser only warns that page checks will be left out.
+
 ### Or let your agent do it
 
 Paste this into a new session of the agent you want to measure:

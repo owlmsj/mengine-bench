@@ -98,6 +98,9 @@ untouched", or the page file exists).
   half of the task; a gate that guards the tests still does. The task shows its status, counts its full time and
   is never Solved. A reply already given when the limit hits counts as the reply. With nothing written or
   said, there is nothing for the checks to credit.
+- `infra` (2.6): a known host refusal in the stream or an unavailable filesystem snapshot marks an `ok` or
+  `timeout` task as infrastructure failure. Checks and Correct remain as graded, with no extra discount or credit;
+  any run containing an `infra` task is an observation, not ranked, until that task is rerun. `crash` stays `crash`.
 - Each prompt states the limit, 1 to 7 min per step, and that the folder and the reply are graded as they
   stand when time runs out. Load a local model before the run: a cold load counts against the first task.
 - **Solved** = the agent finished, and every gate and every check passed.
