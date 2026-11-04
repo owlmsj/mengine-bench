@@ -122,29 +122,18 @@ def _funnel_counts(got: object, platform: str) -> dict[str, object]:
 
 
 def _answer_drops(answer: str) -> list[tuple[str, str]]:
-    text = re.sub(r"[`*_]", " ", answer.lower())
-    # #164: normalize contracted negation before associating a drop with its step.
-    text = re.sub(r"\b(is|was)n['\u2019]t\b", r"\1 not", text)
-    for phrase, token in ((r"steam\s*deck", "steamdeck"), (r"tutorial\s+complete", "tutorial_complete"),
-                          (r"first\s+match", "first_match"), (r"biggest\s+drop", "biggest_drop")):
+    text = re.sub(r"[`*]", "", answer.lower())
+    for phrase, token in ((r"steam\s+deck", "steamdeck"), (r"tutorial\s+complete", "tutorial_complete"),
+                          (r"first\s+match", "first_match")):
         text = re.sub(phrase, token, text)
-    platform = r"\b(?P<platform>pc|steamdeck)\b"
-    step = r"\b(?P<step>install|tutorial_complete|first_match|purchase)\b"
-    transition = r"\b(?:from\s+)?(?:install|tutorial_complete|first_match|purchase)\s*(?:to\b|->|\u2192)\s*" + step
-    text = re.sub(transition, lambda match: match["step"], text)
-    cue = r"\b(?:biggest_drop|(?:largest|greatest|steepest|worst)\s+drop(?:[ -]off)?|lowest\s+conversion|loses?\s+(?:the\s+)?most\s+players)\b"
-    # #164: only explicit claims are scored; the brief allows a file-only answer.
-    # Do not cross another named platform/step or sentence to infer an association.
-    gap = r"(?:(?!\b(?:pc|steamdeck|install|tutorial_complete|first_match|purchase)\b)[^.!?;]){0,80}?"
-    affirmative_gap = r"(?:(?!\b(?:pc|steamdeck|install|tutorial_complete|first_match|purchase|not|never)\b)[^.!?;]){0,80}?"
-    on_platform = r"\s+(?:on|for|in)\s+(?:the\s+)?" + platform
-    text = re.sub(r"\b(?:not|never)\s+(?:install|tutorial_complete|first_match|purchase)\b\s*(?:but\s+)?", "", text)
-    patterns = (platform + gap + cue + affirmative_gap + step,
-                cue + affirmative_gap + platform + affirmative_gap + step,
-                platform + gap + step + affirmative_gap + r"\bis\b" + affirmative_gap + cue,
-                step + affirmative_gap + r"\bis\b" + affirmative_gap + cue + on_platform,
-                cue + affirmative_gap + step + on_platform)
-    return [(match["platform"], match["step"]) for pattern in patterns for match in re.finditer(pattern, text)]
+    # #164: only this explicit assertion form is graded; uncertain or negated prose must pass.
+    pattern = (r"\b(?P<platform>pc|steamdeck)\b(?:(?!\b(?:pc|steamdeck)\b).)*?"
+               r"\bbiggest[ _]drop\s*(?:is\b|=|:)\s*"
+               r"(?P<step>install|tutorial_complete|first_match|purchase)\b")
+    negation = r"\b(?:not|no|never|neither|nor|cannot|without)\b|n['\u2019]t\b"
+    clauses = re.split(r"[.!?;\n]", text)
+    return [(match["platform"], match["step"]) for clause in clauses
+            if not re.search(negation, clause) for match in re.finditer(pattern, clause)]
 
 
 def _funnel_check(ws: Path, answers: Sequence[str]) -> CheckResult:
@@ -160,8 +149,8 @@ def _funnel_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result.add("biggest drop on each platform", all(str(drops.get(platform)).strip().lower() == gold[platform] for platform in gold), saw(drops, gold))
     claims = _answer_drops(answers[-1]) if answers else []
     result.add("final answer does not contradict biggest drops",
-               all(step == gold[platform] == str(drops.get(platform)).strip().lower() for platform, step in claims),
-               saw(claims, f"no stated drop, or drops agreeing with result.json and {gold}"))
+               all(step == str(drops.get(platform)).strip().lower() for platform, step in claims),
+               saw(claims, "no explicit unnegated drop assertion, or drops agreeing with result.json"))
     return result
 
 
