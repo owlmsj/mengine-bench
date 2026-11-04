@@ -191,9 +191,9 @@ def test_leaderboard_ranks_the_current_major_minor_only(tmp_path: Path) -> None:
     assert board.ranked == 2 and board.history == 1 and board.unranked == []
 
 
-def test_2_0_to_2_4_runs_stay_ranked_in_2_5_with_their_marks_161_164(tmp_path: Path) -> None:
-    # #139: 2.1 kept the 2.0 runs ranked. #151: 2.2 added three tasks and kept both. #153: 2.3 keeps all three.
-    # #161: 2.4 adds a check to two tasks and keeps all four; a 2.3 run is complete on its own catalog.
+def test_2_3_to_2_5_runs_stay_ranked_in_2_6_and_2_0_to_2_2_are_history_187(tmp_path: Path) -> None:
+    # #139, #151, #153, #161, #164: the owner kept every 2.x run ranked and marked. #187 (owner, 2026-11-04): one
+    # catalog per ranking; the 20- and 23-task rows (2.0 to 2.2) are history, the 28-task rows (2.3 on) stay, marked.
     added = leaderboard.TASKS_ADDED_IN_2_2 | leaderboard.TASKS_ADDED_IN_2_3
     old_ids = [task.id for task in catalog.all_tasks() if task.id not in added]
     v22_ids = [task.id for task in catalog.all_tasks() if task.id not in leaderboard.TASKS_ADDED_IN_2_3]
@@ -208,21 +208,19 @@ def test_2_0_to_2_4_runs_stay_ranked_in_2_5_with_their_marks_161_164(tmp_path: P
     _write_result(results, "v21-short", 99.0, model="short-model", bench_version="2.1.1", task_ids=old_ids[1:])
     _write_result(results, "v17", 99.0, model="v17-model", bench_version="1.7.3", task_ids=[TASK])
     board = leaderboard.build_leaderboard(results, tmp_path)
-    assert board.ranked == 7
+    assert board.ranked == 4 and board.history == 3
     text = board.markdown
-    assert "Bench 2.0 to 2.5 runs stay in this ranking (#139, #151, #153, #161, #164, #185)" in text
-    assert "a row marked 2.3 covers 28, without the 2.4 check" in " ".join(text.split())
-    order = [text.index(mark) for mark in ("v21-model", "v22-model", "v23-model", "v24-model", "v25-model", "v26-model",
-                                           "## Not ranked")]
+    assert "Bench 2.3 to 2.5 runs stay in this ranking (#153, #161, #164, #185, #187)" in text
+    assert "The bench 2.0 to 2.2 runs (20 and 23 tasks) moved to history" in " ".join(text.split())
+    order = [text.index(mark) for mark in ("v23-model", "v24-model", "v25-model", "v26-model", "## Bench 2.2 (history)",
+                                           "v22-model", "## Bench 2.1 (history)", "v21-model", "## Bench 2.0 (history)",
+                                           "v20-model", "## Not ranked")]
     assert order == sorted(order)
-    assert "[run](results/v20/summary.md) (bench 2.0) |" in text
-    assert "[run](results/v21/summary.md) (bench 2.1) |" in text
-    assert "[run](results/v22/summary.md) (bench 2.2) |" in text
     assert "[run](results/v23/summary.md) (bench 2.3) |" in text
     assert "[run](results/v24/summary.md) (bench 2.4) |" in text
     assert "[run](results/v25/summary.md) (bench 2.5) |" in text
     assert "[run](results/v26/summary.md) |" in text
-    assert "## Bench 2.0 (history)" not in text and "## Bench 2.1 (history)" not in text
+    assert text.index("[run](results/v20/summary.md) (bench 2.0) |") > text.index("## Bench 2.0 (history)")
     assert [name for name, _ in board.unranked] == ["results/v17", "results/v21-short"]
 
 
