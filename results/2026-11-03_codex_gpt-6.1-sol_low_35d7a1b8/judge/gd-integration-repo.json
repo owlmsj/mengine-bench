@@ -1,0 +1,69 @@
+{
+ "task_id": "gd-integration-repo",
+ "prompts": [
+  "An integration test of the Pixel Arena backend in {WS} fails while the unit tests pass. Make the backend behave as {WS}/docs says: fix every cause, not just the symptom this test shows. Existing tests stay as they are, and the project takes no new dependencies."
+ ],
+ "answers": [
+  "[goal]\nMake the backend follow `docs`; assumed decimal config values express exact payout intent.\n\n[action]\nFixed config precedence, credit restoration, and floating-point rounding. Added regressions; existing tests unchanged. No dependencies added.\n\n[result]\nRegressions reproduced all three defects before fixes. Full-suite evidence:\n```text\nRan 19 tests in 0.008s\n\nOK\n```\n\n[next]\nComplete. No browser tabs, windows, or apps opened."
+ ],
+ "diff": "M arena_server/config/loader.py\nM arena_server/economy/payout.py\nM arena_server/persistence/codec.py\nA tests/unit/test_documented_contracts.py\n\n--- arena_server/config/loader.py ---\n\"\"\"Runtime config. Precedence, lowest to highest: DEFAULTS < JSON file < env (docs/CONFIG.md).\"\"\"\n\nimport json\nimport os\n\nfrom arena_server.config.defaults import DEFAULTS\n\n\ndef _coerce(raw, like):\n    return type(like)(raw)\n\n\ndef load_config(file_path=None, env=None):\n    cfg = dict(DEFAULTS)\n    env = os.environ if env is None else env\n    if file_path:\n        with open(file_path, encoding=\"utf-8\") as fh:\n            cfg.update(json.load(fh))\n    for key, default in DEFAULTS.items():\n        value = env.get(f\"ARENA_{key.upper()}\")\n        if value is not None:\n            cfg[key] = _coerce(value, default)\n    return cfg\n\n\n--- arena_server/economy/payout.py ---\n\"\"\"Match payout. Rules live in docs/ECONOMY.md.\"\"\"\n\nfrom decimal import Decimal, ROUND_HALF_UP\n\n\ndef match_payout(won, kills, cfg):\n    base = cfg[\"win_base\"] if won else cfg[\"loss_base\"]\n    subtotal = Decimal(str(base)) + Decimal(str(kills)) * Decimal(str(cfg[\"kill_bonus\"]))\n    raw = subtotal * Decimal(str(cfg[\"event_multiplier\"]))\n    return int((raw / 10).quantize(Decimal(\"1\"), rounding=ROUND_HALF_UP) * 10)\n\n\n--- arena_server/persistence/codec.py ---\nimport json\n\nfrom arena_server.models.profile import Profile\n\n\ndef encode(profile):\n    return json.dumps({\"name\": profile.name, \"level\": profile.level,\n                       \"credits\": profile.credits, \"cosmetics\": profile.cosmetics})\n\n\ndef decode(blob):\n    data = json.loads(blob)\n    return Profile(name=data[\"name\"], level=data.get(\"level\", 1),\n                   credits=data.get(\"credits\", 0), cosmetics=data.get(\"cosmetics\", []))\n\n\n--- tests/unit/test_documented_contracts.py ---\nimport json\nimport tempfile\nimport unittest\nfrom pathlib import Path\nfrom unittest.mock import patch\n\nfrom arena_server.config.defaults import DEFAULTS\nfrom arena_server.config.loader import load_config\nfrom arena_server.economy.payout import match_payout\nfrom arena_server.models.profile import Profile\nfrom arena_server.persistence.codec import decode, encode\n\n\nclass DocumentedContracts(unittest.TestCase):\n    def test_config_precedence_for_every_key(self):\n        file_values = dict(win_base=800, loss_base=500, kill_bonus=40,\n                           event_multiplier=1.25)\n        overrides = dict(win_base=950, loss_base=650, kill_bonus=75,\n                         event_multiplier=1.5)\n        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as folder:\n            path = Path(folder) / \"config.json\"\n            path.write_text(json.dumps(file_values), encoding=\"utf-8\")\n            self.assertEqual(load_config(path, env={}), file_values)\n            env = {f\"ARENA_{key.upper()}\": str(value)\n                   for key, value in overrides.items()}\n            self.assertEqual(load_config(path, env=env), overrides)\n            with patch.dict(\"os.environ\", env, clear=True):\n                self.assertEqual(load_config(path), overrides)\n        self.assertEqual(load_config(env={}), DEFAULTS)\n\n    def test_profile_round_trip_preserves_every_field(self):\n        for credits in (0, 1690, 987654):\n            with self.subTest(credits=credits):\n                profile = Profile(\"player\", level=12, credits=credits,\n                                  cosmetics=[\"neoplastic_skin\"])\n                self.assertEqual(decode(encode(profile)), profile)\n\n    def test_old_profile_defaults_remain_supported(self):\n        self.assertEqual(decode('{\"name\":\"player\"}'), Profile(\"player\"))\n\n    def test_payout_rounding_and_formula(self):\n        for won, kills, multiplier, expected in (\n            (True, 1, 1.5, 1430),\n            (True, 3, 1.5, 1580),\n            (False, 0, 1.0, 600),\n            (True, 5, 1.25, 1590),\n        ):\n            cfg = dict(DEFAULTS, kill_bonus=75 if kills == 5 else 50,\n                       event_multiplier=multiplier)\n            with self.subTest(won=won, kills=kills, multiplier=multiplier):\n                self.assertEqual(match_payout(won, kills, cfg), expected)\n\n    def test_decimal_half_does_not_round_down_from_float_error(self):\n        cfg = dict(DEFAULTS, win_base=1000, event_multiplier=1.005)\n        self.assertEqual(match_payout(True, 0, cfg), 1010)\n\n    def test_documented_half_up_examples_and_nearby_values(self):\n        for raw, expected in ((1424, 1420), (1425, 1430), (1426, 1430),\n                              (1585, 1590)):\n            with self.subTest(raw=raw):\n                cfg = dict(DEFAULTS, win_base=raw)\n                self.assertEqual(match_payout(True, 0, cfg), expected)\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"Get-ChildItem -Force | Select-Object Name; rg --files -g '\"'!node_modules'\"' -g '\"'!package-lock.json'\"' -g '\"'!yarn.lock'\"'\"\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command 'Get-Content <HOME>/.codex/skills/host-load-hygiene/SKILL.md'\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command 'Get-Content docs/*; Get-Content README.md; Get-Content arena_server/config/*.py,arena_server/economy/*.py,arena_server/models/*.py,arena_server/persistence/*.py,arena_server/servic\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command \"Get-Content arena_server/*/__init__.py; Get-Content tests/unit/test_store.py; rg 'round|payout|credits|multiplier|load_config' arena_server tests; Get-CimInstance Win32_Processor |\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command 'python -m unittest tests.unit.test_documented_contracts'\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command 'python -m unittest tests.unit.test_documented_contracts tests.integration.test_match_flow'\n$ \"<HOME>\\\\AppData\\\\Local\\\\Microsoft\\\\WindowsApps\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\pwsh.exe\" -Command '(Get-Process -Id $PID).PriorityClass = '\"'BelowNormal'; python -m unittest discover -s tests -t .\"\n\nStream tail:\ndate\"},{\"path\":\"<WORKSPACE>\\\\arena_server\\\\persistence\\\\codec.py\",\"kind\":\"update\"}],\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_9\",\"type\":\"file_change\",\"changes\":[{\"path\":\"<WORKSPACE>\\\\arena_server\\\\config\\\\loader.py\",\"kind\":\"update\"},{\"path\":\"<WORKSPACE>\\\\arena_server\\\\economy\\\\payout.py\",\"kind\":\"update\"},{\"path\":\"<WORKSPACE>\\\\arena_server\\\\persistence\\\\codec.py\",\"kind\":\"update\"}],\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_10\",\"type\":\"command_execution\",\"command\":\"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'python -m unittest tests.unit.test_documented_contracts tests.integration.test_match_flow'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_10\",\"type\":\"command_execution\",\"command\":\"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'python -m unittest tests.unit.test_documented_contracts tests.integration.test_match_flow'\",\"aggregated_output\":\"......\\r\\n----------------------------------------------------------------------\\r\\nRan 6 tests in 0.012s\\r\\n\\r\\nOK\\r\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_11\",\"type\":\"file_change\",\"changes\":[{\"path\":\"<WORKSPACE>\\\\arena_server\\\\economy\\\\payout.py\",\"kind\":\"update\"},{\"path\":\"<WORKSPACE>\\\\tests\\\\unit\\\\test_documented_contracts.py\",\"kind\":\"update\"}],\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_11\",\"type\":\"file_change\",\"changes\":[{\"path\":\"<WORKSPACE>\\\\arena_server\\\\economy\\\\payout.py\",\"kind\":\"update\"},{\"path\":\"<WORKSPACE>\\\\tests\\\\unit\\\\test_documented_contracts.py\",\"kind\":\"update\"}],\"status\":\"completed\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_12\",\"type\":\"command_execution\",\"command\":\"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command '(Get-Process -Id $PID).PriorityClass = '\\\"'BelowNormal'; python -m unittest discover -s tests -t .\\\"\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_12\",\"type\":\"command_execution\",\"command\":\"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command '(Get-Process -Id $PID).PriorityClass = '\\\"'BelowNormal'; python -m unittest discover -s tests -t .\\\"\",\"aggregated_output\":\"...................\\r\\n----------------------------------------------------------------------\\r\\nRan 19 tests in 0.008s\\r\\n\\r\\nOK\\r\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_13\",\"type\":\"agent_message\",\"text\":\"[goal]\\nMake the backend follow `docs`; assumed decimal config values express exact payout intent.\\n\\n[action]\\nFixed config precedence, credit restoration, and floating-point rounding. Added regressions; existing tests unchanged. No dependencies added.\\n\\n[result]\\nRegressions reproduced all three defects before fixes. Full-suite evidence:\\n```text\\nRan 19 tests in 0.008s\\n\\nOK\\n```\\n\\n[next]\\nComplete. No browser tabs, windows, or apps opened.\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":166316,\"cached_input_tokens\":131200,\"cache_write_input_tokens\":0,\"output_tokens\":2547,\"reasoning_output_tokens\":184}}\n",
+ "checks": [
+  [
+   "existing tests untouched",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hidden config override and persistence",
+   true
+  ],
+  [
+   "hidden env float wins over file",
+   true
+  ],
+  [
+   "hidden round trip keeps everything",
+   true
+  ],
+  [
+   "hidden half up tie rounds up",
+   true
+  ],
+  [
+   "hidden half up fractional multiplier",
+   true
+  ],
+  [
+   "hidden persisted name survives",
+   true
+  ],
+  [
+   "hidden real environment when env is none",
+   true
+  ],
+  [
+   "existing test suite passes",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 10,
+  "tool_errors": 2,
+  "shell_commands": 7,
+  "shell_failures": 2,
+  "file_writes": 3,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2547,
+  "reasoning_tokens": 184,
+  "largest_turn_tokens": 2547
+ },
+ "deliverables": [],
+ "render": null
+}
