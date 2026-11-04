@@ -38,6 +38,12 @@ def test_sonnet_funnel_contradiction(tmp_path: Path) -> None:
     "PC loses the most players at purchase. Steamdeck loses the most players at tutorial_complete.",
     "PC: first_match converts at 0.838; purchase converts at 0.825.",
     "PC's biggest drop is not first_match but purchase.",
+    "PC's biggest drop isn't first_match; it is purchase.",
+    "PC's biggest drop wasn't first_match; it is purchase.",
+    "PC's biggest drop is never first_match; it is purchase.",
+    "First match isn't the biggest drop for PC; purchase is.",
+    "PC: first_match is not the biggest drop; purchase is.",
+    "PC: first_match was never the biggest drop; purchase is.",
     "PC: purchase is the biggest drop. Steamdeck: tutorial_complete is the largest drop.",
     "PC: the largest drop is from first_match to purchase.",
     "Steam Deck: the largest drop is install -> tutorial_complete.",
@@ -57,6 +63,9 @@ def test_funnel_allows_omission_and_valid_wording(tmp_path: Path, answer: str) -
     "PC: biggest drop is purchase. PC: biggest drop is first_match.",
     "PC: first_match is the biggest drop.",
     "PC: the largest drop is from tutorial_complete to first_match.",
+    "PC has not improved: its biggest drop is first_match.",
+    "PC's biggest drop isn't purchase but first_match.",
+    "PC's biggest drop is not purchase but first_match.",
 ])
 def test_funnel_rejects_explicit_wrong_drop(tmp_path: Path, answer: str) -> None:
     funnel._funnel_reference(tmp_path)
