@@ -26,7 +26,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mengine_bench.core import answer_json
+from mengine_bench.core import JudgeState, answer_json
 from mengine_bench.runner import process
 from mengine_bench.runner.agents import Agent, AgentError
 
@@ -103,9 +103,10 @@ class JudgeContext:
     checks: tuple[tuple[str, bool], ...]
     status: str = "ok"
     stats: Mapping[str, object] = field(default_factory=dict)
-    # Built from the bundle when judging; never stored in the packet.
+    # Built from the bundle and the catalog when judging; never stored in the packet.
     tool_log: str = ""
     deliverables: tuple[tuple[str, str], ...] = ()
+    states: tuple[JudgeState, ...] = ()
 
     def record(self) -> dict[str, object]:
         """JSON form, stored in a bundle as judge/<task>.json for `mengine-bench judge`."""
@@ -194,7 +195,7 @@ def build_judge_prompt(context: JudgeContext, screenshot: bool, note: str = "",
     log = context.tool_log or context.transcript_tail or "(empty)"
     files = "\n\n".join(f"--- {rel} --- ({len(text)} chars)\n{_clip(text, DELIVERABLE_CHARS)}" for rel, text in context.deliverables)
     # Claude's inline image blocks carry no file name (#93): the order here is the only label.
-    closing = [f"Attached images, in this order: {', '.join(images)}."] if screenshot else []
+    closing = [f"Attached images, in this order: {', '.join(images)}.", *_state_lines(context, images)] if screenshot else []
     if deliverable_images and not screenshot:
         # #153: an image the agent made is part of the deliverable, so it is graded there, not as a rendered page.
         closing = [f"Attached images, in this order: {', '.join(deliverable_images)}. They are deliverables the agent "
@@ -213,6 +214,12 @@ def build_judge_prompt(context: JudgeContext, screenshot: bool, note: str = "",
         *([note] if note else []),
         "Reply now with the JSON object described in your instructions.",
     ])
+
+
+def _state_lines(context: JudgeContext, images: Sequence[str]) -> list[str]:
+    """#184: what each attached state frame shows; a frame that failed to render is not named."""
+    shown = [state for state in context.states if f"state-{state.name}.png" in images]
+    return [f"state-{state.name}.png is the page opened with {state.query}" for state in shown]
 
 
 def workspace_diff(before: dict[str, bytes], after: dict[str, bytes]) -> str:

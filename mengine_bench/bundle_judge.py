@@ -5,10 +5,13 @@ judge/<task>.json (prompts, answers, workspace diff, transcript tail, checks,
 all redacted) and each declared deliverable verbatim (redacted) under
 judge/<task>/<file>. The maintainer runs this while reviewing the result pull
 request, so contributors need no judge and every ranked run is judged the
-same way: one rubric 2.5 vote per task. For a task whose deliverable is an
+same way: one rubric vote per task. For a task whose deliverable is an
 HTML page, the stored page is rendered headless in a temp dir at three moments
 and the judge sees the frames, kept for audit as judge/<task>-1s.png,
-judge/<task>-4s.png and judge/<task>.png (the last). A frame that keeps failing
+judge/<task>-4s.png and judge/<task>.png (the last), plus one frame per state the
+task declares (#184: the stored page opened with its query, such as ?word=saudade),
+kept as judge/<task>-state-<name>.png. The page always comes from the bundle, never
+from a workspace, so `--again` sees what the first vote saw. A frame that keeps failing
 is noted and the judge votes on the others, or without an image when none
 rendered: a flaky browser is no grade. Nothing is written unless every task ends with a vote, and with no browser
 at all nothing is judged. `--again` replaces the votes of a judged bundle, which is
@@ -22,13 +25,14 @@ import json
 import re
 import shutil
 import tempfile
-from collections.abc import Callable, MutableMapping
+from collections.abc import MutableMapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Protocol
 
 from mengine_bench import __version__, catalog
 from mengine_bench.bundle import JUDGE_DIR, RESULT_NAME, SUMMARY_NAME, is_image_deliverable, public_json, public_text
-from mengine_bench.core import EvalTask
+from mengine_bench.core import EvalTask, JudgeState
 from mengine_bench.judge import JUDGE_SYSTEM_PROMPT, RUBRIC_VERSION, SCREENSHOT_NAME, JudgeContext, RubricJudge, TaskVerdict
 from mengine_bench.judge_view import NO_CALLS, tool_log, transcript_streams
 from mengine_bench.redact import PathScope, local_names
@@ -38,11 +42,20 @@ from mengine_bench.scoring import combined_score, judge_mean, speed_points
 from mengine_bench.visual import NO_BROWSER, RENDERED, is_render_failure, render_headless
 
 TaskEntry = MutableMapping[str, object]
-Renderer = Callable[[Path, Path, int], str]
+
+
+class Renderer(Protocol):
+    """render_headless's shape: (html, png, budget_ms, query) -> RENDERED, NO_BROWSER or a failure reason."""
+
+    def __call__(self, html: Path, png: Path, budget_ms: int, *, query: str = "") -> str: ...
+
+
 RENDER_ATTEMPTS = 3
 # (virtual time, suffix of the file kept in the bundle, name attached to the vote). Each frame is its own page load:
 # the Chromium command line cannot capture a running page twice, and a new dependency is out (#93).
 JUDGE_FRAMES = ((1000, "-1s", "frame-1s.png"), (4000, "-4s", "frame-4s.png"), (8000, "", SCREENSHOT_NAME))
+# #184: a state frame waits like the middle landing frame; long enough for a page that reads its query on load.
+STATE_FRAME_MS = 4000
 # One fixed page per task, made by Opus 5.5 xhigh to set the bar (#93), so a grade does not move when a new run comes out.
 REFERENCES_DIR = Path(__file__).resolve().parent / "assets" / "references"
 
@@ -54,6 +67,23 @@ class JudgePacket:
     render: str | None
     # #153: image deliverables the vote sees as attachments, name -> stored file.
     images: dict[str, Path] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class JudgeFrame:
+    budget_ms: int
+    # The frame is kept in the bundle as judge/<task><suffix>.png.
+    suffix: str
+    # The name attached to the vote, in order.
+    name: str
+    query: str = ""
+
+
+def judge_frames(states: tuple[JudgeState, ...]) -> tuple[JudgeFrame, ...]:
+    """The landing frames, then one frame per declared state of the page (#184)."""
+    landing = tuple(JudgeFrame(budget_ms, suffix, name) for budget_ms, suffix, name in JUDGE_FRAMES)
+    return (*landing, *(JudgeFrame(STATE_FRAME_MS, f"-state-{state.name}", f"state-{state.name}.png", state.query)
+                        for state in states))
 
 
 def read_packet(bundle: Path, task_id: str) -> JudgePacket:
@@ -72,8 +102,10 @@ def read_packet(bundle: Path, task_id: str) -> JudgePacket:
     if log == NO_CALLS and context.stats.get("tool_calls"):
         raise ValueError(f"received {context.stats['tool_calls']} tool_calls in {task_id} and none in its log; "
                          f"expected the judge's tool log to show them")
+    # #184: the page states come from the catalog too, so a packet cannot pick its own.
     context = replace(context, task_id=task.id, prompts=tuple(step.prompt for step in task.steps),
-                      diff=_agent_diff(context.diff, task), tool_log=log, deliverables=_stored_deliverables(bundle, task))
+                      diff=_agent_diff(context.diff, task), tool_log=log, deliverables=_stored_deliverables(bundle, task),
+                      states=task.judge_states)
     return JudgePacket(context=context, render=task.render_target, images=_stored_images(bundle, task))
 
 
@@ -114,15 +146,15 @@ def _render_verdict(bundle: Path, task_id: str, packet: JudgePacket, judge: Rubr
         shutil.copytree(stored, site)
     images: dict[str, Path] = {}
     failures: list[str] = []
-    for budget_ms, suffix, name in JUDGE_FRAMES:
-        png = _frame_path(workdir, suffix)
-        status = _render_frame(site / page, png, budget_ms, render)
+    for frame in judge_frames(packet.context.states):
+        png = _frame_path(workdir, frame.suffix)
+        status = _render_frame(site / page, png, frame, render)
         if status == NO_BROWSER:
             raise ValueError(f"received {status!r} rendering {page}; expected a browser: nothing was judged")
         if status == RENDERED:
-            images[name] = png
+            images[frame.name] = png
         else:
-            failures.append(f"{name}: {status}")
+            failures.append(f"{frame.name}: {status}")
     # #70: the same page rendered in 4 of 5 more tries after a timeout that had scored it 0.
     note = f"Not attached, the render failed, no defect of the page: {'; '.join(failures)}." if failures else ""
     attached = {**images, **_reference_images(task_id)} if images else {}
@@ -138,10 +170,10 @@ def _frame_path(workdir: Path, suffix: str) -> Path:
     return workdir / "render" / f"shot{suffix}.png"
 
 
-def _render_frame(html: Path, png: Path, budget_ms: int, render: Renderer) -> str:
+def _render_frame(html: Path, png: Path, frame: JudgeFrame, render: Renderer) -> str:
     """#68: a browser timeout is not the page's fault until it repeats."""
     for _ in range(RENDER_ATTEMPTS):
-        status = render(html, png, budget_ms)
+        status = render(html, png, frame.budget_ms, query=frame.query)
         if not is_render_failure(status):
             return status
     # The bundle keeps what the vote saw, not an image left by a browser that then failed.
@@ -176,9 +208,9 @@ def judge_bundle(bundle: Path, judge_agent: Agent, render: Renderer | None = Non
             verdicts[task_id] = vote_packet(bundle, task_id, packet, judge, workdir, render)
             if packet.render is None:
                 continue
-            for _, suffix, _ in JUDGE_FRAMES:
-                shot = _frame_path(workdir, suffix)
-                frames[f"{task_id}{suffix}.png"] = shot.read_bytes() if shot.is_file() else None
+            for frame in judge_frames(packet.context.states):
+                shot = _frame_path(workdir, frame.suffix)
+                frames[f"{task_id}{frame.suffix}.png"] = shot.read_bytes() if shot.is_file() else None
     missing = {task_id: verdict.errors[-1:] for task_id, verdict in verdicts.items() if verdict.score is None}
     if missing:
         raise ValueError(f"received no judge vote for {sorted(missing)} ({missing}); expected one vote per task, "

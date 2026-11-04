@@ -131,12 +131,13 @@ def is_render_failure(status: str) -> bool:
 
 
 def render_headless(html: Path, png: Path, budget_ms: int = DEFAULT_BUDGET_MS,
-                    browser_argv: Sequence[str] | None = None, console: list[str] | None = None) -> str:
+                    browser_argv: Sequence[str] | None = None, console: list[str] | None = None, query: str = "") -> str:
     """Screenshot `html` at 1440x900 after `budget_ms` of page time; returns RENDERED, NO_BROWSER or a RENDER_FAILED reason.
 
     A failure reads "render failed: <cause>" so the run log explains itself.
     `browser_argv` replaces the discovered browser executable (tests use a fake).
     `console`, when given, receives the browser's log lines.
+    `query` ("?word=saudade") opens the page in a state its brief asks for (#184).
     """
     if not html.is_file():
         return f"{RENDER_FAILED}: no html file {html.name}"
@@ -150,18 +151,18 @@ def render_headless(html: Path, png: Path, budget_ms: int = DEFAULT_BUDGET_MS,
     # helper still holding its cache made archiving the workspace fail.
     profile = Path(tempfile.mkdtemp(prefix="mengine-bench-browser-"))
     try:
-        return _screenshot(list(browser_argv), profile, html, png, budget_ms, console)
+        return _screenshot(list(browser_argv), profile, html, png, budget_ms, console, query)
     finally:
         _stop_profile_processes(profile)
         _remove_profile(profile)
 
 
 def _screenshot(browser_argv: list[str], profile: Path, html: Path, png: Path, budget_ms: int,
-                console: list[str] | None) -> str:
+                console: list[str] | None, query: str = "") -> str:
     flags = headless_browser_flags(platform.system(), _running_as_root(), budget_ms)
     logging = [CONSOLE_LOG_FLAG] if console is not None else []
     argv = [*browser_argv, *flags, *logging, f"--user-data-dir={profile}", f"--screenshot={png.resolve()}",
-            html.resolve().as_uri()]
+            html.resolve().as_uri() + query]
     # stderr goes to a file, not a pipe: orphaned helpers inherit the handle
     # and a pipe would never reach EOF while they live.
     with tempfile.TemporaryFile() as stderr_log:
