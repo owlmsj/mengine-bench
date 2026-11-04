@@ -54,7 +54,10 @@ was fetched: a fetch counts from a fetch or browser tool's input or a URL writte
 (curl, wget, Invoke-WebRequest, `python -c`, `node -e`), matched by host; a script file the agent writes and runs is
 not evidence, since the trace cannot show what it fetched.
 Codex opened-page results with `turn<N>view<M>` references also count as fetched URLs; search snippets do not (#171).
-Every task gains the gate "nothing written outside the workspace". 3d-print-homage scores its
+Every task gains the gate "nothing written outside the workspace". The gate compares snapshots of the task's
+parent and run directories before and after each step, so only changes left in the final state fail it (#185, #183).
+Transient use of `../` appears in `outside_path_uses`, a statistic the judge sees, and does not fail the gate.
+3d-print-homage scores its
 render's composition against the print. Leniencies the audit and a review of every grader found are fixed, each
 with the wrong answer that used to pass as a test. The 2.0 to 2.4 runs stay ranked, each row marked with its
 version, graded without these checks; the leaderboard recomputes every ranked Score with the 2.5 weights from the
