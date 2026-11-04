@@ -215,7 +215,7 @@ def _run_date(run: Run) -> str:
     return str(run.get("started_at") or run.get("date") or "")
 
 
-def _changes_section(runs: Sequence[Run], noise_floor: float | None = None) -> list[str]:
+def _changes_section(runs: Sequence[Run]) -> list[str]:
     groups: dict[str, list[Run]] = {}
     for run in runs:
         if not _run_date(run):
@@ -223,10 +223,14 @@ def _changes_section(runs: Sequence[Run], noise_floor: float | None = None) -> l
         groups.setdefault(setup_key(run), []).append(run)
     lines = ["## Changes since the last run", ""]
     repeated = [key for key, group in groups.items() if len(group) > 1]
+    measured = False
     for key in repeated:
         previous, latest = sorted(groups[key], key=_run_date)[-2:]
         if len(_metric_values([previous, latest], "score")) < 2:
             continue
+        # The run being tested cannot supply evidence for its own noise floor (#185, #94).
+        noise_floor = score_noise_floor([run for run in runs if run is not latest])
+        measured |= noise_floor is not None
         warnings = _regression_warnings(previous["totals"], latest["totals"], "time_s", noise_floor)
         if not warnings:
             continue
@@ -238,11 +242,11 @@ def _changes_section(runs: Sequence[Run], noise_floor: float | None = None) -> l
         lines.extend(_changed_tasks(previous, latest, noise_floor))
     if len(lines) == 2:
         lines.append("No repeated combinations to compare." if not repeated else
-                     "noise floor: not measured" if noise_floor is None else "No warnings.")
+                     "No warnings." if measured else "noise floor: not measured")
     return lines
 
 
 def render_analysis(runs: Sequence[Run], version: str) -> str:
     sections = [[f"# Bench {version}: {len(runs)} judged runs"], _parts_table(runs), _tasks_table(runs), _pairs_table(runs),
-                _noise_section(runs), _changes_section(runs, score_noise_floor(runs))]
+                _noise_section(runs), _changes_section(runs)]
     return "\n\n".join("\n".join(section) for section in sections) + "\n"

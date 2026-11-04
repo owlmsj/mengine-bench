@@ -95,8 +95,9 @@ Bench 2.6 (#185) stabilizes the process without touching a task, prompt or limit
 - Noise and calibration: `analyze` groups ranked and observed reruns by agent, model, effort, a hash of the published
   config and bench major.minor, computed on read without changing `result.json`.
   For each setup with two or more runs it reports max-min and sample standard deviation of Score, Correct %, Judge
-  and Time; the largest observed Score spread gates regression warnings, with no warning inside that floor and
-  `not measured` before a pair exists.
+  and Time. For each comparison with the previous run, the largest observed Score spread excluding the run being
+  evaluated gates regression warnings. Other setups and earlier runs of the same setup supply that floor;
+  there is no warning inside it, or before an independent pair exists (`not measured`).
   `mengine-bench judge-calibrate --votes <file> <bundleA> <bundleB>` reads the bench-audit owner's exported scores,
   re-votes those packets with the official judge and reports mean absolute difference, the count beyond 8 and the rubric.
   It never modifies the bundles, saves `docs/judge-calibration/<date>-<rubric>.md` only with `--write`, and exits 1

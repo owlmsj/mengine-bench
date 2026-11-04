@@ -118,8 +118,9 @@ def test_changes_warn_about_regressions_and_name_only_affected_tasks() -> None:
     task.update(agent_s=40.0, judge=73, tokens={"input": 126})
     task["checks"][0]["ok"] = False
     latest["totals"].update(score=90, time_s=45.0 * len(IDS), judge=73, tokens={"input": 1260})
-    # An independently supplied floor keeps the existing diagnostic thresholds covered (#185).
-    changes = "\n".join(analyze._changes_section([latest, previous], noise_floor=4))
+    baseline = _dated_run("2026-10-29")
+    baseline["totals"]["score"] = 96
+    changes = _changes([latest, previous, baseline])
     assert changes.count("codex repeat/low") == 1
     assert "2026-10-30 -> 2026-10-31" in changes
     assert f"Time: {30 * len(IDS)} -> {45 * len(IDS)}" in changes
@@ -135,7 +136,8 @@ def test_changes_do_not_warn_at_thresholds_or_for_improvements() -> None:
     latest["totals"].update(time_s=30.0 * len(IDS) * 1.25, judge=74, tokens={"input": 1250})
     latest["tasks"][0].update(agent_s=37.5, judge=74, tokens={"input": 125})
     latest["tasks"][1].update(agent_s=1.0, judge=100, tokens={"input": 1})
-    assert _changes([previous, latest]).strip() == "No warnings."
+    baseline = _dated_run("2026-10-29")
+    assert _changes([baseline, previous, latest]).strip() == "No warnings."
     for before, after in zip(previous["tasks"][:2], latest["tasks"][:2], strict=True):
         assert analyze._regression_warnings(before, after, "agent_s", noise_floor=0) == []
     before = {key: value for key, value in previous["totals"].items() if key != "score"}
@@ -168,8 +170,8 @@ def test_changes_compare_only_the_latest_pair_by_started_at() -> None:
     latest["started_at"] = "2026-10-30T10:00:00Z"
     latest["agent"]["version"] = "new CLI version"
     assert _changes([latest, oldest, previous]).strip() == "No warnings."
-    oldest["totals"]["score"], previous["totals"]["score"], latest["totals"]["score"] = 100, 90, 80
-    changes = "\n".join(analyze._changes_section([latest, oldest, previous], noise_floor=4))
+    oldest["totals"]["score"], previous["totals"]["score"], latest["totals"]["score"] = 100, 90, 70
+    changes = _changes([latest, oldest, previous])
     assert "2026-10-30T09:00:00Z -> 2026-10-30T10:00:00Z" in changes
     assert "check failed" not in changes
 
@@ -241,7 +243,29 @@ def test_pair_inside_global_score_noise_floor_generates_no_warning() -> None:
     noisier_first, noisier_second = deepcopy(previous), deepcopy(previous)
     noisier_first["agent"]["model"] = noisier_second["agent"]["model"] = "noisier"
     noisier_second["totals"]["score"] = 90
-    assert _changes([previous, latest, noisier_first, noisier_second]).strip() == "No warnings."
+    noisier_baseline = deepcopy(noisier_second)
+    noisier_baseline["date"] = "2026-10-29"
+    noisier_second["date"] = "2026-10-31"
+    assert _changes([previous, latest, noisier_baseline, noisier_first, noisier_second]).strip() == "No warnings."
+
+
+@pytest.mark.parametrize("latest_score, warns", [(20, True), (98, False)])
+def test_latest_run_does_not_set_its_own_noise_floor(latest_score: float, warns: bool) -> None:
+    runs = [_dated_run(f"2026-10-{day}") for day in (29, 30, 31)]
+    for run, score in zip(runs, (100, 99, latest_score), strict=True):
+        run["totals"]["score"] = score
+    changes = _changes(runs)
+    if warns:
+        assert "Score: 99 -> 20" in changes
+        assert "2026-10-30 -> 2026-10-31" in changes
+    else:
+        assert changes.strip() == "No warnings."
+
+
+def test_first_pair_cannot_measure_its_own_noise_floor() -> None:
+    previous, latest = _dated_run("2026-10-30"), _dated_run("2026-10-31")
+    latest["totals"]["score"] = 20
+    assert _changes([previous, latest]).strip() == "noise floor: not measured"
 
 
 def test_regression_warning_requires_a_measured_floor_and_a_drop_strictly_beyond_it() -> None:
