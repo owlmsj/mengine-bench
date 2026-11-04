@@ -60,6 +60,11 @@ RANKED_WITH_NOTE = ("Bench 2.0 to 2.4 runs stay in this ranking (#139, #151, #15
                     "docs/SCORING.md).\n")
 # #146: runs the owner keeps on the board without ranking them, by bundle name, with why.
 OBSERVED_RUNS: dict[str, str] = {
+    # #164: the validation run of the 2.5 checks, kept on the board with its reason.
+    "2026-11-03_claude_claude-opus-5-5_low_01327b0c": (
+        "Opus 5.5 low on a 2.5.0 pre-release commit (529a84d), before the final fetch-evidence rules and four "
+        "parser fixes of #164; it validated the new checks (every failure checked by hand was real), so it is "
+        "shown, not ranked."),
     "2026-11-02_codex_gpt-6-astra_low_43e898d9": (
         "clean Codex, Astra low, Fast. The model never replied on ds-sql-funnel, hw-stutter-tuning and ts-plugin-bug "
         "(the stream ends at turn.started); two reruns stalled the same way, the #144 retry too, while a short prompt "

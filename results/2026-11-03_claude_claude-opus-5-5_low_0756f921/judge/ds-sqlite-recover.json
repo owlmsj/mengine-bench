@@ -1,0 +1,48 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [
+  "**[goal]** Get the price rows out of the truncated `prices.db` and save them to `./recovered.json`.\n\n**[action]** The file is 4096 bytes and it is not a complete SQLite file. Its first 100 bytes, where the file header normally sits, are gone. What is left starts with byte `0x0D`, which marks a page that holds table rows. That page header says it has 10 cells (`\\r\\x00\\x00\\x00\\n`). The page-size value I first read is really leftover page bytes, not a real page size. So I treated the whole file as one row page and decoded each row myself with a small script (`../scr/r.py`), byte by byte, following the SQLite record format.\n\n**[result]** All 10 cells decoded cleanly. `recovered.json` holds 10 rows, in the order they sit on the page:\ntrail map 0, matchbox 1, tent stake 2.75, lantern 24, rope coil 18, water filter 39.9, sleeping bag 129, camp stove 310, compass 15.5, first aid kit 0.99.\n\nHow I know it is right:\n- The page header says 10 rows and the script found exactly 10.\n- Each row ID matches its cell's position on the page: 1 to 10.\n- Every row read to its end without running past the end of the file.\n- The names and numbers can be seen directly in the raw bytes. For example, `compass@/\\x00...` is the 8-byte number 15.5, and `first aid kit?\\xef\\xae\\x14z\\xe1G\\xae` is 0.99.\n\nAssumptions:\n- Each row has its text column as the item name and its number column as the price.\n- Prices are kept exactly as stored. Some were saved as whole numbers and some as decimals.\n- \"trail map\" really is 0 in the file: SQLite stores it with a special code that means the number zero, so I kept it rather than drop it.\n- No other rows survived. Everything else in the file is zero bytes, so nothing was guessed or made up.\n\n**[next]** Nothing left to do. I opened no browser tabs or apps."
+ ],
+ "diff": "A recovered.json\n\n--- recovered.json ---\n[\r\n {\r\n  \"item\": \"trail map\",\r\n  \"price\": 0\r\n },\r\n {\r\n  \"item\": \"matchbox\",\r\n  \"price\": 1\r\n },\r\n {\r\n  \"item\": \"tent stake\",\r\n  \"price\": 2.75\r\n },\r\n {\r\n  \"item\": \"lantern\",\r\n  \"price\": 24\r\n },\r\n {\r\n  \"item\": \"rope coil\",\r\n  \"price\": 18\r\n },\r\n {\r\n  \"item\": \"water filter\",\r\n  \"price\": 39.9\r\n },\r\n {\r\n  \"item\": \"sleeping bag\",\r\n  \"price\": 129\r\n },\r\n {\r\n  \"item\": \"camp stove\",\r\n  \"price\": 310\r\n },\r\n {\r\n  \"item\": \"compass\",\r\n  \"price\": 15.5\r\n },\r\n {\r\n  \"item\": \"first aid kit\",\r\n  \"price\": 0.99\r\n }\r\n]",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ cd \"$PWD\"; mkdir -p ../scr; cat > ../scr/r.py <<'E'\nimport sys,json,struct\nd=open(sys.argv[1],'rb').read()\ndef varint(b,i):\n    v=0\n    for k in range(9):\n        c=b[i+k]\n        if k==8: return (v<<8)|c,i+9\n        v=(v<<7)|(c&0x7f)\n        if c<0x80: return v,i+k+1\nps=struct.unpack('>H',d[16:18])\n$ python -I -c \"\nd=open('prices.db','rb').read();print(d[:120]);print(d[-600:])\"\n$ cd ../scr && sed -i 's/^ps=struct.*/ps=len(d)/; s/h=100 if p==0 else 0/h=0/; s/if p==0 or not s/if not s/; s/nm=\\[v for v in vals if isinstance(v,(int,float)) and not isinstance(v,bool)\\]/nm=[v for v in vals[1:] if isinstance(v,(int,float))]/' r.py && cd - >/dev/null && python -I ../scr/r.py prices.\n\nStream tail:\nion_input_tokens\":18514,\"cache_read_input_tokens\":121208,\"output_tokens\":2221,\"output_tokens_details\":{\"thinking_tokens\":236},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":18514,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":706,\"cache_read_input_tokens\":36781,\"cache_creation_input_tokens\":722,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":722},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":8,\"outputTokens\":2221,\"cacheReadInputTokens\":121208,\"cacheCreationInputTokens\":18514,\"webSearchRequests\":0,\"costUSD\":0.21680560000000001,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":236,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":18514,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":4,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"**[goal]** Get the price rows out of the truncated `prices.db` and save them to `./recovered.json`.\\n\\n**[action]** The file is 4096 bytes and it is not a complete SQLite file. Its first 100 bytes, where the file header normally sits, are gone. What is left starts with byte `0x0D`, which marks a page that holds table rows. That page header says it has 10 cells (`\\\\r\\\\x00\\\\x00\\\\x00\\\\n`). The page-size value I first read is really leftover page bytes, not a real page size. So I treated the whole file as one row page and decoded each row myself with a small script (`../scr/r.py`), byte by byte, following the SQLite record format.\\n\\n**[result]** All 10 cells decoded cleanly. `recovered.json` holds 10 rows, in the order they sit on the page:\\ntrail map 0, matchbox 1, tent stake 2.75, lantern 24, rope coil 18, water filter 39.9, sleeping bag 129, camp stove 310, compass 15.5, first aid kit 0.99.\\n\\nHow I know it is right:\\n- The page header says 10 rows and the script found exactly 10.\\n- Each row ID matches its cell's position on the page: 1 to 10.\\n- Every row read to its end without running past the end of the file.\\n- The names and numbers can be seen directly in the raw bytes. For example, `compass@/\\\\x00...` is the 8-byte number 15.5, and `first aid kit?\\\\xef\\\\xae\\\\x14z\\\\xe1G\\\\xae` is 0.99.\\n\\nAssumptions:\\n- Each row has its text column as the item name and its number column as the price.\\n- Prices are kept exactly as stored. Some were saved as whole numbers and some as decimals.\\n- \\\"trail map\\\" really is 0 in the file: SQLite stores it with a special code that means the number zero, so I kept it rather than drop it.\\n- No other rows survived. Everything else in the file is zero bytes, so nothing was guessed or made up.\\n\\n**[next]** Nothing left to do. I opened no browser tabs or apps.\",\"ttft_ms\":2336,\"type\":\"result\",\"duration_ms\":27861,\"uuid\":\"bdcf7227-f055-435e-98d7-8be2b4fb91b4\",\"ttft_stream_ms\":2013,\"time_to_request_ms\":101,\"first_content_frame_ms\":2013,\"queued_turn_count\":0,\"result_index\":0,\"model_usage_since_last_result\":{\"claude-opus-5-5\":{\"inputTokens\":8,\"outputTokens\":2221,\"cacheReadInputTokens\":121208,\"cacheCreationInputTokens\":18514,\"webSearchRequests\":0,\"costUSD\":0.21680560000000001,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":236,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":18514,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}}}\n",
+ "checks": [
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   true
+  ],
+  [
+   "rows with fractional prices recovered",
+   true
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   true
+  ],
+  [
+   "no row that is not in the table",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 4,
+  "tool_calls": 3,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 2,
+  "generated_tokens": 2221,
+  "reasoning_tokens": 236
+ },
+ "deliverables": [],
+ "render": null
+}

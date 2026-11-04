@@ -1,0 +1,56 @@
+{
+ "task_id": "ts-plugin-bug",
+ "prompts": [
+  "Users of our harness plugins report that tool.after hooks run out of order, that sometimes a hook never runs, and that a failing hook is silently ignored. The hook bus and the plugin are in {WS}; the README there says how the bus must behave. Fix the bus. Its public API stays as it is, the tests in {WS}/test stay as they are, and package.json takes no dependencies."
+ ],
+ "answers": [
+  "**[goal]** Make the hook bus follow the README: handlers run in order one at a time, `emit` waits for all of them, a handler error rejects `emit`, and unsubscribing during an emit doesn't break that emit.\n\n**[action]**\n- Found the cause in `src/bus.ts`: `emit` used `list.forEach(async ...)`. That starts every handler at once and never waits for them. So async handlers finished in any order, `emit` resolved before they were done, and their rejections were lost.\n- It also looped over the live list. A handler that unsubscribed itself mid-loop shifted the list and the next handler was skipped. That is the \"hook never runs\" report.\n- Fix: `emit` now copies the handler list when it starts, then runs `for (const handler of snapshot) await handler(payload);`. An error stops the loop and rejects `emit` with that same error.\n- No change to the public API, the tests in `./test` or `package.json`. I did not add a regression test because the brief says the tests stay as they are.\n\n**[result]**\n- Scratch check: handler 1 unsubscribes itself, handler 2 is async (20 ms delay), handler 3 throws `\"x\"`, handler 4 records a value. Output: `[1,2,\"x\"]`. So handler 2 still ran after the unsubscribe, it finished before anything later ran, `emit` rejected with the same error, and handler 4 never ran.\n- `npm test`: `ℹ pass 2` / `ℹ fail 0`.\n- I deleted the scratch file. I opened no browser tabs or apps.\n\n**Assumptions:**\n- `src/plugin.ts` needs no change; the order and error bugs came from the bus.\n- If the same handler is subscribed twice, unsubscribing removes only the first copy.\n- Handlers subscribed during an emit only run from the next emit.\n\n**[next]** Add a test for order, error and unsubscribe-during-emit if editing `./test` becomes allowed."
+ ],
+ "diff": "M src/bus.ts\n\n--- src/bus.ts ---\n/**\r\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\r\n * handlers run one after another in subscription order, emit resolves after all of them,\r\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\r\n */\r\n\r\nexport type Handler<T> = (payload: T) => void | Promise<void>;\r\n\r\nexport class HookBus {\r\n  private handlers: Map<string, Handler<unknown>[]> = new Map();\r\n\r\n  /** Subscribes a handler to an event; returns the function that unsubscribes it. */\r\n  on<T>(event: string, handler: Handler<T>): () => void {\r\n    const list = this.handlers.get(event) ?? [];\r\n    list.push(handler as Handler<unknown>);\r\n    this.handlers.set(event, list);\r\n    return () => {\r\n      const index = list.indexOf(handler as Handler<unknown>);\r\n      if (index >= 0) {\r\n        list.splice(index, 1);\r\n      }\r\n    };\r\n  }\r\n\r\n  /** Runs the handlers of an event with the payload. */\r\n  async emit<T>(event: string, payload: T): Promise<void> {\r\n    // Snapshot so unsubscribes during this emit take effect from the next emit (README).\r\n    const snapshot = [...(this.handlers.get(event) ?? [])];\r\n    for (const handler of snapshot) {\r\n      await handler(payload);\r\n    }\r\n  }\r\n\r\n  /** How many handlers an event has. */\r\n  count(event: string): number {\r\n    return (this.handlers.get(event) ?? []).length;\r\n  }\r\n}\r\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ cd \"<WORKSPACE>\"; ls -R | grep -v node_modules | head -30; cat README* package.json; find . -name \"*.js\" -not -path \"*/node_modules/*\" | xargs wc -l\n$ cd \"<WORKSPACE>\"; cat src/bus.ts; head -40 test/bus.test.ts\n$ cd \"<WORKSPACE>\"; python - <<'E'\np='src/bus.ts';s=open(p).read()\ns=s.replace(\"\"\"    const list = this.handlers.get(event) ?? [];\n    list.forEach(async (handler) => {\n      await handler(payload);\n    });\"\"\",\"\"\"    // Snapshot so unsubs\n$ cd \"<WORKSPACE>\"; npm test 2>&1 | tail -8\n$ cd \"<WORKSPACE>\"; rm -rf tmp\n\nStream tail:\n1,\"usage\":{\"input_tokens\":12,\"cache_creation_input_tokens\":17467,\"cache_read_input_tokens\":191565,\"output_tokens\":1828,\"output_tokens_details\":{\"thinking_tokens\":156},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":17467,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":645,\"cache_read_input_tokens\":36215,\"cache_creation_input_tokens\":241,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":241},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":12,\"outputTokens\":1828,\"cacheReadInputTokens\":191565,\"cacheCreationInputTokens\":17467,\"webSearchRequests\":0,\"costUSD\":0.21465700000000001,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":156,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":17467,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":6,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"**[goal]** Make the hook bus follow the README: handlers run in order one at a time, `emit` waits for all of them, a handler error rejects `emit`, and unsubscribing during an emit doesn't break that emit.\\n\\n**[action]**\\n- Found the cause in `src/bus.ts`: `emit` used `list.forEach(async ...)`. That starts every handler at once and never waits for them. So async handlers finished in any order, `emit` resolved before they were done, and their rejections were lost.\\n- It also looped over the live list. A handler that unsubscribed itself mid-loop shifted the list and the next handler was skipped. That is the \\\"hook never runs\\\" report.\\n- Fix: `emit` now copies the handler list when it starts, then runs `for (const handler of snapshot) await handler(payload);`. An error stops the loop and rejects `emit` with that same error.\\n- No change to the public API, the tests in `./test` or `package.json`. I did not add a regression test because the brief says the tests stay as they are.\\n\\n**[result]**\\n- Scratch check: handler 1 unsubscribes itself, handler 2 is async (20 ms delay), handler 3 throws `\\\"x\\\"`, handler 4 records a value. Output: `[1,2,\\\"x\\\"]`. So handler 2 still ran after the unsubscribe, it finished before anything later ran, `emit` rejected with the same error, and handler 4 never ran.\\n- `npm test`: `ℹ pass 2` / `ℹ fail 0`.\\n- I deleted the scratch file. I opened no browser tabs or apps.\\n\\n**Assumptions:**\\n- `src/plugin.ts` needs no change; the order and error bugs came from the bus.\\n- If the same handler is subscribed twice, unsubscribing removes only the first copy.\\n- Handlers subscribed during an emit only run from the next emit.\\n\\n**[next]** Add a test for order, error and unsubscribe-during-emit if editing `./test` becomes allowed.\",\"ttft_ms\":3872,\"type\":\"result\",\"duration_ms\":37368,\"uuid\":\"da3a74da-1326-44d1-a6f1-24d39e2f1514\",\"ttft_stream_ms\":2811,\"time_to_request_ms\":101,\"first_content_frame_ms\":2811,\"queued_turn_count\":0,\"result_index\":0,\"model_usage_since_last_result\":{\"claude-opus-5-5\":{\"inputTokens\":12,\"outputTokens\":1828,\"cacheReadInputTokens\":191565,\"cacheCreationInputTokens\":17467,\"webSearchRequests\":0,\"costUSD\":0.21465700000000001,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":156,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":17467,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}}}\n",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "package.json takes no dependencies",
+   true
+  ],
+  [
+   "hidden handlers run in subscription order",
+   true
+  ],
+  [
+   "hidden emit resolves after every handler",
+   true
+  ],
+  [
+   "hidden a failing handler rejects emit",
+   true
+  ],
+  [
+   "hidden a handler that unsubscribes itself does not stop the others",
+   true
+  ],
+  [
+   "hidden the audit plugin redacts before it logs",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 5,
+  "tool_errors": 0,
+  "shell_commands": 5,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 1,
+  "generated_tokens": 1828,
+  "reasoning_tokens": 156
+ },
+ "deliverables": [],
+ "render": null
+}

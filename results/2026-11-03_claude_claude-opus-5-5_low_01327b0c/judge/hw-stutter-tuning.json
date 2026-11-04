@@ -1,0 +1,56 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "[goal] Find what causes the arena-01 hitches and which setting changes fix them without touching PCIe link speed or BIOS overclocks; write the answer to `result.json`.\n\n[action] Read NOTES.md and settings.json, then worked out the FPS figures from `capture/presentmon.csv` (8238 frames) using the owner's formulas. I listed the frames slower than 20 ms and lined them up against `capture/sensors.csv` on the shared clock. Nothing was applied to this host, and I opened no browser tabs or apps.\n\n[result]\n- **FPS:** `avg_fps` is 137.29 and `low_1pct_fps` is 45.35.\n- **Cause:** power saving on the GPU's PCIe slot (ASPM L1, set in the BIOS as `pcie_aspm_rp1_gpu`). Every 4 seconds the GPU link drops into the L1 power-saving state, at sensor seconds 2, 6, 10, 14 and so on up to 58. Frame times jump at exactly those moments, from about 7 ms to 21-23 ms for about 0.25 s (frames at t=2.40, 6.41, 10.40...). Link speed stays Gen5 x4 the whole time, so this is a power-state problem, not a speed problem.\n- **Change:** `pcie_aspm_rp1_gpu` from `L1` to `disabled`. This stays within the constraints: it leaves the Gen5 x4 link speed, XMP, PBO and core ratio as they are.\n- **Ruled out:**\n  - A Defender scan (MsMpEng.exe) ran at seconds 43-45, and the disk was busy at seconds 13, 27 and 52. None of these line up with the slow frames, so I left Defender alone.\n  - I did not check the frame times inside those exact windows separately.\n- **Assumption:** turning off L1 removes the slow frames, so the 1% low should recover to near the normal ~7 ms frame time. Not measured: there is no capture taken after the change.\n\n[next] Disable ASPM on the GPU root port in the BIOS, then take another one-minute PresentMon capture of the same replay. It confirms the fix if the link stays in L0 and there are no more 21 ms frames every 4 seconds."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\"avg_fps\": 137.29, \"low_1pct_fps\": 45.35,\n \"cause\": \"PCIe ASPM L1 on the GPU root port (pcie_aspm_rp1_gpu=L1): every ~4 s the GPU link drops to L1 (sensors.csv s 2,6,10,...,58) and exactly then frame times jump from ~7 ms to ~21-23 ms for ~0.25 s (presentmon.csv t=2.40,6.41,10.40...). Link speed stays Gen5 x4; the fix is the power state, not the speed.\",\n \"changes\": [{\"setting\": \"pcie_aspm_rp1_gpu\", \"from\": \"L1\", \"to\": \"disabled\"}]}\n",
+ "transcript_tail": "Shell commands the agent ran (last 40):\n$ cd ..; ls; head -c 1500 *notes* *setting* 2>/dev/null; for f in *; do echo \"== $f\"; head -5 \"$f\"; done\n$ ls -la; for f in *; do echo \"== $f\"; head -c 1500 \"$f\"; echo; done\n$ tail -c 1000 settings.json; ls capture; for f in capture/*; do echo \"== $f\"; head -3 \"$f\"; done\n$ python -I -c \"\nimport csv\nr=list(csv.DictReader(open('capture/presentmon.csv')));m=sorted(float(x['MsBetweenPresents']) for x in r)\nimport math;n=len(m);print(n,1000/(sum(m)/n),1000/m[math.ceil(.99*n)-1])\nsp=[(round(float(x['TimeInSeconds']),2),x['MsBetweenPresents']) for x in r if float(x['MsBetwee\n$ cat > result.json <<'E'\n{\"avg_fps\": 137.29, \"low_1pct_fps\": 45.35,\n \"cause\": \"PCIe ASPM L1 on the GPU root port (pcie_aspm_rp1_gpu=L1): every ~4 s the GPU link drops to L1 (sensors.csv s 2,6,10,...,58) and exactly then frame times jump from ~7 ms to ~21-23 ms for ~0.25 s (presentmon.csv t=2.40,6.41,\n\nStream tail:\noutput_tokens_details\":{\"thinking_tokens\":170},\"server_tool_use\":{\"web_search_requests\":0,\"web_fetch_requests\":0},\"service_tier\":\"standard\",\"cache_creation\":{\"ephemeral_1h_input_tokens\":19607,\"ephemeral_5m_input_tokens\":0},\"inference_geo\":\"global\",\"iterations\":[{\"input_tokens\":2,\"output_tokens\":766,\"cache_read_input_tokens\":37804,\"cache_creation_input_tokens\":792,\"cache_creation\":{\"ephemeral_5m_input_tokens\":0,\"ephemeral_1h_input_tokens\":792},\"type\":\"message\"}],\"speed\":\"standard\",\"fallback_credit\":null},\"modelUsage\":{\"claude-opus-5-5\":{\"inputTokens\":12,\"outputTokens\":1795,\"cacheReadInputTokens\":193146,\"cacheCreationInputTokens\":19607,\"webSearchRequests\":0,\"costUSD\":0.23143319999999998,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":170,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":19607,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"permission_denials\":[],\"terminal_reason\":\"completed\",\"fast_mode_state\":\"off\",\"fast_mode_disabled_reason\":\"sdk_opt_in_required\",\"subagent_stats\":{\"spawned\":0,\"requested\":{\"background\":0,\"foreground\":0,\"unset\":0},\"started_in_background\":0,\"max_depth\":0,\"spawned_by_subagents\":0,\"completed\":0,\"failed\":0,\"killed\":{\"parent\":0,\"user\":0,\"system\":0},\"refused\":{\"depth_limit\":0,\"concurrency_limit\":0,\"budget\":0},\"by_type\":{}},\"safety_stops\":0,\"is_error\":false,\"num_turns\":6,\"subtype\":\"success\",\"api_error_status\":null,\"result\":\"[goal] Find what causes the arena-01 hitches and which setting changes fix them without touching PCIe link speed or BIOS overclocks; write the answer to `result.json`.\\n\\n[action] Read NOTES.md and settings.json, then worked out the FPS figures from `capture/presentmon.csv` (8238 frames) using the owner's formulas. I listed the frames slower than 20 ms and lined them up against `capture/sensors.csv` on the shared clock. Nothing was applied to this host, and I opened no browser tabs or apps.\\n\\n[result]\\n- **FPS:** `avg_fps` is 137.29 and `low_1pct_fps` is 45.35.\\n- **Cause:** power saving on the GPU's PCIe slot (ASPM L1, set in the BIOS as `pcie_aspm_rp1_gpu`). Every 4 seconds the GPU link drops into the L1 power-saving state, at sensor seconds 2, 6, 10, 14 and so on up to 58. Frame times jump at exactly those moments, from about 7 ms to 21-23 ms for about 0.25 s (frames at t=2.40, 6.41, 10.40...). Link speed stays Gen5 x4 the whole time, so this is a power-state problem, not a speed problem.\\n- **Change:** `pcie_aspm_rp1_gpu` from `L1` to `disabled`. This stays within the constraints: it leaves the Gen5 x4 link speed, XMP, PBO and core ratio as they are.\\n- **Ruled out:**\\n  - A Defender scan (MsMpEng.exe) ran at seconds 43-45, and the disk was busy at seconds 13, 27 and 52. None of these line up with the slow frames, so I left Defender alone.\\n  - I did not check the frame times inside those exact windows separately.\\n- **Assumption:** turning off L1 removes the slow frames, so the 1% low should recover to near the normal ~7 ms frame time. Not measured: there is no capture taken after the change.\\n\\n[next] Disable ASPM on the GPU root port in the BIOS, then take another one-minute PresentMon capture of the same replay. It confirms the fix if the link stays in L0 and there are no more 21 ms frames every 4 seconds.\",\"ttft_ms\":4356,\"type\":\"result\",\"duration_ms\":38183,\"uuid\":\"0eeb3547-f9bd-4777-a01d-fc56a47c8aaa\",\"ttft_stream_ms\":3625,\"time_to_request_ms\":166,\"first_content_frame_ms\":3625,\"queued_turn_count\":0,\"result_index\":0,\"model_usage_since_last_result\":{\"claude-opus-5-5\":{\"inputTokens\":12,\"outputTokens\":1795,\"cacheReadInputTokens\":193146,\"cacheCreationInputTokens\":19607,\"webSearchRequests\":0,\"costUSD\":0.23143319999999998,\"contextWindow\":1000000,\"maxOutputTokens\":128000,\"thinkingTokens\":170,\"cacheCreationEphemeral5mInputTokens\":0,\"cacheCreationEphemeral1hInputTokens\":19607,\"canonicalModel\":\"claude-opus-5-5\",\"provider\":\"firstParty\",\"costBasis\":\"list\"}},\"credential_expires_at\":\"2026-11-17T20:24:52.013Z\"}\n",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 5,
+  "tool_errors": 1,
+  "shell_commands": 5,
+  "shell_failures": 1,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1795,
+  "reasoning_tokens": 170
+ },
+ "deliverables": [],
+ "render": null
+}
