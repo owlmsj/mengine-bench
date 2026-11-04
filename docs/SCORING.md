@@ -88,8 +88,11 @@ Bench 2.6 (#185) stabilizes the process without touching a task, prompt or limit
 - 3d-print-homage: the blue-layout similarity to the print is a note, no longer a scored check. Measured on the 18
   published renders, no cutoff separated judge votes >= 65 from <= 55 (a 73 at 0.305, a 62 at 0.574); the judge's
   rendered criterion carries composition.
-- Judge input (#176): every web search shows how many results it returned and the first five, on every harness; a
-  contract fixture per harness (Claude Code, Codex, opencode, AGY) asserts that each tool kind reaches the judge log.
+- Judge input (#176): Claude Code and Codex structured web-search results show the count and first five titles/domains
+  (`6 results:` in both contract fixtures). opencode shows harness text clipped at 400 characters
+  (`[... 166 chars cut by the benchmark]` in its fixture); the AGY fixture has no result text and shows
+  `(results not in the harness stream)`. A contract fixture per harness (Claude Code, Codex, opencode, AGY)
+  asserts that each recorded tool kind reaches the judge log.
 - Rubric 2.6 (#184): visual tasks get the page rendered in the states the brief asks for (`state-<name>.png`), task
   notes from the benchmark, tighter rendered bands, and a render or browser check of the page counts as verification.
 - Noise and calibration: `analyze` groups ranked and observed reruns by agent, model, effort, a hash of the published
