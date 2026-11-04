@@ -17,7 +17,7 @@ from html import unescape
 from pathlib import Path
 from urllib.parse import quote, unquote
 
-from mengine_bench.core import CheckResult, EvalTask, Step, WROTE_RESULT, checkpoints, has, near, read_json, result_json, saw, write
+from mengine_bench.core import CheckResult, EvalTask, JudgeState, Step, WROTE_RESULT, checkpoints, has, near, read_json, result_json, saw, write
 from mengine_bench.tasks.visual import LOOK, OPENED, _plain, _rendered_source
 from mengine_bench.visual import RENDERED, dump_page_dom
 
@@ -441,6 +441,10 @@ TASKS = [
         summary="Collect a saved Portuguese dictionary site and build one view that shows how its words relate.",
         setup=_word_setup, check=_universe_check, reference=_word_reference,
         timeout_s=360, deliverables=(PAGE,),
+        judge_notes=("The brief values the one view most: someone searches for a word and finds how it relates to others.\n"
+                     "Opening the page with ?word=<a word> must show that word and its relations, so a word can be shared."),
+        # Both words are in THEMES above (saudade: "sentimentos", floresta: "natureza"); saudade is the brief's own example.
+        judge_states=(JudgeState("word-saudade", "?word=saudade"), JudgeState("word-floresta", "?word=floresta")),
         checkpoints=checkpoints(("walked the site", r"\bsite[/\\]|[/\\]site\b"), ("wrote words.json", r"words\.json"),
                                 ("wrote the page", r"universe.{1,4}index\.html"), OPENED, WROTE_RESULT),
         steps=(Step("Words are tied to each other, and nobody here can see how. {WS}/site is a saved copy of a Portuguese "
