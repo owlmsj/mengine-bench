@@ -283,3 +283,30 @@ def test_the_agent_is_told_the_limit_and_how_it_is_graded(tmp_path: Path, monkey
     [prompt] = (tmp_path / "run").rglob("step-0.md")
     text = prompt.read_text(encoding="utf-8")
     assert text.startswith("go") and "2 min" in text and "as they stand" in text
+
+
+# #181 #185: a Claude-shaped tool result carrying the upload refusal; the model's own text never counts.
+UPLOAD_REFUSED_AGENT = """
+import json
+refusal = "Error: only files this session is allowed to read can be uploaded"
+print(json.dumps({"type": "assistant", "message": {"content": [
+    {"type": "tool_use", "id": "u1", "name": "mcp__browser__upload_file", "input": {"path": "cover.png"}}]}}))
+print(json.dumps({"type": "user", "message": {"content": [
+    {"type": "tool_result", "tool_use_id": "u1", "content": refusal, "is_error": True}]}}))
+"""
+
+
+def test_host_refusal_in_a_tool_result_closes_the_run_as_infra(fake_agent: FakeAgent, tmp_path: Path) -> None:
+    from mengine_bench import leaderboard
+    out = tmp_path / "results"
+    code = cli.main(["run", "--agent", "cmd", "--cmd", fake_agent("refused", UPLOAD_REFUSED_AGENT), "--model", "fake/up",
+                     "--tasks", "ds-ab-playtest", "--out", str(out), "--work", str(tmp_path / "work")])
+    assert code == 0
+    [result_file] = out.glob("*/result.json")
+    assert (result_file.parent / "summary.md").is_file()
+    result = json.loads(result_file.read_text(encoding="utf-8"))
+    [task] = result["tasks"]
+    assert task["status"] == "infra" and not task["solved"]
+    assert result["totals"]["solved"] == 0 and result["totals"]["correct"] == task["c"] * 100
+    signature = "only files this session is allowed to read can be uploaded"
+    assert leaderboard.unranked_reason(result) == f"infra fault on ds-ab-playtest: {signature}; rerun that task"

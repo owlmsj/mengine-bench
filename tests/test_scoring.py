@@ -162,3 +162,10 @@ def test_the_score_counts_speed() -> None:
     assert combined_score(100.0, 85.7, speed_points(801.0)) == 88.1
     assert combined_score(100.0, 82.8, speed_points(304.0)) == 95.6
     assert combined_score(100.0, None, 50.0) is None
+
+
+def test_an_infra_task_keeps_its_grade_and_time_but_is_never_solved() -> None:
+    # #181 #185: task_run marks a host refusal `infra`; the run must still close with its totals.
+    run = score_run([outcome(status="infra", correctness=0.6, solved=True, agent_s=400.0)])
+    assert (run.correct, run.solved, run.time_s) == (60.0, 0, 400.0)
+    assert run.tasks[0].status == "infra" and not run.tasks[0].solved
