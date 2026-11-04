@@ -172,6 +172,25 @@ def test_unsafe_archive_is_rejected_without_rewriting(tmp_path: Path, name: str,
         _extract(archive_path, tmp_path / "workspace")
     assert not (tmp_path / "escape").exists()
 
+
+@pytest.mark.parametrize("limit", ["WORKSPACE_EXPANDED_BYTES", "WORKSPACE_MEMBERS"])
+def test_archive_expansion_budget_extracts_nothing(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, limit: str) -> None:
+    from mengine_bench import bundle
+    from mengine_bench.regrade import _extract
+    archive_path = tmp_path / "oversized.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as archive:
+        for name in ("first", "second"):
+            member = tarfile.TarInfo(name)
+            member.size = 4
+            archive.addfile(member, io.BytesIO(b"1234"))
+    monkeypatch.setattr(bundle, limit, 4 if limit == "WORKSPACE_EXPANDED_BYTES" else 1, raising=False)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    with pytest.raises(ValueError, match="expected at most"):
+        _extract(archive_path, workspace)
+    assert list(workspace.iterdir()) == []
+
 def test_regrade_refreshes_judge_packet_and_preserves_original(
         fresh_bundle: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from mengine_bench import bundle_judge

@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 
 from mengine_bench import __version__, catalog
-from mengine_bench.bundle import REPO_ROOT, RESULT_NAME, SUMMARY_NAME, public_json, public_text
+from mengine_bench.bundle import REPO_ROOT, RESULT_NAME, SUMMARY_NAME, public_json, public_text, workspace_members
 from mengine_bench.redact import PathScope, local_names
 from mengine_bench.report import render_summary
 from mengine_bench.run_command import _correctness, _detail
@@ -20,7 +20,7 @@ from mengine_bench.scoring import TaskOutcome, score_run
 
 def _extract(archive_path: Path, workspace: Path) -> None:
     with tarfile.open(archive_path, "r:gz") as archive:
-        members = archive.getmembers()
+        members = workspace_members(archive)
         for member in members:
             destination = workspace / member.name
             if not member.isfile() or not destination.resolve().is_relative_to(workspace.resolve()):

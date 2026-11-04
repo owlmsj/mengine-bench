@@ -54,6 +54,38 @@ def test_workspace_compressed_cap_writes_nothing(tmp_path: Path, monkeypatch: py
     assert not target.exists()
 
 
+@pytest.mark.parametrize("limit", ["WORKSPACE_EXPANDED_BYTES", "WORKSPACE_MEMBERS"])
+def test_workspace_expansion_budget_before_compression(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, limit: str) -> None:
+    from mengine_bench import bundle
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / "first").write_bytes(b"1234")
+    (ws / "second").write_bytes(b"5678")
+    monkeypatch.setattr(bundle, limit, 1, raising=False)
+    target = tmp_path / "archive.tar.gz"
+    notes = bundle._write_workspace(target, ws)
+    assert notes and notes[0].startswith("workspace not kept: ")
+    assert "expected at most" in notes[0]
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("limit", ["WORKSPACE_EXPANDED_BYTES", "WORKSPACE_MEMBERS"])
+def test_workspace_scan_rejects_expansion_budget(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, limit: str) -> None:
+    import io
+    from mengine_bench import bundle
+    (tmp_path / "workspace").mkdir()
+    with tarfile.open(tmp_path / "workspace/unknown.tar.gz", "w:gz") as archive:
+        for name in ("first", "second"):
+            member = tarfile.TarInfo(name)
+            member.size = 4
+            archive.addfile(member, io.BytesIO(b"1234"))
+    monkeypatch.setattr(bundle, limit, 1, raising=False)
+    with pytest.raises(ValueError, match="expected at most"):
+        bundle_leaks(tmp_path, LocalNames())
+
+
 def _evidence_task() -> EvalTask:
     return EvalTask(id="human-evidence", category="media", provenance="test", summary="test",
                     setup=lambda ws: None, steps=(Step("Create media files."),),

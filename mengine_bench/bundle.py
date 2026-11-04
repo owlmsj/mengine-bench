@@ -38,6 +38,8 @@ SUMMARY_NAME = "summary.md"
 JUDGE_DIR = "judge"
 EVIDENCE_FILE_BYTES = 5 * 1024 * 1024
 WORKSPACE_BYTES = 20 * 1024 * 1024
+WORKSPACE_EXPANDED_BYTES = 200 * 1024 * 1024
+WORKSPACE_MEMBERS = 20_000
 WORKSPACE_EXCLUDED = frozenset({"target", "node_modules", ".venv", "__pycache__"})
 _STEP_FILE = re.compile(r"^step-(?P<label>.+)\.(?P<stream>stdout|stderr)\.txt$")
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -198,33 +200,66 @@ def _write_workspace(target: Path, workspace: Path, scope: PathScope = PathScope
     try:
         if _linked(workspace):
             return ["workspace not kept: symlink or junction"]
+        sources = _workspace_files(workspace)
+        expanded = 0
         with gzip.GzipFile(fileobj=compressed, mode="wb", mtime=0) as zipped:
             with tarfile.open(fileobj=zipped, mode="w|") as archive:
-                for root, directories, files in os.walk(workspace, followlinks=False):
-                    directories[:] = sorted(name for name in directories
-                                            if name not in WORKSPACE_EXCLUDED and not _linked(Path(root) / name))
-                    for name in sorted(files):
-                        source = Path(root) / name
-                        if _linked(source) or not stat.S_ISREG(source.stat().st_mode):
-                            continue
-                        raw = source.read_bytes()
-                        try:
-                            text = raw.decode("utf-8") if b"\x00" not in raw else None
-                        except UnicodeDecodeError:
-                            text = None
-                        member = archive.gettarinfo(source, arcname=source.relative_to(workspace).as_posix())
-                        if text is not None:
-                            raw = public_text(text, scope, allowed).encode("utf-8")
-                        member.size = len(raw)
-                        archive.addfile(member, io.BytesIO(raw))
+                for source in sources:
+                    with source.open("rb") as stream:
+                        raw = stream.read(WORKSPACE_EXPANDED_BYTES - expanded + 1)
+                    _workspace_budget(len(sources), expanded + len(raw))
+                    try:
+                        text = raw.decode("utf-8") if b"\x00" not in raw else None
+                    except UnicodeDecodeError:
+                        text = None
+                    member = archive.gettarinfo(source, arcname=source.relative_to(workspace).as_posix())
+                    if text is not None:
+                        raw = public_text(text, scope, allowed).encode("utf-8")
+                    expanded += len(raw)
+                    _workspace_budget(len(sources), expanded)
+                    member.size = len(raw)
+                    archive.addfile(member, io.BytesIO(raw))
         size = compressed.tell()
         if size > WORKSPACE_BYTES:
             return [f"workspace not kept: {size / (1024 * 1024):.2f} MiB"]
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(compressed.getvalue())
     except (OSError, ValueError) as error:
-        return [f"workspace not kept: {type(error).__name__}"]
+        return [f"workspace not kept: {str(error) if isinstance(error, ValueError) else type(error).__name__}"]
     return []
+
+
+def _workspace_budget(count: int, expanded: int) -> None:
+    if count > WORKSPACE_MEMBERS or expanded > WORKSPACE_EXPANDED_BYTES:
+        raise ValueError(f"received workspace with {count} members and {expanded} expanded bytes; "
+                         f"expected at most {WORKSPACE_MEMBERS} members and {WORKSPACE_EXPANDED_BYTES} expanded bytes")
+
+
+def _workspace_files(workspace: Path) -> list[Path]:
+    sources: list[Path] = []
+    expanded = 0
+    for root, directories, files in os.walk(workspace, followlinks=False):
+        directories[:] = sorted(name for name in directories
+                                if name not in WORKSPACE_EXCLUDED and not _linked(Path(root) / name))
+        for name in sorted(files):
+            source = Path(root) / name
+            if _linked(source) or not stat.S_ISREG(source.stat().st_mode):
+                continue
+            expanded += source.stat().st_size
+            sources.append(source)
+            _workspace_budget(len(sources), expanded)
+    return sources
+
+
+def workspace_members(archive: tarfile.TarFile) -> list[tarfile.TarInfo]:
+    """Validate expansion before any member is read or extracted (#185)."""
+    members: list[tarfile.TarInfo] = []
+    expanded = 0
+    for member in archive:
+        expanded += member.size
+        members.append(member)
+        _workspace_budget(len(members), expanded)
+    return members
 
 
 def _evidence_file_problem(source: Path, workspace: Path) -> str | None:
@@ -314,7 +349,7 @@ def bundle_leaks(bundle_dir: Path, names: LocalNames) -> dict[str, dict[str, int
         if relative.parts[0] == "workspace" and path.name.endswith(".tar.gz"):
             allowed = _fixture_strings(path.name.removesuffix(".tar.gz"), names)
             with tarfile.open(path, "r:gz") as archive:
-                for member in archive:
+                for member in workspace_members(archive):
                     if not member.isfile():
                         continue
                     stream = archive.extractfile(member)
