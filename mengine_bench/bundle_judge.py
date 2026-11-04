@@ -102,10 +102,10 @@ def read_packet(bundle: Path, task_id: str) -> JudgePacket:
     if log == NO_CALLS and context.stats.get("tool_calls"):
         raise ValueError(f"received {context.stats['tool_calls']} tool_calls in {task_id} and none in its log; "
                          f"expected the judge's tool log to show them")
-    # #184: the page states come from the catalog too, so a packet cannot pick its own.
+    # #184: the page states and notes come from the catalog too, so a packet cannot pick its own.
     context = replace(context, task_id=task.id, prompts=tuple(step.prompt for step in task.steps),
                       diff=_agent_diff(context.diff, task), tool_log=log, deliverables=_stored_deliverables(bundle, task),
-                      states=task.judge_states)
+                      states=task.judge_states, notes=task.judge_notes)
     return JudgePacket(context=context, render=task.render_target, images=_stored_images(bundle, task))
 
 

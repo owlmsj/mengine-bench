@@ -89,7 +89,7 @@ def test_judging_the_bundle_sets_one_vote_per_task(fake_agent: FakeAgent, tmp_pa
     assert task["checks"] == before["tasks"][0]["checks"], "the judge never changes the checks"
     judge = result["judge"]
     assert {key: judge[key] for key in ("agent", "model", "effort", "rubric")} == {
-        "agent": "cmd", "model": "judge-x", "effort": "high", "rubric": "2.5"}
+        "agent": "cmd", "model": "judge-x", "effort": "high", "rubric": "2.6"}
     assert judge["bench"] and len(judge["system_prompt_sha256"]) == 64
     assert task["judge_parts"] == {"approach": 30, "deliverable": 25, "verification": 25}
     totals = result["totals"]
@@ -509,3 +509,13 @@ def test_a_state_frame_that_keeps_failing_leaves_the_vote_on_the_other_frames(
         f"state-{state.name}.png: {visual.RENDER_FAILED}: timeout after 120s" for state in task.judge_states]
     assert not list((bundle / "judge").glob("*-state-*.png"))
 
+
+def test_the_vote_reads_the_task_notes_from_the_catalog(fake_agent: FakeAgent, tmp_path: Path,
+                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    [task] = STATE_TASKS
+    bundle = _run_without_query_check(fake_agent, tmp_path, monkeypatch, task.id)
+    monkeypatch.setattr(bundle_judge, "render_headless", _render_except(None, []))
+    assert _judge(fake_agent, bundle, JUDGE_READING_IMAGES) == 0
+    prompt = json.loads((tmp_path / "fakes" / "judge.images").read_text(encoding="utf-8"))["prompt"]
+    assert f"## Task notes from the benchmark (trusted)\n{task.judge_notes}" in prompt
+    assert json.loads((bundle / "result.json").read_text(encoding="utf-8"))["judge"]["rubric"] == "2.6"

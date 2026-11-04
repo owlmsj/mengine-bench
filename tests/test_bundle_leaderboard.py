@@ -13,6 +13,7 @@ from conftest import FakeAgent
 from fakes import MARKER, fake_secret
 from mengine_bench import __version__, catalog, cli, leaderboard
 from mengine_bench.core import scratch_root
+from mengine_bench.judge import RUBRIC_VERSION
 from mengine_bench.redact import LocalNames
 
 TASK = "ds-ab-playtest"

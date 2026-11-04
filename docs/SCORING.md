@@ -157,7 +157,7 @@ would reward one route over another. "Not seen" can simply be a different route.
 `mengine-bench judge results/<run>` (maintainer only) runs one judge, Claude
 `claude-opus-5-5` at effort `xhigh`, exactly once per task. A call that fails or
 returns invalid JSON is retried; if a task still has no vote, nothing is written.
-Rubric 2.5 grades what the checks cannot see. The check results are shown to
+Rubric 2.6 grades what the checks cannot see. The check results are shown to
 the judge as context with the instruction not to re-score correctness. Its rules and
 anchors travel in a system prompt, and every vote comes with its three subscores, which
 must add up to the score.
@@ -166,7 +166,7 @@ must add up to the score.
 | --- | --- |
 | Reasoning and execution: understood the problem, chose a sound strategy of its own, carried it out simply and reproducibly. Any valid route can earn full marks. | 40 |
 | Deliverable and presentation: the problem is solved, nothing invented, and the final message says what was found, the assumptions and any limit left open. Format is never a defect. | 30 |
-| Quality assurance: an independent check of its own result; on a task that only asks for a few facts, answer discipline (none in 2.0); on pages, the rendered look | 30 |
+| Quality assurance: an independent check of its own result; on a task that only asks for a few facts, answer discipline (none in 2.0); on pages, the rendered look, where a render or browser check of the delivered page counts as verification under reasoning and execution (2.6) | 30 |
 
 The plan is judged from the actions: a written plan earns nothing by itself.
 
@@ -176,6 +176,16 @@ judge sees three frames, each from a fresh load after about 1, 4 and 8 seconds o
 a reference page, made by Opus 5.5 xhigh for the same brief, which sets the bar and stays fixed so a grade does not move when a new run comes out. A frame that fails is
 tried up to 3 times; if it keeps failing, the judge votes on the other frames, or without images when none rendered, and
 the bundle records it. With no browser at all, nothing is judged.
+
+Rubric 2.6 (#184) adds two task inputs, both fixed in the catalog. A page whose brief asks for a state declares it
+(`judge_states`, a name and a fixed query): web-word-universe opens `?word=saudade` and `?word=floresta`. Each state is
+one more frame, `state-<name>.png` after about 4 seconds, rendered the same way from the page stored in the bundle, never
+from the workspace, so `judge --again` sees what the first vote saw; it is kept as `judge/<task>-state-<name>.png`, and a
+state frame that keeps failing is noted like any other frame. Each visual task also carries two lines of judge notes
+(`judge_notes`) naming what its brief values most, never the method or the answer; the judge reads them as trusted
+text. The rendered bands are tighter: 27-30 finished with every state the brief asks for working, 20-26 one or two
+visible defects or one state weak, 10-19 unfinished, off brief or landing only (a state the brief asks for is missing or
+inert), 0-9 broken.
 
 The judge reads the task prompt, the check results, the final answers, each page whole, the agent's other changes
 and one tool log with the same shape for every harness. It does not read the raw stream, which carries the model id.

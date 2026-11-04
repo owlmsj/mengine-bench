@@ -121,7 +121,7 @@ def test_checkpoints_stay_out_of_the_judge_and_show_in_the_summary() -> None:
 
 
 def test_format_is_never_a_defect_and_any_route_can_earn_full_marks() -> None:
-    assert "rubric 2.5" in JUDGE_SYSTEM_PROMPT
+    assert "rubric 2.6" in JUDGE_SYSTEM_PROMPT
     assert "any valid route can earn full marks" in JUDGE_SYSTEM_PROMPT
     assert "are never defects" in JUDGE_SYSTEM_PROMPT
     assert "a code fence around" not in JUDGE_SYSTEM_PROMPT
