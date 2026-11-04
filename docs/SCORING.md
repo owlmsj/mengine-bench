@@ -1,12 +1,4 @@
-# Scoring (bench 2.5)
-
-## Bench 2.6: regradable bundles
-
-New bundles keep each task's final graded workspace in `workspace/<task>.tar.gz`, up to 20 MiB compressed, preserving regular files and `.git` while excluding symlinks, `target/`, `node_modules/`, `.venv/` and `__pycache__/`.
-Workspace bytes receive the same privacy scan as human evidence and are never judge input; an oversized workspace leaves a task note instead of an archive.
-`mengine-bench regrade results/<run>` reruns current checks and gates using that workspace, saved answers, transcripts and recorded runtime observations, without running an agent, and records previous correctness and checks in `graded_with`.
-Tasks without an archive retain their grade with a note; totals and `summary.md` are refreshed, and Score remains unavailable until judged.
-This mechanism does not change the ranking rule or complete missing tasks.
+# Scoring (bench 2.6)
 
 A run of an agent (harness + model + configuration) gets three numbers folded into
 the Score, and a Cost kept apart.
@@ -80,15 +72,33 @@ skipped files leave a task note, and evidence still passes the bundle privacy sc
 
 Bench 2.5.2 (#171, #172): fix Codex opened-view fetch evidence and web/MCP judge input; no tasks or prompts change.
 
-Bench 2.6 (#185): `analyze` groups ranked and observed reruns by agent, model, effort, a hash of the published
-config and bench major.minor, computed on read without changing `result.json`.
-For each setup with two or more runs it reports max-min and sample standard deviation of Score, Correct %, Judge
-and Time; the largest observed Score spread gates regression warnings, with no warning inside that floor and
-`not measured` before a pair exists.
-`mengine-bench judge-calibrate --votes <file> <bundleA> <bundleB>` reads the bench-audit owner's exported scores,
-re-votes those packets with the official judge and reports mean absolute difference, the count beyond 8 and the rubric.
-It never modifies the bundles, saves `docs/judge-calibration/<date>-<rubric>.md` only with `--write`, and exits 1
-when the count exceeds an explicitly supplied `--max-beyond`.
+Bench 2.6 (#185) stabilizes the process without touching a task, prompt or limit; its parts, each with its issue:
+- Regradable bundles. New bundles keep each task's final graded workspace in `workspace/<task>.tar.gz`, up to 20 MiB compressed, preserving regular files and `.git` while excluding symlinks, `target/`, `node_modules/`, `.venv/` and `__pycache__/`. Workspace bytes receive the same privacy scan as human evidence and are never judge input; an oversized workspace leaves a task note instead of an archive. `mengine-bench regrade results/<run>` reruns current checks and gates using that workspace, saved answers, transcripts and recorded runtime observations, without running an agent, and records previous correctness and checks in `graded_with`. Tasks without an archive retain their grade with a note; totals and `summary.md` are refreshed, and Score remains unavailable until judged. This mechanism does not change the ranking rule or complete missing tasks.
+- Status `infra` (#181): a known host refusal (an upload the browser extension refused, a filesystem snapshot the runner
+  could not take) marks the task, keeps its grade and makes the run an observation until that task is rerun. Claude Code
+  runs with `--add-dir <workspace>` so the Claude in Chrome extension may upload workspace files; preflight checks
+  cargo, node and git.
+- Leftover attribution (#177): a process the task left running fails the cleanup check only when the agent named its
+  executable in a shell command; a harness helper is killed and noted.
+- The workspace gate reads the final state of the task's parent and run directories (#183): a file created and removed
+  during the task is not a failure; transient `../` use shows in `outside_path_uses`, which the judge sees.
+- 3d-print-homage: the blue-layout similarity to the print is a note, no longer a scored check. Measured on the 18
+  published renders, no cutoff separated judge votes >= 65 from <= 55 (a 73 at 0.305, a 62 at 0.574); the judge's
+  rendered criterion carries composition.
+- Judge input (#176): every web search shows how many results it returned and the first five, on every harness; a
+  contract fixture per harness (Claude Code, Codex, opencode, AGY) asserts that each tool kind reaches the judge log.
+- Rubric 2.6 (#184): visual tasks get the page rendered in the states the brief asks for (`state-<name>.png`), task
+  notes from the benchmark, tighter rendered bands, and a render or browser check of the page counts as verification.
+- Noise and calibration: `analyze` groups ranked and observed reruns by agent, model, effort, a hash of the published
+  config and bench major.minor, computed on read without changing `result.json`.
+  For each setup with two or more runs it reports max-min and sample standard deviation of Score, Correct %, Judge
+  and Time; the largest observed Score spread gates regression warnings, with no warning inside that floor and
+  `not measured` before a pair exists.
+  `mengine-bench judge-calibrate --votes <file> <bundleA> <bundleB>` reads the bench-audit owner's exported scores,
+  re-votes those packets with the official judge and reports mean absolute difference, the count beyond 8 and the rubric.
+  It never modifies the bundles, saves `docs/judge-calibration/<date>-<rubric>.md` only with `--write`, and exits 1
+  when the count exceeds an explicitly supplied `--max-beyond`.
+  
 
 Separately, ties come from the published tasks: draw the tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as

@@ -49,7 +49,9 @@ def test_bundle_holds_result_summary_and_redacted_transcripts(fake_agent: FakeAg
     [bundle] = out.glob("*")
     assert bundle.name.split("_")[1:4] == ["cmd", "fake-ref", "none"]
     files = sorted(p.relative_to(bundle).as_posix() for p in bundle.rglob("*") if p.is_file())
-    assert files == [f"judge/{TASK}.json", "result.json", "summary.md", f"transcripts/{TASK}.jsonl.gz"]
+    # #185: since 2.6 the bundle also keeps the task's final workspace for `regrade`.
+    assert files == [f"judge/{TASK}.json", "result.json", "summary.md", f"transcripts/{TASK}.jsonl.gz",
+                     f"workspace/{TASK}.tar.gz"]
     packet_text = (bundle / f"judge/{TASK}.json").read_text(encoding="utf-8")
     packet = json.loads(packet_text)
     assert set(packet) == {"task_id", "prompts", "answers", "diff", "transcript_tail", "checks", "deliverables",
