@@ -30,7 +30,7 @@ from mengine_bench.run_command import JudgeEvidence, RunSettings, run_tasks
 from mengine_bench.judge import OFFICIAL_JUDGE_EFFORT, OFFICIAL_JUDGE_MODEL, RubricJudge
 from mengine_bench.runner.agents import AGENT_NAMES, make_agent
 from mengine_bench.runner.site import serve_site
-from mengine_bench.visual import add_page_checks
+from mengine_bench.visual import COMPOSITION_PRINTS, add_page_checks
 from mengine_bench.scoring import CORRECT_SHARE, JUDGE_SHARE, SPEED_SHARE, parse_price
 from mengine_bench.submit import SubmitError, gh_login, submit
 from mengine_bench.safe_runner import relaunch_run
@@ -286,7 +286,7 @@ def _gold_problem(task: EvalTask, root: Path) -> str | None:
         answers = task.reference(solved)
     result = task.check(solved, answers)
     if task.render_target is not None:
-        add_page_checks(result, solved / task.render_target)
+        add_page_checks(result, solved / task.render_target, composition=COMPOSITION_PRINTS.get(task.id))
     return None if result.passed else f"reference fails {result.failed()}"
 
 

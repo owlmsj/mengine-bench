@@ -17,7 +17,7 @@ import stat
 import subprocess
 import sys
 import tempfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -48,6 +48,7 @@ class Checkpoint:
 
     name: str
     pattern: str
+    fetch_only: bool = False
 
 
 def checkpoints(*pairs: tuple[str, str]) -> tuple[Checkpoint, ...]:
@@ -116,7 +117,38 @@ class CheckResult:
 
 
 Setup = Callable[[Path], None]
-Check = Callable[[Path, Sequence[str]], CheckResult]
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    """Harness-neutral tool input, without tool output or assistant prose (#164)."""
+
+    name: str
+    inputs: Mapping[str, object]
+    failed: bool = False
+
+
+class ReferenceAnswers(list[str]):
+    """Trusted offline reference evidence; the runner always overrides it with its real trace (#164)."""
+
+    def __init__(self, answers: Sequence[str], trace: Sequence[ToolCall]) -> None:
+        super().__init__(answers)
+        self.trace = tuple(trace)
+
+
+@dataclass(frozen=True)
+class TraceCheck:
+    """Opt in to trace evidence; old two-argument checks keep their contract (#164)."""
+
+    evaluate: Callable[[Path, Sequence[str], Sequence[ToolCall]], CheckResult]
+
+    def __call__(self, ws: Path, answers: Sequence[str], trace: Sequence[ToolCall] | None = None) -> CheckResult:
+        if trace is None:
+            trace = answers.trace if isinstance(answers, ReferenceAnswers) else ()
+        return self.evaluate(ws, answers, trace)
+
+
+Check = Callable[[Path, Sequence[str]], CheckResult] | TraceCheck
 Reference = Callable[[Path], list[str]]
 
 

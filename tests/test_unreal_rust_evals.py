@@ -89,6 +89,36 @@ def test_wrong_ways_to_keep_the_tracker_fail(tmp_path: Path, wrong: str) -> None
     assert "crash fixed: the score tracker survives garbage collection" in gamedev._ue_check(ws, [""]).failed()
 
 
+@pytest.mark.parametrize(("block", "kept"), [
+    # #164: a keep-alive inside #if 0 never compiles, so the crash stays; the #else branch does compile.
+    ("#if 0\n	ScoreTracker->AddToRoot();\n#endif\n", False),
+    ("#if 0\n#if WITH_EDITOR\n#endif\n	ScoreTracker->AddToRoot();\n#endif\n", False),
+    ("#if 0\n	Hud = nullptr;\n#else\n	ScoreTracker->AddToRoot();\n#endif\n", True),
+    ("#if WITH_EDITOR\n	Hud = nullptr;\n#endif\n	ScoreTracker->AddToRoot();\n", True),
+])
+def test_a_keep_alive_in_a_disabled_block_fixes_nothing(tmp_path: Path, block: str, kept: bool) -> None:
+    ws = _ue_solved(tmp_path)
+    write(ws, HEADER, UE_FILES[HEADER])
+    _fixed(ws, SOURCE, "	Stats = new FArenaStats();", block + "	Stats = new FArenaStats();")
+    failed = gamedev._ue_check(ws, [""]).failed()
+    assert ("crash fixed: the score tracker survives garbage collection" not in failed) is kept, failed
+
+
+@pytest.mark.parametrize(("ini", "cooked"), [
+    # #164: cooking all content also packages the palette, unless a never-cook entry drops it again.
+    (UE_FILES[GAME_INI].replace("bCookAll=False", "bCookAll=True"), True),
+    (UE_FILES[GAME_INI].replace("bCookAll=False", "bCookAll=true"), True),
+    (UE_FILES[GAME_INI].replace("bCookAll=False", "bCookAll=True\nbCookAll=False"), False),
+    (UE_FILES[GAME_INI].replace("bCookAll=False", 'bCookAll=True\n+DirectoriesToNeverCook=(Path="/Game/Data/Palettes")'), False),
+    (UE_FILES[GAME_INI] + "\n[/Script/EngineSettings.GeneralProjectSettings]\nbCookAll=True\n", False),
+])
+def test_cooking_all_content_also_cooks_the_palette(tmp_path: Path, ini: str, cooked: bool) -> None:
+    ws = _ue_solved(tmp_path)
+    write(ws, GAME_INI, ini)
+    failed = gamedev._ue_check(ws, [""]).failed()
+    assert ("colors fixed: the palette reaches the cook" not in failed) is cooked, failed
+
+
 def test_reflecting_the_plain_pointer_fails(tmp_path: Path) -> None:
     ws = _ue_solved(tmp_path)
     _fixed(ws, HEADER, "	FArenaStats* Stats = nullptr;", "	UPROPERTY()\n	FArenaStats* Stats = nullptr;")
@@ -246,3 +276,21 @@ def test_a_cargo_target_folder_stays_out_of_the_judge_view(tmp_path: Path) -> No
     write(tmp_path, "src/lib.rs", "x")
     write(tmp_path, "target/debug/huge.bin", "x")
     assert set(snapshot(tmp_path)) == {"src/lib.rs"}
+
+
+def test_a_noop_transfer_fails(tmp_path: Path) -> None:
+    rust._rs_setup(tmp_path)
+    wrong = ONE_LOCK.replace(
+        "        *state.scores.get_mut(&from).unwrap() -= points;\n"
+        "        *state.scores.get_mut(&to).unwrap() += points;\n", "")
+    assert wrong != ONE_LOCK
+    write(tmp_path, "src/lib.rs", wrong)
+    result = rust._rs_check(tmp_path, [""])
+    assert set(result.failed()) == {"hidden asymmetric transfers move points", "hidden the visible score example passes"}
+
+
+def test_comments_in_an_empty_dependency_table_pass(tmp_path: Path) -> None:
+    ws = _rs_solved(tmp_path)
+    write(ws, "Cargo.toml", rust.CARGO_TOML + "# Standard library only.\n")
+    result = rust._rs_check(ws, [""])
+    assert result.passed, (result.failed(), result.details)

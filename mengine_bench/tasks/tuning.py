@@ -174,8 +174,9 @@ def _stutter_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result.add("cause named", isinstance(cause, (str, list, dict)) and re.search(STUTTER_CAUSE_PATTERN, cause_text, re.IGNORECASE) is not None,
                saw(cause, "the GPU link's power-saving state (ASPM L1 on its root port)"))
     pairs = _stutter_changes(got)
-    fixed = any(re.search(STUTTER_ASPM_SETTING, setting, re.IGNORECASE) and re.search(STUTTER_OFF_VALUE, to, re.IGNORECASE)
-                for setting, to in pairs)
+    # #164: the plan's final value per setting counts, so a later change back to L1 undoes the fix.
+    final_aspm = {setting.strip().lower(): to for setting, to in pairs if re.search(STUTTER_ASPM_SETTING, setting, re.IGNORECASE)}
+    fixed = bool(final_aspm) and all(re.search(STUTTER_OFF_VALUE, to, re.IGNORECASE) for to in final_aspm.values())
     result.add("ASPM off on the GPU root port", fixed, saw(pairs, "pcie_aspm_rp1_gpu -> disabled"))
     # #124: an empty change list keeps every constraint but fixes nothing, so it earns neither.
     link = [setting for setting, _ in pairs if re.search(STUTTER_LINK_SETTING, setting, re.IGNORECASE)]

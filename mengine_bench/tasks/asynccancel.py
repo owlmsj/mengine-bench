@@ -1,7 +1,7 @@
 """Async job runner with a concurrency cap that still cleans up on Ctrl+C (#151, ported from Terminal-Bench 2.1).
 
 Upstream task `cancel-async-tasks` (Apache-2.0, author Alex Shaw). The agent writes run_tasks(tasks, max_concurrent) in
-run.py. The check copies run.py into a scratch folder and runs a hidden harness in a fresh Python per scenario: each job
+run.py. The check copies the delivered modules into a scratch folder and runs a hidden harness in a fresh Python per scenario: each job
 counts when it starts, finishes and finishes its cleanup (a `finally` that itself awaits), and the harness tracks the
 peak of jobs running at once. A Ctrl+C is delivered with _thread.interrupt_main(SIGINT) 0.4 s in, which goes through
 asyncio.run's own SIGINT handler exactly as a real keyboard interrupt does, on Windows too. Upstream measured time and
@@ -122,8 +122,9 @@ def _ac_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     with tempfile.TemporaryDirectory(prefix="bench-ac-", dir=scratch_root(), ignore_cleanup_errors=True) as tmp:
         folder = Path(tmp)
-        if (ws / AC_MODULE).is_file():
-            shutil.copy2(ws / AC_MODULE, folder / AC_MODULE)
+        # The brief permits local helpers and packages behind run.py (#164).
+        shutil.copytree(ws, folder, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns(".git", ".venv", "__pycache__"))
         (folder / "harness_ac.py").write_text(AC_HARNESS, encoding="utf-8")
         # Separate processes, so the five runs overlap: about 2 s in all instead of 7.
         with ThreadPoolExecutor(max_workers=len(AC_SCENARIOS)) as pool:

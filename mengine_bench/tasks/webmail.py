@@ -135,9 +135,41 @@ def _webmail_saved_pdfs(ws: Path) -> dict[str, str]:
 
 
 def _webmail_states_total(text: str) -> bool:
-    """Any number in the reply equals the total: 1,205.77, 1.205,77, EUR 1205.77 all count."""
-    tokens = re.findall(r"\d[\d.,]*\d|\d", text)
-    return any((got := number(token)) is not None and abs(got - INVOICE_TOTAL) < 0.005 for token in tokens)
+    """Accept the total in either number convention, excluding denials and competing confirmations."""
+    correct = False
+    text = re.sub(r"(?m)^\s*>[^\n]*", "", text)
+    # #164: a quoted or denied total is not a confirmation. Keep negation local so
+    # unrelated statements ("not paid yet") and corrected subtotals stay valid.
+    clauses = re.split(r"[;\n!?]|\.(?!\d)|\b(?:but|rather than)\b", text, flags=re.I)
+    for clause in clauses:
+        for match in re.finditer(r"\d[\d.,]*\d|\d", clause):
+            got = number(match.group())
+            before, after = clause[:match.start()], clause[match.end():]
+            prefix = re.split(r",|\band\b|\bincluding\b", before, flags=re.I)[-1]
+            # #164: negation scopes over the amount's noun phrase, not just its currency.
+            # #164: adverbs ("cannot yet confirm") stay inside the negation's scope.
+            noun_phrase = (r"(?:(?:the|an?|earlier|previous|invoice|total|amount|of|previously|quoted|as|confirm(?:ed)?"
+                           r"|yet|still|fully|currently|now|really)\s+)*")
+            denied = re.search(r"\b(?:not|never|cannot|can't|can\u2019t|isn't|isn\u2019t|wasn't|wasn\u2019t)\s*" + noun_phrase
+                               + r"(?:EUR\s*|\u20ac\s*)?$", prefix, re.I)
+            denied_after = re.match(r"\s*(?:EUR|\u20ac)?\s*(?:is|was)\s+not\b", after, re.I)
+            confirmation = re.split(r"\bconfirm(?:ed)?\b", prefix, flags=re.I)
+            # #164: "confirm the quoted total" reaffirms it; an unconfirmed quotation remains historical.
+            historical_words = r"earlier|previous(?:ly)?|superseded" + (r"|quoted" if len(confirmation) == 1 else "")
+            historical = re.search(r"\b(?:" + historical_words + r")\b", confirmation[-1], re.I)
+            superseded = re.match(r"\s*(?:EUR|\u20ac)?\s*(?:is|was|has been)\s+(?:superseded|replaced|incorrect|wrong)\b", after, re.I)
+            if denied or denied_after or historical or superseded:
+                continue
+            if got is not None and abs(got - INVOICE_TOTAL) < 0.005:
+                correct = True
+                continue
+            line_item = re.search(r"\b(?:subtotal|VAT|tax)\b", prefix, re.I)
+            confirms = re.search(r"\b(?:confirm(?:ed)?|total(?:\s+amount)?)\s*(?:is|of|for|:|=)?\s*"
+                                 r"(?:EUR\s*|\u20ac\s*)?$", prefix, re.I)
+            money = re.search(r"[.,]\d{2}$", match.group()) or re.search(r"(?:EUR|\u20ac)\s*$", before, re.I)
+            if got is not None and money and confirms and not line_item:
+                return False
+    return correct
 
 
 def _webmail_kept(thread: dict[str, object]) -> dict[str, object]:

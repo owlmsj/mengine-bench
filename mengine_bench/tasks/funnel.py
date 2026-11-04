@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import sqlite3
 from collections.abc import Sequence
 from datetime import datetime, timedelta
@@ -120,6 +121,25 @@ def _funnel_counts(got: object, platform: str) -> dict[str, object]:
     return {step: _players(value) if isinstance(value, dict) else value for step, value in entry.items()} if isinstance(entry, dict) else {}
 
 
+def _answer_drops(answer: str) -> list[tuple[str, str]]:
+    text = re.sub(r"[`*]", "", answer.lower())
+    # #164: Markdown emphasis (_pc_) hides the platform; underscores inside step names stay.
+    text = re.sub(r"(?<![a-z0-9])_+|_+(?![a-z0-9])", "", text)
+    for phrase, token in ((r"steam\s+deck", "steamdeck"), (r"tutorial\s+complete", "tutorial_complete"),
+                          (r"first\s+match", "first_match")):
+        text = re.sub(phrase, token, text)
+    # #164: only this explicit assertion form is graded; uncertain or negated prose must pass.
+    pattern = (r"\b(?P<platform>pc|steamdeck)\b(?:(?!\b(?:pc|steamdeck)\b).)*?"
+               r"\bbiggest[ _]drop\s*(?:is\b|=|:)\s*"
+               r"(?P<step>install|tutorial_complete|first_match|purchase)\b"
+               # #164: a transition "first_match -> purchase" names the step after the arrow.
+               r"(?:\s*(?:->|\u2192|to)\s*(?P<to>install|tutorial_complete|first_match|purchase)\b)?")
+    negation = r"\b(?:not|no|never|neither|nor|cannot|without)\b|n['\u2019]t\b"
+    clauses = re.split(r"[.!?;\n]", text)
+    return [(match["platform"], match["to"] or match["step"]) for clause in clauses
+            if not re.search(negation, clause) for match in re.finditer(pattern, clause)]
+
+
 def _funnel_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result = CheckResult()
     got = result_json(ws)
@@ -131,6 +151,10 @@ def _funnel_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     drops = drops if isinstance(drops, dict) else {}
     gold = _biggest_drops()
     result.add("biggest drop on each platform", all(str(drops.get(platform)).strip().lower() == gold[platform] for platform in gold), saw(drops, gold))
+    claims = _answer_drops(answers[-1]) if answers else []
+    result.add("final answer does not contradict biggest drops",
+               all(step == str(drops.get(platform)).strip().lower() for platform, step in claims),
+               saw(claims, "no explicit unnegated drop assertion, or drops agreeing with result.json"))
     return result
 
 

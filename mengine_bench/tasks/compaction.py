@@ -79,7 +79,9 @@ HANDOFF_GOLD = {
     # #59: the value with a unit glued to it counts; the superseded 37.8 next to it does not.
     "final_decode": r"^(?!.*37[.,]8)(?=.*(?<![\w.,+-])38(?:[.,]0+)?(?!\d|[.,]\d))",
     "final_vram_mib": r"(?<![\w.,+-])7697(?:[.,]0+)?(?!\w|[.,]\d)",
-    "discarded_quant": r"\bQ6(?:_?K)?\b",
+    # #164: one quantization, not a hedge containing the gold plus other candidates.
+    "discarded_quant": r"^(?=.*\bQ6(?:_?K)?\b)"
+                       r"(?!.*\b(?!Q6(?:_?K)?\b)(?:I?Q\d+[A-Z0-9_]*|BF16|FP(?:16|32)|F(?:16|32))\b)",
     # #28, #59: the README with what is wrong in it, in any wording, and not another README.
     "pending": r"^(?!.*\broot\b)(?=.*\bREADME\b)"
                r"(?=.*\b(?:update|fix|remove|edit|replace|check_vision|evals|stale|out of date))",
@@ -90,6 +92,18 @@ HANDOFF_GOLD = {
 
 
 HANDOFF_LIMIT = 1000
+
+
+def _discarded_quant_answer(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    quant = r"\b(?:I?Q\d+[A-Z0-9_]*|BF16|FP(?:16|32)|F(?:16|32))\b"
+    # #164: retained/fallback context is allowed, but must not excuse an ambiguous discarded choice.
+    if re.search(quant + r"\s+or\s+" + quant, value, re.I):
+        return ""
+    retained = quant + r"`?\s*(?:\([^)]*\)\s*)?(?:(?:is|was|remains)\s+)?" \
+               r"(?:kept|retained|(?:only\s+)?(?:the\s+|a\s+)?fallback)\b"
+    return re.sub(retained, "", value, flags=re.I)
 
 
 def _handoff_setup(ws: Path) -> None:
@@ -106,7 +120,8 @@ def _handoff_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     vram = next((number for number in numbers if float(number) >= 1000), None)
     got["final_vram_mib"] = vram or ""
     for key, pattern in HANDOFF_GOLD.items():
-        result.add(f"answer {key}", has(str(got.get(key, "")), pattern), saw(got.get(key), f"a match for {pattern}"))
+        value = _discarded_quant_answer(got.get(key)) if key == "discarded_quant" else str(got.get(key, ""))
+        result.add(f"answer {key}", has(value, pattern), saw(got.get(key), f"a match for {pattern}"))
     result.add("does not repeat the spilled VRAM as final", vram is not None and not close(vram, 7881, 0), saw(vram, "not 7881"))
     return result
 

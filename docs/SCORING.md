@@ -1,4 +1,4 @@
-# Scoring (bench 2.1)
+# Scoring (bench 2.5)
 
 A run of an agent (harness + model + configuration) gets three numbers folded into
 the Score, and a Cost kept apart.
@@ -8,7 +8,7 @@ the Score, and a Cost kept apart.
 | **Correct %** | `100 x mean(c_i)` over every task. Deterministic: anyone reproduces it with `run` and `selftest`. |
 | **Judge** | Mean of one rubric vote per task, 0-100. Set by the maintainer with `mengine-bench judge`. |
 | **Speed** | 100 at 5 min of Time or less, 0 at 30 min or more, linear in between: `100 x (1800 - Time) / 1500`. |
-| **Score** | `0.6 x Correct % + 0.15 x Judge + 0.25 x Speed x Correct % / 100`, one decimal, from the published values. Speed pays only for work that is right. Only once judged. |
+| **Score** | `0.5 x Correct % + 0.25 x Judge + 0.25 x Speed x Correct % / 100`, one decimal, from the published values. Speed pays only for work that is right. Only once judged. |
 | **Time** | Total agent wall seconds. Grading and judging are excluded; a timeout counts its full time. On Codex the clock stops at the final event (`turn.completed`); a process still alive 5 s later is ended and flagged, not counted as a timeout. |
 | **Cost** | One column (#162): `$x` exact when the harness reports it, else `~$x`, the run's tokens at public API list prices (below), so subscription and API runs compare; `$0.00 (local)` for local inference, `>=` a lower bound, `n/a` neither. No points per dollar. |
 | **Thinking, Tools, Tool s** | Reasoning tokens, tool calls, and the median seconds per tool call where the harness times each call (opencode, AGY, Claude Code event stamps; `-` on Codex, never estimated). Statistics only, no points (#162). |
@@ -47,6 +47,16 @@ the agent is done, and nothing the task started is left running. On every task t
 left running (a process born during the task whose parent links lead back to the runner; never one that existed
 before the task or was born from one) and records it as `left_running`, with `left_open_tabs` on the site tasks; a
 page told the task is over blanks itself. The 2.0 to 2.3 runs stay in the ranking, each row marked with its version.
+Bench 2.5 (#164) hardens the checks after an audit of two runs found the judge calibrated (55 of 56 votes within 8
+points of an auditor's) and the checks lenient. Correct moves 0.1 of the Score to Judge (0.5 and 0.25, Speed stays
+0.25). Checks may now read the run's tool calls: web-fact-search and web-plan-ranking count a source only when it
+was fetched: a fetch counts from a fetch or browser tool's input or a URL written in an executed fetch command
+(curl, wget, Invoke-WebRequest, `python -c`, `node -e`), matched by host; a script file the agent writes and runs is
+not evidence, since the trace cannot show what it fetched. Every task gains the gate "nothing written outside the workspace". 3d-print-homage scores its
+render's composition against the print. Leniencies the audit and a review of every grader found are fixed, each
+with the wrong answer that used to pass as a test. The 2.0 to 2.4 runs stay ranked, each row marked with its
+version, graded without these checks; the leaderboard recomputes every ranked Score with the 2.5 weights from the
+run's own published Correct %, Judge and Speed, so no run is judged again and no number is edited by hand.
 
 A run is one sample and runs are not repeated, so ties come from the published tasks: draw the tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
@@ -222,7 +232,7 @@ Three tasks, Claude Code (harness USD):
 - Judge = (80 + 60 + 30) / 3 = 56.7
 - Time = 120 + 300 + 900 = 1320 s (22 min 00 s)
 - Speed = 100 x (1800 - 1320) / 1500 = 32.0
-- Score = 0.6 x 53.3 + 0.15 x 56.7 + 0.25 x 32.0 x 53.3 / 100 = 44.7
+- Score = 0.5 x 53.3 + 0.25 x 56.7 + 0.25 x 32.0 x 53.3 / 100 = 45.1
 - Cost = 0.40 + 0.90 = >= $1.30 (harness), a lower bound because C has no usage
 
 With `--price input=1.25,cached=0.125,output=10`, a Codex step of 2,000,000

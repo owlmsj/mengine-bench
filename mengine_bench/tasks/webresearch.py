@@ -17,9 +17,13 @@ from datetime import date
 from pathlib import Path
 
 from mengine_bench.core import (
+    Checkpoint,
     CheckResult,
     EvalTask,
+    ReferenceAnswers,
     Step,
+    ToolCall,
+    TraceCheck,
     WROTE_RESULT,
     checkpoints,
     number,
@@ -28,6 +32,7 @@ from mengine_bench.core import (
     saw,
     write,
 )
+from mengine_bench.runner.trace import fetched_hosts, host_key, url_key
 
 RUBRIC_FILE = "RUBRIC.md"
 DOSSIER_FILE = "dossier.md"
@@ -218,13 +223,25 @@ def _web_row_score_ok(row: Mapping[str, object]) -> bool:
     return abs(score - want) <= WEB_SCORE_TOL or abs(score / 100 - want) <= WEB_SCORE_TOL
 
 
-def _web_has_url(row: Mapping[str, object]) -> bool:
+def _web_cited_urls(text: str) -> set[str]:
+    urls: set[str] = set()
+    for url in re.findall(r'''https?://[^\s<>\]"']+''', text):
+        url = url.rstrip(".,;:")
+        # #164: prose punctuation and Markdown's closing parenthesis are not part of a cited URL.
+        while url.endswith(")") and url.count(")") > url.count("("):
+            url = url[:-1]
+        urls.add(url)
+    return urls
+
+
+def _web_has_url(row: Mapping[str, object], fetched: set[str]) -> bool:
     sources = row.get("sources")
     items = sources if isinstance(sources, list) else [sources]
-    return any(re.search(r"https?://\S+\.\S+", str(item or "")) for item in items)
+    return any(host_key(url) in fetched for item in items for url in _web_cited_urls(str(item or "")))
 
 
-def _web_check(ws: Path, answers: Sequence[str]) -> CheckResult:
+@TraceCheck
+def _web_check(ws: Path, answers: Sequence[str], trace: Sequence[ToolCall]) -> CheckResult:
     result = CheckResult()
     got = result_json(ws)
     rows = _web_rows(got)
@@ -260,14 +277,17 @@ def _web_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     top = got.get("top3")
     top_names = [p.name if (p := _web_plan_named(item)) else str(item) for item in top] if isinstance(top, list) else top
     result.add("top 3", top_names == list(WEB_TOP3), saw(top, list(WEB_TOP3)))
-    unsourced = [name for name in names if name not in rows or not _web_has_url(rows[name])]
-    result.add("every plan has a source", not unsourced, saw(unsourced, "an http(s) URL in sources for every plan"))
+    fetched = fetched_hosts(trace)
+    unsourced = [name for name in names if name not in rows or not _web_has_url(rows[name], fetched)]
+    result.add("every plan has a source", not unsourced, saw(unsourced, "a cited http(s) URL on a fetched host for every plan"))
     dossier = read(ws, DOSSIER_FILE) or ""
-    urls = set(re.findall(r"https?://[^\s)>\]]+", dossier))
+    cited = {url for url in _web_cited_urls(dossier) if host_key(url) in fetched}
+    urls = {url_key(url) for url in cited}
     plain = unicodedata.normalize("NFKD", dossier).encode("ascii", "ignore").decode().lower()
     plans_named = sorted(word for word in ("cruzado", "bresser", "verao", "collor", "real") if re.search(rf"\b{word}\b", plain))
     result.add("dossier", len(dossier) >= 600 and len(urls) >= 3 and len(plans_named) >= 3,
-               saw({"chars": len(dossier), "urls": len(urls), "plans": plans_named}, "600+ chars, 3+ URLs, 3+ plans"))
+               saw({"chars": len(dossier), "urls": len(urls), "plans": plans_named},
+                   "600+ chars, 3+ cited URLs on fetched hosts, 3+ plans"))
     return result
 
 
@@ -288,7 +308,9 @@ def _web_reference(ws: Path) -> list[str]:
               "cut the annual rate but were followed by a new plan within three years.", "",
               "IPCA series: https://apisidra.ibge.gov.br/values/t/1737/n1/all/v/2265"]
     write(ws, DOSSIER_FILE, "\n".join(lines) + "\n")
-    return ["done"]
+    urls = {str(url) for row in rows for url in row["sources"]}
+    urls.add("https://apisidra.ibge.gov.br/values/t/1737/n1/all/v/2265")
+    return ReferenceAnswers(["done"], [ToolCall("WebFetch", {"url": url}) for url in sorted(urls)])
 
 
 TASKS = [
@@ -299,8 +321,8 @@ TASKS = [
         setup=_web_setup, check=_web_check, reference=_web_reference, timeout_s=210,
         deliverables=(DOSSIER_FILE,),
         checkpoints=checkpoints(("read the rubric", r"RUBRIC"), ("searched the web", r"web_?search|search_query|google|bing|duckduckgo"),
-                                ("opened a source", r"web_?fetch|fetch_url|curl|Invoke-WebRequest|wikipedia\.org|ibge\.gov"), WROTE_RESULT,
-                                ("wrote the dossier", r"dossier\.md")),
+                                WROTE_RESULT, ("wrote the dossier", r"dossier\.md"))
+                    + (Checkpoint("opened a source", r"https?://", fetch_only=True),),
         steps=(Step("A policy newsletter is running a piece on which of Brazil's anti-inflation plans delivered what it "
                     "promised, and wants a ranking it can defend. Research the plans in {WS}/RUBRIC.md on the open web: "
                     "this one needs public sources, and you are allowed to browse. Score every plan with that rubric, "

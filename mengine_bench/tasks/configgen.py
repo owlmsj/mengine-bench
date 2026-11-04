@@ -3,25 +3,36 @@
 The owner's rule is that a generated file is never the place to fix a value: the fix goes into the source and the
 copies are rebuilt from it. The gold runs the original generator on the delivered source, so editing the source and
 running the generator passes, and so does editing the source and patching every copy by hand to the same result.
+The delivered gen.py must also still rebuild those same configs (#164), so a broken generator fails one check.
+The grader runs delivered code with the runner's authority, like other tasks' hidden tests;
+an OS sandbox for all grader executions is a separate issue (#164).
 """
 
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import tomllib
 from collections.abc import Sequence
 from pathlib import Path
+from typing import BinaryIO
 
 from mengine_bench.core import CheckResult, EvalTask, Step, checkpoints, read, saw, scratch_root, write
+from mengine_bench.runner.containment import new_scope, stop_session_group
 
 CFG_FAST_CODER = "fast-coder"
 CFG_WANTED_CONTEXT = 262144
 CFG_OLD_CONTEXT = 131072
 CFG_OUTPUTS = ("out/opencode.json", "out/codex.toml", "out/claude.json")
 CFG_GEN_LIMIT_S = 60
+CFG_GEN_OUTPUT_LIMIT = 64 * 1024
+CFG_COPY_EXCLUSIONS = (".git", "__pycache__", ".venv", "node_modules")
 
 CFG_SOURCE = """{
   "models": [
@@ -111,14 +122,113 @@ def _cfg_generate(source_text: str) -> dict[str, str]:
         root = Path(tmp)
         write(root, CFG_GEN_FILE, CFG_GEN)
         write(root, CFG_SOURCE_FILE, source_text)
+        return _cfg_run_generator(root, "-I")
+
+
+def _cfg_generate_delivered(ws: Path) -> dict[str, str]:
+    """The delivered gen.py run on a copy of the delivered project with out/ emptied, or {} when it fails (#164)."""
+    with tempfile.TemporaryDirectory(prefix="bench-cfg-own-", dir=scratch_root()) as tmp:
+        root = Path(tmp) / "project"
+        # A refactor may import sibling modules, so the whole project goes; the outputs do not, so a generator that
+        # writes nothing cannot pass on the delivered copies.
         try:
-            done = subprocess.run([sys.executable, "-I", str(root / CFG_GEN_FILE)], cwd=root, capture_output=True,
-                                  text=True, timeout=CFG_GEN_LIMIT_S, check=False)
-        except subprocess.TimeoutExpired:
+            _cfg_check_links(ws)
+            shutil.copytree(ws, root, symlinks=True,
+                            ignore=shutil.ignore_patterns(*CFG_COPY_EXCLUSIONS))
+            # #164: an absolute internal link must point into the copy, never back into the delivery.
+            absolute_links = [(link, root / link.resolve().relative_to(ws.resolve())) for link in root.rglob("*")
+                              if link.is_symlink() and link.readlink().is_absolute()]
+            for link, target in absolute_links:
+                link.unlink()
+                link.symlink_to(os.path.relpath(target, link.parent), target_is_directory=target.is_dir())
+            _cfg_check_links(root)
+            for rel in CFG_OUTPUTS:
+                (root / rel).unlink(missing_ok=True)
+        except (OSError, ValueError, RuntimeError):
             return {}
-        if done.returncode != 0:
-            return {}
-        return {rel: read(root, rel) or "" for rel in CFG_OUTPUTS}
+        # As the README runs it (`python gen.py`): -I would also hide the script's own folder from its imports.
+        return _cfg_run_generator(root, "-Es")
+
+
+def _cfg_check_links(root: Path) -> None:
+    # #164: validate exactly the copied tree; ignored environments may legitimately link outside it.
+    resolved_root = root.resolve()
+    for directory, subdirs, files in os.walk(root):
+        subdirs[:] = [name for name in subdirs if name not in CFG_COPY_EXCLUSIONS]
+        included = (Path(directory) / name for name in subdirs + files if name not in CFG_COPY_EXCLUSIONS)
+        escaping = next((path for path in included if not path.resolve().is_relative_to(resolved_root)), None)
+        if escaping is not None:
+            raise ValueError(saw(escaping.relative_to(root).as_posix(), "a symlink resolving inside the project"))
+
+
+def _cfg_generator_environment(root: Path) -> dict[str, str]:
+    environment = {"PATH": os.pathsep.join((str(Path(sys.executable).parent), os.defpath))}
+    if os.name == "nt":
+        if "SYSTEMROOT" in os.environ:
+            environment["SYSTEMROOT"] = os.environ["SYSTEMROOT"]
+        temp = root.parent / "process-temp"
+        temp.mkdir(exist_ok=True)
+        environment.update(TEMP=str(temp), TMP=str(temp))
+    return environment
+
+
+def _cfg_drain_output(pipe: BinaryIO, captured: bytearray) -> None:
+    # #164: keep at most the diagnostic budget, even when the generator floods both output streams.
+    with pipe:
+        while chunk := pipe.read(4096):
+            remaining = CFG_GEN_OUTPUT_LIMIT - len(captured)
+            captured.extend(chunk[:remaining])
+
+
+def _cfg_run_generator(root: Path, isolation: str) -> dict[str, str]:
+    scope = new_scope()
+    proc: subprocess.Popen[bytes] | None = None
+    captured = bytearray()
+    reader: threading.Thread | None = None
+    completed = False
+    try:
+        # #164: suspend/adopt/resume on Windows or a new POSIX session contains descendants before execution.
+        deadline = time.monotonic() + CFG_GEN_LIMIT_S
+        proc = subprocess.Popen([sys.executable, isolation, str(root / CFG_GEN_FILE)], cwd=root,
+                                env=_cfg_generator_environment(root), stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **scope.popen_kwargs)
+        scope.adopt(proc)
+        assert proc.stdout is not None
+        reader = threading.Thread(target=_cfg_drain_output, args=(proc.stdout, captured), daemon=True)
+        reader.start()
+        while proc.poll() is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                proc.wait(timeout=min(remaining, 0.05))
+            except subprocess.TimeoutExpired:
+                continue
+        completed = proc.poll() == 0
+    except OSError:
+        return {}
+    finally:
+        try:
+            if proc is not None:
+                stop_session_group(proc.pid)
+                scope.kill_all(proc.pid)
+                if proc.poll() is None:
+                    proc.kill()
+                proc.wait(timeout=5)
+            if reader is not None:
+                reader.join(timeout=1)
+        finally:
+            scope.close()
+    if not completed or (reader is not None and reader.is_alive()):
+        return {}
+    try:
+        _cfg_check_links(root)
+    except (OSError, ValueError, RuntimeError):
+        return {}
+    outputs = {rel: read(root, rel) for rel in CFG_OUTPUTS}
+    if any(text is None for text in outputs.values()):
+        return {}
+    return {rel: text or "" for rel, text in outputs.items()}
 
 
 def _cfg_parse(rel: str, text: str | None) -> object | None:
@@ -201,6 +311,12 @@ def _cfg_check(ws: Path, answers: Sequence[str]) -> CheckResult:
              if not regenerated or _cfg_parse(rel, read(ws, rel)) != _cfg_parse(rel, regenerated.get(rel))]
     result.add("the delivered configs equal what the source generates", not stale,
                saw(f"{stale} differ from a fresh generation", "every out/ file as gen.py writes it"))
+    # #164: "for good" means the project's own generator still rebuilds out/; any equivalent refactor passes.
+    own = _cfg_generate_delivered(ws) if regenerated else {}
+    differs = [rel for rel in CFG_OUTPUTS if not own or _cfg_parse(rel, own.get(rel)) != _cfg_parse(rel, regenerated.get(rel))]
+    result.add("the delivered generator still writes those configs", not differs,
+               saw(f"{differs} differ or are missing when the delivered {CFG_GEN_FILE} runs",
+                   "every out/ file as the original gen.py writes it from the delivered source"))
     models = _cfg_without_target(_cfg_models_by_name(source))
     expected = _cfg_without_target(_cfg_models_by_name(CFG_SOURCE))
     result.add("the other models and fields are unchanged", models == expected, saw(models, expected))

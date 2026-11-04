@@ -9,6 +9,7 @@ one a run took (browser or scripted HTTP) is recorded as a note, never a grade.
 from __future__ import annotations
 
 import hashlib
+import io
 import http.cookiejar
 import json
 import re
@@ -141,10 +142,20 @@ def _reference(ws: Path) -> list[str]:
 
 
 def png_size(data: bytes) -> tuple[int, int] | None:
-    if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
+    from PIL import Image
+
+    # #164: the upload endpoint accepts arbitrary nonempty bytes; an IHDR alone
+    # must not earn credit for a poster that no image viewer can open.
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            if image.format != "PNG":
+                return None
+            image.verify()
+        with Image.open(io.BytesIO(data)) as image:
+            image.load()
+            return image.size
+    except (OSError, ValueError, SyntaxError):
         return None
-    width, height = struct.unpack(">II", data[16:24])
-    return width, height
 
 
 def _signed_history(ws: Path, result: CheckResult) -> tuple[list[dict[str, object]], list[SiteEvent]]:
@@ -204,7 +215,10 @@ def _check(ws: Path, answers: Sequence[str]) -> CheckResult:
     kept = {post["uri"]: post for post in final if post["uri"] in seed}
     result.add("other people's posts and older posts untouched", kept == seed,
                saw(sorted(set(seed) - set(kept)), "no seed post missing or changed"))
-    extra = [post["record"].get("text") for post in final if post["uri"] not in seed]
+    # #164: deleting an extra publication cannot undo the forbidden publication.
+    extra = [post["record"].get("text") for _, post in created if post["uri"] != test_post["uri"]]
+    if test_post["uri"] in final_uris:
+        extra.append(record.get("text"))
     result.add("nothing else published", not extra, saw(extra, []))
     in_order = 0 <= test_at < deleted.get(test_post["uri"], -1)
     result.add("post, then delete", in_order, saw([test_at, deleted.get(test_post["uri"])],

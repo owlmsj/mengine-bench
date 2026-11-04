@@ -211,6 +211,27 @@ def test_a_missing_relation_in_the_sample_fails_and_says_which(graded: Path) -> 
     assert SAMPLE_CHECK in result.failed() and "nostalgia" in result.details[SAMPLE_CHECK] and lost in result.details[SAMPLE_CHECK]
 
 
+def test_deleting_every_unsampled_pair_fails(graded: Path) -> None:
+    sampled = set(words.RELATION_SAMPLE)
+    links = {word: [other for other in others if word in sampled or other in sampled]
+             for word, others in _gold_lists().items()}
+    assert len(words._pairs(words._delivered_links(links))) < GOLD_PAIRS
+    _deliver(graded, links)
+    result = _check(graded)
+    assert SAMPLE_CHECK in result.failed(), result.details
+    assert RESULT_CHECK in result.failed(), result.details
+
+
+def test_an_unsampled_invented_pair_fails(graded: Path) -> None:
+    pair = next((word, other) for word in GOLD for other in GOLD
+                if word != other and word not in words.RELATION_SAMPLE and other not in words.RELATION_SAMPLE
+                and other not in GOLD[word] and frozenset((word, other)) not in words._noise_pairs())
+    links = _gold_lists()
+    links[pair[0]].append(pair[1])
+    _deliver(graded, links)
+    assert SAMPLE_CHECK in _check(graded).failed()
+
+
 @pytest.mark.parametrize("source", [next(word for word in words._day_words("saudade") if word not in GOLD["saudade"]), words.FOOTER_WORDS[0]],
                          ids=["sidebar", "footer"])
 def test_a_link_from_the_sidebar_or_the_footer_is_a_false_relation(graded: Path, source: str) -> None:
@@ -273,7 +294,7 @@ def test_a_page_without_a_search_field_fails(graded: Path, page: str) -> None:
 
 def test_the_page_runs_under_the_existing_page_checks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[Path] = []
-    monkeypatch.setattr(task_run, "add_page_checks", lambda result, html: seen.append(html))
+    monkeypatch.setattr(task_run, "add_page_checks", lambda result, html, composition=None: seen.append(html))
     monkeypatch.setattr(words, "dump_page_dom", lambda page, query: (visual.RENDERED, _panel_dom(query)))
     TASK.setup(tmp_path)
     record = task_run.TaskRunRecord(task_id=TASK.id, answers=TASK.reference(tmp_path), workspace=tmp_path)

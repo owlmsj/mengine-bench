@@ -4,18 +4,26 @@ from __future__ import annotations
 
 import itertools
 import json
+import re
 from pathlib import Path
 
 import pytest
 
 from mengine_bench import catalog
-from mengine_bench.core import write
+from mengine_bench.core import CheckResult, ToolCall, write
 from mengine_bench.tasks import webresearch as web
 from mengine_bench.tasks.webresearch import WEB_PLANS, WEB_TOP3, web_reference_rows, web_rubric_score
 
 TASK = next(task for task in catalog.all_tasks() if task.id == "web-plan-ranking")
 CHECK_NAMES = ["all six plans recorded", "launch dates", "inflation before and after", "months lasted",
                "scores follow the rubric", "top 3", "every plan has a source", "dossier"]
+
+
+def _check(ws: Path, answers: list[str]) -> CheckResult:
+    # #164: the offline reference needs explicit synthetic fetch evidence, never implicit trust in its URLs.
+    text = " ".join(path.read_text(encoding="utf-8") for path in ws.iterdir() if path.suffix in {".json", ".md"})
+    urls = re.findall(r'https?://[^\s"\')>\]]+', text)
+    return TASK.check(ws, answers, [ToolCall("WebFetch", {"url": url}) for url in urls])
 
 
 def _solved(ws: Path) -> Path:
@@ -36,11 +44,12 @@ def _row(got: dict[str, object], name: str) -> dict[str, object]:
 
 
 def test_the_reference_passes_and_the_untouched_folder_fails(tmp_path: Path) -> None:
-    result = TASK.check(_solved(tmp_path / "solved"), ["done"])
+    result = _check(_solved(tmp_path / "solved"), ["done"])
     assert result.passed, result.details
+    assert TASK.check(tmp_path / "solved", TASK.reference(tmp_path / "solved")).passed
     (tmp_path / "bare").mkdir()
     TASK.setup(tmp_path / "bare")
-    bare = TASK.check(tmp_path / "bare", [""])
+    bare = _check(tmp_path / "bare", [""])
     assert bare.score == 0.0 and [name for name, _ in bare.checks] == CHECK_NAMES
 
 
@@ -65,7 +74,7 @@ def test_another_valid_route_and_writing_passes(tmp_path: Path) -> None:
         got["top3"] = ["Plano Real", "Plano Collor I", "plano collor ii"]
 
     _rewrite(ws, other_route)
-    result = TASK.check(ws, [""])
+    result = _check(ws, [""])
     assert result.passed, result.details
 
 
@@ -109,7 +118,7 @@ def _no_source(got: dict[str, object]) -> None:
 def test_each_check_fails_on_its_own_wrong_answer(tmp_path: Path, check: str, break_it: object) -> None:
     ws = _solved(tmp_path)
     _rewrite(ws, break_it)
-    result = TASK.check(ws, [""])
+    result = _check(ws, [""])
     assert check in result.failed() and check in result.details
     # A missing plan also takes its dates, rates and score with it; every other break hits one check only.
     if break_it is not _drop_plan:
@@ -123,7 +132,7 @@ def test_a_missing_thin_or_unsourced_dossier_fails(tmp_path: Path, dossier: str 
     (ws / web.DOSSIER_FILE).unlink()
     if dossier is not None:
         write(ws, web.DOSSIER_FILE, dossier)
-    assert TASK.check(ws, [""]).failed() == ["dossier"]
+    assert _check(ws, [""]).failed() == ["dossier"]
 
 
 def test_a_bare_collor_is_not_a_plan_name() -> None:
@@ -141,7 +150,7 @@ def test_the_brief_asks_for_the_web_but_hands_over_no_answer() -> None:
 def test_a_correct_answer_in_the_chat_alone_earns_nothing(tmp_path: Path) -> None:
     TASK.setup(tmp_path)
     answer = json.dumps({"plans": web_reference_rows(), "top3": list(WEB_TOP3)})
-    assert TASK.check(tmp_path, [answer]).score == 0.0
+    assert _check(tmp_path, [answer]).score == 0.0
 
 
 def test_the_canonical_top3_holds_across_every_accepted_tolerance() -> None:
@@ -166,3 +175,59 @@ def test_the_canonical_top3_holds_across_every_accepted_tolerance() -> None:
         assert worst[better][0] > worst[worse][1], (better, worse, worst)
     rest = [name for name in worst if name not in WEB_TOP3]
     assert worst[WEB_TOP3[-1]][0] > max(worst[name][1] for name in rest), worst
+
+
+def test_unopened_citations_no_longer_pass(tmp_path: Path) -> None:
+    # #164: Opus delivered URLs without fetching any of them.
+    result = TASK.check(_solved(tmp_path), ["done"])
+    assert "every plan has a source" in result.failed()
+    assert "dossier" in result.failed()
+
+
+def test_one_fetched_source_cannot_satisfy_three_url_dossier(tmp_path: Path) -> None:
+    ws = _solved(tmp_path)
+    url = "https://www.idinheiro.com.br/tabelas/tabela-ipca/"
+
+    def cite_opened(got: dict[str, object]) -> None:
+        for row in got["plans"]:
+            row["sources"] = [url]
+
+    _rewrite(ws, cite_opened)
+    with (ws / web.DOSSIER_FILE).open("a", encoding="utf-8") as dossier:
+        dossier.write("\n" + url)
+    result = TASK.check(ws, [], [ToolCall("WebFetch", {"url": url})])
+    assert result.failed() == ["dossier"]
+    assert "'urls': 1" in result.details["dossier"]
+
+
+def test_distinct_fetched_query_urls_still_count_as_three_urls(tmp_path: Path) -> None:
+    ws = _solved(tmp_path)
+    urls = [f"https://example.org/source?year={year}" for year in (1985, 1987, 1989)]
+    write(ws, web.DOSSIER_FILE, "Cruzado, Bresser, Real. " * 35 + "\n" + "\n".join(urls))
+    result = TASK.check(ws, [], [ToolCall("WebFetch", {"url": url}) for url in urls])
+    assert "dossier" not in result.failed()
+
+
+def test_one_fetched_host_accepts_three_cited_urls(tmp_path: Path) -> None:
+    ws = _solved(tmp_path)
+    urls = [f"https://example.org/source?year={year}" for year in (1985, 1987, 1989)]
+    write(ws, web.DOSSIER_FILE, "Cruzado, Bresser, Real. " * 35 + "\n" + "\n".join(urls))
+    result = TASK.check(ws, [], [ToolCall("WebFetch", {"url": urls[0]})])
+    assert "dossier" not in result.failed()
+
+
+def test_three_fetched_hosts_allow_other_cited_pages(tmp_path: Path) -> None:
+    ws = _solved(tmp_path)
+    hosts = ["example.org", "example.net", "example.com"]
+    write(ws, web.DOSSIER_FILE, "Cruzado, Bresser, Real. " * 35 + "\n" + "\n".join(f"https://{host}/citation" for host in hosts))
+    result = TASK.check(ws, [], [ToolCall("WebFetch", {"url": f"https://{host}/fetched"}) for host in hosts])
+    assert "dossier" not in result.failed()
+
+
+def test_dossier_urls_with_prose_punctuation_and_parentheses(tmp_path: Path) -> None:
+    ws = _solved(tmp_path)
+    urls = ["https://example.org/one", "https://example.org/two", "https://example.org/Plan_(history)"]
+    citations = f"Source: {urls[0]}. Source: {urls[1]}; [history]({urls[2]})"
+    write(ws, web.DOSSIER_FILE, "Cruzado, Bresser, Real. " * 35 + "\n" + citations)
+    result = TASK.check(ws, [], [ToolCall("WebFetch", {"url": url}) for url in urls])
+    assert "dossier" not in result.failed()

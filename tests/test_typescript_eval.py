@@ -145,3 +145,24 @@ def test_the_brief_does_not_hand_over_the_cause() -> None:
 def test_a_fix_only_in_the_chat_earns_nothing(tmp_path: Path) -> None:
     typescript._ts_setup(tmp_path)
     assert typescript._ts_check(tmp_path, [BUS.replace(PLANTED_EMIT, FIXED_EMIT)]).score == 0
+
+
+@pytest.mark.parametrize("failure_kind", ["both", "sync", "async"])
+def test_continuing_after_a_handler_failure_fails(tmp_path: Path, failure_kind: str) -> None:
+    emit = """  async emit<T>(event: string, payload: T): Promise<void> {
+    let failure: unknown;
+    for (const handler of [...(this.handlers.get(event) ?? [])]) {
+      BODY
+    }
+    if (failure) throw failure;
+  }
+"""
+    bodies = {
+        "both": "try { await handler(payload); } catch (error) { failure = error; }",
+        "sync": "let pending; try { pending = handler(payload); } catch (error) { failure = error; }\n"
+                "      await pending;",
+        "async": "const pending = handler(payload);\n"
+                 "      try { await pending; } catch (error) { failure = error; }",
+    }
+    result = typescript._ts_check(_with_emit(tmp_path, emit.replace("BODY", bodies[failure_kind])), [""])
+    assert "hidden a failing handler rejects emit" in result.failed(), result.details

@@ -1,0 +1,94 @@
+"""#164: a correct file must not hide a contradictory final answer."""
+
+from pathlib import Path
+
+import pytest
+
+from mengine_bench.tasks import funnel
+
+
+def test_reference_passes_and_untouched_fails(tmp_path: Path) -> None:
+    funnel._funnel_setup(tmp_path)
+    assert not funnel._funnel_check(tmp_path, [""]).passed
+    assert funnel._funnel_check(tmp_path, funnel._funnel_reference(tmp_path)).passed
+
+
+def test_sonnet_funnel_contradiction(tmp_path: Path) -> None:
+    funnel._funnel_reference(tmp_path)
+    # #164: verbatim result bullets from the Sonnet bundle; the file was correct.
+    answer = (
+        "- **pc:** biggest_drop is `first_match` (0.825). It is close to the others: "
+        "0.828 for `tutorial_complete` and 0.838 for `purchase`.\n"
+        "- **steamdeck:** biggest_drop is `tutorial_complete` (0.667), then 0.680 "
+        "for `first_match` and 0.701 for `purchase`. Steam Deck loses a third of "
+        "installs before the tutorial finishes."
+    )
+    result = funnel._funnel_check(tmp_path, [answer])
+    assert result.failed() == ["final answer does not contradict biggest drops"]
+    assert not result.mandatory
+
+
+@pytest.mark.parametrize("answer", [
+    "done", "", "The counts are in result.json.",
+    "- **PC:** biggest_drop is `PURCHASE`.\n- Steam Deck: largest drop is tutorial complete.",
+    "- **PC:** biggest_drop is `PURCHASE`\n- **Steam Deck:** largest drop is tutorial complete",
+    "PC: biggest drop is purchase, Steam Deck: biggest drop is tutorial_complete",
+    "The biggest drop on PC is purchase; the lowest conversion for steamdeck is tutorial_complete.",
+    "Purchase is the biggest drop for PC. Tutorial complete is the largest drop on Steam Deck.",
+    "PC loses the most players at purchase. Steamdeck loses the most players at tutorial_complete.",
+    "PC: first_match converts at 0.838; purchase converts at 0.825.",
+    "PC's biggest drop is not first_match but purchase.",
+    "PC's biggest drop isn't first_match; it is purchase.",
+    "PC's biggest drop wasn't first_match; it is purchase.",
+    "PC's biggest drop is never first_match; it is purchase.",
+    "First match isn't the biggest drop for PC; purchase is.",
+    "PC: first_match is not the biggest drop; purchase is.",
+    "PC: first_match was never the biggest drop; purchase is.",
+    "PC: purchase is the biggest drop. Steamdeck: tutorial_complete is the largest drop.",
+    "PC: the largest drop is from first_match to purchase.",
+    "Steam Deck: the largest drop is install -> tutorial_complete.",
+    "The biggest drop on pc is tutorial complete.",
+    "First match is the largest drop for PC.",
+    "PC loses the most players at first match.",
+    "Steam Deck: lowest conversion is purchase.",
+    "PC: first_match is the biggest drop.",
+    "PC: the largest drop is from tutorial_complete to first_match.",
+    "PC has not improved: its biggest drop is first_match.",
+    "PC's biggest drop isn't purchase but first_match.",
+    "PC's biggest drop is not purchase but first_match.",
+    "PC does not have its biggest drop at first_match; it is purchase.",
+    "PC: biggest drop is first_match, not purchase.",
+    # #164 advisor pass 3: a transition names the step after the arrow.
+    "PC: biggest drop is first_match -> purchase.",
+    "PC: biggest drop is first_match \u2192 purchase.",
+])
+def test_funnel_allows_omission_and_valid_wording(tmp_path: Path, answer: str) -> None:
+    funnel._funnel_reference(tmp_path)
+    assert funnel._funnel_check(tmp_path, [answer]).passed
+
+
+@pytest.mark.parametrize("answer", [
+    "- **PC:** biggest_drop is `FIRST_MATCH`.",
+    "PC: biggest drop is purchase. Steamdeck: biggest drop is first_match.",
+    "PC: biggest drop is purchase. PC: biggest drop is first_match.",
+    "PC: biggest_drop = first_match.",
+    "PC: biggest drop: tutorial_complete.",
+    # #164 advisor pass 3: Markdown emphasis must not hide the platform.
+    "_PC_: biggest drop is first_match.",
+    "__PC__: biggest drop is first_match.",
+])
+def test_funnel_rejects_explicit_wrong_drop(tmp_path: Path, answer: str) -> None:
+    funnel._funnel_reference(tmp_path)
+    assert "final answer does not contradict biggest drops" in funnel._funnel_check(tmp_path, [answer]).failed()
+
+
+def test_consistency_compares_claim_to_delivered_drop(tmp_path: Path) -> None:
+    import json
+
+    funnel._funnel_reference(tmp_path)
+    result_file = tmp_path / "result.json"
+    delivered = json.loads(result_file.read_text(encoding="utf-8"))
+    delivered["biggest_drop"]["pc"] = "first_match"
+    result_file.write_text(json.dumps(delivered), encoding="utf-8")
+    result = funnel._funnel_check(tmp_path, ["PC: biggest_drop is first_match."])
+    assert result.failed() == ["biggest drop on each platform"]

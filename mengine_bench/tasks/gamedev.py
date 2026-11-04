@@ -145,8 +145,28 @@ COOKED_PATHS = frozenset({"/game/data/palettes", "data/palettes", "/game/data", 
 
 
 def _code(text: str | None) -> str:
-    """Source without comments: a fix left in a comment fixes nothing."""
-    return re.sub(r"//[^\n]*|/\*.*?\*/", "", text or "", flags=re.DOTALL)
+    """Source without comments or #if 0 blocks: a fix left in a comment or a disabled block fixes nothing."""
+    return _enabled_lines(re.sub(r"//[^\n]*|/\*.*?\*/", "", text or "", flags=re.DOTALL))
+
+
+def _enabled_lines(code: str) -> str:
+    """Drop the lines an `#if 0` (or `#if false`) disables, up to its #else, #elif or #endif (#164)."""
+    kept: list[str] = []
+    depth = 0  # > 0 inside a disabled block, counting the #if nested in it
+    for line in code.splitlines():
+        directive = re.match(r"\s*#\s*(\w+)\s*(\S*)", line)
+        word, arg = (directive.group(1), directive.group(2).lower()) if directive else ("", "")
+        if depth == 0:
+            if word == "if" and arg in {"0", "false"}:
+                depth = 1
+                continue
+            kept.append(line)
+            continue
+        if word in {"if", "ifdef", "ifndef"}:
+            depth += 1
+        elif word == "endif" or (depth == 1 and word in {"else", "elif"}):
+            depth -= 1
+    return "\n".join(kept)
 
 
 def _ini_sections(text: str | None) -> dict[str, list[str]]:
@@ -161,8 +181,23 @@ def _ini_sections(text: str | None) -> dict[str, list[str]]:
     return sections
 
 
+def _cooks_all_content(packaging: Sequence[str]) -> bool:
+    """bCookAll=True cooks every asset, the palette too, unless a never-cook entry drops its folder (#164)."""
+    values = [found.group(1).lower() for line in packaging
+              if (found := re.match(r"bCookAll\s*=\s*(\w+)", line, re.IGNORECASE))]
+    if not values or values[-1] != "true":
+        return False
+    for line in packaging:
+        found = re.match(r'[+]?DirectoriesToNeverCook\s*=\s*\(\s*Path\s*=\s*"?([^")]+)"?\s*\)', line, re.IGNORECASE)
+        if found and found.group(1).strip().rstrip("/").lower() in COOKED_PATHS:
+            return False
+    return True
+
+
 def _palette_reaches_the_cook(ws: Path) -> bool:
     sections = _ini_sections(read(ws, GAME_INI))
+    if _cooks_all_content(sections.get(PACKAGING_SECTION, [])):
+        return True
     for line in sections.get(PACKAGING_SECTION, []):
         found = re.match(r'[+]?DirectoriesToAlwaysCook\s*=\s*\(\s*Path\s*=\s*"?([^")]+)"?\s*\)', line, re.IGNORECASE)
         if found and found.group(1).strip().rstrip("/").lower() in COOKED_PATHS:
@@ -185,7 +220,7 @@ def _ue_check(ws: Path, answers: Sequence[str]) -> CheckResult:
     result.add("crash fixed: the score tracker survives garbage collection", any(re.search(way, code) for way in KEPT_ALIVE),
                "ScoreTracker is not kept alive by UPROPERTY, TStrongObjectPtr, AddToRoot or a reported reference")
     result.add("colors fixed: the palette reaches the cook", _palette_reaches_the_cook(ws),
-               f"{ASSET} is not always cooked from the packaging settings, the asset manager or a hard reference")
+               f"{ASSET} is not cooked by the packaging settings (always-cook folder or bCookAll), the asset manager or a hard reference")
     result.add("the plain C++ pointer stays out of reflection", re.search(STRUCT_REFLECTED, code) is None,
                "UPROPERTY on FArenaStats stops the build: it is not a reflected type")
     got = result_json(ws)

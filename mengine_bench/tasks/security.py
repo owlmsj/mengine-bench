@@ -1,7 +1,7 @@
 """Security: a backup service with a hardcoded API token and a shell built from web form input (#124).
 
 Mirrors a pre-open-source security review. The gold runs hidden unittest cases the agent never saw against the
-delivered modules, one run per case, with the network call mocked. Any archive route passes: Python's tarfile or a
+delivered modules, one run per case, with the HTTP transport mocked. Any archive route passes: Python's tarfile or a
 list-argument `tar`; the hidden cases only open the archive with tarfile, so no `tar` binary is required to grade.
 """
 
@@ -188,6 +188,54 @@ class HiddenCase(unittest.TestCase):
 '''
 
 HIDDEN_CASES: dict[str, str] = {
+    "the HTTP client uploads without leaking the token": r'''    def test_case(self):
+        from email.parser import BytesHeaderParser
+
+        response = b"HTTP/1.1 201 Created\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        received = []
+        transport = mock.MagicMock()
+        transport.sendall.side_effect = lambda chunk: received.append(bytes(chunk))
+        transport.makefile.side_effect = lambda *args, **kwargs: io.BytesIO(response)
+        archive = Path("backup.tar.gz")
+        with tarfile.open(archive, "w:gz") as packed:
+            packed.add("photos", arcname="photos")
+        captured = CapturedLogs()
+        root = logging.getLogger()
+        old_level = root.level
+        root.addHandler(captured)
+        root.setLevel(logging.DEBUG)
+        printed = io.StringIO()
+        # Keep upload/send_archive real and HTTPS valid, without DNS or network access (#164).
+        try:
+            with mock.patch("socket.create_connection", return_value=transport), \
+                 mock.patch("ssl.SSLContext.wrap_socket", return_value=transport), \
+                 contextlib.redirect_stdout(printed), contextlib.redirect_stderr(printed):
+                status = fresh_agent().upload(archive)
+        finally:
+            root.removeHandler(captured)
+            root.setLevel(old_level)
+        self.assertEqual(status, 201, f"received status {status!r}; expected 201")
+        wire = b"".join(received)
+        self.assertIn(b"\r\n\r\n", wire, "received no HTTP request; expected headers and archive bytes")
+        header, body = wire.split(b"\r\n\r\n", 1)
+        request_line, header = header.split(b"\r\n", 1)
+        headers = BytesHeaderParser().parsebytes(header)
+        if headers.get("Transfer-Encoding", "").lower() == "chunked":
+            stream, chunks = io.BytesIO(body), []
+            while True:
+                size = int(stream.readline().split(b";")[0], 16)
+                if not size:
+                    break
+                chunks.append(stream.read(size))
+                stream.read(2)
+            body = b"".join(chunks)
+        self.assertEqual(request_line.split()[0], b"POST")
+        self.assertEqual(headers.get("Authorization"), f"Bearer {ENV_TOKEN}")
+        self.assertEqual(body, archive.read_bytes())
+        leaked = [line for line in captured.lines + printed.getvalue().splitlines()
+                  if ENV_TOKEN in line or OLD_TOKEN in line]
+        self.assertEqual(leaked, [], "received token output; expected no token in logs or console")
+''',
     "the upload uses the token from BACKUP_TOKEN": '''    def test_case(self):
         sent = self.run_form("photos")
         self.assert_archive_holds(sent, "beach.txt")

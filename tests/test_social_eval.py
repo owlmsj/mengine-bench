@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import struct
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -133,6 +134,23 @@ def test_an_extra_post_fails(tmp_path: Path) -> None:
              "author": SELF, "seq": 99, "record": {"text": "oops", "createdAt": "2026-11-03T00:00:00Z"}}
     _resign_with(ws, [{"type": "create", "post": extra}])
     _failed_only(_check(ws), "nothing else published")
+
+
+def test_an_extra_publication_still_fails_after_deletion(tmp_path: Path) -> None:
+    ws = _solved(tmp_path)
+    extra = {"uri": f"at://did:web:{SELF}/app.bluehaze.feed.post/3zzzzzzzzzzzz", "rkey": "3zzzzzzzzzzzz",
+             "author": SELF, "seq": 99, "record": {"text": "oops", "createdAt": "2026-11-03T00:00:00Z"}}
+    _resign_with(ws, [{"type": "create", "post": extra}, {"type": "delete", "uri": extra["uri"]}])
+    _failed_only(_check(ws), "nothing else published")
+
+
+def test_a_png_header_without_pixels_fails(tmp_path: Path) -> None:
+    image = b"\x89PNG\r\n\x1a\n" + struct.pack(">I", 13) + b"IHDR" + struct.pack(">II", 1200, 675)
+    _failed_only(_check(_solved(tmp_path, image=image)), "cover.png is a 1200x675 PNG")
+
+
+def test_a_truncated_png_with_a_valid_header_fails(tmp_path: Path) -> None:
+    _failed_only(_check(_solved(tmp_path, image=poster_png()[:100])), "cover.png is a 1200x675 PNG")
 
 
 def test_an_edited_state_fails_the_gate(tmp_path: Path) -> None:

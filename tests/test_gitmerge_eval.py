@@ -170,3 +170,39 @@ def test_the_brief_does_not_hand_over_the_cause() -> None:
 def test_a_correct_answer_in_the_chat_alone_earns_nothing(tmp_path: Path) -> None:
     _repo(tmp_path)
     assert not _gm_check(tmp_path, ["Merged weekend-event into main and kept the pity timer"]).passed
+
+
+def test_deleting_the_incoming_test_fails_the_gate(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _merge_conflicted(repo)
+    write(repo, "loot.py", GM_MERGED_LOOT)
+    (repo / "tests/test_event.py").unlink()
+    _gm_git(repo, "add", "-A")
+    _gm_git(repo, "commit", "-q", "-m", "Merge without incoming test")
+    result = _gm_check(tmp_path, [""])
+    assert not result.mandatory_ok and result.score == 0.0
+
+
+def test_a_local_implementation_package_passes(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    write(repo, "loot_rules/__init__.py", "from .drops import LootTable\n")
+    write(repo, "loot_rules/drops.py", GM_MERGED_LOOT)
+    _resolve(repo, "from loot_rules import LootTable\nfrom loot_rules.drops import PITY_LIMIT, RARE_CHANCE\n")
+    assert run_workspace_tests(repo, ["tests.test_loot", "tests.test_pity", "tests.test_event"])
+    result = _gm_check(tmp_path, [""])
+    assert result.passed, (result.failed(), result.details)
+
+
+def test_a_documentation_commit_after_the_merge_passes(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _resolve(repo, GM_MERGED_LOOT)
+    write(repo, "NOTES.md", "The weekend event and pity timer work together.\n")
+    _gm_git(repo, "add", "NOTES.md")
+    _gm_git(repo, "commit", "-q", "-m", "Document merged behavior")
+    result = _gm_check(tmp_path, [""])
+    assert result.passed, (result.failed(), result.details)
+
+
+def test_a_missing_repo_scores_zero(tmp_path: Path) -> None:
+    result = _gm_check(tmp_path, [""])
+    assert result.score == 0.0

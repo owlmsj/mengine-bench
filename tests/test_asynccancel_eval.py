@@ -106,6 +106,17 @@ def test_a_worker_pool_also_passes(tmp_path: Path) -> None:
     assert _with(tmp_path, WORKER_POOL) == []
 
 
+@pytest.mark.parametrize("module", ["job_runner", "job_package.runner"])
+def test_a_local_implementation_module_passes(tmp_path: Path, module: str) -> None:
+    _ac_setup(tmp_path)
+    write(tmp_path, AC_MODULE, f"from {module} import run_tasks\n")
+    write(tmp_path, module.replace(".", "/") + ".py", WORKER_POOL)
+    if "." in module:
+        write(tmp_path, "job_package/__init__.py", "")
+    result = _ac_check(tmp_path, [""])
+    assert result.passed, (result.failed(), result.details)
+
+
 @pytest.mark.parametrize(("source", "lost"), [
     (GATHER, [QUEUED]),
     (SERIAL, [PARALLEL, BELOW, AT, QUEUED]),

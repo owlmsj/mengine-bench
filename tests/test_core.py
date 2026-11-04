@@ -1,5 +1,6 @@
 """Task contract ported from the private suite."""
 
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
@@ -105,3 +106,25 @@ def test_run_hidden_tests(tmp_path: Path) -> None:
     ok, _ = run_hidden_tests(tmp_path, gold.format(2))
     bad, _ = run_hidden_tests(tmp_path, gold.format(3))
     assert ok and not bad
+
+
+def test_trace_check_keeps_legacy_checks_unchanged(tmp_path: Path) -> None:
+    from mengine_bench.core import ReferenceAnswers, ToolCall, TraceCheck
+    from mengine_bench.runner.task_run import TaskRunRecord, _grade
+
+    stream = '{"type":"item.completed","item":{"type":"command_execution","command":"curl https://example.org/source"}}'
+    seen: list[ToolCall] = []
+
+    def evidence_check(ws: Path, answers: Sequence[str], trace: Sequence[ToolCall]) -> CheckResult:
+        seen.extend(trace)
+        return CheckResult(checks=[("evidence", bool(trace))])
+
+    record = TaskRunRecord("demo", workspace=tmp_path, streams=[stream])
+    _grade(make_task(check=TraceCheck(evidence_check)), record)
+    assert record.check.passed
+    assert seen == [ToolCall("shell", {"command": "curl https://example.org/source"})]
+    reference = ReferenceAnswers(["done"], seen)
+    assert TraceCheck(evidence_check)(tmp_path, reference).passed
+    assert not TraceCheck(evidence_check)(tmp_path, reference, ()).passed
+    _grade(make_task(check=lambda ws, answers: CheckResult(checks=[("legacy", True)])), record)
+    assert record.check.passed

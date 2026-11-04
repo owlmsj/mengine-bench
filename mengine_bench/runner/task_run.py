@@ -26,13 +26,15 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from mengine_bench.core import CheckResult, EvalTask
+from mengine_bench.core import CheckResult, EvalTask, TraceCheck, saw
 from mengine_bench.runner import process
 from mengine_bench.runner.agents import Agent, AgentError, Usage, sum_usage, partial_answer
 from mengine_bench.runner.leftovers import LeftProcess, TaskWindow
 from mengine_bench.runner.site import SITE_PLACEHOLDER, SiteFailed, end_pages, serve_site
 from mengine_bench.runner.stats import RunStats, merge_stats, stream_stats
-from mengine_bench.visual import add_page_checks
+from mengine_bench.runner.trace import tool_trace
+from mengine_bench.runner.workspace_gate import WORKSPACE_WRITE_GATE, outside_changes, outside_snapshot
+from mengine_bench.visual import COMPOSITION_PRINTS, add_page_checks
 
 # Browser user-data dirs an agent left in the workspace; their cache files can
 # stay locked by a live browser, and they are never part of the solution.
@@ -45,7 +47,8 @@ BROWSER_PROFILE_DIRS = frozenset({"_browser-profile", ".browser-profile", "brows
 # workspace are not: earlier steps and runs live next to it, and the
 # transcripts are published.
 # A Sonnet run stopped its page server with `Get-Process python | Stop-Process -Force`, which killed this runner too (#107).
-WORKSPACE_RULES = ("Use any skill, tool or MCP server you have. Read and write local files only inside this directory.\n"
+WORKSPACE_RULES = ("Use any skill, tool or MCP server you have. Write local files only inside this directory.\n"
+                   "You may read installed tools and skills outside it, but not other task workspaces, runs or benchmark answers.\n"
                    "Other programs run on this machine: stop only the processes you started, by their id, never by name.\n"
                    "Do not print credentials, environment variables or personal data: this session is published.\n")
 # #41: without this a model can plan until the limit and leave nothing to grade.
@@ -97,6 +100,9 @@ class TaskRunRecord:
     # task left running that the runner killed after grading.
     left_open_tabs: int | None = None
     left_running: list[LeftProcess] = field(default_factory=list)
+    outside_writes: list[str] = field(default_factory=list)
+    # #164: a snapshot the runner could not take is an infra fault: the gate goes unmeasured, never failed.
+    outside_unmeasured: str | None = None
 
     @property
     def usage(self) -> Usage | None:
@@ -196,7 +202,7 @@ def _run_and_grade(task: EvalTask, agent: Agent, root: Path, fresh_root: Path | 
     except SiteFailed as error:
         record.status, record.error, workspace_index = "crash", str(error), 0
     record.workspace = settle_workspace(workspace, root, workspace_index)
-    _grade(task, record)
+    _grade(task, record, original_workspace=workspace)
     return record
 
 
@@ -279,6 +285,16 @@ def _step_env(workspace: Path, extra: Mapping[str, str] | None) -> dict[str, str
     return env
 
 
+def _snapshot_note(error: OSError, workspace: Path) -> str:
+    # #164: exception messages can contain host paths; publish only a bounded relative location.
+    location = "."
+    if error.filename:
+        path = Path(error.filename).absolute()
+        if path.is_relative_to(workspace.parent.absolute()):
+            location = Path(os.path.relpath(path, workspace)).as_posix()
+    return f"filesystem snapshot unavailable: {type(error).__name__} at {location}"
+
+
 def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: int, prompt: str,
             record: TaskRunRecord, attachments: tuple[str, ...]) -> str:
     label = str(index)
@@ -289,12 +305,24 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: in
     prompt_file = prompts / f"step-{label}.md"
     prompt_file.write_text(prompt, encoding="utf-8")
     call = agent.invocation(prompt, prompt_file.resolve(), workspace.resolve(), attachments)
+    before: dict[str, tuple[int, int, int]] | None
+    try:
+        before = outside_snapshot(workspace, root)
+    except OSError as error:
+        before, record.outside_unmeasured = None, _snapshot_note(error, workspace)
     try:
         result = process.run_process(call.argv, workspace, task.timeout_s, stdin_text=call.stdin_text,
                                      env=_step_env(workspace, call.env), final_event=call.final_event)
     except OSError as error:
         record.steps.append(StepRecord(index, 0.0, None, "crash", str(error)))
         raise StepFailed("crash", f"could not start agent {call.argv[0]!r}: {error}") from error
+    finally:
+        # #164: capture before settling removes sibling scratch files, including at timeout/crash.
+        if before is not None:
+            try:
+                record.outside_writes.extend(outside_changes(before, outside_snapshot(workspace, root)))
+            except OSError as error:
+                record.outside_unmeasured = _snapshot_note(error, workspace)
     if result.reaped:
         print(f"[{task.id}] step {label}: killed {result.reaped} process(es) the agent left running", flush=True)
     if result.stopped_after_final:
@@ -325,14 +353,22 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: in
     return parsed.answer
 
 
-def _grade(task: EvalTask, record: TaskRunRecord) -> None:
+def _grade(task: EvalTask, record: TaskRunRecord, original_workspace: Path | None = None) -> None:
     assert record.workspace is not None
     started = time.monotonic()
     answers = record.answers + [""] * (len(task.steps) - len(record.answers))
     try:
-        record.check = task.check(record.workspace, answers)
+        record.check = (task.check(record.workspace, answers, tool_trace(record.streams, record.workspace, original_workspace))
+                        if isinstance(task.check, TraceCheck) else task.check(record.workspace, answers))
+        if record.outside_unmeasured is not None:
+            record.check.notes.append(f"{WORKSPACE_WRITE_GATE}: not measured ({record.outside_unmeasured})")
+        else:
+            record.check.mandatory.append((WORKSPACE_WRITE_GATE, not record.outside_writes))
+        if record.outside_writes and record.outside_unmeasured is None:
+            record.check.details[WORKSPACE_WRITE_GATE] = saw(sorted(set(record.outside_writes)),
+                "no filesystem changes outside the workspace, in the task's parent and run directories")
         if task.render_target is not None:
-            add_page_checks(record.check, record.workspace / task.render_target)
+            add_page_checks(record.check, record.workspace / task.render_target, composition=COMPOSITION_PRINTS.get(task.id))
     except (ValueError, RuntimeError, OSError) as error:
         record.error = f"{record.error or ''} grading failed: {error}".strip()
         record.status = "crash"
