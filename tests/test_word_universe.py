@@ -294,7 +294,7 @@ def test_a_page_without_a_search_field_fails(graded: Path, page: str) -> None:
 
 def test_the_page_runs_under_the_existing_page_checks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[Path] = []
-    monkeypatch.setattr(task_run, "add_page_checks", lambda result, html: seen.append(html))
+    monkeypatch.setattr(task_run, "add_page_checks", lambda result, html, composition=None: seen.append(html))
     monkeypatch.setattr(words, "dump_page_dom", lambda page, query: (visual.RENDERED, _panel_dom(query)))
     TASK.setup(tmp_path)
     record = task_run.TaskRunRecord(task_id=TASK.id, answers=TASK.reference(tmp_path), workspace=tmp_path)
