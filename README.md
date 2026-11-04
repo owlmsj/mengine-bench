@@ -152,7 +152,7 @@ Report only values copied from command output. Never print credentials.
 - **Everything its harness gives it** is allowed: shell, web, browsers, MCP servers, skills, subagents. Every step's prompt says so, and asks the agent to close the browser tabs, windows and apps it opened before it finishes. Reading the reference, the hidden tests or a published answer is not: the run gets rejected.
 - **Personal instructions count as configuration.** `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.config/opencode/AGENTS.md`, `~/.gemini/GEMINI.md` and any `CLAUDE.md` or `AGENTS.md` above the temp dir are recorded by name and shown on the leaderboard. Move them aside for a plain run.
 - **Memory across sessions is off inside the bench, on Codex and Claude** (`--disable memories`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY`). Daily use keeps it on. It carries earlier runs into this one, the same leak as an earlier workspace left on disk.
-- **Rankings compare the same bench version.** Older rankings stay on the leaderboard as history, with the Scores of their own formula.
+- **Rankings compare the same bench version**, or an older minor the owner kept ranked, marked on its row (a row marked "rubric 2.5" waits for its re-judge). Older rankings stay on the leaderboard as history, with the Scores of their own formula.
 
 ## Privacy
 

@@ -14,8 +14,11 @@ the Score, and a Cost kept apart.
 | **Thinking, Tools, Tool s** | Reasoning tokens, tool calls, and the median seconds per tool call where the harness times each call (opencode, AGY, Claude Code event stamps; `-` on Codex, never estimated). Statistics only, no points (#162). |
 
 The formulas live in `mengine_bench/scoring.py`. Runs compare when they ran the
-same bench major.minor (2.0.x). A patch release changes no task or brief; a workspace safety rule may change. When it changes how a run is judged or
-scored, every ranked run is judged again from its bundle (`mengine-bench judge --again`), so none has to run again. Rankings of older versions stay in LEADERBOARD.md as history, with the Scores of their own formula.
+same bench major.minor (2.0.x), or an older minor the owner kept ranked by decision (`RANKED_WITH_CURRENT`, #139), marked on
+its row. A patch release changes no task or brief; a workspace safety rule may change. When a release changes how a run is
+judged, every ranked run is judged again from its bundle on the next release train (`mengine-bench judge --again`,
+CONTRIBUTING), so none has to run again; until then its row is marked with the rubric it was judged by (#185). When a
+patch changes a check, a run that kept its workspace is regraded (`mengine-bench regrade`). Rankings of older versions stay in LEADERBOARD.md as history, with the Scores of their own formula.
 Bench 1.8 changed only the weights (#122): Speed 0.25 and Judge 0.15, from 0.15 and 0.25 in 1.7; tasks and briefs are those of 1.7.
 Bench 2.0 keeps the 1.8 weights and changes the tasks (#124): 20 instead of 15.
 Bench 2.1 changes only the time limits (#137): each is the slowest finished time in the eight published 2.0
