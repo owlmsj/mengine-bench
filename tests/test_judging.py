@@ -234,3 +234,30 @@ def test_a_bundle_without_a_log_for_its_calls_is_refused(tmp_path: Path) -> None
     (transcripts / f"{task.id}.jsonl.gz").write_bytes(gzip.compress(line.encode("utf-8")))
     with pytest.raises(ValueError, match="tool_calls"):
         read_packet(tmp_path, task.id)
+
+
+def test_codex_web_and_mcp_calls_reach_live_packet_172(tmp_path: Path) -> None:
+    from mengine_bench.run_command import _judge_packet
+
+    opened = json.loads((Path(__file__).parent / "fixtures/codex_open_views.json").read_text())
+    items = [
+        {"type": "web_search", "action": {"type": "search", "queries": ["Unicode release", "SQLite release"]}},
+        opened,
+        {"type": "mcp_tool_call", "server": "research", "tool": "lookup", "arguments": {"topic": "release"},
+         "result": {"content": [{"type": "text", "text": "found"}]}},
+    ]
+    stream = _jsonl([{"type": "item.completed", "item": item} for item in items])
+    transcripts = tmp_path / "transcripts"
+    transcripts.mkdir()
+    (transcripts / "0.stdout.txt").write_text(stream, encoding="utf-8")
+    task = next(item for item in catalog.all_tasks() if item.id == "web-fact-search")
+    packet = _judge_packet(task, TaskRunRecord(task_id=task.id), tmp_path)
+    for log in (tool_log([stream]), str(packet["transcript_tail"])):
+        assert "web_search" in log
+        assert "Unicode release" in log and "SQLite release" in log
+        assert "https://www.unicode.org/versions/Unicode15.0.0/" in log
+        assert "https://www.postgresql.org/about/news/postgresql-15-released-2526/" in log
+        assert "research.lookup" in log and "topic" in log and "release" in log
+        assert log.index("Unicode release") < log.index("https://www.unicode.org") < log.index("research.lookup")
+    assert tool_log([CLAUDE]) == SHELL_LINES
+    assert tool_log([OPENCODE]) == SHELL_LINES + '\n[step 1] read "a.txt" ok -> "body"'

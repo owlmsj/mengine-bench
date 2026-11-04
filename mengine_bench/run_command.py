@@ -18,6 +18,7 @@ from mengine_bench.bundle import bench_commit
 from mengine_bench.checkpoints import reached_checkpoints
 from mengine_bench.core import EvalTask
 from mengine_bench.judge import JudgeContext, workspace_diff
+from mengine_bench.judge_view import tool_log
 from mengine_bench.environment import collect_environment
 from mengine_bench.report import RunMeta, TaskDetail, build_results, stats_summary, usage_record
 from mengine_bench.runner.agents import Agent, split_jsonl
@@ -116,6 +117,9 @@ def _judge_context(task: EvalTask, record: TaskRunRecord, root: Path) -> JudgeCo
     if commands:
         listed = "\n".join(f"$ {command[:300]}" for command in commands[-COMMANDS_SHOWN:])
         tail = f"Shell commands the agent ran (last {COMMANDS_SHOWN}):\n{listed}\n\nStream tail:\n{tail}"
+    log = tool_log([path.read_text(encoding="utf-8") for path in transcripts])
+    if log:
+        tail = f"Tool calls the agent made:\n{log}"
     checks = () if record.check is None else (*record.check.mandatory, *record.check.checks)
     # #165: a PDF can be valid UTF-8; exclude human evidence before the diff decodes file bodies.
     excluded = {Path(rel) for rel in task.evidence}
