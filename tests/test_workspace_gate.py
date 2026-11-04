@@ -98,4 +98,3 @@ def test_a_snapshot_the_runner_cannot_take_leaves_the_gate_unmeasured(tmp_path: 
     assert any("not measured" in note for note in record.check.notes), record.check.notes
     assert record.outside_unmeasured == "filesystem snapshot unavailable: PermissionError at ../blocked"
     assert str(tmp_path) not in str(record.check.notes)
-

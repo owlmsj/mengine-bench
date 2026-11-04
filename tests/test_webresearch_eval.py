@@ -208,6 +208,22 @@ def test_distinct_fetched_query_urls_still_count_as_three_urls(tmp_path: Path) -
     assert "dossier" not in result.failed()
 
 
+def test_one_fetched_query_does_not_prove_three_sources(tmp_path: Path) -> None:
+    ws = _solved(tmp_path)
+    urls = [f"https://example.org/source?year={year}" for year in (1985, 1987, 1989)]
+    write(ws, web.DOSSIER_FILE, "Cruzado, Bresser, Real. " * 35 + "\n" + "\n".join(urls))
+    result = TASK.check(ws, [], [ToolCall("WebFetch", {"url": urls[0]})])
+    assert "dossier" in result.failed()
+
+
+def test_three_fetched_hosts_allow_other_cited_pages(tmp_path: Path) -> None:
+    ws = _solved(tmp_path)
+    hosts = ["example.org", "example.net", "example.com"]
+    write(ws, web.DOSSIER_FILE, "Cruzado, Bresser, Real. " * 35 + "\n" + "\n".join(f"https://{host}/citation" for host in hosts))
+    result = TASK.check(ws, [], [ToolCall("WebFetch", {"url": f"https://{host}/fetched"}) for host in hosts])
+    assert "dossier" not in result.failed()
+
+
 def test_dossier_urls_with_prose_punctuation_and_parentheses(tmp_path: Path) -> None:
     ws = _solved(tmp_path)
     urls = ["https://example.org/one", "https://example.org/two", "https://example.org/Plan_(history)"]

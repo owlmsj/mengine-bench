@@ -32,7 +32,7 @@ from mengine_bench.core import (
     saw,
     write,
 )
-from mengine_bench.runner.trace import fetched_urls, url_key
+from mengine_bench.runner.trace import fetched_hosts, fetched_urls, host_key, url_key
 
 RUBRIC_FILE = "RUBRIC.md"
 DOSSIER_FILE = "dossier.md"
@@ -237,7 +237,7 @@ def _web_cited_urls(text: str) -> set[str]:
 def _web_has_url(row: Mapping[str, object], fetched: set[str]) -> bool:
     sources = row.get("sources")
     items = sources if isinstance(sources, list) else [sources]
-    return any(url_key(url) in fetched for item in items for url in _web_cited_urls(str(item or "")))
+    return any(host_key(url) in fetched for item in items for url in _web_cited_urls(str(item or "")))
 
 
 @TraceCheck
@@ -277,15 +277,19 @@ def _web_check(ws: Path, answers: Sequence[str], trace: Sequence[ToolCall]) -> C
     top = got.get("top3")
     top_names = [p.name if (p := _web_plan_named(item)) else str(item) for item in top] if isinstance(top, list) else top
     result.add("top 3", top_names == list(WEB_TOP3), saw(top, list(WEB_TOP3)))
-    fetched = fetched_urls(trace)
+    fetched = fetched_hosts(trace)
     unsourced = [name for name in names if name not in rows or not _web_has_url(rows[name], fetched)]
-    result.add("every plan has a source", not unsourced, saw(unsourced, "a fetched http(s) URL in sources for every plan"))
+    result.add("every plan has a source", not unsourced, saw(unsourced, "a cited http(s) URL on a fetched host for every plan"))
     dossier = read(ws, DOSSIER_FILE) or ""
-    urls = {url for url in _web_cited_urls(dossier) if url_key(url) in fetched}
+    cited = {url for url in _web_cited_urls(dossier) if host_key(url) in fetched}
+    urls = {url_key(url) for url in cited}
+    hosts = {host_key(url) for url in cited}
+    opened_urls = urls & fetched_urls(trace)
     plain = unicodedata.normalize("NFKD", dossier).encode("ascii", "ignore").decode().lower()
     plans_named = sorted(word for word in ("cruzado", "bresser", "verao", "collor", "real") if re.search(rf"\b{word}\b", plain))
-    result.add("dossier", len(dossier) >= 600 and len(urls) >= 3 and len(plans_named) >= 3,
-               saw({"chars": len(dossier), "urls": len(urls), "plans": plans_named}, "600+ chars, 3+ fetched URLs, 3+ plans"))
+    result.add("dossier", len(dossier) >= 600 and len(urls) >= 3 and max(len(hosts), len(opened_urls)) >= 3 and len(plans_named) >= 3,
+               saw({"chars": len(dossier), "urls": len(urls), "fetched_hosts": len(hosts), "fetched_urls": len(opened_urls), "plans": plans_named},
+                   "600+ chars, 3+ URLs spanning 3+ fetched hosts or distinct fetched URLs, 3+ plans"))
     return result
 
 

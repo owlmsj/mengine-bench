@@ -202,7 +202,7 @@ def _run_and_grade(task: EvalTask, agent: Agent, root: Path, fresh_root: Path | 
     except SiteFailed as error:
         record.status, record.error, workspace_index = "crash", str(error), 0
     record.workspace = settle_workspace(workspace, root, workspace_index)
-    _grade(task, record)
+    _grade(task, record, original_workspace=workspace)
     return record
 
 
@@ -353,12 +353,12 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: in
     return parsed.answer
 
 
-def _grade(task: EvalTask, record: TaskRunRecord) -> None:
+def _grade(task: EvalTask, record: TaskRunRecord, original_workspace: Path | None = None) -> None:
     assert record.workspace is not None
     started = time.monotonic()
     answers = record.answers + [""] * (len(task.steps) - len(record.answers))
     try:
-        record.check = (task.check(record.workspace, answers, tool_trace(record.streams))
+        record.check = (task.check(record.workspace, answers, tool_trace(record.streams, record.workspace, original_workspace))
                         if isinstance(task.check, TraceCheck) else task.check(record.workspace, answers))
         if record.outside_unmeasured is not None:
             record.check.notes.append(f"{WORKSPACE_WRITE_GATE}: not measured ({record.outside_unmeasured})")

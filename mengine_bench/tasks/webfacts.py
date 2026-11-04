@@ -19,7 +19,7 @@ from mengine_bench.core import (
     Checkpoint, CheckResult, EvalTask, ReferenceAnswers, Step, ToolCall, TraceCheck,
     WROTE_RESULT, checkpoints, number, result_json, saw, write,
 )
-from mengine_bench.runner.trace import fetched_urls, url_key
+from mengine_bench.runner.trace import fetched_hosts, host_key
 from mengine_bench.tasks.webresearch import _web_date
 
 
@@ -82,10 +82,10 @@ def _webfacts_check(ws: Path, answers: Sequence[str], trace: Sequence[ToolCall])
         result.add(f"{fact.key} value", _webfacts_value_ok(entry.get("value"), fact), saw(entry.get("value"), want))
         result.add(f"{fact.key} primary source", _webfacts_host_ok(entry.get("url"), fact.domains),
                    saw(entry.get("url"), f"an http(s) URL on {' or '.join(fact.domains)}"))
-    fetched = fetched_urls(trace)
-    missing = [fact.key for fact in WEB_FACTS if url_key(_webfacts_entry(got, fact.key).get("url")) not in fetched]
+    fetched = fetched_hosts(trace)
+    missing = [fact.key for fact in WEB_FACTS if host_key(_webfacts_entry(got, fact.key).get("url")) not in fetched]
     result.add("cited primary sources were fetched", not missing,
-               saw(missing, "each cited URL's host and path in a fetch action"))
+               saw(missing, "each cited source's host in a fetch action"))
     return result
 
 
