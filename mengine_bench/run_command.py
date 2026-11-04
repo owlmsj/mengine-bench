@@ -195,6 +195,8 @@ def _detail(task: EvalTask, record: TaskRunRecord) -> TaskDetail:
         left_open_tabs=record.left_open_tabs,
         left_running=[left.record() for left in record.left_running if left.attributed],
         left_running_unattributed=[left.record() for left in record.left_running if not left.attributed],
+        left_open_tabs=record.left_open_tabs, left_running=[left.record() for left in record.left_running],
+        outside_writes=list(record.outside_writes), outside_unmeasured=record.outside_unmeasured,
     )
 
 

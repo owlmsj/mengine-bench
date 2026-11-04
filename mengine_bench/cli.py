@@ -64,6 +64,8 @@ def _parser() -> argparse.ArgumentParser:
                                                "once the bundle is written)")
     run.add_argument("--dry-run", action="store_true", help="print the plan and the preflight findings; run nothing")
     sub.add_parser("list", help="list the tasks")
+    regrade = sub.add_parser("regrade", help="rerun current checks from bundled workspaces without an agent")
+    regrade.add_argument("bundle", type=Path)
     board = sub.add_parser("leaderboard", help="rank results/*/result.json into LEADERBOARD.md")
     board.add_argument("--results", type=Path, default=Path("results"))
     board.add_argument("--output", type=Path, default=Path("LEADERBOARD.md"))
@@ -111,6 +113,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "list":
         for task in catalog.all_tasks():
             print(f"{task.id}\t{task.category}\t{task.summary}")
+        return 0
+    if args.command == "regrade":
+        from mengine_bench.regrade import regrade_bundle
+        try:
+            regrade_bundle(args.bundle)
+        except (OSError, ValueError) as error:
+            print(f"regrade: FAILED: {error}")
+            return 1
+        print("regrade: updated result.json and summary.md")
         return 0
     if args.command == "leaderboard":
         return _leaderboard(args)
