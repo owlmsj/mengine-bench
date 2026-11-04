@@ -19,7 +19,11 @@ def test_reference_passes_and_untouched_fails(tmp_path: Path) -> None:
     ("Q6_K (7.03 GiB, does not fit at 128k). Also discarded: the first Q5 run "
      "(37.8 t/s, 7881 MiB, 1494 MiB spilled to shared memory). Q4_K_M (7305 MiB, "
      "40.4 t/s) is kept only as fallback.", False),
-    ("Q6_K or Q5", False), ("Q6_K; Q4_K_M is only fallback", False),
+    ("Q6_K or Q5", False), ("Q6_K; Q4_K_M is only fallback", True),
+    ("Q6_K was discarded; Q4_K_M remains the fallback", True),
+    ("Q6_K discarded; Q5_K_M is retained; Q4_K_M is kept", True),
+    ("Q6_K or Q5_K_M", False),
+    ("Q6_K or Q5_K_M is kept as fallback", False),
     ("Q6_K or Q6_K_M", False), ("Q6_K or IQ4_XS", False),
     (["Q6_K", "Q5"], False), ("Q6_K or Q8_0", False),
     ("Q6_K", True), ("Q6K", True), ("q6", True),
