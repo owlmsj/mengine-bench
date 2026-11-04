@@ -110,6 +110,36 @@ def test_a_renamed_copy_in_a_subfolder_and_european_writing_pass(tmp_path: Path)
     assert _graded(tmp_path, other_route).passed
 
 
+@pytest.mark.parametrize("body", [
+    "The invoice total is not EUR 1,205.77. We confirm EUR 996.50.",
+    "We confirm EUR 996.50, rather than EUR 1,205.77.",
+    "EUR 1,205.77 is not the invoice total. The total is EUR 996.50.",
+    "The invoice total is EUR 1,205.77. We confirm the total is EUR 996.50.",
+])
+def test_a_denied_or_contradictory_total_fails(tmp_path: Path, body: str) -> None:
+    def reply(ws: Path) -> None:
+        client = QuillmailClient(ws)
+        message = json.loads(client.get(f"/mail/api/thread/{TARGET_THREAD}"))["messages"][-1]
+        (ws / webmail.INVOICE_FILE).write_bytes(client.get(f"/mail/u/0/attachment?th={TARGET_THREAD}&att=lp1"))
+        client.post("/mail/api/send", {"threadId": TARGET_THREAD, "inReplyTo": message["id"],
+                                      "to": [webmail.BILLING["email"]], "body": body})
+
+    assert _graded(tmp_path, reply).failed() == ["reply states the invoice total"]
+
+
+@pytest.mark.parametrize("body", [
+    "Confirmed: EUR 1,205.77.",
+    "Not EUR 996.50 but EUR 1,205.77 is the total.",
+    "The subtotal is EUR 996.50 and VAT is EUR 209.27. Total: EUR 1,205.77.",
+    "We confirm the total EUR 1205.77, including subtotal EUR 996.50 and VAT EUR 209.27.",
+    "We have not paid yet; we confirm the invoice total of EUR 1,205.77.",
+    "We confirm invoice LP-2026-0418, total EUR 1,205.77 for 20 prints.",
+    "We confirm total EUR 1205.77 with EUR 0.00 outstanding.",
+])
+def test_total_confirmation_allows_corrections_and_line_items(body: str) -> None:
+    assert webmail._webmail_states_total(body)
+
+
 def test_the_session_and_token_guard_writes_like_the_real_site(tmp_path: Path) -> None:
     ws = tmp_path / "ws"
     ws.mkdir()

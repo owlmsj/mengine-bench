@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import ArrayObject, DecodedStreamObject, NameObject
 
@@ -76,6 +76,41 @@ def test_other_valid_routes_pass(tmp_path: Path) -> None:
     ws = _ws(tmp_path)
     _letterboxed(ws)
     _form_by_hand(ws)
+    result = TASK.check(ws, [""])
+    assert result.passed, result.details
+
+
+def test_cutting_off_the_basket_fails_even_with_the_complete_envelope(tmp_path: Path) -> None:
+    ws = _ws(tmp_path)
+    TASK.reference(ws)
+    media_write_photo(ws, (2200, 300, 2800, 1050))
+    result = TASK.check(ws, [""])
+    assert result.failed() == ["balloon fully in frame and undistorted"], result.details
+
+
+def test_an_invented_magenta_disc_is_not_the_source_photo(tmp_path: Path) -> None:
+    ws = _ws(tmp_path)
+    TASK.reference(ws)
+    image = Image.new("RGB", media.MEDIA_FEED_SIZE, "white")
+    ImageDraw.Draw(image).ellipse((400, 300, 700, 600), fill=media.MEDIA_BALLOON_RGB)
+    image.save(ws / MEDIA_PHOTO_OUT, "JPEG")
+    result = TASK.check(ws, [""])
+    assert result.failed() == ["balloon fully in frame and undistorted"], result.details
+
+
+@pytest.mark.parametrize("box", [(2200, 250, 2800, 1100), (2100, 0, 2900, 1100), (1400, 0, 3000, 2000)])
+@pytest.mark.parametrize("padding", ["white", "black", "#503c28"])
+def test_other_source_crops_with_the_whole_subject_pass(
+    tmp_path: Path, box: tuple[int, int, int, int], padding: str,
+) -> None:
+    ws = _ws(tmp_path)
+    TASK.reference(ws)
+    # Preserve aspect ratio for the first close crop by padding the shorter side.
+    photo = Image.open(ws / MEDIA_PHOTO).crop(box)
+    photo.thumbnail(media.MEDIA_FEED_SIZE)
+    canvas = Image.new("RGB", media.MEDIA_FEED_SIZE, padding)
+    canvas.paste(photo, ((canvas.width - photo.width) // 2, (canvas.height - photo.height) // 2))
+    canvas.save(ws / MEDIA_PHOTO_OUT, "JPEG", quality=70)
     result = TASK.check(ws, [""])
     assert result.passed, result.details
 
