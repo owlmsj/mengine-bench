@@ -169,7 +169,8 @@ projects, so skim `results/<run>/` before you submit.
 - A timeout or a crash with nothing written has nothing to grade. The only retry is for a task whose model never
   replied before the limit (#144): it runs once more from scratch, and its flags say so.
 - Time depends on your machine and network, and Cost is an estimate.
-- A machine without Rust, Node.js or git fails the checks of the tasks that need them, and a harness without web
+- A machine without cargo, git or Node.js 22.18 or later does not start a run; with `--allow-missing-toolchain`
+  the missing tools are recorded in config and the tasks that need them fail their checks. A harness without web
   search or fetch scores only what it delivers on `web-plan-ranking`.
 
 ## Develop
