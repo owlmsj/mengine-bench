@@ -65,6 +65,8 @@ Bench 2.5.1: tasks can declare human-only `evidence`, stored as verbatim bytes u
 crop and filled PDF for owner review. Only regular workspace files without symlinks are kept, up to 5 MiB each;
 skipped files leave a task note, and evidence still passes the bundle privacy scan. No prompts or checks change.
 
+Bench 2.5.2 (#171, #172): fix Codex opened-view fetch evidence and web/MCP judge input; no tasks or prompts change.
+
 A run is one sample and runs are not repeated, so ties come from the published tasks: draw the tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
 a tie. This shows how much the order rests on this set of tasks; it says nothing about the noise between two runs of one agent.
