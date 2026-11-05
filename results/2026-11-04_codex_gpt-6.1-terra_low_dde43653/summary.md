@@ -2,43 +2,43 @@
 
 | Score | Correct % | Solved | Judge | Speed | Time | Cost | Tokens |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **-** | 99.1 | 27/28 | - | 72.5 | 11 min 53 s | n/a | 4.72M |
+| **88.4** | 99.1 | 27/28 | 83.7 | 72.5 | 11 min 53 s | n/a | 4.72M |
 
-- Judge: pending (the maintainer runs `mengine-bench judge` on review)
+- Judge: claude-opus-5-5@xhigh, rubric 2.6
 - Config: service_tier=fast; personal_instructions=~/.codex/AGENTS.md
 - Machine: Windows 11, AMD Ryzen 9 8945HS w/ Radeon 780M Graphics (16 threads), 31.3 GB RAM, GPU NVIDIA GeForce RTX 4070 Laptop GPU (8 GB)
 - Run: 2026-11-04, started 2026-11-04T23:31:55Z; bench at 58ebdf80fa3f; submitter -
 
 | task | status | correct | checks | judge | time | cost (USD) | turns | tools | tool s | generated | thinking | first write |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| py-async-cancel | ok | 100% | 6/6 | - | 17.5 s | - | 1 | 3 | - | 1.3k | 0.1k | - |
-| ds-ab-playtest | ok (stopped after its final event) | 100% | 5/5 | - | 22.3 s | - | 1 | 5 | - | 2.1k | 0.1k | - |
-| bo-pnl-runway | ok | 100% | 6/6 | - | 21.3 s | - | 1 | 4 | - | 2.0k | 0.0k | - |
-| bo-reconcile | ok | 100% | 5/5 | - | 11.8 s | - | 1 | 3 | - | 0.7k | 0.0k | - |
-| cmp-handoff | ok (stopped after its final event) | 100% | 12/12 | - | 25.0 s | - | 2 | 7 | - | 1.3k | 0.1k | - |
-| cfg-source-drift | ok | 100% | 5/5 | - | 21.2 s | - | 1 | 6 | - | 1.0k | 0.0k | - |
-| doc-lab-pdf | ok | 100% | 7/7 | - | 18.2 s | - | 1 | 4 | - | 0.9k | 0.1k | - |
-| ds-sql-funnel | ok (stopped after its final event) | 100% | 5/5 | - | 18.8 s | - | 1 | 4 | - | 1.3k | 0.0k | - |
-| ue-packaged-bug | ok (stopped after its final event) | 100% | 6/6 | - | 19.0 s | - | 1 | 4 | - | 1.2k | 0.1k | - |
-| git-merge-conflict | ok | 100% | 7/7 | - | 21.1 s | - | 1 | 5 | - | 1.2k | 0.0k | - |
-| infra-gpu-fit | ok (stopped after its final event) | 100% | 7/7 | - | 11.5 s | - | 1 | 2 | - | 0.7k | 0.0k | - |
-| ir-server-logs | ok | 100% | 7/7 | - | 19.2 s | - | 1 | 5 | - | 0.9k | 0.0k | - |
-| gd-integration-repo | ok | 100% | 10/10 | - | 30.8 s | - | 1 | 8 | - | 1.8k | 0.1k | - |
-| media-voice | ok (stopped after its final event) | 100% | 4/4 | - | 13.6 s | - | 1 | 2 | - | 0.6k | 0.0k | - |
-| file-media-edit | ok (stopped after its final event) | 100% | 10/10 | - | 47.6 s | - | 1 | 10 | - | 2.3k | 0.1k | - |
-| txt-regex-log | ok | 100% | 5/5 | - | 13.1 s | - | 1 | 2 | - | 1.0k | 0.1k | - |
-| rs-lock-bug | ok (left running, not attributed: vctip.exe (18152)) | 100% | 9/9 | - | 24.2 s | - | 1 | 4 | - | 2.0k | 0.1k | - |
-| sec-leak-fix | ok | 100% | 10/10 | - | 21.6 s | - | 1 | 4 | - | 1.7k | 0.2k | - |
-| cu-social-cycle | ok (route observed: browser (3 of 3 writes with Sec-Fetch-*; user agents ['Mozilla'])) | 100% | 11/11 | - | 38.6 s | - | 1 | 16 | - | 1.3k | 0.0k | - |
-| ds-sqlite-recover | ok | 100% | 6/6 | - | 17.3 s | - | 1 | 4 | - | 1.0k | 0.1k | - |
-| hw-stutter-tuning | ok (stopped after its final event) | 100% | 7/7 | - | 18.2 s | - | 1 | 5 | - | 1.1k | 0.0k | - |
-| ts-plugin-bug | ok (stopped after its final event) | 100% | 8/8 | - | 18.6 s | - | 1 | 4 | - | 1.3k | 0.0k | - |
-| web-mondrian-landing | ok (stopped after its final event) | 100% | 11/11 | - | 32.0 s | - | 1 | 7 | - | 2.7k | 0.1k | - |
-| 3d-print-homage | ok (blue-layout similarity to the print: 0.526 against great-wave.jpg on a 4x3 grid (0.4 once scored; a note since 2.6)) | 100% | 12/12 | - | 49.8 s | - | 1 | 6 | - | 3.9k | 0.1k | - |
-| web-fact-search | ok | 100% | 8/8 | - | 17.2 s | - | 1 | 3 | - | 0.7k | 0.0k | - |
-| cu-webmail | ok (write routes (observation only): {"origin": "http://127.0.0.1:56539", "sec-fetch-dest": "empty", "sec-fetch-mode": "cors", "sec-fetch-site": "same-origin", "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36 Edg/156."}) | 100% | 9/9 | - | 43.8 s | - | 1 | 11 | - | 1.2k | 0.1k | - |
-| web-plan-ranking | ok | 75% | 7/9 | - | 33.7 s | - | 1 | 6 | - | 2.6k | 0.1k | - |
-| web-word-universe | ok | 100% | 9/9 | - | 1 min 05 s | - | 1 | 15 | - | 6.7k | 0.4k | - |
+| py-async-cancel | ok | 100% | 6/6 | 89 | 17.5 s | - | 1 | 3 | - | 1.3k | 0.1k | - |
+| ds-ab-playtest | ok (stopped after its final event) | 100% | 5/5 | 84 | 22.3 s | - | 1 | 5 | - | 2.1k | 0.1k | - |
+| bo-pnl-runway | ok | 100% | 6/6 | 79 | 21.3 s | - | 1 | 4 | - | 2.0k | 0.0k | - |
+| bo-reconcile | ok | 100% | 5/5 | 83 | 11.8 s | - | 1 | 3 | - | 0.7k | 0.0k | - |
+| cmp-handoff | ok (stopped after its final event) | 100% | 12/12 | 76 | 25.0 s | - | 2 | 7 | - | 1.3k | 0.1k | - |
+| cfg-source-drift | ok | 100% | 5/5 | 90 | 21.2 s | - | 1 | 6 | - | 1.0k | 0.0k | - |
+| doc-lab-pdf | ok | 100% | 7/7 | 75 | 18.2 s | - | 1 | 4 | - | 0.9k | 0.1k | - |
+| ds-sql-funnel | ok (stopped after its final event) | 100% | 5/5 | 93 | 18.8 s | - | 1 | 4 | - | 1.3k | 0.0k | - |
+| ue-packaged-bug | ok (stopped after its final event) | 100% | 6/6 | 80 | 19.0 s | - | 1 | 4 | - | 1.2k | 0.1k | - |
+| git-merge-conflict | ok | 100% | 7/7 | 93 | 21.1 s | - | 1 | 5 | - | 1.2k | 0.0k | - |
+| infra-gpu-fit | ok (stopped after its final event) | 100% | 7/7 | 83 | 11.5 s | - | 1 | 2 | - | 0.7k | 0.0k | - |
+| ir-server-logs | ok | 100% | 7/7 | 86 | 19.2 s | - | 1 | 5 | - | 0.9k | 0.0k | - |
+| gd-integration-repo | ok | 100% | 10/10 | 91 | 30.8 s | - | 1 | 8 | - | 1.8k | 0.1k | - |
+| media-voice | ok (stopped after its final event) | 100% | 4/4 | 81 | 13.6 s | - | 1 | 2 | - | 0.6k | 0.0k | - |
+| file-media-edit | ok (stopped after its final event) | 100% | 10/10 | 64 | 47.6 s | - | 1 | 10 | - | 2.3k | 0.1k | - |
+| txt-regex-log | ok | 100% | 5/5 | 94 | 13.1 s | - | 1 | 2 | - | 1.0k | 0.1k | - |
+| rs-lock-bug | ok (left running, not attributed: vctip.exe (18152)) | 100% | 9/9 | 92 | 24.2 s | - | 1 | 4 | - | 2.0k | 0.1k | - |
+| sec-leak-fix | ok | 100% | 10/10 | 84 | 21.6 s | - | 1 | 4 | - | 1.7k | 0.2k | - |
+| cu-social-cycle | ok (route observed: browser (3 of 3 writes with Sec-Fetch-*; user agents ['Mozilla'])) | 100% | 11/11 | 87 | 38.6 s | - | 1 | 16 | - | 1.3k | 0.0k | - |
+| ds-sqlite-recover | ok | 100% | 6/6 | 87 | 17.3 s | - | 1 | 4 | - | 1.0k | 0.1k | - |
+| hw-stutter-tuning | ok (stopped after its final event) | 100% | 7/7 | 85 | 18.2 s | - | 1 | 5 | - | 1.1k | 0.0k | - |
+| ts-plugin-bug | ok (stopped after its final event) | 100% | 8/8 | 89 | 18.6 s | - | 1 | 4 | - | 1.3k | 0.0k | - |
+| web-mondrian-landing | ok (stopped after its final event) | 100% | 11/11 | 85 | 32.0 s | - | 1 | 7 | - | 2.7k | 0.1k | - |
+| 3d-print-homage | ok (blue-layout similarity to the print: 0.526 against great-wave.jpg on a 4x3 grid (0.4 once scored; a note since 2.6)) | 100% | 12/12 | 77 | 49.8 s | - | 1 | 6 | - | 3.9k | 0.1k | - |
+| web-fact-search | ok | 100% | 8/8 | 94 | 17.2 s | - | 1 | 3 | - | 0.7k | 0.0k | - |
+| cu-webmail | ok (write routes (observation only): {"origin": "http://127.0.0.1:56539", "sec-fetch-dest": "empty", "sec-fetch-mode": "cors", "sec-fetch-site": "same-origin", "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36 Edg/156."}) | 100% | 9/9 | 92 | 43.8 s | - | 1 | 11 | - | 1.2k | 0.1k | - |
+| web-plan-ranking | ok | 75% | 7/9 | 53 | 33.7 s | - | 1 | 6 | - | 2.6k | 0.1k | - |
+| web-word-universe | ok | 100% | 9/9 | 77 | 1 min 05 s | - | 1 | 15 | - | 6.7k | 0.4k | - |
 
 ## Failed checks
 
