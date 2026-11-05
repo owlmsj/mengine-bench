@@ -1,0 +1,53 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [
+  "\n\n[action] Created `run.py` with `run_tasks` and `test_run.py`; ran the tests.\n\n**Design / assumptions** (stated in the module docstring):\n- Implementation: `asyncio.Semaphore(max_concurrent)` wrapping each job, driven by `asyncio.TaskGroup` (3.11+, stdlib only).\n- Normal path: returns results in task order once all jobs finish.\n- Ctrl+C path: on SIGINT, `asyncio.run` cancels the main task; `TaskGroup` then cancels every unfinished job and **awaits all of them** before re-raising `CancelledError`, so each job's `finally` / async-context-manager cleanup runs, including cleanup that itself awaits. A second Ctrl+C surfaces as `KeyboardInterrupt`; cleanup still ran because the first SIGINT already triggered the cancel-and-await.\n- Job failure: fail-fast (my choice, matching TaskGroup semantics) — remaining jobs are cancelled, awaited, and an `ExceptionGroup` propagates.\n- `max_concurrent < 1` raises `ValueError` instead of deadlocking.\n- A job that swallows `CancelledError` and never awaits can still block shutdown; that is the job's bug, noted in the docstring.\n\n[result] `python test_run.py` output, verbatim: `all tests passed`. Evidence it is right:\n- Cap test: 20 jobs, cap 4 → peak observed concurrency exactly 4, never above; results in order.\n- Ctrl+C test: cancels the `run_tasks` task (exactly what `asyncio.run` does on first SIGINT) mid-run; the two started jobs' `finally` blocks (with an await inside) completed, and `CancelledError` propagated.\n- Error test: a failing job cancels the slow job, its cleanup ran, `except* RuntimeError` caught the group.\n- `max_concurrent=0` raises `ValueError`.\n\n[nex] Nothing blocking; if you want gather-style first-exception semantics instead of `ExceptionGroup`, that is a one-line swap to a manual gather with cleanup-on-cancel."
+ ],
+ "diff": "A run.py\nA test_run.py\n\n--- run.py ---\n\"\"\"Concurrency helper for batch scripts.\n\nUsage:\n    from run import run_tasks\n\n    results = await run_tasks(tasks, max_concurrent)\n\nEach task is a zero-argument callable that returns an awaitable job.\nAt most ``max_concurrent`` jobs run at once. On normal completion every\njob has finished and results are returned in task order.\n\nOn Ctrl+C (KeyboardInterrupt under asyncio.run, which cancels the main\ntask) or on a job failure, all unfinished jobs are cancelled and *awaited*\nbefore the error propagates, so each job's cleanup (finally blocks, async\ncontext managers) runs to completion.\n\nAssumptions:\n- Python 3.11+ (uses asyncio.TaskGroup), standard library only.\n- Fail-fast on job errors: remaining jobs are cancelled (after their\n  cleanup) and an ExceptionGroup is raised, matching TaskGroup semantics.\n- Ctrl+C surfaces as CancelledError (first SIGINT) or KeyboardInterrupt\n  (repeated SIGINTs); cleanup runs in both cases, the error re-raises.\n- A job that ignores cancellation (no await in cleanup, or bare\n  except-then-await) can still block shutdown; that is the job's bug.\n\"\"\"\n\nimport asyncio\nfrom collections.abc import Awaitable, Callable, Iterable\nfrom typing import TypeVar\n\nT = TypeVar(\"T\")\n\n\nasync def run_tasks(\n    tasks: Iterable[Callable[[], Awaitable[T]]],\n    max_concurrent: int,\n) -> list[T]:\n    \"\"\"Run all jobs with bounded concurrency; return results in task order.\n\n    Raises ValueError if max_concurrent < 1. Propagates job exceptions as\n    an ExceptionGroup after cancelling and awaiting the remaining jobs.\n    Propagates CancelledError/KeyboardInterrupt after cleanup completes.\n    \"\"\"\n    if max_concurrent < 1:\n        raise ValueError(f\"max_concurrent must be >= 1, got {max_concurrent}\")\n\n    semaphore = asyncio.Semaphore(max_concurrent)\n\n    async def guarded(task: Callable[[], Awaitable[T]]) -> T:\n        async with semaphore:\n            return await task()\n\n    async with asyncio.TaskGroup() as tg:\n        handles = [tg.create_task(guarded(task)) for task in tasks]\n    return [handle.result() for handle in handles]\n\n\nimport asyncio  # noqa: E402  (import kept after docstring for readability)\n\n--- test_run.py ---\nimport asyncio\nimport time\n\nfrom run import run_tasks\n\n\nasync def test_concurrency_cap_and_results():\n    running = 0\n    peak = 0\n\n    def make(i):\n        async def job():\n            nonlocal running, peak\n            running += 1\n            peak = max(peak, running)\n            await asyncio.sleep(0.02)\n            running -= 1\n            return i\n        return job\n\n    results = await run_tasks([make(i) for i in range(20)], 4)\n    assert results == list(range(20)), results\n    assert peak <= 4, peak\n    assert peak == 4, peak  # cap is actually used\n\n\nasync def test_cleanup_on_cancel():\n    cleaned = []\n\n    def make(i):\n        async def job():\n            try:\n                await asyncio.sleep(10)\n            finally:\n                await asyncio.sleep(0.01)  # async cleanup\n                cleaned.append(i)\n        return job\n\n    async def outer():\n        await run_tasks([make(i) for i in range(6)], 2)\n\n    t = asyncio.create_task(outer())\n    await asyncio.sleep(0.05)\n    t.cancel()  # what asyncio.run does on first SIGINT\n    try:\n        await t\n    except asyncio.CancelledError:\n        pass\n    else:\n        raise AssertionError(\"expected CancelledError\")\n    assert sorted(cleaned) == [0, 1], cleaned  # started jobs cleaned up\n\n\nasync def test_error_propagates_after_cleanup():\n    cleaned = []\n\n    def boom():\n        async def job():\n            raise RuntimeError(\"boom\")\n        return job\n\n    def slow():\n        async def job():\n            try:\n                await asyncio.sleep(10)\n            finally:\n                cleaned.append(1)\n        return job\n\n    try:\n        await run_tasks([boom(), slow()], 2)\n    except* RuntimeError:\n        pass\n    else:\n        raise AssertionError(\"expected ExceptionGroup\")\n    await asyncio.sleep(0)  # slow cleanup already awaited by TaskGroup\n    assert cleaned == [1], cleaned\n\n\nasync def test_bad_cap():\n    try:\n        await run_tasks([], 0)\n    except ValueError:\n        return\n    raise AssertionError(\"expected ValueError\")\n\n\nasync def main():\n    await test_concurrency_cap_and_results()\n    await test_cleanup_on_cancel()\n    await test_error_propagates_after_cleanup()\n    await test_bad_cap()\n    print(\"all tests passed\")\n\n\nif __name__ == \"__main__\":\n    asyncio.run(main())",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Created file successfully: <WORKSPACE>/run.py\"\n[step 1] edit \"<WORKSPACE>\\\\run.py\" ok -> \"Edited <WORKSPACE>/run.py (1 replacement)\"\n[step 1] write \"<WORKSPACE>\\\\test_run.py\" ok -> \"Created file successfully: <WORKSPACE>/test_run.py\"\n[step 1] shell \"python test_run.py\" ok -> \"all tests passed\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 4,
+  "tool_calls": 4,
+  "tool_errors": 0,
+  "shell_commands": 1,
+  "shell_failures": 0,
+  "file_writes": 3,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 3462,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1872
+ },
+ "deliverables": [],
+ "render": null
+}

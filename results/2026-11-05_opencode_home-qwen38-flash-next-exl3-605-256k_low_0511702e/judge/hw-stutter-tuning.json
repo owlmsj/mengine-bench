@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "\n\n[result] `./result.json` written and validated:\n- avg_fps: **137.29** (1000 / mean MsBetweenPresents, 8238 presented frames)\n- low_1pct_fps: **45.35** (1000 / p99 MsBetweenPresents = 22.05 ms)\n- cause: PCIe ASPM L1 on the GPU root port (`pcie_aspm_rp1_gpu=L1`)\n- changes: `pcie_aspm_rp1_gpu`: `L1` → `disabled`\n\n[how I know]\n- The sensor log's `gpu_pcie_link_state` is L1 at exactly 15 seconds (2,6,10,…,58, every ~4 s). All 180 hitch frames (MsBetweenPresents > 2× the 6.96 ms median) fall inside those 15 L1 seconds; **zero** hitches occur in L0 seconds. L0 frames max out at 8.2 ms (smooth); L1 frames reach 23.7 ms. That 1:1 mapping is the ASPM L1-exit wake latency.\n- Removing the L1-second frames lifts the 1% low from 45.35 to ~130 fps while avg stays 137.29, so this single cause explains the poor lows.\n- Ruled out the decoys: the Defender `MsMpEng.exe` spike at seconds 43-45 (dpc 420-455 µs, disk 94%) produced no hitch (max frame 8.1 ms); NVMe disk spikes at 13/27/52 (game streaming) also produced none, so `pcie_aspm_rp0_nvme` is left alone.\n\n[constraints] ASPM is power management, not an overclock, so it is allowed; the fix keeps the GPU link at Gen5 x4 and touches no XMP/PBO/core-ratio setting.\n\n[next] Nothing applied to this host; all findings are in the rig's files only. Assumption: the periodic L1 toggling is ASPM-driven (the BIOS root-port setting), which disabling it removes."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"avg_fps\": 137.29,\n  \"low_1pct_fps\": 45.35,\n  \"cause\": \"PCIe ASPM L1 power state on the GPU root port (pcie_aspm_rp1_gpu=L1). The GPU link drops to L1 every ~4 s (sensor seconds 2,6,10,...,58) and the L1-exit wake latency adds ~15 ms to the frame, producing a periodic hitch. All 180 hitch frames (MsBetweenPresents > 2x median) fall inside the 15 L1 seconds; zero hitches occur in L0 seconds (L0 frames max 8.2 ms, L1 frames up to 23.7 ms). The Defender MsMpEng scan spike at seconds 43-45 (dpc 420-455 us, disk 94%) caused no frame hitch (max 8.1 ms), so it is not the cause. Fixing ASPM raises 1% low from 45.35 to ~130 fps with avg unchanged.\",\n  \"changes\": [\n    {\n      \"setting\": \"pcie_aspm_rp1_gpu\",\n      \"from\": \"L1\",\n      \"to\": \"disabled\"\n    }\n  ]\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"ls ..\" ok -> \"Directory: <HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-bwvp22ah\\r\\n\\r\\n\\u001b[32;1mMode   \\u001b[0m\\u001b[32;1m              LastWriteTime\\u001b[0m \\u001b[32;1;3m        Length\\u001b[0m\\u001b[32;1m Name\\u001b[0m\\r\\n\\u001b[32;1m----   \\u001b[0m \\u001b[32;1m             -------------\\u001b[0m \\u001b[32;1m        ------\\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\nd----          05/11/2026    16:15                \\u001b[44;1mworkspace\\u001b[0m\"\n[step 1] shell \"ls -la .; ls -la .. 2>$null\" failed -> \"\\u001b[31;1mGet-ChildItem: \\u001b[31;1mA parameter cannot be found that matches parameter name 'la'.\\u001b[0m\\r\\n\\u001b[31;1mGet-ChildItem: \\u001b[31;1mA parameter cannot be found that matches parameter name 'la'.\\u001b[0m\"\n[step 1] shell \"Get-ChildItem -Force . | Select-Object Name,Length; Write-Output \\\"PARENT:\\\"; Get-ChildItem -Force .. | Select-Object Name,Length\" ok -> \"\\u001b[32;1mName         \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----         \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\ncapture       \\r\\nAGENTS.md     394\\r\\nNOTES.md      774\\r\\nsettings.json 2429\\r\\nPARENT:\\r\\nworkspace\"\n[step 1] read \"settings.json\" ok -> \"Read file settings.json, lines 1-125\\n1: {\\n2:   \\\"rig\\\": \\\"arena-01\\\",\\n3:   \\\"settings\\\": [\\n4:     {\\n5:       \\\"setting\\\": \\\"power_plan\\\",\\n6:       \\\"value\\\": \\\"Balanced\\\",\\n7:       \\\"where\\\": \\\"Windows\\\"\\n8:     },\\n9:     {\\n10:       \\\"setting\\\": \\\"hardware_accelerated_gpu_scheduling\\\",\\n11:       \\\"value\\\": \\\"on\\\",\\n12:       \\\"where\\\": \\\"Windows\\\"\\n13:     },\\n14:     {\\n15:       \\\"setting\\\": \\\"game_mode\\\",\\n16:       \\\"value\\\": \\\"on\\\",\\n1[... 2582 chars cut by the benchmark]\"\n[step 1] read \"NOTES.md\" ok -> \"Read file NOTES.md, lines 1-15\\n1: # Owner notes - rig \\\"arena-01\\\"\\n2: \\n3: The game hitches every few seconds even though the average frame rate looks fine.\\n4: Capture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\n5: taken at the same time (same clock: second 0 of both files is the same instant).\\n6: settings.json is a dump of the rig's current settings.\\n7: \\n8: How [... 455 chars cut by the benchmark]\"\n[step 1] shell \"Get-ChildItem -Force -Recurse capture | Select-Object FullName,Length\" ok -> \"\\u001b[32;1mFullName                                                                                            \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m--------                                                                                            \\u001b[0m \\u001b[32;<WORKSPACE>\\\\capture\\\\presentmon.csv 715870\\r\\nC:\\\\Users\\\\<USER>\\\\AppData\\\\L[... 78 chars cut by the benchmark]\"\n[step 1] shell \"Write-Output \\\"=== presentmon head ===\\\"; Get-Content capture\\\\presentmon.csv -TotalCount 3; Write-Output \\\"=== sensors head ===\\\"; Get-Content capture\\\\sensors.csv -TotalCount 5; Write-Output \\\"=== sensors wc ===\\\"; (Get-Content capture\\\\sensors.csv | Measure-Object -Line).Lines\" ok -> \"=== presentmon head ===\\r\\nApplication,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.000000,6.861,6.847,0.294,4.901,5.568\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.006861,6.773,6.812,0.387,4.013,6.252\\r\\n=== sensor[... 338 chars cut by the benchmark]\"\n[step 1] write \"analyze.py\" ok -> \"Created file successfully: analyze.py\"\n[step 1] shell \"python analyze.py\" ok -> \"frames(non-dropped)=8238 mean_mbp=7.284 avg_fps=137.29 p99_mbp=22.049 1%low_fps=45.35\\r\\ntotal rows: 8238 dropped: 0\\r\\nmedian_mbp 6.962\\r\\nhitch count (>2x median): 180\\r\\nhitch times: [2.4, 2.4, 2.4, 2.5, 2.5, 2.5, 2.5, 2.6, 2.6, 2.6, 2.6, 2.6, 6.4, 6.4, 6.4, 6.5, 6.5, 6.5, 6.5, 6.6, 6.6, 6.6, 6.6, 6.6, 10.4, 10.4, 10.4, 10.5, 10.5, 10.5, 10.5, 10.6, 10.6, 10.6, 10.6, 10.6, 14.4, 14.4, 14.4, 14.5, 14.5,[... 15088 chars cut by the benchmark]\"\n[step 1] write \"verify.py\" ok -> \"Created file successfully: verify.py\"\n[step 1] shell \"python verify.py\" ok -> \"defender window 43-46: n= 431 max_mbp= 8.13 mean= 6.96\\r\\nL1-sec frames: n= 1764 mean= 8.5 max= 23.68\\r\\nL0-sec frames: n= 6474 mean= 6.95 max= 8.2\\r\\np99 excluding L1 frames= 7.664 -> 1%low= 130.48\\r\\navg fps unchanged= 137.29\\r\\nhitches outside L1 secs: []\"\n[step 1] write \"result.json\" ok -> \"Created file successfully: result.json\"\n[step 1] shell \"python -c \\\"import json;d=json.load(open('result.json'));print('keys',list(d));print('avg',d['avg_fps'],'low',d['low_1pct_fps']);print('changes',d['changes'])\\\"; Remove-Item analyze.py,verify.py\" ok -> \"keys ['avg_fps', 'low_1pct_fps', 'cause', 'changes']\\r\\navg 137.29 low 45.35\\r\\nchanges [{'setting': 'pcie_aspm_rp1_gpu', 'from': 'L1', 'to': 'disabled'}]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 12,
+  "tool_calls": 13,
+  "tool_errors": 0,
+  "shell_commands": 8,
+  "shell_failures": 1,
+  "file_writes": 3,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 5539,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 2191
+ },
+ "deliverables": [],
+ "render": null
+}

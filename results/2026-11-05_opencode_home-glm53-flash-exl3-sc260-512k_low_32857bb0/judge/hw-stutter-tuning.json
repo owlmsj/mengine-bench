@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "**[result]** Written `result.json` — avg_fps 137.29, low_1pct_fps 45.35, cause: GPU ASPM L1, changes: `pcie_aspm_rp1_gpu` L1 → disabled.\n\n**[evidence]**\n- presentmon.csv: 8238 frames / 60 s → 137.29 avg; p99 frame time 22.05 ms → 45.35 1% low (computed by script, output quoted above).\n- 180 frames >20 ms occur in exactly the seconds 2, 6, 10 … 58 — a strict 4-second cadence, ~120 ms of stall per hitch (\"hitches every few seconds\").\n- sensors.csv: `gpu_pcie_link_state` falls to L1 in exactly those same seconds (2, 6, 10, …, 58), nowhere else. L1 exit latency on the Gen5 x4 link stalls presentation — the recurring hitch.\n- Defender (MsMpEng.exe) spikes at s43-45 (DPC ~400-455 µs, disk 80-94%) but does not match the 4 s cadence and its seconds show no extra frame-time damage beyond the regular pattern, so it is not the cause.\n- Fix stays inside the owner's constraints: link speed remains Gen5 x4, only the power state changes; no XMP/PBO/core-ratio edits. NVMe L1 left alone since disk spikes don't correlate with hitches.\n\nNo browser tabs, windows or apps were opened."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"avg_fps\": 137.29,\n  \"low_1pct_fps\": 45.35,\n  \"cause\": \"GPU PCIe link power management (ASPM L1 on root port rp1_gpu): the sensor log shows gpu_pcie_link_state dropping to L1 exactly at seconds 2,6,10,...58 (every 4 s), and presentmon shows a burst of ~12 long frames (>20 ms, up to ~23.7 ms) in exactly those same seconds. The periodic L1 re-entry/exit latency on the Gen5 x4 link causes the recurring hitches; average FPS stays high because the bursts are short. The MsMpEng.exe (Defender) spike at s43-45 raises DPC latency (~400-455 us) but does not coincide with the hitch cadence and is not the driver of the 1% lows.\",\n  \"changes\": [\n    {\n      \"setting\": \"pcie_aspm_rp1_gpu\",\n      \"from\": \"L1\",\n      \"to\": \"disabled\"\n    }\n  ],\n  \"notes\": \"Fix respects constraints: PCIe link speed stays Gen5 x4 (only the ASPM power state is disabled, not the link speed), no BIOS overclock changes. pcie_aspm_rp0_nvme L1 and rp2_chipset disabled left as-is: hitches align with the GPU port's L1 transitions, and nvme L1 shows no frame-time correlation (disk_active_pct spikes at s13,27,43-45,52 do not match the 4 s hitch pattern).\",\n  \"assumptions\": [\n    \"Hitch frames defined as MsBetweenPresents > 20 ms (baseline is ~6-7 ms at ~145 fps); every 4 s window contains exactly 12 such frames, totaling ~120 ms of stall per hitch, consistent with 'hitches every few seconds'.\",\n    \"Avg FPS = frames/elapsed per owner notes (8238 frames / 60 s capture); 1% low = 1000 / p99(MsBetweenPresents) = 1000 / 22.049 ms.\"\n  ]\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem .. | Select Name,Length\" ok -> \"\\u001b[32;1mName     \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----     \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\nworkspace\"\n[step 1] shell \"Get-ChildItem ..\\\\..\\\\ | Select Name; Get-ChildItem . | Select Name\" ok -> \"\\u001b[32;1mName\\u001b[0m\\r\\n\\u001b[32;1m----\\u001b[0m\\r\\n.tmp0hA3YB\\r\\n.tmp0O9ocA\\r\\n.tmp121BHD\\r\\n.tmp1hDBES\\r\\n.tmp1lQa3J\\r\\n.tmp1Q6qWv\\r\\n.tmp1VOEke\\r\\n.tmp38Y9EO\\r\\n.tmp3DyoAv\\r\\n.tmp3ijcjC\\r\\n.tmp3KarVf\\r\\n.tmp3rTGzq\\r\\n.tmp5aNpfl\\r\\n.tmp5EJSTZ\\r\\n.tmp7ipERy\\r\\n.tmp9oHaV8\\r\\n.tmpA1BOUz\\r\\n.tmpA1CoN8\\r\\n.tmpAh5Y3O\\r\\n.tmpApbf2d\\r\\n.tmpaUE9DL\\r\\n.tmpAvNptD\\r\\n.tmpB3jepS\\r\\n.tmpBe7egm\\r\\n.tmpbHawWo\\r\\n.tmpBhkUu4\\r\\n.tmpC1xJwm\\r\\n.tmpC4Ce6b\\r\\n.tmpCgxz5Y\\r\\n.tmpClcvBF\\r\\n.tmpcL[... 9868 chars cut by the benchmark]\"\n[step 1] shell \"Get-ChildItem .\\\\capture | Select Name,Length; Get-Content .\\\\NOTES.md\" ok -> \"\\u001b[32;1mName          \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----          \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\npresentmon.csv 715870\\r\\nsensors.csv      2660\\r\\n# Owner notes - rig \\\"arena-01\\\"\\r\\n\\r\\nThe game hitches every few seconds even though the average frame rate looks fine.\\r\\nCapture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\r\\ntaken at the same time (same clock: second 0 of both fil[... 523 chars cut by the benchmark]\"\n[step 1] shell \"Get-Content .\\\\sensors.csv; Get-Content .\\\\settings.json\" ok -> \"\\u001b[31;1mGet-Content: \\u001b[31;1mCannot find path '<WORKSPACE>\\\\sensors.csv' because it does not exist.\\u001b[0m\\r\\n{\\r\\n  \\\"rig\\\": \\\"arena-01\\\",\\r\\n  \\\"settings\\\": [\\r\\n    {\\r\\n      \\\"setting\\\": \\\"power_plan\\\",\\r\\n      \\\"value\\\": \\\"Balanced\\\",\\r\\n      \\\"where\\\": \\\"Windows\\\"\\r\\n    },\\r\\n    {\\r\\n      \\\"setting\\\": \\\"hardware_accelerated_gpu_scheduling\\\",\\r\\n      \\\"value\\\": \\\"on\\\",\\r\\n   [... 2320 chars cut by the benchmark]\"\n[step 1] shell \"Get-Content .\\\\capture\\\\sensors.csv\" ok -> \"time_s,cpu_clock_mhz,cpu_util_pct,gpu_clock_mhz,gpu_pcie_link_state,gpu_pcie_link_speed,dpc_latency_us,disk_active_pct,top_cpu_process\\r\\n0,5354,35,2724,L0,Gen5 x4,52,1,Arena.exe\\r\\n1,5350,40,2754,L0,Gen5 x4,88,4,Arena.exe\\r\\n2,5270,31,2754,L1,Gen5 x4,40,3,Arena.exe\\r\\n3,5373,31,2720,L0,Gen5 x4,81,2,Arena.exe\\r\\n4,5290,33,2759,L0,Gen5 x4,41,1,Arena.exe\\r\\n5,5344,32,2735,L0,Gen5 x4,49,2,Arena.exe\\r\\n6,5380,35,27[... 2319 chars cut by the benchmark]\"\n[step 1] shell \"Get-Content .\\\\capture\\\\presentmon.csv -TotalCount 5; (Get-Content .\\\\capture\\\\presentmon.csv).Count\" ok -> \"Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.000000,6.861,6.847,0.294,4.901,5.568\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.006861,6.773,6.812,0.387,4.013,6.252\\r\\nArena.exe,7316,0x000001F2A8C40000,D[... 143 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv,statistics\\nrows=list(csv.DictReader(open(r'capture\\\\presentmon.csv')))\\nft=[float(r['MsBetweenPresents']) for r in rows]\\nft.sort()\\nn=len(ft)\\nmean=sum(ft)/n\\nimport math\\np99=ft[math.ceil(0.99*n)-1]\\nprint('frames',n,'avg_fps',1000/mean,'p99_ms',p99,'low1pct',1000/p99)\\n# hitch frames\\nh=[(r['TimeInSeconds'],float(r['MsBetweenPresents'])) for r in rows if float(r['MsBetweenPresents'])>40]\\nprint('hitches',len(h))\\nimport collections\\nsecs=collections.Counter(int(t) for t,_ in h)\\nprint(sorted(secs.items()))\\n\\\"\" ok -> \"frames 8238 avg_fps 137.28571999702498 p99_ms 22.049 low1pct 45.35353077237063\\r\\nhitches 0\\r\\n[]\"\n[step 1] shell \"python -c \\\"\\nimport csv,collections,math\\nrows=list(csv.DictReader(open(r'capture\\\\presentmon.csv')))\\nft=[float(r['MsBetweenPresents']) for r in rows]\\ns=sorted(ft); n=len(s)\\nfor q in (95,99,99.5):\\n i=math.ceil(q/100*n)-1; print(q,1000/s[i])\\nh=[(float(r['TimeInSeconds']),float(r['MsBetweenPresents'])) for r in rows if float(r['MsBetweenPresents'])>20]\\nsecs=collections.Counter(int(t) for t,_ in h)\\nprint('frames>20ms:',len(h))\\nprint(sorted(secs.items()))\\nprint('max',max(ft),'at',h[-1] if h else None)\\n\\\"\" ok -> \"95 132.92569453675395\\r\\n99 45.35353077237063\\r\\n99.5 44.535494789347105\\r\\nframes>20ms: 180\\r\\n[(2, 12), (6, 12), (10, 12), (14, 12), (18, 12), (22, 12), (26, 12), (30, 12), (34, 12), (38, 12), (42, 12), (46, 12), (50, 12), (54, 12), (58, 12)]\\r\\nmax 23.675 at (58.650811, 21.576)\"\n[step 1] write \".\\\\result.json\" ok -> \"Created file successfully: result.json\"\n[step 1] shell \"python -c \\\"\\nimport json,csv,math\\nd=json.load(open('result.json'))\\nrows=list(csv.DictReader(open(r'capture\\\\presentmon.csv')))\\nft=sorted(float(r['MsBetweenPresents']) for r in rows)\\nn=len(ft); assert abs(d['avg_fps']-1000/(sum(ft)/n))<0.01 and abs(d['low_1pct_fps']-1000/ft[math.ceil(0.99*n)-1])<0.01\\nprint('validated; avg',1000/(sum(ft)/n),'low1',1000/ft[math.ceil(0.99*n)-1])\\n\\\"\" ok -> \"validated; avg 137.28571999702498 low1 45.35353077237063\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 11,
+  "tool_calls": 10,
+  "tool_errors": 0,
+  "shell_commands": 9,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 1,
+  "generated_tokens": 2192,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 933
+ },
+ "deliverables": [],
+ "render": null
+}

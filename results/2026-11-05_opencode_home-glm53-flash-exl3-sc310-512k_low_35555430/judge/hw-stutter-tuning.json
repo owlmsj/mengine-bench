@@ -1,0 +1,55 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"rig\": \"arena-01\",\n  \"avg_fps\": 137.3,\n  \"low_1pct_fps\": 45.4,\n  \"cause\": \"GPU PCIe ASPM: the GPU link drops to L1 and wakes back to L0 on a ~4 s cycle (sensor log: L1 at exactly t=2,6,10,...,58), and every hitch burst in presentmon.csv starts right after each L0 exit (hitch clusters at t=2.4, 6.4, 10.4, 14.4 ... ~180 burst frames of ~21 ms). A secondary contributor is Windows Defender realtime scanning: MsMpEng becomes the top CPU process at t=43-45 with disk at 80-94% and DPC latency spiking to ~420-455 us, adding hitches mid-capture.\",\n  \"changes\": [\n    {\n      \"setting\": \"pcie_aspm_rp1_gpu\",\n      \"from\": \"L1\",\n      \"to\": \"disabled\"\n    },\n    {\n      \"setting\": \"defender_exclusions\",\n      \"from\": \"[]\",\n      \"to\": \"[\\\"Arena.exe process and the game's install folder (realtime scan exclusion)\\\"]\"\n    }\n  ],\n  \"constraints_respected\": \"GPU link speed stays Gen5 x4 (only the L1 power state is disabled, speed/width untouched); no XMP/PBO/core-ratio changes.\",\n  \"assumptions\": \"Avg FPS = 1000/mean MsBetweenPresents; 1% low = 1000/p99 MsBetweenPresents per owner notes. ASPM L1 disable is a power-state change, not an overclock, so it is allowed. Defender exclusion assumed acceptable since only scheduled-scan and realtime settings are otherwise free; the scheduled 21:00 quick scan did not run during the capture, so the 43-45 s spike is realtime scanning of game file/streaming activity.\",\n  \"evidence\": \"capture/presentmon.csv: 8238 frames, mean 7.28 ms, p99 22.05 ms; hitch bursts (>20 ms frame times) begin at 2.40, 6.40, 10.40, 14.40 s, each ~12 frames. capture/sensors.csv: gpu_pcie_link_state=L1 at seconds 2,6,10,14,18,22,26,30,34,38,42,46,50,54,58 (exactly every 4 s); MsMpEng.exe top process at t=43,44,45 with dpc_latency_us 420,455,396 and disk_active_pct 94,83,80.\"\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem .. | Select Name,Length\" ok -> \"\\u001b[32;1mName     \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----     \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\nworkspace\"\n[step 1] shell \"Get-ChildItem . -Recurse | Select FullName,Length\" ok -> \"\\u001b[32;1mFullName                                                                                            \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m--------                                                                                            \\u001b[0m \\u001b[32;<WORKSPACE>\\\\capture                \\r\\nC:\\\\Users\\\\<USER>\\\\AppData\\\\Local\\\\T[... 498 chars cut by the benchmark]\"\n[step 1] read \"NOTES.md\" ok -> \"Read file NOTES.md, lines 1-15\\n1: # Owner notes - rig \\\"arena-01\\\"\\n2: \\n3: The game hitches every few seconds even though the average frame rate looks fine.\\n4: Capture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\n5: taken at the same time (same clock: second 0 of both files is the same instant).\\n6: settings.json is a dump of the rig's current settings.\\n7: \\n8: How [... 455 chars cut by the benchmark]\"\n[step 1] read \"settings.json\" ok -> \"Read file settings.json, lines 1-125\\n1: {\\n2:   \\\"rig\\\": \\\"arena-01\\\",\\n3:   \\\"settings\\\": [\\n4:     {\\n5:       \\\"setting\\\": \\\"power_plan\\\",\\n6:       \\\"value\\\": \\\"Balanced\\\",\\n7:       \\\"where\\\": \\\"Windows\\\"\\n8:     },\\n9:     {\\n10:       \\\"setting\\\": \\\"hardware_accelerated_gpu_scheduling\\\",\\n11:       \\\"value\\\": \\\"on\\\",\\n12:       \\\"where\\\": \\\"Windows\\\"\\n13:     },\\n14:     {\\n15:       \\\"setting\\\": \\\"game_mode\\\",\\n16:       \\\"value\\\": \\\"on\\\",\\n1[... 2582 chars cut by the benchmark]\"\n[step 1] read \"capture\\\\sensors.csv\" ok -> \"Read file capture\\\\sensors.csv, lines 1-61\\n1: time_s,cpu_clock_mhz,cpu_util_pct,gpu_clock_mhz,gpu_pcie_link_state,gpu_pcie_link_speed,dpc_latency_us,disk_active_pct,top_cpu_process\\n2: 0,5354,35,2724,L0,Gen5 x4,52,1,Arena.exe\\n3: 1,5350,40,2754,L0,Gen5 x4,88,4,Arena.exe\\n4: 2,5270,31,2754,L1,Gen5 x4,40,3,Arena.exe\\n5: 3,5373,31,2720,L0,Gen5 x4,81,2,Arena.exe\\n6: 4,5290,33,2759,L0,Gen5 x4,41,1,Arena.exe\\n[... 2536 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv,statistics\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\nms=[float(r['MsBetweenPresents']) for r in rows]\\nms_sorted=sorted(ms)\\nprint('n',len(ms),'mean',1000/statistics.mean(ms),'p99',1000/ms_sorted[int(len(ms)*0.99)])\\nprint('worst10',ms_sorted[-10:])\\n# timestamps of hitches\\nimport collections\\nbig=[(float(r['TimeInSeconds']),float(r['MsBetweenPresents'])) for r in rows if float(r['MsBetweenPresents'])>2*statistics.mean(ms)]\\nprint(len(big)); print(big[:40])\\nprint(rows[0].keys())\\n\\\"\" ok -> \"n 8238 mean 137.28571999702498 p99 45.35353077237063\\r\\nworst10 [22.944, 22.946, 22.974, 22.975, 22.988, 23.02, 23.203, 23.224, 23.327, 23.675]\\r\\n180\\r\\n[(2.400643, 21.863), (2.422506, 22.853), (2.445359, 22.078), (2.467437, 21.606), (2.489043, 22.669), (2.511712, 21.025), (2.532737, 22.123), (2.55486, 21.902), (2.576762, 21.966), (2.598728, 22.495), (2.621223, 21.199), (2.642422, 20.636), (6.405129, 2[... 798 chars cut by the benchmark]\"\n[step 1] write \"result.json\" ok -> \"Created file successfully: result.json\"\n[step 1] shell \"python -c \\\"\\nimport csv,statistics,json\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\nms=[float(r['MsBetweenPresents']) for r in rows]\\ns=sorted(ms)\\nprint(round(1000/statistics.mean(ms),1), round(1000/s[int(len(s)*0.99)],1))\\nprint(json.load(open('result.json'))['avg_fps'])\\n\\\"\" ok -> \"137.3 45.4\\r\\n137.3\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 7,
+  "tool_calls": 8,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1623,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1090
+ },
+ "deliverables": [],
+ "render": null
+}

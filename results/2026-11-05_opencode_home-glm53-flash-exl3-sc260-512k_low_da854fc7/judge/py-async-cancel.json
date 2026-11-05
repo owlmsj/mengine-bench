@@ -1,0 +1,53 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [
+  "That's my test's assertion being wrong (jobs 1-4 finish in 0.05s, before the 0.15s timeout; only the 2s job is cancelled) — the implementation behaved correctly. Fixing the test:"
+ ],
+ "diff": "A run.py\nA tmp/test_run.py\n\n--- run.py ---\n\"\"\"Batch runner helper.\n\nUsage:\n    from run import run_tasks\n    await run_tasks(tasks, max_concurrent=8)\n\nEach item in ``tasks`` is a zero-argument callable returning an awaitable\n(a coroutine, Future or Task). At most ``max_concurrent`` jobs run at once.\nrun_tasks returns when every job is done.\n\nOn Ctrl+C (KeyboardInterrupt, delivered by asyncio.run as a cancellation of\nthe main task) the remaining jobs are cancelled, and we await them so their\ncleanup code (finally blocks, context managers, async with) still runs, then\nthe interruption propagates.\n\"\"\"\n\nimport asyncio\n\n\nasync def run_tasks(tasks, max_concurrent):\n    \"\"\"Run ``tasks`` with at most ``max_concurrent`` jobs in flight.\"\"\"\n    if not isinstance(max_concurrent, int) or max_concurrent < 1:\n        raise ValueError(f\"max_concurrent must be a positive int, got {max_concurrent!r}\")\n\n    semaphore = asyncio.Semaphore(max_concurrent)\n\n    async def run_one(task):\n        async with semaphore:\n            return await task()\n\n    jobs = [asyncio.ensure_future(run_one(task)) for task in tasks]\n    try:\n        await asyncio.gather(*jobs)\n    except (asyncio.CancelledError, KeyboardInterrupt):\n        # Interrupted: cancel whatever is still running and wait for each job\n        # so its cleanup code (finally / async with / context manager exit)\n        # executes before we propagate the interruption.\n        for job in jobs:\n            job.cancel()\n        await asyncio.gather(*jobs, return_exceptions=True)\n        raise\n\n--- tmp/test_run.py ---\nimport asyncio, signal, sys, time\nfrom run import run_tasks\n\n# 1. Importable as from run import run_tasks, signature ok (no NameError, no run at import).\n# 2. Concurrency limit + completion.\nasync def main():\n    log = []\n    running = 0\n    peak = 0\n\n    def make_job(i, delay=0.05):\n        async def job():\n            nonlocal running, peak\n            running += 1\n            peak = max(peak, running)\n            try:\n                await asyncio.sleep(delay)\n                log.append(i)\n            finally:\n                running -= 1\n        return job\n\n    tasks = [make_job(i) for i in range(20)]\n    t0 = time.monotonic()\n    await run_tasks(tasks, max_concurrent=5)\n    dt = time.monotonic() - t0\n    assert sorted(log) == list(range(20)), log\n    assert peak == 5, peak\n    assert 0.15 < dt < 0.6, dt  # 4 waves of 5, not 1 wave (0.05) or serial (1.0)\n    print(\"PASS concurrency/completion: peak=5, all 20 done, dt=%.2f\" % dt)\n\n# 3. Ctrl+C / cancellation: remaining jobs cancelled, cleanup runs.\nasync def main_interrupt():\n    ran, cleaned = [], []\n\n    def make_job(i, delay=0.05):\n        async def job():\n            try:\n                await asyncio.sleep(delay)\n                ran.append(i)\n            finally:\n                cleaned.append(i)\n        return job\n\n    tasks = [make_job(i, delay=(2.0 if i == 0 else 0.05)) for i in range(5)]\n    try:\n        await asyncio.wait_for(run_tasks(tasks, max_concurrent=3), timeout=0.15)\n        raise AssertionError(\"should have been cancelled\")\n    except (asyncio.TimeoutError, asyncio.CancelledError):\n        pass\n    assert ran == [1, 2, 3, 4], ran            # fast jobs finished; the 2s job was cancelled\n    assert sorted(cleaned) == list(range(5)), cleaned  # EVERY job's finally ran\n    print(\"PASS interruption: ran=%s, cleanup ran for %s\" % (ran, cleaned))\n\n# 4. Real KeyboardInterrupt at the event loop level (what Ctrl+C does via asyncio.run).\nasync def main_sigint():\n    cleaned = []\n\n    def make_job(i):\n        async def job():\n            try:\n                await asyncio.sleep(5)\n            finally:\n                cleaned.append(i)\n        return job\n\n    tasks = [make_job(i) for i in range(3)]\n    if sys.platform == \"win32\":\n        loop = asyncio.get_running_loop()\n        def raise_interrupt():\n            import _thread\n            _thread.interrupt_main()\n        loop.call_later(0.05, raise_interrupt)\n    else:\n        loop = asyncio.get_running_loop()\n        loop.call_later(0.05, lambda: signal.raise_signal(signal.SIGINT))\n    try:\n        await run_tasks(tasks, max_concurrent=3)\n        raise AssertionError(\"should have raised KeyboardInterrupt\")\n    except KeyboardInterrupt:\n        pass\n    assert sorted(cleaned) == list(range(3)), cleaned\n    print(\"PASS real SIGINT: cleanup ran for %s\" % cleaned)\n\n# 5. Bad max_concurrent rejected; jobs may also return plain Futures/Tasks.\nasync def main_misc():\n    try:\n        await run_tasks([], 0)\n        raise AssertionError(\"0 accepted\")\n    except ValueError as e:\n        print(\"PASS validation:\", e)\n    res = []\n    async def src():\n        return 7\n    fut = asyncio.ensure_future(src())\n    async def wrap_fut():\n        return fut\n    await run_tasks([wrap_fut], 1)\n    assert fut.result() == 7\n    print(\"PASS future-returning task\")\n\nasyncio.run(main())\nasyncio.run(main_interrupt())\nasyncio.run(main_sigint())\nasyncio.run(main_misc())\nprint(\"ALL TESTS PASSED\")",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Created file successfully: run.py\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\test_run.py\" ok -> \"Created file successfully: tmp/test_run.py\"\n[step 1] shell \"python tmp\\\\test_run.py\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\tmp\\\\test_run.py\\\", line 2, in <module>\\r\\n    from run import run_tasks\\r\\nModuleNotFoundError: No module named 'run'\"\n[step 1] shell \"$env:PYTHONPATH='.'; python tmp\\\\test_run.py\" failed -> \"PASS concurrency/completion: peak=5, all 20 done, dt=0.25\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\tmp\\\\test_run.py\\\", line 103, in <module>\\r\\n    asyncio.run(main_interrupt())\\r\\n    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\\r\\n  File \\\"<HOME>\\\\AppData\\\\Roaming\\\\uv\\\\python\\\\cpython-3.13-windows-x86_64-none\\\\Lib\\\\asyncio\\\\runners.p[... 808 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>\\\\tmp\\\\test_run.py\" ok -> \"Edited tmp/test_run.py (1 replacement)\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 5,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 2,
+  "file_writes": 3,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2214,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 993
+ },
+ "deliverables": [],
+ "render": null
+}

@@ -1,0 +1,51 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [],
+ "diff": "A recover.py\nA recovered.json\n\n--- recover.py ---\nimport json, struct\n\ndata = open('prices.db', 'rb').read()\n\ndef varint(buf, off):\n    v = 0\n    for i in range(9):\n        b = buf[off + i]\n        if i == 8:\n            v = (v << 8) | b\n            return v, off + 9\n        v = (v << 7) | (b & 0x7f)\n        if not (b & 0x80):\n            return v, off + i + 1\n\ndef value(buf, off, st):\n    if st == 0: return None, off\n    if st == 1: return struct.unpack('>b', buf[off:off+1])[0], off+1\n    if st == 2: return struct.unpack('>h', buf[off:off+2])[0], off+2\n    if st == 3: return int.from_bytes(buf[off:off+3], 'big', signed=True), off+3\n    if st == 4: return struct.unpack('>i', buf[off:off+4])[0], off+4\n    if st == 5: return int.from_bytes(buf[off:off+6], 'big', signed=True), off+6\n    if st == 6: return struct.unpack('>q', buf[off:off+8])[0], off+8\n    if st == 7: return struct.unpack('>d', buf[off:off+8])[0], off+8\n    if st == 8: return 0, off\n    if st == 9: return 1, off\n    if st >= 12 and st % 2 == 0:\n        n = (st - 12) // 2\n        return buf[off:off+n], off+n\n    if st >= 13 and st % 2 == 1:\n        n = (st - 13) // 2\n        return buf[off:off+n].decode('utf-8'), off+n\n    raise ValueError('bad serial type %d' % st)\n\nrows = []\nn = struct.unpack('>H', data[3:5])[0]\nfor i in range(n):\n    ptr = struct.unpack('>H', data[8 + 2*i:10 + 2*i])[0]\n    sz, o = varint(data, ptr)          # payload size\n    rowid, o = varint(data, o)         # rowid\n    hsz, o2 = varint(data, o)          # record header size\n    end = o + hsz\n    types = []\n    p = o2\n    while p < end:\n        st, p = varint(data, p)\n        types.append(st)\n    vals = []\n    p = end\n    for st in types:\n        v, p = value(data, p, st)\n        vals.append(v)\n    rows.append((rowid, vals))\n\nout = []\nfor rowid, vals in rows:\n    assert vals[0] is None and vals[1:] and rowid > 0, (rowid, vals)  # col0 = INTEGER PRIMARY KEY (rowid alias)\n    item, price = vals[1], vals[2]\n    assert isinstance(item, str), (rowid, vals)\n    assert isinstance(price, (int, float)), (rowid, vals)\n    out.append({'item': item, 'price': price})\n\njson.dump(out, open('recovered.json', 'w', encoding='utf-8'), ensure_ascii=False, indent=1)\nprint(len(out), 'rows')\nfor r in out: print(r)\n\n--- recovered.json ---\n[\r\n {\r\n  \"item\": \"trail map\",\r\n  \"price\": 0\r\n },\r\n {\r\n  \"item\": \"matchbox\",\r\n  \"price\": 1\r\n },\r\n {\r\n  \"item\": \"tent stake\",\r\n  \"price\": 2.75\r\n },\r\n {\r\n  \"item\": \"lantern\",\r\n  \"price\": 24\r\n },\r\n {\r\n  \"item\": \"rope coil\",\r\n  \"price\": 18\r\n },\r\n {\r\n  \"item\": \"water filter\",\r\n  \"price\": 39.9\r\n },\r\n {\r\n  \"item\": \"sleeping bag\",\r\n  \"price\": 129\r\n },\r\n {\r\n  \"item\": \"camp stove\",\r\n  \"price\": 310\r\n },\r\n {\r\n  \"item\": \"compass\",\r\n  \"price\": 15.5\r\n },\r\n {\r\n  \"item\": \"first aid kit\",\r\n  \"price\": 0.99\r\n }\r\n]",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"python -c \\\"import os;print(os.path.getsize('prices.db'))\\\"; python -c \\\"\\ndata=open('prices.db','rb').read()\\nprint(data[:100])\\n\\\"\" ok -> \"4096\\r\\nb'\\\\r\\\\x00\\\\x00\\\\x00\\\\n\\\\x0f=\\\\x00\\\\x0f\\\\xf1\\\\x0f\\\\xe3\\\\x0f\\\\xcb\\\\x0f\\\\xbd\\\\x0f\\\\xad\\\\x0f\\\\x93\\\\x0f\\\\x7f\\\\x0fm\\\\x0fX\\\\x0f=\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00'\"\n[step 1] write \"recover.py\" ok -> \"Created file successfully: recover.py\"\n[step 1] shell \"python recover.py\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\recover.py\\\", line 58, in <module>\\r\\n    assert isinstance(item, str), (rowid, vals)\\r\\n           ~~~~~~~~~~^^^^^^^^^^^\\r\\nAssertionError: (1, [None, 'trail map', 0])\"\n[step 1] shell \"python -c \\\"\\ndata=open('prices.db','rb').read()\\nimport struct\\nn=struct.unpack('>H',data[3:5])[0]\\nfor i in range(n):\\n    ptr=struct.unpack('>H',data[8+2*i:10+2*i])[0]\\n    print(i,ptr,data[ptr:ptr+40])\\n\\\"\" ok -> \"0 4081 b'\\\\r\\\\x01\\\\x04\\\\x00\\\\x1f\\\\x08trail map'\\r\\n1 4067 b'\\\\x0c\\\\x02\\\\x04\\\\x00\\\\x1d\\\\tmatchbox\\\\r\\\\x01\\\\x04\\\\x00\\\\x1f\\\\x08trail map'\\r\\n2 4043 b'\\\\x16\\\\x03\\\\x04\\\\x00!\\\\x07tent stake@\\\\x06\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x0c\\\\x02\\\\x04\\\\x00\\\\x1d\\\\tmatchbox\\\\r\\\\x01'\\r\\n3 4029 b'\\\\x0c\\\\x04\\\\x04\\\\x00\\\\x1b\\\\x01lantern\\\\x18\\\\x16\\\\x03\\\\x04\\\\x00!\\\\x07tent stake@\\\\x06\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x0c\\\\x02'\\r\\n4 4013 b'\\\\x0e\\\\x05\\\\x04\\\\x00\\\\x1f\\\\x01rope coil\\\\x12\\\\x0c\\\\x04\\\\x04\\\\x0[... 522 chars cut by the benchmark]\"\n[step 1] edit \"recover.py\" ok -> \"Edited recover.py (1 replacement)\"\n[step 1] shell \"python recover.py && python -c \\\"\\nd=open('prices.db','rb').read()\\nnz=[i for i,b in enumerate(d) if b]\\nprint('nonzero byte range:',min(nz),max(nz),'of',len(d))\\nimport json; r=json.load(open('recovered.json')); print(len(r),'rows valid JSON')\\n\\\"\" ok -> \"10 rows\\r\\n{'item': 'trail map', 'price': 0}\\r\\n{'item': 'matchbox', 'price': 1}\\r\\n{'item': 'tent stake', 'price': 2.75}\\r\\n{'item': 'lantern', 'price': 24}\\r\\n{'item': 'rope coil', 'price': 18}\\r\\n{'item': 'water filter', 'price': 39.9}\\r\\n{'item': 'sleeping bag', 'price': 129}\\r\\n{'item': 'camp stove', 'price': 310}\\r\\n{'item': 'compass', 'price': 15.5}\\r\\n{'item': 'first aid kit', 'price': 0.99}\\r\\nnonzero byte ran[... 38 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport struct\\nd=open('prices.db','rb').read()\\ndef varint(b,o):\\n    v=0\\n    for i in range(9):\\n        c=b[o+i]; v=(v<<7)|(c&0x7f)\\n        if not c&0x80: return v,o+i+1\\nszs=[]\\nfor i in range(10):\\n    p=struct.unpack('>H',d[8+2*i:10+2*i])[0]\\n    sz,o=varint(d,p); rid,o=varint(d,o)\\n    hsz,o2=varint(d,o); end=o+hsz; types=[]\\n    q=o2\\n    while q<end:\\n        st,q=varint(d,q); types.append(st)\\n    body=end\\n    for st in types:\\n        n={0:0,1:1,2:2,3:3,4:4,5:6,6:8,7:8,8:0,9:0}.get(st)\\n        if n is None: n=(st-12)//2 if st%2==0 else (st-13)//2\\n        body+=n\\n    szs.append(body-p==sz)\\nprint('payload sizes match:',all(szs))\\n\\\"\" ok -> \"payload sizes match: False\"\n[step 1] shell \"python -c \\\"\\nimport struct\\nd=open('prices.db','rb').read()\\ndef varint(b,o):\\n    v=0\\n    for i in range(9):\\n        c=b[o+i]; v=(v<<7)|(c&0x7f)\\n        if not c&0x80: return v,o+i+1\\nfor i in range(10):\\n    p=struct.unpack('>H',d[8+2*i:10+2*i])[0]\\n    sz,o=varint(d,p); rid,o=varint(d,o)\\n    hsz,o2=varint(d,o); end=o+hsz\\n    q=o2; types=[]\\n    while q<end:\\n        st,q=varint(d,q); types.append(st)\\n    body=end\\n    for st in types:\\n        n={0:0,1:1,2:2,3:3,4:4,5:6,6:8,7:8,8:0,9:0}.get(st)\\n        if n is None: n=(st-12)//2 if st%2==0 else (st-13)//2\\n        body+=n\\n    print(i,'declared',sz,'record_len',body-o)\\n\\\"\" ok -> \"0 declared 13 record_len 13\\r\\n1 declared 12 record_len 12\\r\\n2 declared 22 record_len 22\\r\\n3 declared 12 record_len 12\\r\\n4 declared 14 record_len 14\\r\\n5 declared 24 record_len 24\\r\\n6 declared 18 record_len 18\\r\\n7 declared 16 record_len 16\\r\\n8 declared 19 record_len 19\\r\\n9 declared 25 record_len 25\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   true
+  ],
+  [
+   "rows with fractional prices recovered",
+   true
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   true
+  ],
+  [
+   "no row that is not in the table",
+   true
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 9,
+  "tool_calls": 8,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 1,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 7057,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 2581
+ },
+ "deliverables": [],
+ "render": null
+}

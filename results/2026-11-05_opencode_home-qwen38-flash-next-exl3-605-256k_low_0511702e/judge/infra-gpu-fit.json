@@ -1,0 +1,57 @@
+{
+ "task_id": "infra-gpu-fit",
+ "prompts": [
+  "We want to serve the model described in {WS}/MODEL.md on rented GPUs. Today's offers are in {WS}/offers.csv and our rental rules in {WS}/POLICY.md. Pick the cheapest way to serve it under the policy and justify the choice. Record it in {WS}/result.json with weights_gb, kv_cache_gb, total_gb, offer_id, usd_per_hour and usd_per_month."
+ ],
+ "answers": [
+  "\n\n[goal] Pick the cheapest GPU offer to serve arena-coder-70b under POLICY.md, record it in result.json.\n\n[action] Read MODEL.md, POLICY.md, offers.csv; computed memory with a short python script that also filtered every offer on all four policy rules; wrote `result.json`.\n\n[result]\n\nMemory sizing (GB = 10^9 bytes, per MODEL.md):\n- Weights: 70e9 params x 1 byte (FP8) = 70 GB\n- KV cache: 327,680 B/token x 32,768 tokens x 4 sequences = 42.94967296 GB\n- Runtime overhead: 8 GB (once per deployment)\n- Total: 120.94967296 GB usable VRAM required\n\nFilter of all 11 offers (usable = gpu_count x vram_gb_per_gpu):\n\n| offer | region | usable GB | $/h | verdict |\n|---|---|---|---|---|\n| of-101 | us-east | 96 | 1.79 | too small |\n| of-104 | us-east | 80 | 1.29 | too small |\n| of-108 | eu-west | 160 | 3.10 | out of stock |\n| of-111 | ap-southeast | 192 | 2.98 | region not allowed |\n| of-113 | us-central | 96 | 1.84 | too small |\n| of-117 | us-central | 160 | 3.58 | **fits, cheapest** |\n| of-120 | eu-west | 141 | 3.79 | fits, pricier |\n| of-124 | us-east | 192 | 3.92 | fits, pricier |\n| of-129 | us-east | 180 | 4.89 | over $4 cap |\n| of-133 | us-central | 282 | 7.10 | over $4 cap |\n| of-137 | sa-east | 160 | 3.20 | region not allowed |\n\nChoice: of-117 (voltbay, us-central, 2x H100 80GB), 160 GB usable vs 120.95 GB needed, $3.58/h, $2,613.40/month at 730 h. Written to `result.json`:\n\n```json\n{\"weights_gb\": 70, \"kv_cache_gb\": 42.94967296, \"total_gb\": 120.94967296, \"offer_id\": \"of-117\", \"usd_per_hour\": 3.58, \"usd_per_month\": 2613.4}\n```\n\nAssumptions I made where the brief is silent:\n- FP8 = 1 byte/param; KV bytes/token are already the full all-layer K+V figure, so no extra factor.\n- No headroom margin required by policy, so I accepted any offer with usable >= total; of-117 has ~39 GB slack.\n- \"Cheapest\" = lowest hourly price (monthly is a strict multiple of it at 730 h, so the ranking is identical).\n- KV cache is not quantized or paged away; the full 4x32,768-token context must be resident, per MODEL.md line 12.\n- Tensor parallelism only shards memory (MODEL.md line 13-14); no per-GPU minimum or divisibility constraint is stated, so 2 GPUs for a 70B model is accepted.\n\n[next] Nothing blocking. If a headroom margin (say 10%) were later required, of-117 still fits at 133 GB, so the answer is unchanged.\n\n[note] No browser tabs, windows or apps were opened; only file reads, one python one-liner, and one file write in the workspace."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"weights_gb\": 70,\n  \"kv_cache_gb\": 42.94967296,\n  \"total_gb\": 120.94967296,\n  \"offer_id\": \"of-117\",\n  \"usd_per_hour\": 3.58,\n  \"usd_per_month\": 2613.4\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\MODEL.md\" ok -> \"Read file <WORKSPACE>\\\\MODEL.md, lines 1-16\\n1: # Model to serve: arena-coder-70b\\n2: \\n3: | property | value |\\n4: | --- | --- |\\n5: | parameters | 70 billion |\\n6: | weight precision | 8-bit (FP8) |\\n7: | KV cache | 327,680 bytes per token (FP16, all layers, K and V) |\\n8: | context we want per sequence | 32,768 tokens |\\n9: | concurrent se[... 434 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\POLICY.md\" ok -> \"Read file <WORKSPACE>\\\\POLICY.md, lines 1-8\\n1: # Rental policy\\n2: \\n3: - Hourly cap: US$ 4 per hour for the whole deployment. Nothing above it is rented.\\n4: - Rent only offers that are in stock now (`in_stock` = yes).\\n5: - Allowed regions: us-east, us-central, eu-west.\\n6: - `usd_per_hour` in offers.csv is the price of the whole offer [... 131 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\offers.csv\" ok -> \"Read file <WORKSPACE>\\\\offers.csv, lines 1-12\\n1: offer_id,provider,region,gpu,gpu_count,vram_gb_per_gpu,usd_per_hour,in_stock\\n2: of-101,cloudnine,us-east,RTX PRO 6000,1,96,1.79,yes\\n3: of-104,cloudnine,us-east,A100 80GB,1,80,1.29,yes\\n4: of-108,gridrent,eu-west,H100 80GB,2,80,3.1,no\\n5: of-111,gridrent,ap-southeast,RTX PRO 6000,2,96,2.9[... 349 chars cut by the benchmark]\"\n[step 1] shell \"cd <WORKSPACE>; python -c \\\"\\nimport csv\\nw=70e9/1e9; kv=327680*32768*4/1e9; tot=w+kv+8\\nprint(w,kv,tot)\\nok=[]\\nfor r in csv.DictReader(open('offers.csv')):\\n    u=int(r['gpu_count'])*float(r['vram_gb_per_gpu']); p=float(r['usd_per_hour'])\\n    fits=u>=tot; stock=r['in_stock']=='yes'; reg=r['region'] in ('us-east','us-central','eu-west'); cap=p<=4\\n    print(r['offer_id'],r['region'],u,p,fits,stock,reg,cap)\\n    if fits and stock and reg and cap: ok.append((p,r['offer_id'],u))\\nprint(sorted(ok))\\nprint('monthly', round(sorted(ok)[0][0]*730,2))\\n\\\"\" ok -> \"70.0 42.94967296 120.94967296\\r\\nof-101 us-east 96.0 1.79 False True True True\\r\\nof-104 us-east 80.0 1.29 False True True True\\r\\nof-108 eu-west 160.0 3.1 True False True True\\r\\nof-111 ap-southeast 192.0 2.98 True True False True\\r\\nof-113 us-central 96.0 1.84 False True True True\\r\\nof-117 us-central 160.0 3.58 True True True True\\r\\nof-120 eu-west 141.0 3.79 True True True True\\r\\nof-124 us-east 192.0 3.92 Tr[... 255 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\result.json\" ok -> \"Created file successfully: <WORKSPACE>/result.json\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "weights size",
+   true
+  ],
+  [
+   "KV cache size",
+   true
+  ],
+  [
+   "total memory needed",
+   true
+  ],
+  [
+   "cheapest feasible offer",
+   true
+  ],
+  [
+   "hourly price",
+   true
+  ],
+  [
+   "monthly price",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 4,
+  "tool_calls": 5,
+  "tool_errors": 0,
+  "shell_commands": 1,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2978,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1655
+ },
+ "deliverables": [],
+ "render": null
+}
