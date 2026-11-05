@@ -1,7 +1,7 @@
 # mengine-bench
 
 **How well does your coding agent do real work, and how fast?** 28 everyday jobs,
-one Score, about 15 minutes for a good setup (estimated until the first 2.3 runs). Every result is public and auditable.
+one Score, 12 to 25 minutes for the ranked setups so far (measured on bench 2.6). Every result is public and auditable.
 
 It grades the whole **agent**: the harness (Claude Code, Codex CLI, opencode, AGY or your
 own command) + the model + its effort + your hardware + your configuration. Change
@@ -12,7 +12,8 @@ It is short on purpose. The jobs are basic and easy to check by hand, so a good 
 separates setups on the quality of the work and on speed, and a rerun shows when a setup got slower or worse.
 Long-horizon work is out of scope.
 
-Results: [LEADERBOARD.md](LEADERBOARD.md).
+Results: [LEADERBOARD.md](LEADERBOARD.md). Five setups are ranked on bench 2.6 (2026-11-04), from 88.4 (Codex
+gpt-6.1-terra low, 11 min 53 s) to 73.7 (Codex gpt-6.1-sol low, 24 min 50 s); the board holds the current order.
 
 ## How a run is graded
 
@@ -24,16 +25,16 @@ Results: [LEADERBOARD.md](LEADERBOARD.md).
 | **Judge** | Is the work good? | One LLM vote per task (Claude Opus 5.5, xhigh), with subscores, blind to the model and the speed. |
 | **Speed** | Was it quick? | 100 at 5 min of total agent time or less, 0 at 30 min or more, linear in between. |
 
-Example: Correct 100, Judge 84.1 and 21 min 44 s (Speed 33.0)
-give 0.5 x 100 + 0.25 x 84.1 + 0.25 x 33.0 x 100 / 100 = **79.3**. It solved every task, and
-thinking time cost it about 17 points. Cost and an estimated price at API list prices are shown too, but never count.
+Example, the Codex gpt-6.1-terra low run (#192): Correct 99.1, Judge 83.7 and 11 min 53 s (Speed 72.5)
+give 0.5 x 99.1 + 0.25 x 83.7 + 0.25 x 72.5 x 99.1 / 100 = **88.4**. It missed only the sources check of one task, and
+its time cost it about 7 points. Cost, exact or estimated at API list prices, is shown too, but never counts.
 
 Formulas and edge cases: [docs/SCORING.md](docs/SCORING.md).
 
 ## The 28 tasks
 
-Each runs in a fresh folder and has a limit of 1 to 7 minutes, 62 min for the whole run at most. The three tasks bench 2.2 added (#151) took an Opus 5.5 xhigh probe 46.2 + 31.6 + 44.7 s, and the five bench 2.3 added (#153) 98.0 + 47.5 + 25.1 + 51.6 + 28.9 s. Through the browser (Claude in Chrome), Sonnet 5.5 low took up to 127.6 s on `cu-social-cycle` and 128.0 s on `cu-webmail` (#155). `cu-social-cycle` and `cu-webmail` work on fictional sites the bench serves on 127.0.0.1 for that task only, `file-media-edit` is graded with Pillow and pypdf, and `media-voice` is graded by an offline transcript with whisper tiny (faster-whisper, about 75 MB, fetched once before the first agent starts, never while grading). Only `web-plan-ranking` and `web-fact-search` need the web: it researches a
-historical case on the open web, and its checks stay offline. If time
+Each runs in a fresh folder and has a limit of 1 to 7 minutes, 62 min for the whole run at most. The three tasks bench 2.2 added (#151) took an Opus 5.5 xhigh probe 46.2 + 31.6 + 44.7 s, and the five bench 2.3 added (#153) 98.0 + 47.5 + 25.1 + 51.6 + 28.9 s. Through the browser (Claude in Chrome), Sonnet 5.5 low took up to 127.6 s on `cu-social-cycle` and 128.0 s on `cu-webmail` (#155). `cu-social-cycle` and `cu-webmail` work on fictional sites the bench serves on 127.0.0.1 for that task only, `file-media-edit` is graded with Pillow and pypdf, and `media-voice` is graded by an offline transcript with whisper tiny (faster-whisper, about 75 MB, fetched once before the first agent starts, never while grading). Only `web-plan-ranking` and `web-fact-search` need the web: they research
+on the open web, and their checks stay offline. If time
 runs out, what is in the folder and the reply so far still get graded, and the prompt
 says so. Each task has a reference solution that the test suite proves passes.
 Toolchains on the machine: Rust for `rs-lock-bug` (`cargo test`), Node.js 22.18 or later for `ts-plugin-bug`
@@ -88,8 +89,8 @@ uv run mengine-bench run --agent claude --model claude-sonnet-5-5 --effort high 
 uv run mengine-bench run --agent claude --model claude-sonnet-5-5 --effort high
 ```
 
-The dry run prints the plan and runs nothing. The real run takes about 73 minutes at
-worst, with every limit hit, and ends with `privacy check: clean`. Read
+The dry run prints the plan and runs nothing. The task limits add up to 62 minutes at
+worst, plus setup and grading; the ranked runs took 12 to 25 minutes. A run ends with `privacy check: clean`. Read
 `results/<run>/summary.md`, whose "Failed checks" say what each check expected and received, then publish it with
 `uv run mengine-bench submit results/<run>`. Grading the three pages needs a Chromium-family browser (Edge, Chrome or
 Chromium); without one, their page checks are left out and the run says so.
@@ -97,7 +98,7 @@ Chromium); without one, their page checks are left out and the run says so.
 | Harness | `--agent` | `--model` example | Cost |
 | --- | --- | --- | --- |
 | Claude Code | `claude` | `claude-sonnet-5-5` | reported by the harness |
-| Codex CLI | `codex` | `gpt-6.1-sol` | `--price input=X,cached=Y,output=Z` (USD per 1M tokens) |
+| Codex CLI | `codex` | `gpt-6.1-terra` | estimated at list prices ([docs/SCORING.md](docs/SCORING.md)); another model takes `--price input=X,cached=Y,output=Z` (USD per 1M tokens) |
 | opencode | `opencode` | `provider/model` | reported by the harness |
 | AGY | `agy` | `gemini-4-argon`, with `--effort high` | not reported |
 | anything else | `cmd` | any label | `--cmd "my-agent --prompt-file {prompt_file}"` |
