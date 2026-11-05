@@ -142,23 +142,29 @@ def _write_result(results: Path, name: str, score: float | None, *, model: str =
     return bundle
 
 
-def test_leaderboard_is_one_table_sorted_by_score_with_the_spec_columns(tmp_path: Path) -> None:
+def test_leaderboard_ranks_in_a_narrow_table_and_keeps_the_stats_in_details(tmp_path: Path) -> None:
+    # #193: the 23-column table broke even on a 2k laptop screen; the ranking fits, the run stats fold below it.
     results = tmp_path / "results"
     _write_result(results, "low", 50.0, model="low-model")
     _write_result(results, "high", 90.0, model="high-model")
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 2 and board.unranked == []
     table = board.markdown[board.markdown.index("| # |"):]
-    header = table.splitlines()[0]
-    assert header == ("| # | Score | Correct % | Solved | Judge | Speed | Time | Timeouts | Cost | Tokens | Generated | Thinking | "
-                      "Turns | Tools | Tool s | Agent | Model | Effort | Hardware | Config | Submitter | Date | Run |")
+    assert table.splitlines()[0] == "| # | Score | Setup | Correct % | Solved | Judge | Speed | Time | Cost | Run |"
     assert table.index("high-model") < table.index("low-model")
     row = table.splitlines()[2]
-    for cell in ("| 1 | **90.0** | 90.0 | 10/", "| 90.0 | 100.0 | 30 min 30 s | 1 | n/a | 1.75M | 3.4k | - | 12 | - | - |",
-                 "| codex codex-cli 0.162.1 | high-model | high |", "AMD Ryzen 9 7950X, NVIDIA GeForce RTX 4090 (24 GB)",
-                 "provider=openai, mcp=none", "| dquill | 2026-10-19 | [run](results/high/summary.md) |"):
+    for cell in ("| 1 | **90.0** | high-model high<br>codex codex-cli 0.162.1 | 90.0 | 10/",
+                 "| 90.0 | 100.0 | 30 min 30 s | n/a | [run](results/high/summary.md) |"):
         assert cell in row, (cell, row)
-    assert board.markdown.count("| # |") == 1, "one table"
+    details = board.markdown[board.markdown.index("<details>"):board.markdown.index("</details>")]
+    assert details.count("| # |") == 1
+    assert ("| # | Model | Timeouts | Tokens | Generated | Thinking | Turns | Tools | Tool s | Hardware | Config | "
+            "Submitter | Date |") in details
+    detail_row = next(line for line in details.splitlines() if line.startswith("| 1 |"))
+    for cell in ("| 1 | high-model | 1 | 1.75M | 3.4k | - | 12 | - | - |",
+                 "AMD Ryzen 9 7950X, NVIDIA GeForce RTX 4090 (24 GB)", "| provider=openai, mcp=none | dquill | 2026-10-19 |"):
+        assert cell in detail_row, (cell, detail_row)
+    assert board.markdown.count("| # | Score |") == 1, "one ranking table"
 
 
 @pytest.mark.parametrize("task_ids", [[TASK], [TASK, TASK]], ids=["subset", "duplicate"])
@@ -368,7 +374,9 @@ def test_tool_seconds_come_from_the_bundle_transcripts_or_stay_a_dash_162(tmp_pa
     no_stamps = _claude_tool_stream().replace('"timestamp"', '"stamp"')
     (untimed / "transcripts" / "t.jsonl.gz").write_bytes(gzip.compress(
         (json.dumps({"step": "0", "stream": "stdout", "text": no_stamps}) + "\n").encode("utf-8")))
-    rows = {line.split(" | ")[16]: line for line in leaderboard.build_leaderboard(results, tmp_path).markdown.splitlines()
+    markdown = leaderboard.build_leaderboard(results, tmp_path).markdown
+    details = markdown[markdown.index("<details>"):]
+    rows = {line.split(" | ")[1]: line for line in details.splitlines()
             if line.startswith("| 1 |") or line.startswith("| 2 |")}
     # Median of 1.5, 4.0 and 2.5 s; a stream without stamps has no per-call time, never an estimate.
     assert set(rows) == {"timed-model", "untimed-model"}
