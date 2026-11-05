@@ -273,6 +273,8 @@ USD per million tokens, read on 2026-10-31:
 | `gpt-6-astra`, fast | 20.00 | 2.00 | 100.00 | OpenAI |
 | `gpt-6.1-sol` | 2.00 | 0.10 | 10.00 | OpenAI |
 | `gpt-6.1-sol`, fast | 4.00 | 0.20 | 20.00 | OpenAI |
+| `gpt-6.1-terra` | 1.00 | 0.05 | 5.00 | OpenAI, read on 2026-11-04 |
+| `gpt-6.1-terra`, fast | 2.00 | 0.10 | 10.00 | OpenAI, read on 2026-11-04 |
 | `zai/glm-5.3-flash` | 0.15 | 0.03 | 0.50 | [Z.ai](https://docs.z.ai/guides/overview/pricing) |
 | `deepseek/deepseek-flash` | 0.15 | 0.003 | 0.60 | [DeepSeek](https://api-docs.deepseek.com/quick_start/pricing) |
 | `gemini-4-argon` | 2.00 | 0.10 | 10.00 | [Google](https://ai.google.dev/gemini-api/docs/pricing) |
