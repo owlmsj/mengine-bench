@@ -37,11 +37,13 @@ def test_the_fast_tier_costs_what_openai_lists_for_it() -> None:
     assert estimated_usd(standard) == 12.0
     assert estimated_usd(fast) == 24.0
     assert estimated_usd(_result("gpt-6-astra", 1_000_000, 0, 0, config={"service_tier": "fast"})) == 20.0
+    terra_fast = _result("gpt-6.1-terra", 1_000_000, 0, 1_000_000, config={"service_tier": "fast"})
+    assert estimated_usd(terra_fast) == 12.0
 
 
 def test_every_model_on_the_board_has_a_price() -> None:
-    assert set(LIST_PRICES) == {"claude-opus-5-5", "claude-sonnet-5-5", "gpt-6-astra", "gpt-6.1-sol", "zai/glm-5.3-flash",
-                                "deepseek/deepseek-flash", "gemini-4-argon"}
+    assert set(LIST_PRICES) == {"claude-opus-5-5", "claude-sonnet-5-5", "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra",
+                                "zai/glm-5.3-flash", "deepseek/deepseek-flash", "gemini-4-argon"}
 
 
 def test_the_cell_says_it_is_an_estimate() -> None:

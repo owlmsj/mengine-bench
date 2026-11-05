@@ -25,6 +25,7 @@ LIST_PRICES: Mapping[str, ListPrice] = {
     "claude-sonnet-5-5": ListPrice(4.0, 0.10, 10.0),
     "gpt-6-astra": ListPrice(10.0, 1.0, 50.0),
     "gpt-6.1-sol": ListPrice(2.0, 0.10, 10.0),
+    "gpt-6.1-terra": ListPrice(1.0, 0.05, 5.0),
     "zai/glm-5.3-flash": ListPrice(0.15, 0.03, 0.50),
     # Off-peak; peak hours cost twice this. Gemini's rise on 2026-12-01 is not applied.
     "deepseek/deepseek-flash": ListPrice(0.15, 0.003, 0.60),
@@ -33,6 +34,7 @@ LIST_PRICES: Mapping[str, ListPrice] = {
 FAST_PRICES: Mapping[str, ListPrice] = {
     "gpt-6-astra": ListPrice(20.0, 2.0, 100.0),
     "gpt-6.1-sol": ListPrice(4.0, 0.20, 20.0),
+    "gpt-6.1-terra": ListPrice(2.0, 0.10, 10.0),
 }
 _SMALLEST_SHOWN = 0.01
 
