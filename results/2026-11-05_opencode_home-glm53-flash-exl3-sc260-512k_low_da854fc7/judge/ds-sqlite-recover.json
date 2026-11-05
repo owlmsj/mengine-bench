@@ -1,0 +1,51 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [],
+ "diff": "A recovered.json\n\n--- recovered.json ---\n[{\"item\": null, \"price\": \"trail map\"}, {\"item\": null, \"price\": \"matchbox\"}, {\"item\": null, \"price\": \"tent stake\"}, {\"item\": null, \"price\": \"lantern\"}, {\"item\": null, \"price\": \"rope coil\"}, {\"item\": null, \"price\": \"water filter\"}, {\"item\": null, \"price\": \"sleeping bag\"}, {\"item\": null, \"price\": \"camp stove\"}, {\"item\": null, \"price\": \"compass\"}, {\"item\": null, \"price\": \"first aid kit\"}]",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"$f='.\\\\prices.db'; (Get-Item $f).Length; Format-Hex $f -Count 256\" ok -> \"4096\\r\\n\\r\\n   Label: <WORKSPACE>\\\\prices.db\\r\\n\\r\\n\\u001b[32;1m          Offset\\u001b[0m \\u001b[32;1;3mBytes                                          \\u001b[0m\\u001b[32;1m Ascii\\u001b[0m\\r\\n\\u001b[32;1m                \\u001b[0m \\u001b[32;1;3m00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F\\u001b[0m\\u001b[32;1m\\u001b[0m\\r\\n\\u001b[32;1m          ------\\u001b[0m \\u001b[32;1m-----------------------------------------------\\u001b[... 1331 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport json,struct\\nd=open('prices.db','rb').read()\\ndef varint(b,i):\\n    r=0\\n    for n in range(9):\\n        c=b[i]; i+=1\\n        if n==8: r=(r<<8)|c; return r,i\\n        r=(r<<7)|(c&0x7f)\\n        if not c&0x80: return r,i\\ncells=[int.from_bytes(d[o:o+2],'big') for o in range(8,8+2*int.from_bytes(d[3:5],'big'))]\\nrows=[]\\nfor cp in cells:\\n    i=cp\\n    pl,i=varint(d,i); rid,i=varint(d,i)\\n    rec=d[i:i+pl]\\n    hdr,i2=varint(rec,0); j=i2\\n    types=[]\\n    for _ in range(hdr-(1 if False else 0)): pass\\n    k=i2\\n    # parse header serial types\\n    end=i2+ (hdr - (i2)) # header len counts from rec start? header includes len byte\\n    # proper: header length includes the length varint itself\\n    hl=i2  # bytes consumed = hdr total incl len varint? hdr is total header size incl its own varint\\n    k=0\\n    types=[]\\n    pos=i2\\n    hstart=0\\n    # recompute: header spans bytes [0,hdr)\\n    pos=0\\n    _,p=varint(rec,0)  # skip hdr len\\n    while p<hdr:\\n        t,p=varint(rec,p)\\n        types.append(t)\\n    off=hdr\\n    vals=[]\\n    for t in types:\\n        if t==0: vals.append(None)\\n        elif t in (1,2,3,4,5,6): n={1:1,2:2,3:3,4:4,5:6,6:8}[t]; v=int.from_bytes(rec[off:off+n],'big',signed=True); off+=n; vals.append(v)\\n        elif t==7: vals.append(struct.unpack('>d',rec[off:off+8])[0]); off+=8\\n        elif t>=13 and t%2: n=(t-13)//2; vals.append(rec[off:off+n].decode('utf-8')); off+=n\\n        else: n=t//2; off+=n; vals.append(None)\\n    rows.append({'item':vals[0],'price':vals[1]})\\n    print[... 65 chars cut by the benchmark]\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<string>\\\", line 15, in <module>\\r\\n    pl,i=varint(d,i); rid,i=varint(d,i)\\r\\n         ~~~~~~^^^^^\\r\\n  File \\\"<string>\\\", line 7, in varint\\r\\n    c=b[i]; i+=1\\r\\n      ~^^^\\r\\n1 [None, 'trail map', None]\\r\\nIndexError: index out of range\"\n[step 1] shell \"python -c \\\"\\nimport json,struct\\nd=open('prices.db','rb').read()\\ndef varint(b,i):\\n    r=0\\n    for n in range(9):\\n        c=b[i]; i+=1\\n        if n==8: return (r<<8)|c,i\\n        r=(r<<7)|(c&0x7f)\\n        if not c&0x80: return r,i\\nncells=int.from_bytes(d[3:5],'big')\\ncells=[int.from_bytes(d[8+2*k:10+2*k],'big') for k in range(ncells)]\\nrows=[]\\nfor cp in cells:\\n    i=cp\\n    pl,i=varint(d,i); rid,i=varint(d,i)\\n    rec=d[i:i+pl]\\n    hdr,p=varint(rec,0)\\n    types=[]\\n    while p<hdr:\\n        t,p=varint(rec,p); types.append(t)\\n    off=hdr; vals=[]\\n    for t in types:\\n        if t==0: vals.append(None)\\n        elif 1<=t<=6:\\n            n={1:1,2:2,3:3,4:4,5:6,6:8}[t]\\n            vals.append(int.from_bytes(rec[off:off+n],'big',signed=True)); off+=n\\n        elif t==7: vals.append(struct.unpack('>d',rec[off:off+8])[0]); off+=8\\n        elif t>=13 and t%2==1:\\n            n=(t-13)//2; vals.append(rec[off:off+n].decode('utf-8')); off+=n\\n        else:\\n            n=t//2; off+=n; vals.append(None)\\n    print(rid,pl,types,vals)\\n    rows.append({'item':vals[0],'price':vals[1]})\\njson.dump(rows,open('recovered.json','w'))\\nprint(len(rows))\\n\\\"\" ok -> \"1 13 [0, 31, 8] [None, 'trail map', None]\\r\\n2 12 [0, 29, 9] [None, 'matchbox', None]\\r\\n3 22 [0, 33, 7] [None, 'tent stake', 2.75]\\r\\n4 12 [0, 27, 1] [None, 'lantern', 24]\\r\\n5 14 [0, 31, 1] [None, 'rope coil', 18]\\r\\n6 24 [0, 37, 7] [None, 'water filter', 39.9]\\r\\n7 18 [0, 37, 2] [None, 'sleeping bag', 129]\\r\\n8 16 [0, 33, 2] [None, 'camp stove', 310]\\r\\n9 19 [0, 27, 7] [None, 'compass', 15.5]\\r\\n10 25 [0, 39, 7][... 34 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   false
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   false
+  ],
+  [
+   "rows with fractional prices recovered",
+   false
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   false
+  ],
+  [
+   "no row that is not in the table",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 4,
+  "tool_calls": 3,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 1,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1187,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 717
+ },
+ "deliverables": [],
+ "render": null
+}

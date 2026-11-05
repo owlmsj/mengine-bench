@@ -1,0 +1,49 @@
+{
+ "task_id": "bo-reconcile",
+ "prompts": [
+  "Finance has to chase June's receivables. The invoices, the bank statement and our reconciliation notes are in {WS}/backoffice. What do we still have to collect or fix? Record it in {WS}/result.json: unpaid and duplicated (invoice ids) and mismatched (id, invoiced, paid)."
+ ],
+ "answers": [
+  "**[goal]** Identify June receivables to collect or fix: unpaid, duplicated, mismatched; record in `./result.json`.\n\n**[action]** Read `backoffice/README.md` rules, matched each bank memo to its invoice via regex (`INV-1015`, `inv1007`, `invoice 1023` formats), then applied the exclusive-category rules via a Python script.\n\n**[result]** `result.json` written:\n- **Unpaid** (no payment at all): INV-1008, INV-1030, INV-1033\n- **Duplicated**: INV-1015 (two PIX payments of 1904.29, 2026-06-17 and 06-05, one marked \"resend\")\n- **Mismatched**: INV-1036 invoiced 8619.16 vs paid 7757.24; INV-1021 invoiced 21320.36 vs paid 21070.36\n\nAssumptions: the unidentified PIX 1099 (1500.00), CDB interest and bank fee are ignored per README; a \"resend\" PIX counts as a second payment, making the invoice duplicated (not mismatched, since single-payment mismatch rule doesn't apply). Paid-not-found invoice 1099 flagged here as an open item for Finance.\n\n**[next]** Chase payment for the 3 unpaid invoices, refund/contact payer for INV-1015's duplicate, and reconcile the two short payments."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"unpaid\": [\"INV-1008\", \"INV-1030\", \"INV-1033\"],\n  \"duplicated\": [\"INV-1015\"],\n  \"mismatched\": [\n    {\"id\": \"INV-1036\", \"invoiced\": 8619.16, \"paid\": 7757.24},\n    {\"id\": \"INV-1021\", \"invoiced\": 21320.36, \"paid\": 21070.36}\n  ]\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem -Recurse ./backoffice | Select-Object FullName,Length\" ok -> \"\\u001b[32;1mFullName                                                                                                        \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m--------                                                                                                        \\u001b[0m \\u001b[32;<WORKSPACE>\\\\backoffice\\\\bank_statement_june.csv  [... 247 chars cut by the benchmark]\"\n[step 1] shell \"cat ./backoffice/README.md; echo ---; cat ./backoffice/invoices.csv; echo ---; cat ./backoffice/bank_statement_june.csv\" ok -> \"# How we reconcile receivables\\r\\n\\r\\n- The bank memo cites the invoice in different formats.\\r\\n- Ignore fees, interest and PIX transfers without an identifiable invoice.\\r\\n- unpaid: invoices with no payment. duplicated: invoices paid more than once.\\r\\n- mismatched: a single payment whose amount differs from its invoice.\\r\\n- The three categories are exclusive: a duplicated invoice is never also mismatched[... 3524 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv,re,collections\\ninv={r['id']:float(r['amount']) for r in csv.DictReader(open('backoffice/invoices.csv',encoding='latin-1'))}\\npay=collections.defaultdict(list)\\nfor r in csv.DictReader(open('backoffice/bank_statement_june.csv',encoding='latin-1')):\\n    m=re.search(r'INV[- ]?(\\\\d{4})|invoice (\\\\d{4})|inv(\\\\d{4})',r['memo'],re.I)\\n    if m and float(r['amount'])>0:\\n        pay['INV-'+(next(x for x in m.groups() if x))].append((r['memo'],float(r['amount'])))\\nunpaid=sorted(set(inv)-set(pay))\\ndup=sorted(i for i,p in pay.items() if len(p)>1)\\nmis=[(i,inv[i],p[0][1]) for i,p in pay.items() if len(p)==1 and abs(p[0][1]-inv[i])>0.005]\\nprint('unpaid',unpaid); print('dup',dup); print('mis',mis)\\n\\\"\" ok -> \"unpaid ['INV-1008', 'INV-1030', 'INV-1033']\\r\\ndup ['INV-1015']\\r\\nmis [('INV-1036', 8619.16, 7757.24), ('INV-1021', 21320.36, 21070.36)]\"\n[step 1] write \"result.json\" ok -> \"Created file successfully: result.json\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "unpaid invoices",
+   true
+  ],
+  [
+   "duplicated payments",
+   true
+  ],
+  [
+   "mismatched amounts",
+   true
+  ],
+  [
+   "invoiced vs paid on mismatches",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 4,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 758,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 311
+ },
+ "deliverables": [],
+ "render": null
+}

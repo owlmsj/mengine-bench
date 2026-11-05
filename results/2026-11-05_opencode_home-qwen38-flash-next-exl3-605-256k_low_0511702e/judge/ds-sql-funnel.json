@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-sql-funnel",
+ "prompts": [
+  "Product wants to know where players drop off on each platform. The data is in {WS}/analytics.db and our reporting rules are in {WS}/METRICS.md. Where do we lose the most players? Record it in {WS}/result.json: funnel (per platform, players at each step) and biggest_drop (per platform, the step)."
+ ],
+ "answers": [
+  "\n\n[goal] Per-platform funnel drop-off from analytics.db per METRICS.md, written to ./result.json.\n\n[action] Parsed METRICS.md rules and implemented them in `tmp/analyze.py`: steps install → tutorial_complete → first_match → purchase; each step counts only at/after the player's previous-step time (first valid occurrence); excluded test accounts (is_test=1, 79 events) and events from unknown players (15 events); conversion = step players / previous step players; biggest drop = lowest conversion.\n\n[result] `result.json`:\n- pc: install 470, tutorial_complete 389, first_match 326, purchase 269; biggest_drop = purchase (82.5% conversion, lowest of the three steps vs 82.8% and 83.8%)\n- steamdeck: install 192, tutorial_complete 128, first_match 87, purchase 61; biggest_drop = tutorial_complete (66.7% vs 68.0% and 70.1%)\n\nAssumptions: only two platforms exist (pc, steamdeck); a player with no install event never enters the funnel (593/273 non-test users vs 470/192 installs); event names in the DB are exactly the four steps; ties impossible here (conversions distinct).\n\n[next] Nothing blocking; product can read result.json. How I know it's right: the script output above shows the per-step counts and conversion ratios directly from the DB, and the biggest_drop matches the minimum conversion in each platform's printed conversions map."
+ ],
+ "diff": "A result.json\nA tmp/analyze.py\nA tmp/explore.py\n\n--- result.json ---\n{\r\n  \"pc\": {\r\n    \"funnel\": {\r\n      \"install\": 470,\r\n      \"tutorial_complete\": 389,\r\n      \"first_match\": 326,\r\n      \"purchase\": 269\r\n    },\r\n    \"biggest_drop\": \"purchase\"\r\n  },\r\n  \"steamdeck\": {\r\n    \"funnel\": {\r\n      \"install\": 192,\r\n      \"tutorial_complete\": 128,\r\n      \"first_match\": 87,\r\n      \"purchase\": 61\r\n    },\r\n    \"biggest_drop\": \"tutorial_complete\"\r\n  }\r\n}\n\n--- tmp/analyze.py ---\nimport sqlite3, json\n\nc = sqlite3.connect('analytics.db')\nSTEPS = ['install', 'tutorial_complete', 'first_match', 'purchase']\n\nvalid_users = {}\nfor uid, plat, test in c.execute('select user_id, platform, is_test from users'):\n    if not test:\n        valid_users[uid] = plat\n\nunknown = c.execute(\n    \"select count(*) from events e left join users u on u.user_id=e.user_id where u.user_id is null\"\n).fetchone()[0]\ntests = c.execute(\n    \"select count(*) from events e join users u on u.user_id=e.user_id where u.is_test=1\"\n).fetchone()[0]\nnames = [r[0] for r in c.execute('select distinct name from events')]\nprint('unknown-player events:', unknown, 'test events:', tests, 'names:', names)\n\n# per user: earliest valid ts per step, sequential\ntimes = {}\nfor uid, name, ts in c.execute('select user_id, name, ts from events order by ts'):\n    if uid not in valid_users or name not in STEPS:\n        continue\n    t = times.setdefault(uid, {})\n    i = STEPS.index(name)\n    if i == 0:\n        if 'install' not in t or ts < t['install']:\n            t['install'] = ts\n    else:\n        prev = STEPS[i-1]\n        if prev in t and ts >= t[prev]:\n            if name not in t or ts < t[name]:\n                t[name] = ts\n\nfunnel = {}\nfor plat in sorted(set(valid_users.values())):\n    counts = []\n    for i, s in enumerate(STEPS):\n        n = sum(1 for uid, t in times.items()\n                if valid_users[uid] == plat and all(st in t for st in STEPS[:i+1]))\n        counts.append(n)\n    convs = [(counts[i]/counts[i-1] if counts[i-1] else 0, STEPS[i]) for i in range(1, 4)]\n    worst = min(convs)\n    funnel[plat] = {'funnel': dict(zip(STEPS, counts)),\n                    'biggest_drop': worst[1],\n                    'conversions': {s: round(c, 4) for c, s in convs}}\n    print(plat, counts, 'worst:', worst)\n\njson.dump({p: {'funnel': v['funnel'], 'biggest_drop': v['biggest_drop']}\n           for p, v in funnel.items()}, open('result.json', 'w', encoding='utf-8'), indent=2)\nprint(json.dumps(funnel, indent=2))\n\n--- tmp/explore.py ---\nimport sqlite3\nc = sqlite3.connect('analytics.db')\nfor name, sql in c.execute(\"select name, sql from sqlite_master where type='table'\"):\n    print(name, '|', sql)\n    print('rows:', c.execute(f'select count(*) from \"{name}\"').fetchone()[0])\n    for row in c.execute(f'select * from \"{name}\" limit 5'):\n        print(row)",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\METRICS.md\" ok -> \"Read file <WORKSPACE>\\\\METRICS.md, lines 1-6\\n1: # How we report the funnel\\n2: \\n3: Steps, in order: install, tutorial_complete, first_match, purchase.\\n4: A step counts only at or after the same player's previous step, with no time limit; its time is the first valid occurrence.\\n5: Test accounts and events from unknown players do not co[... 133 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"import sqlite3;c=sqlite3.connect('analytics.db');print([r for r in c.execute(\\\\\\\"select name,sql from sqlite_master\\\\\\\")])\\\"\" failed -> \"File \\\"<string>\\\", line 1\\r\\n    import sqlite3;c=sqlite3.connect('analytics.db');print([r for r in c.execute(\\\\\\r\\n                                                                                ^\\r\\nSyntaxError: '(' was never closed\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\explore.py\" ok -> \"Created file successfully: <WORKSPACE>/tmp/explore.py\"\n[step 1] shell \"python tmp\\\\explore.py\" ok -> \"users | CREATE TABLE users (user_id text primary key, platform text, is_test integer)\\r\\nrows: 900\\r\\n('p0000', 'pc', 0)\\r\\n('p0001', 'pc', 0)\\r\\n('p0002', 'pc', 0)\\r\\n('p0003', 'pc', 0)\\r\\n('p0004', 'steamdeck', 0)\\r\\nevents | CREATE TABLE events (user_id text, name text, ts text)\\r\\nrows: 2268\\r\\n('p0654', 'tutorial_complete', '2026-06-11 23:05:00')\\r\\n('p0037', 'tutorial_complete', '2026-06-24 21:00:00')\\r\\n('p0292'[... 133 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\analyze.py\" ok -> \"Created file successfully: <WORKSPACE>/tmp/analyze.py\"\n[step 1] shell \"python tmp\\\\analyze.py\" ok -> \"unknown-player events: 15 test events: 79 names: ['tutorial_complete', 'first_match', 'install', 'purchase']\\r\\npc [470, 389, 326, 269] worst: (0.8251533742331288, 'purchase')\\r\\nsteamdeck [192, 128, 87, 61] worst: (0.6666666666666666, 'tutorial_complete')\\r\\n{\\r\\n  \\\"pc\\\": {\\r\\n    \\\"funnel\\\": {\\r\\n      \\\"install\\\": 470,\\r\\n      \\\"tutorial_complete\\\": 389,\\r\\n      \\\"first_match\\\": 326,\\r\\n      \\\"purchase\\\": 269\\r\\n    },\\r\\n [... 474 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"import sqlite3; c=sqlite3.connect('analytics.db'); print(c.execute('select platform, count(*) from users where is_test=0 group by platform').fetchall()); print(c.execute('select platform, count(*) from users group by platform').fetchall())\\\" ; type result.json\" ok -> \"[('pc', 593), ('steamdeck', 273)]\\r\\n[('pc', 614), ('steamdeck', 286)]\\r\\n{\\r\\n  \\\"pc\\\": {\\r\\n    \\\"funnel\\\": {\\r\\n      \\\"install\\\": 470,\\r\\n      \\\"tutorial_complete\\\": 389,\\r\\n      \\\"first_match\\\": 326,\\r\\n      \\\"purchase\\\": 269\\r\\n    },\\r\\n    \\\"biggest_drop\\\": \\\"purchase\\\"\\r\\n  },\\r\\n  \\\"steamdeck\\\": {\\r\\n    \\\"funnel\\\": {\\r\\n      \\\"install\\\": 192,\\r\\n      \\\"tutorial_complete\\\": 128,\\r\\n      \\\"first_match\\\": 87,\\r\\n      \\\"purchase\\\": 61\\r\\n    },\\r\\n[... 47 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "players per step on pc",
+   false
+  ],
+  [
+   "players per step on steamdeck",
+   false
+  ],
+  [
+   "biggest drop on each platform",
+   false
+  ],
+  [
+   "final answer does not contradict biggest drops",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 7,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 1,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2289,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 892
+ },
+ "deliverables": [],
+ "render": null
+}

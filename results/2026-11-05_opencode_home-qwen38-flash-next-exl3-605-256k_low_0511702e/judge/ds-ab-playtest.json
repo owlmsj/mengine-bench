@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-ab-playtest",
+ "prompts": [
+  "We playtested two versions of the Pixel Arena tutorial and have to pick one for the next release. The export and its notes are in {WS}/telemetry. Should we ship B instead of A? Give a recommendation a skeptical lead would accept. Record it in {WS}/result.json with ship_b, sessions_a, sessions_b, completion_rate_a, completion_rate_b and p_value."
+ ],
+ "answers": [
+  "\n\n[goal] Decide whether tutorial variant B ships over A, from ./telemetry, and record it in ./result.json.\n\n[action] Per the README: deduped on `session_id` (ETL resends; checked duplicates for conflicts, none), normalized `variant` (trim + lowercase), then two-proportion z-test on `completed_tutorial`, two-sided, alpha 0.05 (the repo's release rule). Script: `analyze.py`; cross-checked counts with an independent one-liner.\n\n[result]\n- 1870 rows → 1800 unique sessions, 900 per variant (70 resent rows, all consistent).\n- A: 342/900 = 38.00% completion; B: 420/900 = 46.67%; diff +8.67 pts.\n- z = 3.72, two-sided p = 0.0002 (well under 0.05).\n- `result.json`: `ship_b: true, sessions_a: 900, sessions_b: 900, completion_rate_a: 0.38, completion_rate_b: 0.4667, p_value: 0.0002`.\n\nRecommendation: ship B. The gain passes the stated 5% significance rule with room to spare, on balanced, deduplicated samples; a skeptical lead's usual objections (raw-row double counting, dirty variant labels) were handled explicitly.\n\nAssumptions: two-sided test; duplicates carry identical values (verified); completion is the deciding metric per the release rule; normal approximation is fine at n=900/group (no scipy available for Fisher's exact, but z=3.7 is far from the boundary).\n\n[how I know] Both the analysis script and an independent recount produced identical numbers (1870 rows, 1800 unique, 342/420 completions), and the conflict check on duplicate session_ids printed nothing, so dedup changed no outcomes.\n\n[next] None; no browser or apps were opened."
+ ],
+ "diff": "A analyze.py\nA result.json\n\n--- analyze.py ---\nimport csv, math\nfrom collections import defaultdict\n\nseen = {}\nwith open('telemetry/playtest_ab.csv', newline='') as f:\n    for row in csv.DictReader(f):\n        sid = row['session_id'].strip()\n        v = row['variant'].strip().lower()\n        c = int(row['completed_tutorial'].strip())\n        if sid in seen and seen[sid] != (v, c):\n            print('CONFLICT', sid, seen[sid], (v, c))\n        seen[sid] = (v, c)\n\nn = defaultdict(int); k = defaultdict(int)\nfor v, c in seen.values():\n    n[v] += 1; k[v] += c\n\npa, pb = k['a']/n['a'], k['b']/n['b']\np = (k['a']+k['b'])/(n['a']+n['b'])\nse = math.sqrt(p*(1-p)*(1/n['a']+1/n['b']))\nz = (pb-pa)/se\npval = math.erfc(abs(z)/math.sqrt(2))  # two-sided\nprint(f\"A: {k['a']}/{n['a']} = {pa:.4f}\")\nprint(f\"B: {k['b']}/{n['b']} = {pb:.4f}\")\nprint(f\"diff = {pb-pa:+.4f}, z = {z:.3f}, two-sided p = {pval:.4g}\")\n\nimport json\nout = {\n    \"ship_b\": pval < 0.05 and pb > pa,\n    \"sessions_a\": n['a'],\n    \"sessions_b\": n['b'],\n    \"completion_rate_a\": round(pa, 4),\n    \"completion_rate_b\": round(pb, 4),\n    \"p_value\": round(pval, 4),\n}\nwith open('result.json', 'w') as f:\n    json.dump(out, f, indent=2)\nprint(json.dumps(out))\n\n--- result.json ---\n{\r\n  \"ship_b\": true,\r\n  \"sessions_a\": 900,\r\n  \"sessions_b\": 900,\r\n  \"completion_rate_a\": 0.38,\r\n  \"completion_rate_b\": 0.4667,\r\n  \"p_value\": 0.0002\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"ls -la telemetry && head -c 2000 telemetry/* 2>/dev/null | head -100\" failed -> \"\\u001b[31;1mGet-ChildItem: \\u001b[31;1mA parameter cannot be found that matches parameter name 'la'.\\u001b[0m\"\n[step 1] shell \"Get-ChildItem -Recurse telemetry | Select-Object FullName, Length\" ok -> \"\\u001b[32;1mFullName                                                                                               \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m--------                                                                                               \\u001b[0m \\u001b[32;<WORKSPACE>\\\\telemetry\\\\playtest_ab.csv  41587\\r\\nC:\\\\Users\\\\<USER>\\\\[... 90 chars cut by the benchmark]\"\n[step 1] read \"telemetry\\\\README.md\" ok -> \"Read file telemetry\\\\README.md, lines 1-5\\n1: # Playtest A/B - Pixel Arena tutorial\\n2: \\n3: Export from arena-panel. The ETL resends sessions: `session_id` is the unique key (repeated rows are the same session). `variant` may come lowercase or with a leading space. `completed_tutorial` is 0/1.\\n4: \\n5: Release rule: a variant ships only when its gain in tutorial completion is statistically significant [... 16 chars cut by the benchmark]\"\n[step 1] shell \"Get-Content telemetry\\\\playtest_ab.csv -TotalCount 15; (Get-Content telemetry\\\\playtest_ab.csv | Measure-Object -Line).Lines\" ok -> \"session_id,variant,player_id,completed_tutorial,match_minutes\\r\\ns01423,b,p0798,1,12.6\\r\\ns01632,a,p0693,1,9.0\\r\\ns00612,A,p0098,0,12.2\\r\\ns00389, B,p0202,1,16.5\\r\\ns00509, B,p0896,0,14.8\\r\\ns00206,a,p0059,1,13.0\\r\\ns01758,a,p0342,0,20.4\\r\\ns01097, B,p0084,1,15.1\\r\\ns01547, B,p0372,0,17.4\\r\\ns01715,b,p0660,0,12.8\\r\\ns01716, A,p0314,0,16.8\\r\\ns00419,B,p0135,0,17.6\\r\\ns01180,A,p0304,0,12.8\\r\\ns01465, B,p0858,1,13.8\\r\\n1871\"\n[step 1] write \"analyze.py\" ok -> \"Created file successfully: analyze.py\"\n[step 1] shell \"python analyze.py\" ok -> \"A: 342/900 = 0.3800\\r\\nB: 420/900 = 0.4667\\r\\ndiff = +0.0867, z = 3.721, two-sided p = 0.0001985\\r\\n{\\\"ship_b\\\": true, \\\"sessions_a\\\": 900, \\\"sessions_b\\\": 900, \\\"completion_rate_a\\\": 0.38, \\\"completion_rate_b\\\": 0.4667, \\\"p_value\\\": 0.0002}\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nrows=list(csv.DictReader(open('telemetry/playtest_ab.csv',newline='')))\\nd={r['session_id'].strip():(r['variant'].strip().lower(),int(r['completed_tutorial'])) for r in rows}\\nprint(len(rows),'rows',len(d),'unique')\\nfrom collections import Counter\\nprint(Counter(v for v,_ in d.values()))\\nprint(sum(c for v,c in d.values() if v=='a'), sum(c for v,c in d.values() if v=='b'))\\ntry:\\n    from scipy.stats import fisher_exact\\n    print('fisher p =', fisher_exact([[420,480],[342,558]])[1])\\nexcept ImportError:\\n    print('no scipy')\\n\\\"\" ok -> \"1870 rows 1800 unique\\r\\nCounter({'b': 900, 'a': 900})\\r\\n342 420\\r\\nno scipy\"\n[step 1] shell \"Get-Content result.json\" ok -> \"{\\r\\n  \\\"ship_b\\\": true,\\r\\n  \\\"sessions_a\\\": 900,\\r\\n  \\\"sessions_b\\\": 900,\\r\\n  \\\"completion_rate_a\\\": 0.38,\\r\\n  \\\"completion_rate_b\\\": 0.4667,\\r\\n  \\\"p_value\\\": 0.0002\\r\\n}\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "deduplicated session counts",
+   true
+  ],
+  [
+   "completion rates",
+   true
+  ],
+  [
+   "the gain is significant",
+   true
+  ],
+  [
+   "ship decision",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 8,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 1,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1798,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 530
+ },
+ "deliverables": [],
+ "render": null
+}

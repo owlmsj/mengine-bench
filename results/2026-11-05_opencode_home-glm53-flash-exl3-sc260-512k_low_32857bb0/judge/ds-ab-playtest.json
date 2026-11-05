@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-ab-playtest",
+ "prompts": [
+  "We playtested two versions of the Pixel Arena tutorial and have to pick one for the next release. The export and its notes are in {WS}/telemetry. Should we ship B instead of A? Give a recommendation a skeptical lead would accept. Record it in {WS}/result.json with ship_b, sessions_a, sessions_b, completion_rate_a, completion_rate_b and p_value."
+ ],
+ "answers": [
+  "[goal] Decide whether tutorial B beats A significantly enough to ship, per the release rule (5% significance).\n\n[action] Deduplicated `telemetry/playtest_ab.csv` by `session_id` (README warned of ETL resends), normalized `variant` case/whitespace, and ran a pooled two-proportion z-test (`tmp/analyze.py`).\n\n[result] **Ship B.** After removing 70 duplicate rows (no variant conflicts), both variants have 900 sessions. A completes 342/900 = 38.0%; B completes 420/900 = 46.7%, an absolute gain of 8.7 percentage points. z = 3.72, p = 0.0002, far below the 0.05 threshold. Recorded in `./result.json` (ship_b=true, 900/900 sessions, 0.38 vs 0.4667, p=0.0002).\n\nAssumptions stated: sessions are the unit of analysis (README's rule is per-session completion); duplicates are identical resends so the first row is kept (verified: no conflicting rows); a two-sided z-test matches the README's \"statistically significant\" rule.\n\nHow I know it is right: the script output quoted above is computed from the raw CSV with dedupe applied, the count (1800 unique sessions from 1871 rows) reconciles with the 70 duplicates found, and p = 0.0002 clears the 5% rule with a large margin — a skeptic can rerun `python tmp/analyze.py` to reproduce it.\n\nNo browser tabs or apps were opened, so nothing to close."
+ ],
+ "diff": "A result.json\nA tmp/analyze.py\n\n--- result.json ---\n{\n  \"ship_b\": true,\n  \"sessions_a\": 900,\n  \"sessions_b\": 900,\n  \"completion_rate_a\": 0.38,\n  \"completion_rate_b\": 0.4667,\n  \"p_value\": 0.0002\n}\n\n--- tmp/analyze.py ---\nimport csv, math\nfrom collections import defaultdict\n\nrows = defaultdict(list)\nwith open('./telemetry/playtest_ab.csv', newline='') as f:\n    for r in csv.DictReader(f):\n        v = r['variant'].strip().lower()\n        rows[r['session_id']].append((v, int(r['completed_tutorial'])))\n\nagg = {'a': [0,0], 'b': [0,0]}  # completed, total\ndup = 0\nconflict = 0\nseen = {}\nfor sid, entries in rows.items():\n    variants = {v for v,_ in entries}\n    if len(entries) > 1: dup += 1\n    if len(variants) > 1: conflict += 1\n    v, c = entries[0]\n    if len(variants) > 1:\n        v, c = max(entries, key=lambda e: e[1])  # completed flag wins if conflicting\n    agg[v][1] += 1\n    agg[v][0] += c\n\nna, nb = agg['a'][1], agg['b'][1]\nxa, xb = agg['a'][0], agg['b'][0]\npa, pb = xa/na, xb/nb\n\n# two-proportion z-test (pooled)\np_pool = (xa+xb)/(na+nb)\nse = math.sqrt(p_pool*(1-p_pool)*(1/na+1/nb))\nz = (pb-pa)/se\np_value = 2*(1-0.5*(1+math.erf(abs(z)/math.sqrt(2))))\n\n# Fisher exact check via scipy if available\ntry:\n    from scipy.stats import fisher_exact\n    _, pf = fisher_exact([[xb, nb-xb],[xa, na-xa]])\nexcept Exception:\n    pf = None\n\nprint(f\"duplicate session rows: {dup}, conflicting variant rows: {conflict}\")\nprint(f\"A: {xa}/{na} = {pa:.4f} ({pa*100:.1f}%)\")\nprint(f\"B: {xb}/{nb} = {pb:.4f} ({pb*100:.1f}%)\")\nprint(f\"z = {z:.3f}, p = {p_value:.5f}\")\nif pf is not None: print(f\"fisher exact p = {pf:.5f}\")",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem -Recurse ./telemetry | Select-Object FullName, Length\" ok -> \"\\u001b[32;1mFullName                                                                                               \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m--------                                                                                               \\u001b[0m \\u001b[32;<WORKSPACE>\\\\telemetry\\\\playtest_ab.csv  41587\\r\\nC:\\\\Users\\\\<USER>\\\\[... 90 chars cut by the benchmark]\"\n[step 1] read \"telemetry/README.md\" ok -> \"Read file telemetry/README.md, lines 1-5\\n1: # Playtest A/B - Pixel Arena tutorial\\n2: \\n3: Export from arena-panel. The ETL resends sessions: `session_id` is the unique key (repeated rows are the same session). `variant` may come lowercase or with a leading space. `completed_tutorial` is 0/1.\\n4: \\n5: Release rule: a variant ships only when its gain in tutorial completion is statistically significant [... 16 chars cut by the benchmark]\"\n[step 1] shell \"Get-Content ./telemetry/playtest_ab.csv -TotalCount 8; (Get-Content ./telemetry/playtest_ab.csv).Count\" ok -> \"session_id,variant,player_id,completed_tutorial,match_minutes\\r\\ns01423,b,p0798,1,12.6\\r\\ns01632,a,p0693,1,9.0\\r\\ns00612,A,p0098,0,12.2\\r\\ns00389, B,p0202,1,16.5\\r\\ns00509, B,p0896,0,14.8\\r\\ns00206,a,p0059,1,13.0\\r\\ns01758,a,p0342,0,20.4\\r\\n1871\"\n[step 1] write \"tmp/analyze.py\" ok -> \"Created file successfully: tmp/analyze.py\"\n[step 1] shell \"python tmp/analyze.py\" ok -> \"duplicate session rows: 70, conflicting variant rows: 0\\r\\nA: 342/900 = 0.3800 (38.0%)\\r\\nB: 420/900 = 0.4667 (46.7%)\\r\\nz = 3.721, p = 0.00020\"\n[step 1] write \"result.json\" ok -> \"Created file successfully: result.json\"\n[step 1] shell \"python tmp/analyze.py; Get-Content ./result.json\" ok -> \"duplicate session rows: 70, conflicting variant rows: 0\\r\\nA: 342/900 = 0.3800 (38.0%)\\r\\nB: 420/900 = 0.4667 (46.7%)\\r\\nz = 3.721, p = 0.00020\\r\\n{\\r\\n  \\\"ship_b\\\": true,\\r\\n  \\\"sessions_a\\\": 900,\\r\\n  \\\"sessions_b\\\": 900,\\r\\n  \\\"completion_rate_a\\\": 0.38,\\r\\n  \\\"completion_rate_b\\\": 0.4667,\\r\\n  \\\"p_value\\\": 0.0002\\r\\n}\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "deduplicated session counts",
+   true
+  ],
+  [
+   "completion rates",
+   true
+  ],
+  [
+   "the gain is significant",
+   true
+  ],
+  [
+   "ship decision",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 7,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1147,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 537
+ },
+ "deliverables": [],
+ "render": null
+}
