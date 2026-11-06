@@ -27,7 +27,8 @@ The bench 2.0 to 2.2 runs (20 and 23 tasks) moved to history on 2026-11-04 (#187
 | 9 | **81.7** | home/qwen38-flash-next-exl3-605-256k low<br>pi 1.5.0 | 2026-11-06 | 96.3 | 21/28 | 82.8 | 31.6 | 30 min 32 s | $0.00 (local) | [run](results/2026-11-06_pi_home-qwen38-flash-next-exl3-605-256k_low_6b7600c1/summary.md) (bench 2.6) |
 | 10 | **81.0** | home/qwen38-flash-next-exl3-605-256k xhigh<br>opencode opencode v2.2.5 | 2026-11-06 | 93.6 | 21/28 | 78.5 | 48.2 | 25 min 32 s | $0.00 (local) | [run](results/2026-11-06_opencode_home-qwen38-flash-next-exl3-605-256k_xhigh_86f26532/summary.md) (bench 2.6) |
 | 11 | **78.5** | deepseek/deepseek-flash low<br>opencode opencode v2.2.5 | 2026-11-06 | 95.7 | 23/28 | 82.2 | 12.9 | 36 min 08 s | >= $0.15 | [run](results/2026-11-06_opencode_deepseek-deepseek-flash_low_e7145efd/summary.md) (bench 2.6) |
-| 12 | **63.3** | maritaca/S5 low<br>opencode opencode v2.2.5 | 2026-11-06 | 80.9 | 15/28 | 61.7 | 10.0 | 36 min 59 s | >= ~$0.15 | [run](results/2026-11-06_opencode_maritaca-S5_low_f64abf0d/summary.md) (bench 2.6) |
+| 12 | **71.8** | deepseek/deepseek-flash max<br>opencode opencode v2.2.5 | 2026-11-06 | 88.8 | 17/28 | 78.3 | 0.0 | 45 min 57 s | >= $0.14 | [run](results/2026-11-06_opencode_deepseek-deepseek-flash_max_460f7936/summary.md) |
+| 13 | **63.3** | maritaca/S5 low<br>opencode opencode v2.2.5 | 2026-11-06 | 80.9 | 15/28 | 61.7 | 10.0 | 36 min 59 s | >= ~$0.15 | [run](results/2026-11-06_opencode_maritaca-S5_low_f64abf0d/summary.md) (bench 2.6) |
 
 <details><summary>Run details: tokens, turns, tools, hardware, config</summary>
 
@@ -44,7 +45,8 @@ The bench 2.0 to 2.2 runs (20 and 23 tasks) moved to history on 2026-11-04 (#187
 | 9 | home/qwen38-flash-next-exl3-605-256k | 3 | 4.77M | 185.7k | 0.0k | 335 | 419 | 0.2 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=local, server_gpu=2x RTX 5090 + 2x RTX 4090, ser... | owlmsj | 2026-11-06 |
 | 10 | home/qwen38-flash-next-exl3-605-256k | 3 | 5.21M | 174.3k | 0.0k | 342 | 401 | 0.7 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=local, server_gpu=2x RTX 5090 + 2x RTX 4090, ser... | owlmsj | 2026-11-06 |
 | 11 | deepseek/deepseek-flash | 4 | 5.23M | 250.1k | 110.4k | 422 | 510 | 0.7 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=deepseek-api, model=DeepSeek-V4.1-Flash-1017, ti... | owlmsj | 2026-11-06 |
-| 12 | maritaca/S5 | 7 | 1.59M | 292.0k | 170.8k | 421 | 454 | 0.1 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=maritaca, model=S5, tier=1, role=dev-r, account_... | owlmsj | 2026-11-06 |
+| 12 | deepseek/deepseek-flash | 10 | 4.44M | 346.7k | 213.1k | 403 | 507 | 0.6 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=deepseek-api, model=DeepSeek-V4.1-Flash-1017, ti... | owlmsj | 2026-11-06 |
+| 13 | maritaca/S5 | 7 | 1.59M | 292.0k | 170.8k | 421 | 454 | 0.1 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=maritaca, model=S5, tier=1, role=dev-r, account_... | owlmsj | 2026-11-06 |
 
 </details>
 
