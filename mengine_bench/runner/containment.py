@@ -44,6 +44,38 @@ def _settle(procs: list[psutil.Process]) -> None:
         raise OrphanSurvived(f"received survivors {[p.pid for p in alive]} after {KILL_WAIT_S}s; expected none")
 
 
+def _process_born_at(pid: int, created: float) -> psutil.Process | None:
+    """The process `pid` started at `created`, or None once it exited or the pid was reused.
+
+    #205: a pid seen alive can exit before psutil.Process(pid) is built; that crashed web-word-universe.
+    """
+    try:
+        proc = psutil.Process(pid)
+        return proc if proc.create_time() == created else None
+    except psutil.NoSuchProcess:
+        return None
+
+
+def _not_zombie(proc: psutil.Process) -> bool:
+    try:
+        return proc.status() != psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:  # #205: exited after it was listed
+        return False
+
+
+def _runner_lineage() -> set[int]:
+    """This runner and the ancestors still linked to it; an ancestor that exits mid-walk ends the walk (#205)."""
+    proc: psutil.Process | None = psutil.Process()
+    lineage: set[int] = set()
+    while proc is not None:
+        lineage.add(proc.pid)
+        try:
+            proc = proc.parent()
+        except psutil.NoSuchProcess:
+            break
+    return lineage
+
+
 class PosixSession:
     """The process leads a new session; every descendant that stays in it is found by session id."""
 
@@ -65,7 +97,7 @@ class PosixSession:
                     members.append(candidate)
             except (OSError, psutil.Error):
                 continue
-        alive = [proc for proc in members if proc.status() != psutil.STATUS_ZOMBIE]
+        alive = [proc for proc in members if _not_zombie(proc)]
         _settle(alive)
         return len(alive)
 
@@ -118,7 +150,8 @@ class DescendantWatch:
         self._stop.set()
         with self._lock:
             self._observe()
-            alive = [psutil.Process(pid) for pid in self._born if self._created(pid) is not None]
+            found = (_process_born_at(pid, created) for pid, created in self._born.items())
+            alive = [proc for proc in found if proc is not None]
         _settle(alive)
         return len(alive)
 
@@ -243,8 +276,7 @@ def sweep_workspace(root: Path) -> int:
     forms = _path_forms(root)
     if _is_inside(os.getcwd(), forms) or _is_inside(str(Path.home()), forms):
         return 0
-    me = psutil.Process()
-    keep = {me.pid, *(parent.pid for parent in me.parents())}
+    keep = _runner_lineage()
     holders = []
     for candidate in psutil.process_iter(["pid", "cwd", "cmdline"]):
         if candidate.info["pid"] in keep:
