@@ -1,4 +1,4 @@
-"""Console entry point: list, selftest, run, submit, judge, judge-anchors, analyze, leaderboard, tasks-doc."""
+"""Console entry point: list, selftest, run, redo, submit, judge, judge-anchors, analyze, leaderboard, tasks-doc."""
 
 from __future__ import annotations
 
@@ -66,6 +66,10 @@ def _parser() -> argparse.ArgumentParser:
                                                "once the bundle is written)")
     run.add_argument("--allow-missing-toolchain", action="store_true", help="record missing toolchains in config and continue")
     run.add_argument("--dry-run", action="store_true", help="print the plan and the preflight findings; run nothing")
+    redo = sub.add_parser("redo", help="rerun some tasks of a bundle with its own agent, model, effort and config")
+    redo.add_argument("bundle", type=Path)
+    redo.add_argument("--tasks", default="", help="comma-separated task ids (default: every task with status crash)")
+    redo.add_argument("--cmd", help="argv template when the bundle's agent is cmd; a bundle does not store it")
     sub.add_parser("list", help="list the tasks")
     regrade = sub.add_parser("regrade", help="rerun current checks from bundled workspaces without an agent")
     regrade.add_argument("bundle", type=Path)
@@ -115,7 +119,7 @@ def _select(pool: Sequence[EvalTask], ids: str) -> list[EvalTask]:
 def main(argv: Sequence[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     args = _parser().parse_args(argv)
-    if args.command == "run":
+    if args.command in ("run", "redo"):
         exit_code = relaunch_run(argv)
         if exit_code is not None:
             return exit_code
@@ -148,7 +152,46 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _judge_calibrate(args)
     if args.command == "analyze":
         return _analyze(args.results, args.version or major_minor(__version__))
+    if args.command == "redo":
+        return _redo(args)
     return _run(args)
+
+
+def _redo(args: argparse.Namespace) -> int:
+    """#205: rerun the crashed tasks of a bundle; same preflight, task path and privacy check as `run`."""
+    from mengine_bench.redo import plan_redo, redo_bundle
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    scratch = scratch_root()
+    work = (scratch / "runs" / f"redo-{stamp}").resolve()
+    try:
+        plan = plan_redo(args.bundle, args.tasks)
+        agent_row = plan.result["agent"]
+        assert isinstance(agent_row, dict)
+        if agent_row["name"] == "cmd" and not args.cmd:
+            raise ValueError("received --agent cmd without --cmd; expected the argv template the run used "
+                             "(a bundle does not store it)")
+        config = plan.result.get("config")
+        allowed_missing = isinstance(config, dict) and "allow_missing_toolchain" in config
+        problems = [*([] if allowed_missing else toolchain_problems()), *shell_problems(),
+                    *blocking_problems(scratch, work)]
+        for problem in problems:
+            print(f"preflight: {problem}")
+        if problems:
+            raise ValueError(f"received {len(problems)} preflight problem(s) above; expected none, as `run` does")
+        _fetch_models(plan.tasks)
+        agent = make_agent(str(agent_row["name"]), str(agent_row["model"]), agent_row.get("effort"), args.cmd)
+        print(f"redo: {', '.join(task.id for task in plan.tasks)} ({plan.reason})", flush=True)
+        names = redo_bundle(plan, agent, work)
+    except (OSError, ValueError) as error:
+        print(f"redo: FAILED: {error}")
+        return 1
+    finally:
+        # Raw transcripts are unredacted, and a later run's agent could read these solutions.
+        if work.exists():
+            remove_tree(work)
+    print(f"redo: rewrote {args.bundle} (result.json, summary.md and the redone tasks' files)")
+    return _privacy_check(args.bundle, names)
 
 
 def _judge_calibrate(args: argparse.Namespace) -> int:

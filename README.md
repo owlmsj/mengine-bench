@@ -95,6 +95,12 @@ worst, plus setup and grading; the ranked runs took 12 to 25 minutes. A run ends
 `uv run mengine-bench submit results/<run>`. Grading the three pages needs a Chromium-family browser (Edge, Chrome or
 Chromium); without one, their page checks are left out and the run says so.
 
+A task that crashed (status `crash`) is run again on its own with `uv run mengine-bench redo results/<run>` (#205):
+it reruns every crashed task, or the ones `--tasks <id>,<id>` names, with the bundle's agent, model, effort and
+config (`--cmd` again for `--agent cmd`), replaces those tasks in the bundle, rescores the run, records under `redo`
+in `result.json` what was redone and why, clears the judge votes so the run waits for the judge again, and ends with
+the privacy check. The bundle must come from the installed bench major.minor.
+
 | Harness | `--agent` | `--model` example | Cost |
 | --- | --- | --- | --- |
 | Claude Code | `claude` | `claude-sonnet-5-5` | reported by the harness |
