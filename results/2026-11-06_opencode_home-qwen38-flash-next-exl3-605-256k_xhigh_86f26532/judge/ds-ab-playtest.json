@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-ab-playtest",
+ "prompts": [
+  "We playtested two versions of the Pixel Arena tutorial and have to pick one for the next release. The export and its notes are in {WS}/telemetry. Should we ship B instead of A? Give a recommendation a skeptical lead would accept. Record it in {WS}/result.json with ship_b, sessions_a, sessions_b, completion_rate_a, completion_rate_b and p_value."
+ ],
+ "answers": [
+  "\n\nCross-check agrees: Fisher's exact two-sided p = 0.000237 vs z-test p = 0.0002. No browser or apps were opened, so nothing to close.\n\n[goal] Decide whether to ship tutorial variant B over A and record the verdict in `result.json`.\n\n[action] Wrote `analyze.py` per the README's ETL notes: deduped by `session_id` (1870 raw rows → 1800 unique sessions, 70 duplicate resends, zero conflicting duplicates), normalized `variant` (stripped leading spaces, uppercased case), then ran a two-proportion z-test on `completed_tutorial`. Cross-checked with an exact Fisher test and validated `result.json` keys/values with a script.\n\n[result] **Ship B.** Completion: A = 342/900 = 38.0%, B = 420/900 = 46.7%, a +8.7pp gain. Two-sided z = 3.72, p = 0.0002; Fisher's exact p = 0.00024. That clears the release rule (significant at the 5% level) by a wide margin, and the groups are balanced at 900 sessions each. `result.json`: `ship_b: true, sessions_a: 900, sessions_b: 900, completion_rate_a: 0.38, completion_rate_b: 0.4667, p_value: 0.0002`. Assumptions stated: two-sided test (conservative reading of \"significant at the 5% level\"); duplicate session rows collapsed to one session as the README specifies; all 1800 sessions counted regardless of `match_minutes`.\n\n[next] Nothing further needed; if the lead wants one-sided framing, p would be ~0.0001, same verdict.\n\nHow I know it's right: the numbers come from the raw CSV via a script whose full output I read (not a summary), the dedupe found zero conflicting duplicates so no data was silently dropped, and two independent tests (normal-approximation z and exact Fisher) agree to the reported precision, and `result.json` was re-read and asserted against the required schema."
+ ],
+ "diff": "A analyze.py\nA result.json\n\n--- analyze.py ---\nimport csv, json, math\nfrom collections import OrderedDict\n\nrows = OrderedDict()\nconflicts = 0\nraw = 0\nwith open(\"telemetry/playtest_ab.csv\", newline=\"\") as f:\n    for r in csv.DictReader(f):\n        raw += 1\n        sid = r[\"session_id\"].strip()\n        v = r[\"variant\"].strip().upper()\n        rec = (v, int(r[\"completed_tutorial\"]))\n        if sid in rows:\n            if rows[sid] != rec:\n                conflicts += 1\n        else:\n            rows[sid] = rec\n\nn = {\"A\": 0, \"B\": 0}\nk = {\"A\": 0, \"B\": 0}\nfor v, c in rows.values():\n    n[v] += 1\n    k[v] += c\n\npA, pB = k[\"A\"] / n[\"A\"], k[\"B\"] / n[\"B\"]\np_pool = (k[\"A\"] + k[\"B\"]) / (n[\"A\"] + n[\"B\"])\nse = math.sqrt(p_pool * (1 - p_pool) * (1 / n[\"A\"] + 1 / n[\"B\"]))\nz = (pB - pA) / se\n# two-sided p-value from normal CDF\npval = 2 * (1 - 0.5 * (1 + math.erf(abs(z) / math.sqrt(2))))\n\nprint(f\"raw rows: {raw}, unique sessions: {len(rows)}, conflicting dup rows: {conflicts}\")\nprint(f\"A: {k['A']}/{n['A']} = {pA:.4f}\")\nprint(f\"B: {k['B']}/{n['B']} = {pB:.4f}\")\nprint(f\"diff (B-A): {pB-pA:+.4f}, z = {z:.4f}, two-sided p = {pval:.4f}\")\n\nout = {\n    \"ship_b\": bool(pval < 0.05 and pB > pA),\n    \"sessions_a\": n[\"A\"],\n    \"sessions_b\": n[\"B\"],\n    \"completion_rate_a\": round(pA, 4),\n    \"completion_rate_b\": round(pB, 4),\n    \"p_value\": round(pval, 4),\n}\nwith open(\"result.json\", \"w\") as f:\n    json.dump(out, f, indent=2)\nprint(json.dumps(out))\n\n--- result.json ---\n{\r\n  \"ship_b\": true,\r\n  \"sessions_a\": 900,\r\n  \"sessions_b\": 900,\r\n  \"completion_rate_a\": 0.38,\r\n  \"completion_rate_b\": 0.4667,\r\n  \"p_value\": 0.0002\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"ls -la telemetry; find telemetry -type f | head -50\" ok -> \"\\u001b[31;1mGet-ChildItem: \\u001b[31;1mA parameter cannot be found that matches parameter name 'la'.\\u001b[0m\\r\\ntelemetry/playtest_ab.csv\\ntelemetry/README.md\"\n[step 1] read \"telemetry/playtest_ab.csv\" ok -> \"Read file telemetry/playtest_ab.csv, lines 1-1871\\n1: session_id,variant,player_id,completed_tutorial,match_minutes\\n2: s01423,b,p0798,1,12.6\\n3: s01632,a,p0693,1,9.0\\n4: s00612,A,p0098,0,12.2\\n5: s00389, B,p0202,1,16.5\\n6: s00509, B,p0896,0,14.8\\n7: s00206,a,p0059,1,13.0\\n8: s01758,a,p0342,0,20.4\\n9: s01097, B,p0084,1,15.1\\n10: s01547, B,p0372,0,17.4\\n11: s01715,b,p0660,0,12.8\\n12: s01716, A,p0314,0,16.8\\n13:[... 51355 chars cut by the benchmark]\"\n[step 1] read \"telemetry/README.md\" ok -> \"Read file telemetry/README.md, lines 1-5\\n1: # Playtest A/B - Pixel Arena tutorial\\n2: \\n3: Export from arena-panel. The ETL resends sessions: `session_id` is the unique key (repeated rows are the same session). `variant` may come lowercase or with a leading space. `completed_tutorial` is 0/1.\\n4: \\n5: Release rule: a variant ships only when its gain in tutorial completion is statistically significant [... 16 chars cut by the benchmark]\"\n[step 1] write \"analyze.py\" ok -> \"Created file successfully: analyze.py\"\n[step 1] shell \"python analyze.py\" ok -> \"raw rows: 1870, unique sessions: 1800, conflicting dup rows: 0\\r\\nA: 342/900 = 0.3800\\r\\nB: 420/900 = 0.4667\\r\\ndiff (B-A): +0.0867, z = 3.7210, two-sided p = 0.0002\\r\\n{\\\"ship_b\\\": true, \\\"sessions_a\\\": 900, \\\"sessions_b\\\": 900, \\\"completion_rate_a\\\": 0.38, \\\"completion_rate_b\\\": 0.4667, \\\"p_value\\\": 0.0002}\"\n[step 1] shell \"python -c \\\"\\nimport json\\nfrom scipy import stats\\nprint('fisher p =', stats.fisher_exact([[420,480],[342,558]])[1])\\nprint('chi2 p   =', stats.chi2_contingency([[420,480],[342,558]], correction=False)[1])\\nd=json.load(open('result.json')); print(d)\\nassert set(d)=={'ship_b','sessions_a','sessions_b','completion_rate_a','completion_rate_b','p_value'}\\nassert d['ship_b'] is True and d['p_value']<0.05\\nprint('result.json OK')\\\"\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<string>\\\", line 3, in <module>\\r\\n    from scipy import stats\\r\\nModuleNotFoundError: No module named 'scipy'\"\n[step 1] shell \"python -c \\\"\\nimport json, math\\nfrom math import comb\\n# Fisher exact, two-sided (sum of tables with prob <= observed)\\na,b,c,d_=420,480,342,558\\nn1,n2=a+b,c+d_; K=a+c; N=n1+n2\\np_obs=comb(n1,K)*comb(n2,N-K)/comb(N,N)\\np=0.0\\nfor i in range(max(0,K-n2),min(n1,K)+1):\\n    pi=comb(n1,i)*comb(n2,K-i)/comb(N,K)\\n    if pi<=p_obs*(1+1e-9): p+=pi\\nprint('fisher two-sided p =',p)\\nd=json.load(open('result.json')); print(d)\\nassert set(d)=={'ship_b','sessions_a','sessions_b','completion_rate_a','completion_rate_b','p_value'}\\nassert d['ship_b'] is True and d['p_value']<0.05 and d['sessions_a']==900 and d['sessions_b']==900\\nprint('result.json OK')\\\"\" ok -> \"fisher two-sided p = 0.0\\r\\n{'ship_b': True, 'sessions_a': 900, 'sessions_b': 900, 'completion_rate_a': 0.38, 'completion_rate_b': 0.4667, 'p_value': 0.0002}\\r\\nresult.json OK\"\n[step 1] shell \"python -c \\\"\\nfrom math import comb\\na,b,c,d_=420,480,342,558\\nn1,n2=a+b,c+d_; K=a+c; N=n1+n2\\nf=lambda i: comb(n1,i)*comb(n2,K-i)/comb(N,K)\\np_obs=f(a)\\np=sum(pi for i in range(max(0,K-n2),min(n1,K)+1) if (pi:=f(i))<=p_obs*(1+1e-9))\\nprint('fisher two-sided p =',p)\\\"\" ok -> \"fisher two-sided p = 0.00023730147698582186\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "deduplicated session counts",
+   true
+  ],
+  [
+   "completion rates",
+   true
+  ],
+  [
+   "the gain is significant",
+   true
+  ],
+  [
+   "ship decision",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 8,
+  "tool_errors": 0,
+  "shell_commands": 5,
+  "shell_failures": 1,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 3112,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 851
+ },
+ "deliverables": [],
+ "render": null
+}
