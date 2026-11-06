@@ -1,0 +1,51 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [],
+ "diff": "A recover.py\nA recovered.json\nA scan.py\n\n--- recover.py ---\nimport json, struct\n\ndata = open('prices.db', 'rb').read()\nn = len(data)\n\ndef varint(buf, off):\n    v = 0\n    for i in range(9):\n        if off >= len(buf):\n            return None, off\n        b = buf[off]; off += 1\n        if i == 8:\n            v = (v << 8) | b\n        else:\n            v = (v << 7) | (b & 0x7f)\n            if not (b & 0x80):\n                break\n    return v, off\n\ndef parse_record(buf, off, end):\n    hdr_start = off\n    hdr_size, off = varint(buf, off)\n    if hdr_size is None or hdr_size < 1:\n        raise ValueError('bad hdr size')\n    types = []\n    p = off\n    types_end = hdr_start + hdr_size\n    while p < types_end:\n        t, p = varint(buf, p)\n        if t is None:\n            raise ValueError('truncated type list')\n        types.append(t)\n    vals = []\n    for t in types:\n        if t == 0:\n            vals.append(None)\n        elif 1 <= t <= 4:\n            if off + t > end: raise ValueError('trunc int')\n            vals.append(int.from_bytes(buf[off:off+t], 'big', signed=True)); off += t\n        elif t == 5:\n            if off + 6 > end: raise ValueError('trunc int48')\n            vals.append(int.from_bytes(buf[off:off+6], 'big', signed=True)); off += 6\n        elif t == 6:\n            if off + 8 > end: raise ValueError('trunc int64')\n            vals.append(int.from_bytes(buf[off:off+8], 'big', signed=True)); off += 8\n        elif t == 7:\n            if off + 8 > end: raise ValueError('trunc real')\n            vals.append(struct.unpack('>d', buf[off:off+8])[0]); off += 8\n        elif t == 8:\n            vals.append(0)\n        elif t == 9:\n            vals.append(1)\n        elif t >= 12 and t % 2 == 0:\n            ln = (t - 12) // 2\n            if off + ln > end: raise ValueError('trunc blob')\n            vals.append(buf[off:off+ln]); off += ln\n        elif t >= 13:\n            ln = (t - 13) // 2\n            if off + ln > end: raise ValueError('trunc text')\n            vals.append(buf[off:off+ln].decode('utf-8')); off += ln\n    return vals\n\npgtype = data[0]\nfirst_free, ncells, content_start, frag = struct.unpack('>HHHB', data[1:8])\nprint('page type', hex(pgtype), 'ncells', ncells, 'content', hex(content_start))\nptrs = [struct.unpack('>H', data[8+2*i:10+2*i])[0] for i in range(ncells)]\nprint('cell ptrs', [hex(p) for p in ptrs])\n\nrows = []\nfor i, p in enumerate(sorted(ptrs)):\n    try:\n        payload_len, q = varint(data, p)\n        rowid, q = varint(data, q)\n        end = min(p + (q - p) + payload_len, n)\n        cell_end = q + payload_len\n        if cell_end > n:\n            print(f'cell {i} at {p}: TRUNCATED (needs {cell_end}, file {n})')\n            continue\n        vals = parse_record(data, q, cell_end)\n        print(f'cell {i} ptr {p} rowid {rowid} payload {payload_len} -> {vals!r}')\n        rows.append((rowid, vals))\n    except Exception as e:\n        print(f'cell {i} ptr {p}: ERROR {e}')\n\nout = []\nfor rowid, vals in rows:\n    item = next((v for v in vals if isinstance(v, str)), None)\n    price = next((v for v in vals if isinstance(v, (int, float)) and not isinstance(v, bool)), None)\n    if item is None or price is None:\n        print('skip non-matching row', vals)\n        continue\n    out.append({'item': item, 'price': price})\n\njson.dump(out, open('recovered.json', 'w', encoding='utf-8'), ensure_ascii=False, indent=1)\nprint('recovered', len(out), 'rows')\n\n--- recovered.json ---\n[\r\n {\r\n  \"item\": \"\\u0000'\\u0007first aid \",\r\n  \"price\": 2.615078678784749e+209\r\n },\r\n {\r\n  \"item\": \"\\u0000\\u001b\\u0007comp\",\r\n  \"price\": 2.734523893790785e+161\r\n },\r\n {\r\n  \"item\": \"\\u0000!\\u0002camp st\",\r\n  \"price\": 28534\r\n },\r\n {\r\n  \"item\": \"\\u0000%\\u0002sleeping \",\r\n  \"price\": 25185\r\n },\r\n {\r\n  \"item\": \"\\u0000%\\u0007water fil\",\r\n  \"price\": 4.913586622881781e+252\r\n },\r\n {\r\n  \"item\": \"\\u0000\\u001f\\u0001rope c\",\r\n  \"price\": 111\r\n },\r\n {\r\n  \"item\": \"\\u0000\\u001b\\u0001lant\",\r\n  \"price\": 101\r\n },\r\n {\r\n  \"item\": \"\\u0000!\\u0007tent st\",\r\n  \"price\": 1.9257817127360798e+161\r\n },\r\n {\r\n  \"item\": \"\\u0000\\u001d\\tmatch\",\r\n  \"price\": 1\r\n },\r\n {\r\n  \"item\": \"\\u0000\\u001f\\btrail \",\r\n  \"price\": 0\r\n }\r\n]\n\n--- scan.py ---\nimport re, sys\ndata = open('prices.db', 'rb').read()\nprint('len', len(data))\nfor m in re.finditer(rb'[^\\x00]{2,}', data):\n    print(m.start(), m.end(), m.group()[:100])",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"ls -l; xxd -l 256 prices.db\" ok -> \"\\u001b[31;1mGet-ChildItem: \\u001b[31;1mMissing an argument for parameter 'LiteralPath'. Specify a parameter of type 'System.String[]' and try again.\\u001b[0m\\r\\n00000000: 0d00 0000 0a0f 3d00 0ff1 0fe3 0fcb 0fbd  ......=.........\\n00000010: 0fad 0f93 0f7f 0f6d 0f58 0f3d 0000 0000  .......m.X.=....\\n00000020: 0000 0000 0000 0000 0000 0000 0000 0000  ................\\n00000030: 0000 0000 0000 0000 0000 0000 0000 0000  .[... 831 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"import os,sys;print(os.path.getsize('prices.db'))\\\"; python -c \\\"import sqlite3;c=sqlite3.connect('prices.db');print(c.execute('select name from sqlite_master').fetchall())\\\"\" failed -> \"4096\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<string>\\\", line 1, in <module>\\r\\n    import sqlite3;c=sqlite3.connect('prices.db');print(c.execute('select name from sqlite_master').fetchall())\\r\\n                                                        ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\r\\nsqlite3.DatabaseError: file is not a database\"\n[step 1] shell \"python - <<'EOF'\\ndata=open('prices.db','rb').read()\\nprint(len(data))\\n# nonzero regions\\nimport re\\nfor m in re.finditer(rb'[^\\\\x00]{2,}', data):\\n    print(m.start(), m.end(), m.group()[:80])\\nEOF\" failed -> \"\"\n[step 1] write \"scan.py\" ok -> \"Created file successfully: scan.py\"\n[step 1] shell \"python scan.py\" ok -> \"len 4096\\r\\n4 7 b'\\\\n\\\\x0f='\\r\\n8 28 b'\\\\x0f\\\\xf1\\\\x0f\\\\xe3\\\\x0f\\\\xcb\\\\x0f\\\\xbd\\\\x0f\\\\xad\\\\x0f\\\\x93\\\\x0f\\\\x7f\\\\x0fm\\\\x0fX\\\\x0f='\\r\\n3901 3904 b'\\\\x19\\\\n\\\\x04'\\r\\n3905 3931 b\\\"'\\\\x07first aid kit?\\\\xef\\\\xae\\\\x14z\\\\xe1G\\\\xae\\\\x13\\\\t\\\\x04\\\"\\r\\n3932 3943 b'\\\\x1b\\\\x07compass@/'\\r\\n3949 3952 b'\\\\x10\\\\x08\\\\x04'\\r\\n3953 3970 b'!\\\\x02camp stove\\\\x016\\\\x12\\\\x07\\\\x04'\\r\\n3971 3985 b'%\\\\x02sleeping bag'\\r\\n3986 3990 b'\\\\x81\\\\x18\\\\x06\\\\x04'\\r\\n3991 4016 b'%\\\\x07water filter@C\\\\x[... 247 chars cut by the benchmark]\"\n[step 1] write \"recover.py\" ok -> \"Created file successfully: recover.py\"\n[step 1] edit \"recover.py\" ok -> \"Edited recover.py (1 replacement)\"\n[step 1] shell \"python recover.py\" ok -> \"page type 0xd ncells 10 content 0xf3d\\r\\ncell ptrs ['0xff1', '0xfe3', '0xfcb', '0xfbd', '0xfad', '0xf93', '0xf7f', '0xf6d', '0xf58', '0xf3d']\\r\\ncell 0 ptr 3901 rowid 10 payload 25 -> [None, \\\"\\\\x00'\\\\x07first aid \\\", 2.615078678784749e+209]\\r\\ncell 1 ptr 3928 rowid 9 payload 19 -> [None, '\\\\x00\\\\x1b\\\\x07comp', 2.734523893790785e+161]\\r\\ncell 2 ptr 3949 rowid 8 payload 16 -> [None, '\\\\x00!\\\\x02camp st', 28534]\\r\\nce[... 556 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   false
+  ],
+  [
+   "rows with fractional prices recovered",
+   false
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   false
+  ],
+  [
+   "no row that is not in the table",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 9,
+  "tool_calls": 8,
+  "tool_errors": 1,
+  "shell_commands": 5,
+  "shell_failures": 1,
+  "file_writes": 3,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 5533,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 3103
+ },
+ "deliverables": [],
+ "render": null
+}

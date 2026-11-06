@@ -1,0 +1,51 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [],
+ "diff": "A run.py\nA test_run.py\n\n--- run.py ---\n\"\"\"Bounded-concurrency runner for batch scripts.\n\n    from run import run_tasks\n    await run_tasks(jobs, max_concurrent=4)\n\nDesign decisions (the brief leaves these open):\n- Results are returned as a list in the same order as ``tasks``.\n- Every job is started and awaited; one job failing does not cancel the\n  others. The first exception (in task order) is re-raised once all jobs\n  have settled, so nothing is left running in the background.\n- Cancellation (Ctrl+C) cancels each job once, then waits for every job to\n  unwind so its ``finally`` / async cleanup completes, before re-raising\n  ``CancelledError``. Extra Ctrl+C presses cannot abort that cleanup.\n- Jobs are never awaited through ``gather``: ``gather`` forwards every new\n  ``cancel()`` to the children, which would kill cleanup mid-flight.\n\"\"\"\n\nfrom __future__ import annotations\n\nimport asyncio\nfrom collections.abc import Awaitable, Callable, Sequence\nfrom typing import TypeVar\n\nT = TypeVar(\"T\")\n\n__all__ = [\"run_tasks\"]\n\n\nasync def run_tasks(\n    tasks: Sequence[Callable[[], Awaitable[T]]],\n    max_concurrent: int,\n) -> list[T]:\n    \"\"\"Run zero-argument job factories with at most ``max_concurrent`` live.\n\n    Each element of ``tasks`` is called with no arguments and must return an\n    awaitable; that awaitable is the job. Returns when every job is done.\n    \"\"\"\n    if isinstance(max_concurrent, bool) or not isinstance(max_concurrent, int):\n        raise TypeError(f\"max_concurrent must be an int, got {max_concurrent!r}\")\n    if max_concurrent < 1:\n        raise ValueError(f\"max_concurrent must be >= 1, got {max_concurrent!r}\")\n\n    slots = asyncio.Semaphore(max_concurrent)\n\n    async def worker(job: Callable[[], Awaitable[T]]) -> T:\n        async with slots:\n            return await job()\n\n    children = [asyncio.ensure_future(worker(job)) for job in tasks]\n    if not children:\n        return []\n\n    settled = asyncio.Event()\n    unfinished = len(children)\n\n    def on_done(_child: asyncio.Task) -> None:\n        nonlocal unfinished\n        unfinished -= 1\n        if unfinished == 0:\n            settled.set()\n\n    for child in children:\n        child.add_done_callback(on_done)\n\n    try:\n        await settled.wait()\n    except asyncio.CancelledError:\n        for child in children:\n            child.cancel()\n        # Wait out the unwinding. Cancelling *this* waiter is harmless: the\n        # event and the child tasks are independent of it.\n        while not settled.is_set():\n            try:\n                await settled.wait()\n            except asyncio.CancelledError:\n                continue\n        raise\n\n    outcomes = [\n        asyncio.CancelledError() if c.cancelled() else c.exception()\n        for c in children\n    ]\n    failure = next((o for o in outcomes if o is not None), None)\n    if failure is not None:\n        raise failure\n    return [c.result() for c in children]\n\n--- test_run.py ---\n\"\"\"Checks for run_tasks: concurrency cap, order, cleanup on cancel, errors.\"\"\"\n\nimport asyncio\n\nfrom run import run_tasks\n\nlive = 0\npeak = 0\n\n\ndef job(i, dur=0.02, log=None):\n    async def run():\n        global live, peak\n        live += 1\n        peak = max(peak, live)\n        try:\n            await asyncio.sleep(dur)\n        finally:\n            live -= 1\n            if log is not None:\n                log.append(i)\n        return i\n\n    return run\n\n\nasync def t_cap_and_order():\n    global peak\n    peak = 0\n    log = []\n    res = await run_tasks([job(i, log=log) for i in range(10)], 3)\n    assert res == list(range(10)), res\n    assert peak == 3, peak\n    assert sorted(log) == list(range(10)), log\n    print(\"cap_and_order ok peak=\", peak)\n\n\nasync def t_cleanup_on_cancel():\n    global peak\n    peak = 0\n    log = []\n    started = asyncio.Event()\n\n    def slow(i):\n        async def run():\n            nonlocal started\n            started.set()\n            try:\n                await asyncio.sleep(5)\n            finally:\n                await asyncio.sleep(0.01)  # async cleanup\n                log.append(i)\n\n        return run\n\n    runner = asyncio.ensure_future(run_tasks([job(0, log=log), slow(1)], 2))\n    await started.wait()\n    runner.cancel()\n    try:\n        await runner\n        raise AssertionError(\"expected CancelledError\")\n    except asyncio.CancelledError:\n        pass\n    assert sorted(log) == [0, 1], log\n    assert live == 0, live\n    print(\"cleanup_on_cancel ok log=\", log)\n\n\nasync def t_second_ctrlc_keeps_cleanup():\n    log = []\n    started = []\n\n    def slow(i):\n        async def run():\n            started.append(i)\n            try:\n                await asyncio.sleep(5)\n            finally:\n                await asyncio.sleep(0.05)\n                log.append(i)\n\n        return run\n\n    # 3 jobs, cap 2: job 2 never starts, so it has no cleanup to run.\n    runner = asyncio.ensure_future(run_tasks([slow(i) for i in range(3)], 2))\n    await asyncio.sleep(0.02)\n    runner.cancel()\n    for _ in range(5):  # repeat Ctrl+C while cleanup is in flight\n        await asyncio.sleep(0.01)\n        runner.cancel()\n    try:\n        await runner\n        raise AssertionError(\"expected CancelledError\")\n    except asyncio.CancelledError:\n        pass\n    assert sorted(started) == [0, 1], started\n    assert sorted(log) == [0, 1], log\n    print(\"second_ctrlc ok log=\", log)\n\n\nasync def t_error_waits_for_siblings():\n    log = []\n\n    def boom():\n        async def run():\n            raise RuntimeError(\"boom\")\n\n        return run\n\n    try:\n        await run_tasks([boom(), job(1, dur=0.05, log=log)], 2)\n        raise AssertionError(\"expected RuntimeError\")\n    except RuntimeError as exc:\n        assert str(exc) == \"boom\", exc\n    assert log == [1], log\n    print(\"error_waits ok log=\", log)\n\n\nasync def t_edge():\n    assert await run_tasks([], 1) == []\n    for bad in (0, -1):\n        try:\n            await run_tasks([], bad)\n            raise AssertionError(\"expected ValueError\")\n        except ValueError:\n            pass\n    try:\n        await run_tasks([], \"2\")\n        raise AssertionError(\"expected TypeError\")\n    except TypeError:\n        pass\n    print(\"edge ok\")\n\n\nasync def main():\n    await t_cap_and_order()\n    await t_cleanup_on_cancel()\n    await t_second_ctrlc_keeps_cleanup()\n    await t_error_waits_for_siblings()\n    await t_edge()\n    print(\"ALL OK\")\n\n\nasyncio.run(main())",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Created file successfully: <WORKSPACE>/run.py\"\n[step 1] write \"<WORKSPACE>\\\\test_run.py\" ok -> \"Created file successfully: <WORKSPACE>/test_run.py\"\n[step 1] shell \"python test_run.py\" failed -> \"cap_and_order ok peak= 3\\r\\ncleanup_on_cancel ok log= [0, 1]\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\test_run.py\\\", line 140, in <module>\\r\\n    asyncio.run(main())\\r\\n    ~~~~~~~~~~~^^^^^^^^\\r\\n  File \\\"<HOME>\\\\AppData\\\\Roaming\\\\uv\\\\python\\\\cpython-3.13.14-windows-x86_64-none\\\\Lib\\\\asyncio\\\\runners.py\\\", line 196, in run[... 897 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Wrote file successfully: <WORKSPACE>/run.py\"\n[step 1] shell \"python test_run.py\" failed -> \"cap_and_order ok peak= 3\\r\\ncleanup_on_cancel ok log= [0, 1]\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\test_run.py\\\", line 140, in <module>\\r\\n    asyncio.run(main())\\r\\n    ~~~~~~~~~~~^^^^^^^^\\r\\n  File \\\"<HOME>\\\\AppData\\\\Roaming\\\\uv\\\\python\\\\cpython-3.13.14-windows-x86_64-none\\\\Lib\\\\asyncio\\\\runners.py\\\", line 196, in run[... 901 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>\\\\test_run.py\" ok -> \"Edited <WORKSPACE>/test_run.py (1 replacement)\"\n[step 1] edit \"<WORKSPACE>\\\\test_run.py\" ok -> \"Edited <WORKSPACE>/test_run.py (1 replacement)\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   true
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 2,
+  "file_writes": 5,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 7580,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 3717
+ },
+ "deliverables": [],
+ "render": null
+}
