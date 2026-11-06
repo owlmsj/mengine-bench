@@ -24,7 +24,8 @@ def runner_command(argv: Sequence[str], base_executable: str) -> list[str]:
 def relaunch_run(argv: Sequence[str]) -> int | None:
     if sys.platform != "win32" or Path(sys.executable).name.lower() != "python.exe":
         return None
-    if not argv or argv[0] != "run":
+    # #205: redo runs agents too, so it needs the same shield.
+    if not argv or argv[0] not in ("run", "redo"):
         return None
     try:
         command = runner_command(argv, sys._base_executable)

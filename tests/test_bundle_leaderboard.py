@@ -283,7 +283,7 @@ def test_the_current_table_recomputes_score_with_todays_weights_and_history_keep
 def test_bench_is_version_2_5_2() -> None:
     import tomllib
     pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
-    assert __version__ == pyproject["project"]["version"] == "2.6.0"
+    assert __version__ == pyproject["project"]["version"] == "2.6.1"
 
 
 def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:

@@ -62,35 +62,40 @@ def run_tasks(tasks: Sequence[EvalTask], agent: Agent, settings: RunSettings, wo
     outcomes: list[TaskOutcome] = []
     details: dict[str, TaskDetail] = {}
     for task in tasks:
-        print(f"[{task.id}] running", flush=True)
-        record: TaskRunRecord | None = None
-        try:
-            record = run_task(task, agent, work / task.id)
-            if silent_timeout(record):
-                print(f"[{task.id}] no reply from the model before the limit; retrying once (#144)", flush=True)
-                shutil.move(str(work / task.id), str(work / f"{task.id}.silent"))
-                record = run_task(task, agent, work / task.id)
-                record.notes.append(SILENT_RETRY_NOTE)
-            detail = _detail(task, record)
-            evidence.packets[task.id] = _judge_packet(task, record, work / task.id)
-            evidence.deliverables[task.id] = _deliverables(task, record)
-            evidence.evidence[task.id] = ({rel: record.workspace / rel for rel in task.evidence}
-                                          if record.workspace is not None else {})
-        except Exception as error:  # noqa: BLE001 - one task must not abort the run
-            record, detail = _crashed_task(task, record, error)
-            evidence.packets[task.id] = _crash_packet(task, record)
-        details[task.id] = detail
-        if record.workspace is not None:
-            evidence.workspaces[task.id] = record.workspace
-        outcomes.append(_outcome(task, record))
-        correct = _correctness(record)
-        print(f"[{task.id}] {record.status} c={correct:.2f} t={record.agent_s:.1f}s", flush=True)
+        outcome, details[task.id] = run_one_task(task, agent, work, evidence)
+        outcomes.append(outcome)
     run = score_run(outcomes, settings.price)
     meta = RunMeta(date=datetime.now().strftime("%Y-%m-%d"), agent=agent.name, model=settings.model,
                    effort=settings.effort, agent_version=agent.version(), run_id=uuid.uuid4().hex[:8],
                    started_at=started_at, finished_at=_utc_now(), submitter=settings.submitter,
                    price=settings.price, config=settings.config)
     return build_results(meta, run, details, collect_environment(), bench_commit())
+
+
+def run_one_task(task: EvalTask, agent: Agent, work: Path, evidence: JudgeEvidence) -> tuple[TaskOutcome, TaskDetail]:
+    """Run and grade one task under `work / task.id`, with the #144 silent retry; `redo` reuses it (#205)."""
+    print(f"[{task.id}] running", flush=True)
+    record: TaskRunRecord | None = None
+    try:
+        record = run_task(task, agent, work / task.id)
+        if silent_timeout(record):
+            print(f"[{task.id}] no reply from the model before the limit; retrying once (#144)", flush=True)
+            shutil.move(str(work / task.id), str(work / f"{task.id}.silent"))
+            record = run_task(task, agent, work / task.id)
+            record.notes.append(SILENT_RETRY_NOTE)
+        detail = _detail(task, record)
+        evidence.packets[task.id] = _judge_packet(task, record, work / task.id)
+        evidence.deliverables[task.id] = _deliverables(task, record)
+        evidence.evidence[task.id] = ({rel: record.workspace / rel for rel in task.evidence}
+                                      if record.workspace is not None else {})
+    except Exception as error:  # noqa: BLE001 - one task must not abort the run
+        record, detail = _crashed_task(task, record, error)
+        evidence.packets[task.id] = _crash_packet(task, record)
+    if record.workspace is not None:
+        evidence.workspaces[task.id] = record.workspace
+    correct = _correctness(record)
+    print(f"[{task.id}] {record.status} c={correct:.2f} t={record.agent_s:.1f}s", flush=True)
+    return _outcome(task, record), detail
 
 
 def agent_commands(stdout: str) -> list[str]:

@@ -29,7 +29,10 @@ def test_runner_command_copies_refreshes_and_preserves_arguments(tmp_path: Path)
     assert renamed.read_bytes() == b'python-v2'
 
 
-def test_relaunch_returns_child_exit_and_absolute_pythonpath(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+# #205: redo runs agents like run, so it gets the same shield.
+@pytest.mark.parametrize('command', ['run', 'redo'])
+def test_relaunch_returns_child_exit_and_absolute_pythonpath(command: str, tmp_path: Path,
+                                                             monkeypatch: pytest.MonkeyPatch) -> None:
     base = tmp_path / 'python.exe'
     base.write_bytes(b'python')
     monkeypatch.setattr(sys, 'platform', 'win32')
@@ -43,7 +46,7 @@ def test_relaunch_returns_child_exit_and_absolute_pythonpath(tmp_path: Path, mon
         assert env['PYTHONPATH'].split(';') == [str(Path.cwd()), str(Path('relative').resolve()), str(tmp_path)]
         return 23
     monkeypatch.setattr(subprocess, 'call', child)
-    assert safe_runner.relaunch_run(['run', '--model', 'm']) == 23
+    assert safe_runner.relaunch_run([command, '--model', 'm']) == 23
     assert len(calls) == 1
 
 

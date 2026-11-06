@@ -110,6 +110,11 @@ Bench 2.6 (#185) stabilizes the process without touching a task, prompt or limit
   to history with the Scores of their own version; the 2.3 to 2.5 rows (the same 28-task catalog) stay ranked,
   marked with their version and, until re-judged, their rubric.
 
+Bench 2.6.1 (#205): no task, prompt or limit changes. A process that exits while the runner reads it no longer
+crashes the task; a browser profile dir (a `Local State` file at its root, or a name the runner already skips) is left
+out of the workspace archive; `mengine-bench redo results/<run>` reruns only the crashed tasks of a bundle and
+records them under `redo`.
+
 Separately, ties come from the published tasks: draw the tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
 a tie. This shows how much the order rests on this set of tasks; it says nothing about the noise between two runs of one agent.
