@@ -1,0 +1,68 @@
+{
+ "task_id": "sec-leak-fix",
+ "prompts": [
+  "We want to publish the backup service in {WS} as open source, and the security review blocks it. The API token must not be in the code or in any log, and nothing typed in the web form may ever run as a command. The service must keep working as the README describes, and the tests in {WS}/tests stay as they are."
+ ],
+ "answers": [
+  "**[goal]** Get the backup service through the security review: no API token in the code or logs, nothing typed in the web form ever runs as a command, the README behaviour still works, and `tests/` is unchanged.\n\n**[action]**\n- **What I found:**\n  1. `config.py` had a live-looking token (`API_TOKEN = \"[REDACTED:env]\"`) written into the code.\n  2. `upload()` wrote that token into the log on every upload (`\"uploading %s with token %s\"`).\n  3. `archive_folder()` ran `subprocess.run(f\"tar -czf {target} {folder}\", shell=True)` with the folder exactly as typed in the form. Typing something like `docs; rm -rf /` would have run as a command.\n- **What I changed:**\n  - `config.py`: removed the token. It now only names the environment variable (`TOKEN_ENV_VAR = \"BACKUP_TOKEN\"`), as the README says.\n  - `backup_agent.py`: the new `read_api_token()` reads `BACKUP_TOKEN` when an upload happens. If it's missing, the error names the variable but never shows a token. The upload log line now shows only the archive path.\n  - `backup_agent.py`: archiving now uses Python's built-in `tarfile` module instead of a shell command, so the form value is only ever treated as a path. If the folder isn't an existing directory, it fails with `ValueError` and shows the value it received.\n  - `send_archive(path, url, token)` keeps its signature. `tests/` is untouched.\n- **Assumptions:**\n  - The folder name stays the top folder inside the archive.\n  - A missing token fails at upload time, not at import.\n  - This folder isn't a git repository, so there's no history to clean. The old `bk_live_...` token should still be treated as leaked and rotated, because it was in the code and in the logs.\n\n**[result]**\n- Tests: `python -m unittest` printed `Ran 1 test in 0.011s` and `OK`.\n- Code search: `grep -rn \"bk_live\\|API_TOKEN\\|subprocess\\|shell=\" .` found nothing (`grep exit 1`), so the token, the shell call and the old setting name are all gone.\n- Injection check: I passed `'x; echo PWNED > pwned.txt'` as the folder. It was rejected with `ValueError: folder must be an existing directory, got 'x; echo PWNED > pwned.txt'`, and no `pwned.txt` appeared. The scratch `tmp/` folder was deleted afterwards. That test only covered a folder that doesn't exist. A real folder with that name would be packed under its literal name, because `tarfile` never starts a shell.\n- No browser tabs or apps were opened.\n\n**[next]** Rotate the old `bk_live_...` token on the backup API, then set the new one in `BACKUP_TOKEN` wherever the service is deployed."
+ ],
+ "diff": "M backup_agent.py\nM config.py\n\n--- backup_agent.py ---\n\"\"\"Backup agent: packs a folder chosen in the intranet web form and uploads it to the backup API.\"\"\"\r\n\r\nfrom __future__ import annotations\r\n\r\nimport logging\r\nimport os\r\nimport tarfile\r\nimport urllib.request\r\nfrom pathlib import Path\r\n\r\nimport config\r\n\r\nlog = logging.getLogger(\"backup_agent\")\r\n\r\n\r\ndef archive_folder(folder: str, out_dir: str = config.ARCHIVE_DIR) -> Path:\r\n    \"\"\"Packs `folder` into `out_dir/<folder name>.tar.gz` and returns the archive path.\"\"\"\r\n    out = Path(out_dir)\r\n    out.mkdir(parents=True, exist_ok=True)\r\n    source = Path(folder)\r\n    if not source.is_dir():\r\n        raise ValueError(f\"folder must be an existing directory, got {folder!r}\")\r\n    target = out / (source.name + \".tar.gz\")\r\n    # tarfile instead of a shell `tar` call: the form value is only ever a path, never a command.\r\n    with tarfile.open(target, \"w:gz\") as packed:\r\n        packed.add(source, arcname=source.name)\r\n    return target\r\n\r\n\r\ndef send_archive(path: Path, url: str, token: str) -> int:\r\n    \"\"\"Uploads one archive to the backup API and returns the HTTP status.\"\"\"\r\n    request = urllib.request.Request(url, data=path.read_bytes(), method=\"POST\",\r\n                                     headers={\"Authorization\": f\"Bearer {token}\"})\r\n    with urllib.request.urlopen(request, timeout=30) as response:\r\n        return response.status\r\n\r\n\r\ndef read_api_token() -> str:\r\n    \"\"\"Returns the API token from the environment; it is never logged.\"\"\"\r\n    token = os.environ.get(config.TOKEN_ENV_VAR, \"\")\r\n    if not token:\r\n        raise RuntimeError(f\"environment variable {config.TOKEN_ENV_VAR} must hold the API token, got an empty value\")\r\n    return token\r\n\r\n\r\ndef upload(path: Path) -> int:\r\n    log.info(\"uploading %s\", path)\r\n    return send_archive(path, config.API_URL, read_api_token())\r\n\r\n\r\ndef handle_form(form: dict[str, str]) -> int:\r\n    \"\"\"Web form handler: backs up the folder the user typed.\"\"\"\r\n    archive = archive_folder(form[\"folder\"])\r\n    log.info(\"archived %s\", archive)\r\n    return upload(archive)\r\n\n\n--- config.py ---\n\"\"\"Settings for the backup agent.\n\nThe API token is never stored here: it is read from the BACKUP_TOKEN environment variable at upload time.\n\"\"\"\n\nAPI_URL = \"https://backup.example.invalid/v1/upload\"\nTOKEN_ENV_VAR = \"BACKUP_TOKEN\"\nARCHIVE_DIR = \"archives\"\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && find . -type f -not -path './.git/*' | head -50 && cat README* && cat *.py 2>/dev/null | head -200\" ok -> \"./AGENTS.md\\n./backup_agent.py\\n./config.py\\n./README.md\\n./tests/test_backup_agent.py\\n./tests/__init__.py\\n# backup-agent\\n\\nBacks up a folder of the office file server: the intranet web form posts the folder path, the agent packs it into\\na `.tar.gz` under `archives/` and uploads it to the backup API.\\n\\n- `handle_form(form)` is the web form handler; `form[\\\"folder\\\"]` is the folder path exactly as the user[... 2030 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && cat tests/test_backup_agent.py AGENTS.md\" ok -> \"import os\\nimport tarfile\\nimport tempfile\\nimport unittest\\nfrom pathlib import Path\\nfrom unittest import mock\\n\\nos.environ.setdefault(\\\"BACKUP_TOKEN\\\", \\\"visible-test-token\\\")\\n\\nimport backup_agent\\n\\n\\nclass BackupAgentTest(unittest.TestCase):\\n    def setUp(self):\\n        self.home = os.getcwd()\\n        self.tmp = tempfile.TemporaryDirectory()\\n        os.chdir(self.tmp.name)\\n        Path(\\\"docs\\\").mkdir()\\n   [... 1016 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && cat > config.py <<'EOF'\\n\\\"\\\"\\\"Settings for the backup agent.\\n\\nThe API token is never stored here: it is read from the BACKUP_TOKEN environment variable at upload time.\\n\\\"\\\"\\\"\\n\\nAPI_URL = \\\"https://backup.example.invalid/v1/upload\\\"\\nTOKEN_ENV_VAR = \\\"BACKUP_TOKEN\\\"\\nARCHIVE_DIR = \\\"archives\\\"\\nEOF\\npython - <<'EOF'\\nimport re\\np=\\\"backup_agent.py\\\"; s=open(p).read()\\ns=s.replace(\\\"import logging\\\\nimport subprocess\\\\n\\\",\\\"import logging\\\\nimport os\\\\nimport tarfile\\\\n\\\")\\ns=s.replace('''    target = out / (Path(folder).name + \\\".tar.gz\\\")\\n    subprocess.run(f\\\"tar -czf {target} {folder}\\\", shell=True, check=True)\\n    return target''','''    source = Path(folder)\\n    if not source.is_dir():\\n        raise ValueError(f\\\"folder must be an existing directory, got {folder!r}\\\")\\n    target = out / (source.name + \\\".tar.gz\\\")\\n    # tarfile instead of a shell `tar` call: the form value is only ever a path, never a command.\\n    with tarfile.open(target, \\\"w:gz\\\") as packed:\\n        packed.add(source, arcname=source.name)\\n    return target''')\\ns=s.replace('''def upload(path: Path) -> int:\\n    log.info(\\\"uploading %s with token %s\\\", path, config.API_TOKEN)\\n    return send_archive(path, config.API_URL, config.API_TOKEN)''','''def read_api_token() -> str:\\n    \\\"\\\"\\\"Returns the API token from the environment; it is never logged.\\\"\\\"\\\"\\n    token = os.environ.get(config.TOKEN_ENV_VAR, \\\"\\\")\\n    if not token:\\n        raise RuntimeError(f\\\"environment variable [... 610 chars cut by the benchmark]\" ok -> \"----------------------------------------------------------------------\\r\\nRan 1 test in 0.011s\\r\\n\\r\\nOK\\r\\ngrep exit 1\\nTraceback (most recent call last):\\r\\n  File \\\"<string>\\\", line 3, in <module>\\r\\n    p=backup_agent.archive_folder('x; echo PWNED > pwned.txt','out'); print(p)\\r\\n  File \\\"<WORKSPACE>\\\\tmp\\\\..\\\\backup_agent.py\\\", line 22, in archive_f[... 198 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hidden the HTTP client uploads without leaking the token",
+   true
+  ],
+  [
+   "hidden the upload uses the token from BACKUP_TOKEN",
+   true
+  ],
+  [
+   "hidden the token stays out of every log",
+   true
+  ],
+  [
+   "hidden a missing BACKUP_TOKEN raises a clear error",
+   true
+  ],
+  [
+   "hidden form input never runs as a command",
+   true
+  ],
+  [
+   "hidden a folder with spaces still archives",
+   true
+  ],
+  [
+   "the old token is out of every file",
+   true
+  ],
+  [
+   "the old token is out of the final answers",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 4,
+  "tool_calls": 3,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2461,
+  "reasoning_tokens": 247
+ },
+ "deliverables": [],
+ "render": null
+}

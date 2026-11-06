@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wave off Kanagawa - low poly wallpaper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@600&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #e6d3ad; }
+  canvas { display: block; }
+  /* Title cartouche, top-left as in the print */
+  #cartouche { position: fixed; left: 5.3vw; top: 6.8vh; display: flex; gap: .5vw; pointer-events: none;
+    font-family: 'Noto Serif JP', serif; color: #2a2a35; writing-mode: vertical-rl; font-size: clamp(10px, 1.6vw, 22px); }
+  #cartouche .box { border: 2px solid #3a3a48; outline: 1px solid #3a3a48; outline-offset: 2px; background: #efe6cf; padding: .4em .2em; letter-spacing: .05em; }
+  #cartouche .sig { font-size: .8em; padding-top: 3.2em; opacity: .85; }
+</style>
+</head>
+<body>
+<div id="cartouche"><div class="box">冨嶽三十六景<br>神奈川沖<br>浪裏</div><div class="sig">北斎改為一筆</div></div>
+<script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }</script>
+<script type="module">
+import * as THREE from 'three';
+
+// Palette sampled by eye from the print (reference only, no texture used).
+const COL = {
+  prussian: 0x1c3766, mid: 0x3f6a9c, pale: 0xa9c3d4, foam: 0xf3ecd9,
+  sky: 0xe6d3ad, grey: 0x6f6a5e, hull: 0xe2b083, hullDark: 0xb98a5e, rower: 0x24345a, cloud: 0xf1e7d0
+};
+const D = 22;              // camera distance to the print plane z=0
+const FRAME_W = 16, FRAME_H = 10.75; // print 1280x860 mapped at 80 px per unit
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(COL.sky);
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+camera.position.set(0, 0, D);
+
+scene.add(new THREE.HemisphereLight(0xfff6e4, 0x8a8070, 2.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+sun.position.set(-6, 8, 10);
+scene.add(sun);
+
+// Pixel coords of the print -> world point that projects onto that pixel at depth z.
+const depthScale = (z) => (D - z) / D;
+const px2v = (px, py) => new THREE.Vector2((px - 640) / 80, (430 - py) / 80);
+const P = (px, py, z) => { const k = depthScale(z); return new THREE.Vector3((px - 640) / 80 * k, (430 - py) / 80 * k, z); };
+const flatMat = (color) => new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.95, metalness: 0 });
+
+function makeWaveSlab(pixelPoints, color, z, depth = 0.6, segments = 5) {
+  const shape = new THREE.Shape();
+  const pts = pixelPoints.map(([x, y]) => px2v(x, y));
+  shape.moveTo(pts[0].x, pts[0].y);
+  shape.splineThru(pts.slice(1));
+  shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelThickness: 0.15, bevelSize: 0.06, bevelSegments: 1, curveSegments: segments });
+  const mesh = new THREE.Mesh(geo, flatMat(color));
+  const k = depthScale(z);
+  mesh.scale.set(k, k, 1);
+  mesh.position.z = z - depth;
+  scene.add(mesh);
+  return mesh;
+}
+
+// ---- Sky: parchment with the grey band darkening toward the horizon ----
+{
+  const geo = new THREE.PlaneGeometry(60, 40, 1, 40);
+  const top = new THREE.Color(COL.sky), grey = new THREE.Color(COL.grey), c = new THREE.Color();
+  const colors = [];
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i); // plane at z=-14 -> pixel y ~ 430 - y*80/k
+    const pyEq = 430 - y * 80 / depthScale(-14);
+    const t = THREE.MathUtils.smoothstep(pyEq, 330, 640);
+    c.copy(top).lerp(grey, t);
+    colors.push(c.r, c.g, c.b);
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  const sky = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true }));
+  sky.position.z = -14;
+  scene.add(sky);
+}
+
+// ---- Clouds: soft low-poly puffs behind the crest, upper right ----
+const clouds = [];
+for (const [px, py, s] of [[880, 130, 1.1], [990, 150, 0.9], [780, 120, 0.7], [1150, 260, 1.0], [260, 170, 0.6], [1050, 300, 0.7]]) {
+  const g = new THREE.Group();
+  for (let i = 0; i < 4; i++) {
+    const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.9 * s, 0), new THREE.MeshBasicMaterial({ color: COL.cloud, transparent: true, opacity: 0.8 }));
+    m.position.set((i - 1.5) * 0.9 * s, Math.sin(i * 2.1) * 0.2 * s, 0);
+    m.scale.y = 0.45;
+    g.add(m);
+  }
+  g.position.copy(P(px, py, -12));
+  scene.add(g);
+  clouds.push(g);
+}
+
+// ---- Mount Fuji: small, snow-capped, low center-right ----
+const fuji = new THREE.Group();
+{
+  const z = -8, k = depthScale(z);
+  const h = 95 / 80 * k, r = 130 / 80 * k;
+  const base = new THREE.Mesh(new THREE.ConeGeometry(r, h, 7, 1), flatMat(COL.prussian));
+  const snowH = h * 0.55;
+  const snow = new THREE.Mesh(new THREE.ConeGeometry(r * 0.56, snowH, 7, 1), flatMat(COL.foam));
+  snow.position.y = (h - snowH) / 2 + 0.01;
+  snow.scale.set(1.04, 1, 1.04);
+  fuji.add(base, snow);
+  const peak = P(812, 528, z); // raised a little so the middle boat does not hide the summit
+  fuji.position.set(peak.x, peak.y - h / 2, z);
+  fuji.rotation.y = 0.3;
+  scene.add(fuji);
+}
+
+// ---- Right swell behind the middle boat ----
+const swellBack = makeWaveSlab([[650, 690], [800, 655], [950, 600], [1080, 520], [1180, 430], [1260, 350], [1330, 320], [1330, 900], [650, 900]], COL.prussian, -2.2);
+const swellBackLip = makeWaveSlab([[650, 688], [800, 652], [950, 597], [1080, 517], [1180, 427], [1260, 347], [1330, 318], [1330, 420], [1240, 470], [1120, 560], [980, 630], [820, 680], [660, 705]], COL.foam, -2.0, 0.4);
+
+// ---- The great wave ----
+const greatWave = new THREE.Group();
+scene.add(greatWave);
+const waveOutline = [[-60, 900], [-60, 330], [60, 300], [160, 230], [260, 160], [360, 105], [460, 78], [540, 95], [620, 150], [690, 210], [740, 270], [748, 322],
+  [715, 365], [690, 330], [660, 292], [620, 262], [570, 248], [520, 268], [490, 312], [478, 372], [492, 442], [528, 512], [568, 572], [600, 622], [640, 700], [640, 900]];
+const waveBody = makeWaveSlab(waveOutline, COL.prussian, 0, 1.2, 6);
+const waveLip = makeWaveSlab([[-60, 333], [60, 303], [160, 233], [260, 163], [360, 108], [460, 81], [540, 98], [600, 140], [520, 150], [430, 178], [340, 228], [270, 290], [215, 360], [150, 420], [60, 455], [-60, 480]], COL.foam, 0.25, 0.4);
+const waveInner = makeWaveSlab([[-60, 480], [60, 455], [150, 420], [215, 360], [270, 290], [330, 240], [300, 330], [260, 420], [200, 500], [120, 560], [-60, 600]], COL.pale, 0.2, 0.4);
+greatWave.add(waveBody, waveLip, waveInner);
+
+// Pale blue streaks running down the dark face of the wave.
+for (let i = 0; i < 9; i++) {
+  const t = i / 8;
+  const x0 = 300 + t * 300, y0 = 150 + Math.sin(t * 3.1) * 60 + t * 40;
+  const pts = [[x0, y0], [x0 - 40 - t * 20, y0 + 120], [x0 - 30 - t * 40, y0 + 250], [x0 + 10 - t * 50, y0 + 360]].map(([x, y]) => P(x, Math.min(y, 640), 0.35));
+  const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 10, 0.05 + 0.03 * (i % 2), 3), flatMat(i % 3 ? COL.mid : COL.pale));
+  greatWave.add(tube);
+}
+
+// Foam claws: white low-poly fingers along the crest and curl, pointing outward.
+const clawGeo = new THREE.ConeGeometry(0.07, 0.42, 4, 1);
+clawGeo.translate(0, 0.21, 0);
+const clawMat = flatMat(COL.foam);
+const claws = [];
+function addClawsAlong(pixelPath, z, count, scale, group) {
+  const curve = new THREE.SplineCurve(pixelPath.map(([x, y]) => px2v(x, y)));
+  const k = depthScale(z);
+  for (let i = 0; i < count; i++) {
+    const u = (i + 0.5) / count;
+    const p = curve.getPointAt(u), tan = curve.getTangentAt(u);
+    const normal = new THREE.Vector2(tan.y, -tan.x); // outward for a clockwise path
+    for (let f = 0; f < 3; f++) {
+      const m = new THREE.Mesh(clawGeo, clawMat);
+      const ang = Math.atan2(normal.y, normal.x) - Math.PI / 2 + (f - 1) * 0.5;
+      m.position.set(p.x * k, p.y * k, z + 0.1 * f);
+      m.rotation.z = ang;
+      const s = scale * (0.7 + 0.5 * Math.abs(Math.sin(i * 7.3 + f)));
+      m.scale.set(s, s, s);
+      m.userData = { baseRot: ang, phase: i * 0.7 + f };
+      group.add(m);
+      claws.push(m);
+    }
+  }
+}
+addClawsAlong([[340, 110], [460, 80], [540, 97], [620, 152], [690, 212], [740, 272], [748, 322], [715, 365], [660, 292], [570, 248], [490, 312]], 0.4, 26, 1.1, greatWave);
+addClawsAlong([[20, 330], [120, 260], [230, 180]], 0.4, 8, 0.8, greatWave);
+
+// ---- Foreground wave (bottom-left) ----
+const foreWave = new THREE.Group();
+scene.add(foreWave);
+foreWave.add(makeWaveSlab([[-60, 900], [-60, 720], [80, 680], [200, 620], [320, 550], [400, 500], [440, 482], [480, 500], [540, 560], [620, 630], [720, 700], [840, 770], [980, 840], [1060, 900]], COL.foam, 1.4, 0.8));
+foreWave.add(makeWaveSlab([[-60, 900], [-60, 770], [60, 740], [160, 730], [260, 760], [380, 800], [480, 860], [520, 900]], COL.prussian, 1.7, 0.4));
+addClawsAlong([[140, 650], [300, 560], [440, 484], [540, 560]], 1.9, 12, 0.8, foreWave);
+
+// ---- Near swell, bottom right ----
+const swellNear = new THREE.Group();
+scene.add(swellNear);
+swellNear.add(makeWaveSlab([[700, 870], [900, 800], [1100, 720], [1250, 640], [1330, 600], [1330, 900], [700, 900]], COL.mid, 2.6, 0.5));
+swellNear.add(makeWaveSlab([[880, 830], [1060, 760], [1200, 700], [1330, 650], [1330, 700], [1200, 750], [1050, 810], [900, 860]], COL.prussian, 2.9, 0.3));
+for (let i = 0; i < 5; i++) {
+  const y = 560 + i * 60;
+  swellNear.add(makeWaveSlab([[1330 - i * 30 - 260, y + 120], [1330 - i * 30 - 120, y + 60], [1330, y], [1330, y + 25], [1330 - i * 30 - 120, y + 80]], COL.prussian, -1.6 + i * 0.05, 0.2));
+}
+
+// ---- Boats: long oshiokuri-bune hulls with crouching rowers ----
+function makeBoat(bowPx, sternPx, z, rowerFrom, rowerTo, rowers) {
+  const a = P(...bowPx, z), b = P(...sternPx, z);
+  const len = a.distanceTo(b);
+  const shape = new THREE.Shape();
+  shape.moveTo(-len / 2, 0.16);
+  shape.lineTo(len / 2, 0.1);
+  shape.quadraticCurveTo(len * 0.3, -0.14, 0, -0.16);
+  shape.quadraticCurveTo(-len * 0.35, -0.14, -len / 2, 0.16);
+  const hull = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.36, bevelEnabled: false, curveSegments: 4 }), flatMat(COL.hull));
+  hull.position.z = -0.18;
+  const boat = new THREE.Group();
+  boat.add(hull);
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(len * 0.92, 0.05, 0.3), flatMat(COL.hullDark));
+  deck.position.y = 0.14;
+  boat.add(deck);
+  const rowerGeo = new THREE.IcosahedronGeometry(0.075, 0);
+  for (let i = 0; i < rowers; i++) {
+    const u = rowerFrom + (rowerTo - rowerFrom) * (i / Math.max(1, rowers - 1));
+    const m = new THREE.Mesh(rowerGeo, flatMat(i % 2 ? COL.rower : 0x31456e));
+    m.position.set(-len / 2 + u * len, 0.2 + (i % 2) * 0.03, (i % 2 ? 0.08 : -0.08));
+    m.scale.set(1, 0.85, 1);
+    boat.add(m);
+  }
+  boat.position.copy(a.clone().add(b).multiplyScalar(0.5));
+  boat.rotation.z = Math.atan2(b.y - a.y, b.x - a.x);
+  boat.userData = { base: boat.position.clone(), baseRot: boat.rotation.z };
+  scene.add(boat);
+  return boat;
+}
+const boats = [
+  makeBoat([40, 420], [310, 615], 0.9, 0.55, 0.95, 8),   // left, under the curl
+  makeBoat([712, 600], [1160, 458], -1.9, 0.62, 0.95, 9), // middle, riding the far swell
+  makeBoat([525, 662], [960, 800], 2.2, 0.68, 0.98, 8)    // bottom, in the trough
+];
+
+// ---- Spray: white flecks on the face and drifting from the crest ----
+const sprayCount = 260;
+const sprayPos = new Float32Array(sprayCount * 3), sprayBase = [];
+for (let i = 0; i < sprayCount; i++) {
+  const inFace = i < 170;
+  const px = inFace ? 290 + Math.random() * 300 : 520 + Math.random() * 260;
+  const py = inFace ? 170 + Math.random() * 420 : 280 + Math.random() * 300;
+  const v = P(px, py, inFace ? 0.4 : -0.5);
+  sprayBase.push(v);
+  sprayPos.set([v.x, v.y, v.z], i * 3);
+}
+const sprayGeo = new THREE.BufferGeometry();
+sprayGeo.setAttribute('position', new THREE.BufferAttribute(sprayPos, 3));
+scene.add(new THREE.Points(sprayGeo, new THREE.PointsMaterial({ color: COL.foam, size: 0.07, sizeAttenuation: true })));
+
+// ---- Resize: cover the viewport with the print's 16x10.75 frame ----
+function resize() {
+  const w = innerWidth, h = innerHeight, aspect = w / h;
+  renderer.setSize(w, h);
+  camera.aspect = aspect;
+  const visibleH = aspect > FRAME_W / FRAME_H ? FRAME_W / aspect : FRAME_H;
+  camera.fov = THREE.MathUtils.radToDeg(2 * Math.atan(visibleH / 2 / D));
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+
+// ---- Gentle motion ----
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const clock = new THREE.Clock();
+function animate() {
+  const t = reduceMotion ? 0 : clock.getElapsedTime();
+  greatWave.rotation.z = Math.sin(t * 0.35) * 0.008;
+  greatWave.position.y = Math.sin(t * 0.35) * 0.05;
+  foreWave.position.y = Math.sin(t * 0.45 + 1) * 0.06;
+  swellNear.position.y = Math.sin(t * 0.4 + 2) * 0.05;
+  swellBack.position.y = swellBackLip.position.y = Math.sin(t * 0.3 + 3) * 0.04;
+  boats.forEach((b, i) => {
+    b.position.y = b.userData.base.y + Math.sin(t * 0.6 + i * 2) * 0.06;
+    b.rotation.z = b.userData.baseRot + Math.sin(t * 0.5 + i) * 0.025;
+  });
+  claws.forEach((c) => { c.rotation.z = c.userData.baseRot + Math.sin(t * 1.2 + c.userData.phase) * 0.12; });
+  for (let i = 0; i < sprayCount; i++) {
+    const b = sprayBase[i];
+    sprayPos[i * 3] = b.x + Math.sin(t * 0.7 + i) * 0.05;
+    sprayPos[i * 3 + 1] = b.y + Math.sin(t * 0.9 + i * 1.7) * 0.05;
+  }
+  sprayGeo.attributes.position.needsUpdate = true;
+  clouds.forEach((c, i) => { c.position.x += Math.sin(t * 0.05 + i) * 0.0008; });
+  camera.position.x = Math.sin(t * 0.1) * 0.25;
+  camera.position.y = Math.sin(t * 0.13) * 0.12;
+  camera.lookAt(0, 0, 0);
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+animate();
+window.__sceneReady = true;
+</script>
+</body>
+</html>

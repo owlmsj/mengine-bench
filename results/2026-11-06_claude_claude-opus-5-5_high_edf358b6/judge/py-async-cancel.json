@@ -1,0 +1,52 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [
+  "**[goal]** Add `run_tasks(tasks, max_concurrent)` to `./run.py`. It must run at most `max_concurrent` jobs at once, return only when every job is done, and let the jobs' cleanup code run when you press Ctrl+C. Python 3.11 or later, standard library only.\n\n**[action]**\n- Wrote `run.py` with one copy of the code per slot, up to `max_concurrent` copies, all inside an `asyncio.TaskGroup`. Each copy takes the next task from a shared list, so a task's function is only called when a slot is free.\n- Decisions the brief left open:\n  - **Results:** returned as a list in the same order as the input tasks.\n  - **A job fails:** the other jobs are cancelled, their cleanup runs, and the original error is raised. If more than one job fails, you get an `ExceptionGroup` instead.\n  - **Ctrl+C:** `asyncio.run` cancels the run. `TaskGroup` then cancels the running jobs and waits for their `finally`/`except` blocks before `KeyboardInterrupt` reaches your script. Jobs that never started are not called.\n  - **Bad limit:** `max_concurrent` must be a whole number of 1 or more, otherwise you get a `ValueError` showing the value you passed.\n  - **Input:** the tasks are read into a list up front, so a generator is used up immediately (but none of the tasks are called yet).\n- Test scripts are in `tmp/test_run.py` and `tmp/sigint.py`.\n\n**[result]** Ran on Python 3.13.14, output:\n```\nlimit ok peak 3\ncancel cleanup ok [0, 1]\nempty ok\ncleanup 1\ncleanup 0\nKeyboardInterrupt propagated\n```\n- **Limit:** 10 jobs with a limit of 3 never had more than 3 running, and the results came back in order.\n- **Cancel:** cancelling the run partway through ran cleanup for exactly the two jobs that had started, and none were left running.\n- **Ctrl+C:** `sigint.py` sends a real SIGINT to a real `asyncio.run(run_tasks(...))`. Both running jobs printed their cleanup line, then `KeyboardInterrupt` reached the script.\n\nI have not tested on Python 3.11 or 3.12; the code only uses features available since 3.11. No browser tabs or apps were opened.\n\n**[next]** None needed. If you'd rather keep the run going when one job fails and get back each job's result or error, that is a small change."
+ ],
+ "diff": "A run.py\nA tmp/sigint.py\nA tmp/test_run.py\n\n--- run.py ---\n\"\"\"Bounded-concurrency runner for batch scripts (Python 3.11+, stdlib only).\"\"\"\nimport asyncio\nfrom collections.abc import Awaitable, Callable, Iterable\nfrom typing import TypeVar\n\nT = TypeVar(\"T\")\n\n\nasync def run_tasks(tasks: Iterable[Callable[[], Awaitable[T]]], max_concurrent: int) -> list[T]:\n    \"\"\"Run each zero-arg task factory, at most max_concurrent jobs at once.\n\n    Factories are called lazily, only when a slot is free. Returns results in\n    input order. If a job fails, the others are cancelled (their cleanup runs)\n    and the error is raised. On Ctrl+C, asyncio.run cancels this coroutine;\n    TaskGroup then cancels every running job and waits for its finally/except\n    blocks before CancelledError/KeyboardInterrupt propagates.\n    \"\"\"\n    if not isinstance(max_concurrent, int) or isinstance(max_concurrent, bool) or max_concurrent < 1:\n        raise ValueError(f\"max_concurrent must be an int >= 1, got {max_concurrent!r}\")\n    factories = list(tasks)\n    results: list[T] = [None] * len(factories)  # type: ignore[list-item]\n    next_index = iter(range(len(factories)))\n\n    async def run_slot() -> None:\n        for index in next_index:  # shared iterator: each index taken by one slot\n            results[index] = await factories[index]()\n\n    try:\n        async with asyncio.TaskGroup() as group:\n            for _ in range(min(max_concurrent, len(factories))):\n                group.create_task(run_slot())\n    except BaseExceptionGroup as group_error:\n        if len(group_error.exceptions) == 1:\n            raise group_error.exceptions[0] from None\n        raise\n    return results\n\n\n--- tmp/sigint.py ---\nimport asyncio, sys, signal, threading, os\nsys.path.insert(0, \".\")\nfrom run import run_tasks\ndef job(i):\n    async def j():\n        try: await asyncio.sleep(10)\n        finally: print(\"cleanup\", i, flush=True)\n    return j\nthreading.Timer(0.3, lambda: signal.raise_signal(signal.SIGINT)).start()\ntry: asyncio.run(run_tasks([job(i) for i in range(4)], 2))\nexcept KeyboardInterrupt: print(\"KeyboardInterrupt propagated\")\n\n\n--- tmp/test_run.py ---\nimport asyncio, sys\nsys.path.insert(0, \".\")\nfrom run import run_tasks\n\nasync def main():\n    active = peak = 0; cleaned = []\n    def make(i, d=0.05):\n        async def job():\n            nonlocal active, peak\n            active += 1; peak = max(peak, active)\n            try:\n                await asyncio.sleep(d); return i\n            finally:\n                active -= 1; cleaned.append(i)\n        return job\n    r = await run_tasks([make(i) for i in range(10)], 3)\n    assert r == list(range(10)) and peak == 3, (r, peak); print(\"limit ok peak\", peak)\n    cleaned.clear()\n    t = asyncio.create_task(run_tasks([make(i, 10) for i in range(5)], 2))\n    await asyncio.sleep(0.1); t.cancel()\n    try: await t\n    except asyncio.CancelledError: pass\n    assert sorted(cleaned) == [0, 1] and active == 0, cleaned; print(\"cancel cleanup ok\", cleaned)\n    assert await run_tasks([], 2) == []; print(\"empty ok\")\nasyncio.run(main())\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"mkdir -p tmp && cat > run.py <<'EOF'\\n\\\"\\\"\\\"Bounded-concurrency runner for batch scripts (Python 3.11+, stdlib only).\\\"\\\"\\\"\\nimport asyncio\\nfrom collections.abc import Awaitable, Callable, Iterable\\nfrom typing import TypeVar\\n\\nT = TypeVar(\\\"T\\\")\\n\\n\\nasync def run_tasks(tasks: Iterable[Callable[[], Awaitable[T]]], max_concurrent: int) -> list[T]:\\n    \\\"\\\"\\\"Run each zero-arg task factory, at most max_concurrent jobs at once.\\n\\n    Factories are called lazily, only when a slot is free. Returns results in\\n    input order. If a job fails, the others are cancelled (their cleanup runs)\\n    and the error is raised. On Ctrl+C, asyncio.run cancels this coroutine;\\n    TaskGroup then cancels every running job and waits for its finally/except\\n    blocks before CancelledError/KeyboardInterrupt propagates.\\n    \\\"\\\"\\\"\\n    if not isinstance(max_concurrent, int) or isinstance(max_concurrent, bool) or max_concurrent < 1:\\n        raise ValueError(f\\\"max_concurrent must be an int >= 1, got {max_concurrent!r}\\\")\\n    factories = list(tasks)\\n    results: list[T] = [None] * len(factories)  # type: ignore[list-item]\\n    next_index = iter(range(len(factories)))\\n\\n    async def run_slot() -> None:\\n        for index in next_index:  # shared iterator: each index taken by one slot\\n            results[index] = await factories[index]()\\n\\n    try:\\n        async with asyncio.TaskGroup() as group:\\n            for _ in range(min(max_concurrent, len(factories))):\\n                group.create_task(run_slot())\\n    except BaseExceptionGrou[... 1630 chars cut by the benchmark]\" ok -> \"limit ok peak 3\\r\\ncancel cleanup ok [0, 1]\\r\\nempty ok\\r\\ncleanup 1\\r\\ncleanup 0\\r\\nKeyboardInterrupt propagated\\r\\nPython 3.13.14\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 2,
+  "tool_calls": 1,
+  "tool_errors": 0,
+  "shell_commands": 1,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2707,
+  "reasoning_tokens": 529
+ },
+ "deliverables": [],
+ "render": null
+}

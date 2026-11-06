@@ -1,0 +1,56 @@
+{
+ "task_id": "ir-server-logs",
+ "prompts": [
+  "The game went down in June and we owe the team an incident report. The logs and their notes are in {WS}/logs. When did it start and end, how long was it, did we keep our monthly availability target, and why did it happen? Record it in {WS}/result.json: start, end, minutes_down, availability_june_pct, slo_999_ok, root_cause."
+ ],
+ "answers": [
+  "**[goal]** Write the June outage incident report to `./result.json`: start, end, duration, June availability, whether the 99.9% target held, and root cause.\n\n**[action]**\n- Searched all 3 log files (about 1,800 lines each) for anything other than routine heartbeat, player and autosave lines.\n- Used the definition in `logs/README.md`: \"Down = from the first save error to the 'server ready' line\", June = 30 days = 43,200 min.\n- Assumptions:\n  - Timestamps are in the server's local time. The logs give no timezone, so I recorded them as they appear.\n  - `minutes_down` is the exact time difference, rounded to 2 decimals.\n  - The `RCON auth failed` line on 06-01 has nothing to do with the outage.\n\n**[result]**\n- Start: `2026-06-02 03:17:42 ERROR SaveGame failed: write /data/game/Saved/Level.sav: No space left on device`\n- End: `2026-06-02 03:53:31 INFO server ready, accepting players`\n- Duration: 2,149 s = **35.82 min** (calculated: `2149 35.81666666666667`)\n- June availability: 1 - 35.82/43200 = **99.917%**. That meets the 99.9% target, which allows 43.2 minutes of downtime a month. Only about 7.4 min of that allowance was left.\n- Root cause: the `/data` disk filled up.\n  - Early warning: `03:10:02 WARN disk /data usage 97% (free 3.1 GB)`.\n  - Saves then failed and the server stopped responding. The watchdog tried to restart it about 40 times, and every attempt ended with `exited code 137`.\n  - It recovered only after `03:52:10 INFO backup rotation freed 38.2 GB on /data`, with the server ready 81 s later.\n  - The restart failures were a result of the full disk, not the cause. Memory stayed between 21 and 29 GB the whole time.\n  - It's likely that old backups had built up on the disk, since clearing them is what fixed it. The logs don't prove this.\n- `result.json` loads cleanly: `'minutes_down': 35.82, 'availability_june_pct': 99.917, 'slo_999_ok': True`.\n\n**[next]** Two follow-ups I'd suggest, neither done: alert on `/data` well before it reaches 97%, and run backup rotation on a schedule instead of waiting until the disk is full. I didn't open any browser tabs or apps.\n\nHow I know it's right: the start and end times come straight from the log lines quoted above, the README defines what counts as down and says there was only one incident, and Python did the arithmetic."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"start\": \"2026-06-02T03:17:42\",\n  \"end\": \"2026-06-02T03:53:31\",\n  \"minutes_down\": 35.82,\n  \"availability_june_pct\": 99.917,\n  \"slo_999_ok\": true,\n  \"root_cause\": \"Disk /data filled up (WARN 97% used at 03:10:02; old backups not rotated). At 03:17:42 SaveGame failed with 'No space left on device', the server hung, and the watchdog restart loop kept failing (exit code 137) until backup rotation freed 38.2 GB on /data at 03:52:10; server ready at 03:53:31. Exit 137 / watchdog restarts and the 03:00 player peak are symptoms, not the cause; memory stayed 21-29 GB throughout.\"\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd logs && ls -la && head -c 4000 * \" ok -> \"total 341\\ndrwxr-xr-x 1 <USER> 197121      0 Nov  6 15:41 .\\ndrwxr-xr-x 1 <USER> 197121      0 Nov  6 15:41 ..\\n-rw-r--r-- 1 <USER> 197121    163 Nov  6 15:41 README.md\\n-rw-r--r-- 1 <USER> 197121 112050 Nov  6 15:41 gameserver-2026-06-01.log\\n-rw-r--r-- 1 <USER> 197121 111743 Nov  6 15:41 gameserver-2026-06-02.log\\n-rw-r--r-- 1 <USER> 197121 110912 Nov  6 15:41 gameserver-2026-0[... 12294 chars cut by the benchmark]\"\n[step 1] shell \"cd logs && grep -hv -E \\\"INFO (heartbeat|player|autosave ok)\\\" *.log | head -60; grep -h -n -i \\\"ready\\\\|save\\\" *.log | grep -v \\\"autosave ok\\\" | head\" ok -> \"/usr/bin/bash: line 1: cd: logs: No such file or directory\\n251:2026-06-02 03:17:42 ERROR SaveGame failed: write /data/game/Saved/Level.sav: No space left on device\\n252:2026-06-02 03:18:00 ERROR SaveGame failed: write /data/game/Saved/Level.sav: No space left on device\\n294:2026-06-02 03:53:31 INFO server ready, accepting players\"\n[step 1] shell \"grep -h -v -E \\\"INFO (heartbeat|player|autosave ok)\\\" *.log; grep -c \\\"\\\" *.log; sed -n 245,300p gameserver-2026-06-02.log\" ok -> \"2026-06-01 09:12:40 ERROR RCON auth failed from 203.0.113.12 (bad password)\\n2026-06-02 03:10:02 WARN disk /data usage 97% (free 3.1 GB)\\n2026-06-02 03:17:42 ERROR SaveGame failed: write /data/game/Saved/Level.sav: No space left on device\\n2026-06-02 03:18:00 ERROR SaveGame failed: write /data/game/Saved/Level.sav: No space left on device\\n2026-06-02 03:18:05 FATAL watchdog: server unresponsive for 20[... 7235 chars cut by the benchmark]\"\n[step 1] shell \"cd .. && python -c \\\"\\ns=(3*3600+53*60+31)-(3*3600+17*60+42); m=s/60; print(s,m, 100*(1-m/43200))\\\" && cat > result.json <<'EOF'\\n{\\n  \\\"start\\\": \\\"2026-06-02T03:17:42\\\",\\n  \\\"end\\\": \\\"2026-06-02T03:53:31\\\",\\n  \\\"minutes_down\\\": 35.82,\\n  \\\"availability_june_pct\\\": 99.917,\\n  \\\"slo_999_ok\\\": true,\\n  \\\"root_cause\\\": \\\"Disk /data filled up (WARN 97% used at 03:10:02; old backups not rotated). At 03:17:42 SaveGame failed with 'No space left on device', the server hung, and the watchdog restart loop kept failing (exit code 137) until backup rotation freed 38.2 GB on /data at 03:52:10; server ready at 03:53:31. Exit 137 / watchdog restarts and the 03:00 player peak are symptoms, not the cause; memory stayed 21-29 GB throughout.\\\"\\n}\\nEOF\\npython -c \\\"import json;print(json.load(open('result.json')))\\\"\" ok -> \"2149 35.81666666666667 99.9170910493827\\r\\n{'start': '2026-06-02T03:17:42', 'end': '2026-06-02T03:53:31', 'minutes_down': 35.82, 'availability_june_pct': 99.917, 'slo_999_ok': True, 'root_cause': \\\"Disk /data filled up (WARN 97% used at 03:10:02; old backups not rotated). At 03:17:42 SaveGame failed with 'No space left on device', the server hung, and the watchdog restart loop kept failing (exit code[... 210 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "incident start",
+   true
+  ],
+  [
+   "incident end",
+   true
+  ],
+  [
+   "minutes down",
+   true
+  ],
+  [
+   "June availability",
+   true
+  ],
+  [
+   "SLO 99.9 met",
+   true
+  ],
+  [
+   "root cause = /data disk full",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 4,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1945,
+  "reasoning_tokens": 355
+ },
+ "deliverables": [],
+ "render": null
+}
