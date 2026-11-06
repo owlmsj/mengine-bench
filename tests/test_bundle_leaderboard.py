@@ -118,20 +118,21 @@ def test_scoring_uses_the_recorded_rounded_agent_time() -> None:
 
 
 def _write_result(results: Path, name: str, score: float | None, *, model: str = "m", judged: bool = True,
-                  task_ids: list[str] | None = None, bench_version: str = __version__) -> Path:
+                  task_ids: list[str] | None = None, bench_version: str = __version__, date: str = "2026-10-19",
+                  harness_version: str = "codex-cli 0.162.1") -> Path:
     ids = task_ids if task_ids is not None else [task.id for task in catalog.all_tasks()]
-    # #164: the current table recomputes Score from Correct, Judge and Speed; at Speed 100 the formula gives back
-    # `score` when Correct and Judge equal it, so a test sets one number and the ranking follows it.
+    # #164 #210: the current table recomputes Score from Correct, Judge and Time; at 10 min (Speed 100) the formula
+    # gives back `score` when Correct and Judge equal it, so a test sets one number and the ranking follows it.
     correct, judge, speed = (score, score, 100.0) if score is not None and judged else (80.0, 70.0 if judged else None, 0.0)
     result = {
-        "date": "2026-10-19", "bench_version": bench_version, "submitter": "dquill",
-        "agent": {"name": "codex", "model": model, "effort": "high", "version": "codex-cli 0.162.1"},
+        "date": date, "started_at": f"{date}T12:00:00Z", "bench_version": bench_version, "submitter": "dquill",
+        "agent": {"name": "codex", "model": model, "effort": "high", "version": harness_version},
         "judge": {"agent": "claude", "model": "claude-opus-5-5", "effort": "xhigh", "rubric": leaderboard.RUBRIC_VERSION} if judged else None,
         "config": {"personal_instructions": [], "provider": "openai", "mcp": "none"},
         "environment": {"os": "Linux 6", "cpu": "AMD Ryzen 9 7950X", "cpu_count": 32, "ram_gb": 62.6,
                         "gpu": "NVIDIA GeForce RTX 4090 (24 GB)"},
         "totals": {"score": score, "correct": correct, "solved": 10, "total": len(ids), "judge": judge,
-                   "speed": speed, "time_s": 1830.0, "cost_usd": 2.5, "cost_basis": "price", "cost_lower_bound": True,
+                   "speed": speed, "time_s": 600.0 if speed else 1830.0, "cost_usd": 2.5, "cost_basis": "price", "cost_lower_bound": True,
                    "tokens": {"input": 1_500_000, "cached_input": 0, "output": 250_000, "reasoning": 0},
                    "timeouts": 1, "stats": {"generated_tokens": 3400, "model_turns": 12}},
         "tasks": [{"id": task_id} for task_id in ids],
@@ -150,11 +151,12 @@ def test_leaderboard_ranks_in_a_narrow_table_and_keeps_the_stats_in_details(tmp_
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 2 and board.unranked == []
     table = board.markdown[board.markdown.index("| # |"):]
-    assert table.splitlines()[0] == "| # | Score | Setup | Correct % | Solved | Judge | Speed | Time | Cost | Run |"
+    assert table.splitlines()[0] == ("| # | Score | Setup | Date | Correct % | Solved | Judge | Speed | Time | Cost | "
+                                      "Run |")
     assert table.index("high-model") < table.index("low-model")
     row = table.splitlines()[2]
-    for cell in ("| 1 | **90.0** | high-model high<br>codex codex-cli 0.162.1 | 90.0 | 10/",
-                 "| 90.0 | 100.0 | 30 min 30 s | n/a | [run](results/high/summary.md) |"):
+    for cell in ("| 1 | **90.0** | high-model high<br>codex codex-cli 0.162.1 | 2026-10-19 | 90.0 | 10/",
+                 "| 90.0 | 100.0 | 10 min 00 s | n/a | [run](results/high/summary.md) |"):
         assert cell in row, (cell, row)
     details = board.markdown[board.markdown.index("<details>"):board.markdown.index("</details>")]
     assert details.count("| # |") == 1
@@ -197,9 +199,10 @@ def test_leaderboard_ranks_the_current_major_minor_only(tmp_path: Path) -> None:
     assert board.ranked == 2 and board.history == 1 and board.unranked == []
 
 
-def test_2_3_to_2_5_runs_stay_ranked_in_2_6_and_2_0_to_2_2_are_history_187(tmp_path: Path) -> None:
+def test_2_3_to_2_6_runs_stay_ranked_in_2_7_and_2_0_to_2_2_are_history_187_210(tmp_path: Path) -> None:
     # #139, #151, #153, #161, #164: the owner kept every 2.x run ranked and marked. #187 (owner, 2026-11-04): one
     # catalog per ranking; the 20- and 23-task rows (2.0 to 2.2) are history, the 28-task rows (2.3 on) stay, marked.
+    # #210: 2.7 changes only the Score formula, so the 2.6 rows stay ranked too.
     added = leaderboard.TASKS_ADDED_IN_2_2 | leaderboard.TASKS_ADDED_IN_2_3
     old_ids = [task.id for task in catalog.all_tasks() if task.id not in added]
     v22_ids = [task.id for task in catalog.all_tasks() if task.id not in leaderboard.TASKS_ADDED_IN_2_3]
@@ -210,22 +213,25 @@ def test_2_3_to_2_5_runs_stay_ranked_in_2_6_and_2_0_to_2_2_are_history_187(tmp_p
     _write_result(results, "v23", 75.0, model="v23-model", bench_version="2.3.1")
     _write_result(results, "v24", 70.0, model="v24-model", bench_version="2.4.0")
     _write_result(results, "v25", 65.0, model="v25-model", bench_version="2.5.2")
-    _write_result(results, "v26", 60.0, model="v26-model")
+    _write_result(results, "v26", 60.0, model="v26-model", bench_version="2.6.1")
+    _write_result(results, "v27", 55.0, model="v27-model")
     _write_result(results, "v21-short", 99.0, model="short-model", bench_version="2.1.1", task_ids=old_ids[1:])
     _write_result(results, "v17", 99.0, model="v17-model", bench_version="1.7.3", task_ids=[TASK])
     board = leaderboard.build_leaderboard(results, tmp_path)
-    assert board.ranked == 4 and board.history == 3
+    assert board.ranked == 5 and board.history == 3
     text = board.markdown
-    assert "Bench 2.3 to 2.5 runs stay in this ranking (#153, #161, #164, #185, #187)" in text
+    assert "Bench 2.3 to 2.6 runs stay in this ranking (#153, #161, #164, #185, #187, #210)" in text
     assert "The bench 2.0 to 2.2 runs (20 and 23 tasks) moved to history" in " ".join(text.split())
-    order = [text.index(mark) for mark in ("v23-model", "v24-model", "v25-model", "v26-model", "## Bench 2.2 (history)",
+    order = [text.index(mark) for mark in ("v23-model", "v24-model", "v25-model", "v26-model", "v27-model",
+                                           "## Bench 2.2 (history)",
                                            "v22-model", "## Bench 2.1 (history)", "v21-model", "## Bench 2.0 (history)",
                                            "v20-model", "## Not ranked")]
     assert order == sorted(order)
     assert "[run](results/v23/summary.md) (bench 2.3) |" in text
     assert "[run](results/v24/summary.md) (bench 2.4) |" in text
     assert "[run](results/v25/summary.md) (bench 2.5) |" in text
-    assert "[run](results/v26/summary.md) |" in text
+    assert "[run](results/v26/summary.md) (bench 2.6) |" in text
+    assert "[run](results/v27/summary.md) |" in text
     assert text.index("[run](results/v20/summary.md) (bench 2.0) |") > text.index("## Bench 2.0 (history)")
     assert [name for name, _ in board.unranked] == ["results/v17", "results/v21-short"]
 
@@ -276,14 +282,43 @@ def test_the_current_table_recomputes_score_with_todays_weights_and_history_keep
     assert "| 1 | **70.0** |" in text and "| 2 | **60.0** |" in text, text
     assert "**99.0**" not in text
     assert "**41.0**" in text[text.index("## Bench 0.2 (history)"):]
-    assert leaderboard.current_score({"correct": 53.3, "judge": 56.7, "speed": 32.0}) == 45.1
-    assert leaderboard.current_score({"correct": 80.0, "judge": None, "speed": 0.0}) is None
+    assert leaderboard.current_score({"correct": 53.3, "judge": 56.7, "speed": 32.0, "time_s": 1320.0}) == 51.3
+    assert leaderboard.current_score({"correct": 80.0, "judge": None, "speed": 0.0, "time_s": 600.0}) is None
 
 
-def test_bench_is_version_2_5_2() -> None:
+def test_ranked_rows_are_rescored_with_the_2_7_formula_from_published_time_and_history_keeps_its_own_210(
+        tmp_path: Path) -> None:
+    # #210: weights 0.5/0.35/0.15 and Speed 100 at 10 min, 0 at 40 min. Stored 2.6 Speed and Score came from the
+    # 5/30 min line and 0.25 weights; the ranking recomputes both from Correct, Judge and Time, edits no bundle.
+    results = tmp_path / "results"
+    published = {"v26": ("2.6.1", 97.3, 78.0, 780.0, 74.0, 86.2), "v27": ("2.7.0", 99.2, 83.4, 1140.0, 44.0, 82.5),
+                 "v22": ("2.2.0", 90.0, 70.0, 900.0, 60.0, 41.0)}
+    added = leaderboard.TASKS_ADDED_IN_2_3
+    for name, (version, correct, judge, time_s, speed, score) in published.items():
+        ids = [task.id for task in catalog.all_tasks() if version != "2.2.0" or task.id not in added]
+        bundle = _write_result(results, name, score, model=f"{name}-model", bench_version=version, task_ids=ids)
+        result = json.loads((bundle / "result.json").read_text(encoding="utf-8"))
+        result["totals"].update(correct=correct, judge=judge, time_s=time_s, speed=speed, score=score)
+        (bundle / "result.json").write_text(json.dumps(result), encoding="utf-8")
+    text = leaderboard.build_leaderboard(results, tmp_path).markdown
+    rows = [line for line in text.splitlines() if line.startswith("| 1 |") or line.startswith("| 2 |")]
+    assert rows[0].startswith("| 1 | **89.2** | v27-model") and "| 99.2 | " in rows[0] and "| 83.4 | 70.0 | 19 min 00 s |" in rows[0]
+    assert rows[1].startswith("| 2 | **89.1** | v26-model") and "| 78.0 | 90.0 | 13 min 00 s |" in rows[1]
+    assert "(bench 2.6)" in rows[1]
+    history = text[text.index("## Bench 2.2 (history)"):]
+    assert "| 1 | **41.0** | v22-model" in history and "| 70.0 | 60.0 | 15 min 00 s |" in history
+    flat = " ".join(text.split())
+    assert "0.5 x Correct % + 0.35 x Judge + 0.15 x Speed x Correct % / 100" in flat
+    assert "Speed 100 at 10 min of Time or less, 0 at 40 min or more" in flat
+    assert "every Score and Speed here use the 2.7 formula (#210), recomputed from the row's published Correct %, Judge and Time" in flat
+    stored = json.loads((results / "v26" / "result.json").read_text(encoding="utf-8"))["totals"]
+    assert (stored["speed"], stored["score"]) == (74.0, 86.2), "the leaderboard never edits a bundle"
+
+
+def test_bench_is_version_2_7_0() -> None:
     import tomllib
     pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
-    assert __version__ == pyproject["project"]["version"] == "2.6.1"
+    assert __version__ == pyproject["project"]["version"] == "2.7.0"
 
 
 def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:
@@ -428,3 +463,25 @@ def test_a_run_judged_with_the_kept_older_rubric_is_ranked_and_marked(tmp_path: 
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 0
     assert board.unranked[0][1].endswith("; only claude claude-opus-5-5@xhigh rubric 9.9 judges are ranked")
+
+
+def test_a_preset_keeps_its_3_latest_runs_ranked_and_older_ones_fold_below_210(tmp_path: Path) -> None:
+    # #210 (owner, 2026-11-06): one setup rerun many times crowded the ranking. A preset (harness name, model, effort;
+    # not the harness patch or run id) keeps its 3 most recent runs ranked; older ones stay visible, folded below.
+    results = tmp_path / "results"
+    for name, score, date, harness in (("a", 90.0, "2026-10-01", "codex-cli 0.160.0"), ("b", 80.0, "2026-10-02", "codex-cli 0.161.0"),
+                                       ("c", 70.0, "2026-10-03", "codex-cli 0.162.1"), ("d", 60.0, "2026-10-04", "codex-cli 0.162.1")):
+        _write_result(results, name, score, model="same-model", date=date, harness_version=harness)
+    _write_result(results, "other", 75.0, model="other-model", date="2026-10-05")
+    board = leaderboard.build_leaderboard(results, tmp_path)
+    text = board.markdown
+    ranking = text[text.index("| # | Score |"):text.index("<details>")]
+    assert board.ranked == 4 and "**90.0**" not in ranking, ranking
+    assert [line.split(" | ")[1] for line in ranking.splitlines()[2:6]] == ["**80.0**", "**75.0**", "**70.0**", "**60.0**"]
+    assert "| 1 | **80.0** | same-model high<br>codex codex-cli 0.161.0 | 2026-10-02 | 80.0 |" in ranking
+    older = text[text.index("Older runs of ranked setups"):]
+    assert text.index("Older runs of ranked setups") > text.index("| 4 | **60.0** |")
+    assert "| 1 | **90.0** | same-model high<br>codex codex-cli 0.160.0 | 2026-10-01 | 90.0 |" in older
+    consistency = text[text.index("| Setup | Ranked runs | Score min-max | Score mean |"):]
+    assert "| same-model high<br>codex | 3 | 60.0-80.0 | 70.0 |" in consistency
+    assert "other-model" not in consistency.split("</details>")[0], "one run shows no consistency"

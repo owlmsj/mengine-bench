@@ -4,8 +4,8 @@
   passed (0 on a failed gate). A timeout or a crash keeps what was delivered, is
   never Solved and counts its full time.
 - Judge = mean of the one rubric vote per task, 0-100 (set by `mengine-bench judge`).
-- Speed = 100 at 5 min of Time or less, 0 at 30 min or more, linear in between.
-- Score = 0.5 * Correct + 0.25 * Judge + 0.25 * Speed * Correct / 100, from the published one-decimal values.
+- Speed = 100 at 10 min of Time or less, 0 at 40 min or more, linear in between (#210).
+- Score = 0.5 * Correct + 0.35 * Judge + 0.15 * Speed * Correct / 100, from the published one-decimal values (#210).
 - Time = total agent wall seconds; Cost = USD with its basis, not folded into
   Score. Comparability is the bench major.minor version, so there is no separate
   scoring version and no per-task weights.
@@ -21,14 +21,15 @@ from mengine_bench.runner.agents import Usage
 
 # #181 #185: `infra` is a host refusal (runner/infra_faults.py): graded and timed as delivered, never Solved.
 STATUSES = ("ok", "timeout", "crash", "infra")
-# #164: an audit found the judge calibrated (55 of 56 votes within 8 points) and the checks lenient, so 2.5 moves
-# 0.1 from Correct to Judge.
+# #164: an audit found the judge calibrated (55 of 56 votes within 8 points) and the checks lenient, so 2.5 moved
+# 0.1 from Correct to Judge. #210 (owner, 2026-11-06): Speed is the noisiest part (one setup: 12.8 to 17.3 min over 4
+# runs) and Judge the stablest (77.2 to 78.2), so 2.7 moves 0.1 from Speed to Judge.
 CORRECT_SHARE = 0.5
-JUDGE_SHARE = 0.25
-SPEED_SHARE = 0.25
-# #41: a good run takes about 10 min, and 40 to 50 min is too long.
-SPEED_FULL_S = 300.0
-SPEED_ZERO_S = 1800.0
+JUDGE_SHARE = 0.35
+SPEED_SHARE = 0.15
+# #210: 5 and 30 min made one minute cost ~1.67 Score points against 0.5 per Correct point; ranked runs take 12-37 min.
+SPEED_FULL_S = 600.0
+SPEED_ZERO_S = 2400.0
 COST_BASES = ("harness", "price", "n/a")
 PRICE_KEYS = ("input", "cached", "output")
 PRICE_FORMAT = "input=X,cached=Y,output=Z in USD per million tokens, or 0 for free/local inference"

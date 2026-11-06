@@ -44,7 +44,8 @@ def test_a_timeout_keeps_what_was_delivered_but_is_never_solved() -> None:
 
 def test_score_blends_correct_judge_and_speed() -> None:
     run = score_run([outcome(task_id="a", judge=80), outcome(task_id="b", correctness=0.5, solved=False, judge=50)])
-    assert (run.correct, run.judge, run.speed, run.score) == (75.0, 65.0, 100.0, 72.5)
+    # #210: 0.5 x 75 + 0.35 x 65 + 0.15 x 100 x 75 / 100 (72.5 at the 2.5 weights).
+    assert (run.correct, run.judge, run.speed, run.score) == (75.0, 65.0, 100.0, 71.5)
 
 
 def test_partial_judging_is_rejected() -> None:
@@ -121,15 +122,15 @@ def test_docs_worked_example() -> None:
                 step_usages=(None,)),
     ]
     run = score_run(rows)
-    assert (run.correct, run.solved, run.judge, run.speed, run.score, run.time_s) == (53.3, 1, 56.7, 32.0, 45.1, 1320.0)
+    assert (run.correct, run.solved, run.judge, run.speed, run.score, run.time_s) == (53.3, 1, 56.7, 60.0, 51.3, 1320.0)
     totals = {"cost_usd": run.cost.usd, "cost_basis": run.cost.basis, "cost_lower_bound": run.cost.lower_bound}
     assert (time_text(run.time_s), cost_text(totals)) == ("22 min 00 s", ">= $1.30 (harness)")
     codex = Usage(2_000_000, 1_500_000, 100_000, None, None, "none")
     assert round(parse_price("input=1.25,cached=0.125,output=10").cost_usd(codex) or 0, 2) == 1.81
     doc = (Path(__file__).resolve().parents[1] / "docs" / "SCORING.md").read_text(encoding="utf-8")
     for line in ("Correct % = 100 x (1.00 + 0.60 + 0.00) / 3 = 53.3; Solved 1/3",
-                 "Judge = (80 + 60 + 30) / 3 = 56.7", "Speed = 100 x (1800 - 1320) / 1500 = 32.0",
-                 "Score = 0.5 x 53.3 + 0.25 x 56.7 + 0.25 x 32.0 x 53.3 / 100 = 45.1",
+                 "Judge = (80 + 60 + 30) / 3 = 56.7", "Speed = 100 x (2400 - 1320) / 1800 = 60.0",
+                 "Score = 0.5 x 53.3 + 0.35 x 56.7 + 0.15 x 60.0 x 53.3 / 100 = 51.3",
                  "Time = 120 + 300 + 900 = 1320 s (22 min 00 s)", "Cost = 0.40 + 0.90 = >= $1.30 (harness)",
                  "(500,000 x 1.25 + 1,500,000 x 0.125 + 100,000 x 10) / 1,000,000 = $1.81"):
         assert line in " ".join(doc.split()), line
@@ -150,17 +151,18 @@ def test_a_task_without_usage_has_unknown_cost_not_zero() -> None:
     assert (run.cost.usd, run.cost.lower_bound) == (1.0, True)
 
 
-def test_speed_is_full_at_5_min_and_zero_at_30_min() -> None:
+def test_speed_is_full_at_10_min_and_zero_at_40_min_210() -> None:
+    # #210: from 5 and 30 min; a minute cost ~1.67 Score points against 0.5 per Correct point.
     from mengine_bench.scoring import speed_points
-    assert [speed_points(seconds) for seconds in (100.0, 300.0, 1050.0, 1800.0, 4085.0)] == [100.0, 100.0, 50.0, 0.0, 0.0]
+    assert [speed_points(seconds) for seconds in (100.0, 600.0, 1500.0, 2400.0, 4085.0)] == [100.0, 100.0, 50.0, 0.0, 0.0]
 
 
 def test_the_score_counts_speed() -> None:
     # Published 1.1 numbers (#41): Opus low took 13 min 21 s, Sol low 5 min 04 s, and they trade places.
-    # #164: values at the 2.5 weights (0.5, 0.25, 0.25).
+    # #210: values at the 2.7 weights (0.5, 0.35, 0.15); the 13 min run no longer trails by 7.5 points.
     from mengine_bench.scoring import combined_score, speed_points
-    assert combined_score(100.0, 85.7, speed_points(801.0)) == 88.1
-    assert combined_score(100.0, 82.8, speed_points(304.0)) == 95.6
+    assert combined_score(100.0, 85.7, speed_points(801.0)) == 93.3
+    assert combined_score(100.0, 82.8, speed_points(304.0)) == 94.0
     assert combined_score(100.0, None, 50.0) is None
 
 

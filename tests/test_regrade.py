@@ -154,7 +154,7 @@ def test_judged_score_changes_and_history_appends(fresh_bundle: Path, monkeypatc
     assert cli.main(["regrade", str(fresh_bundle)]) == 0
     assert cli.main(["regrade", str(fresh_bundle)]) == 0
     after = read_result(fresh_bundle)
-    assert after["totals"]["score"] == 20
+    assert after["totals"]["score"] == 28  # #210: Correct 0 leaves 0.35 x Judge 80 (20 at the 2.5 weights)
     assert after["totals"]["judge"] == 80
     assert all(len(row["graded_with"]) == 2 for row in after["tasks"])
 

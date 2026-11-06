@@ -94,7 +94,7 @@ def test_judging_the_bundle_sets_one_vote_per_task(fake_agent: FakeAgent, tmp_pa
     assert task["judge_parts"] == {"approach": 30, "deliverable": 25, "verification": 25}
     totals = result["totals"]
     assert totals["judge"] == 80.0
-    assert totals["score"] == round(0.5 * totals["correct"] + 0.25 * 80.0 + 0.25 * totals["speed"] * totals["correct"] / 100, 1)
+    assert totals["score"] == round(0.5 * totals["correct"] + 0.35 * 80.0 + 0.15 * totals["speed"] * totals["correct"] / 100, 1)  # #210
     assert {key: totals[key] for key in ("correct", "time_s", "cost_usd")} == \
         {key: before["totals"][key] for key in ("correct", "time_s", "cost_usd")}
     assert _judge(fake_agent, bundle) == 1, "a judged bundle is not judged twice by accident"
