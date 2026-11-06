@@ -1,0 +1,53 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [
+  "\n\n[goal] Helper `run_tasks(tasks, max_concurrent)` in `run.py`: capped-concurrency async batch runner, stdlib-only, cleanup-safe on Ctrl+C.\n\n[action] Wrote `run.py`: each task is wrapped in an `asyncio.Semaphore(max_concurrent)` guard, all jobs scheduled with `ensure_future`, awaited via `gather`. On `KeyboardInterrupt`/`CancelledError` (what Ctrl+C becomes inside `asyncio.run` on 3.11+), every job is cancelled and then re-awaited with `return_exceptions=True`, so each job's `finally`/async-context-manager cleanup runs to completion before the interrupt is re-raised. Open-brief assumptions (stated in the module docstring): unstarted jobs never run; the interrupt is re-raised after cleanup; on a job error the first exception propagates after all other jobs finish normally (one failure doesn't kill the batch); `max_concurrent < 1` raises `ValueError`; results are returned in task order.\n\nWrote `tmp/test_run.py` covering: concurrency cap and result order, cleanup-on-cancel, error-after-all-done.\n\n[result] Test run output, verbatim:\n\n```\nT1 cap+order+done OK, peak = 2\nT2 cleanup-on-cancel OK, cleaned = ['c']\nT3 error-after-all-done OK, cleaned = ['ok', 'bad']\nALL OK\n```\n\nT1 proves peak in-flight jobs == `max_concurrent` (measured by a counter inside the jobs), results in order, all jobs completed. T2 cancels the `run_tasks` task mid-flight (same path Ctrl+C takes through `asyncio.run`) and asserts the job's `finally` block ran. T3 shows a failing job doesn't cancel its sibling and both cleanups ran before the `RuntimeError` propagated.\n\n[how I know it's right] The three tests above pass against the actual file; the cancel path is exactly what CPython's `asyncio.run` uses on KeyboardInterrupt since 3.11 (it cancels the main task), which the module also handles directly via the `KeyboardInterrupt` clause. No browser tabs or apps were opened.\n\n[next] Nothing blocking; if you want Ctrl+C to swallow the interrupt instead of re-raising, that's a one-line change."
+ ],
+ "diff": "A run.py\nA tmp/test_run.py\n\n--- run.py ---\n\"\"\"Batch helper: run zero-argument async task callables with a concurrency cap.\n\nUsage:\n    from run import run_tasks\n\n    async def main():\n        await run_tasks([make_job_a, make_job_b], max_concurrent=4)\n\nEach task is a zero-argument callable that returns an awaitable job.\nAt most `max_concurrent` jobs run at once. run_tasks returns when every\njob is done.\n\nAssumptions (the brief leaves these open):\n- On Ctrl+C (KeyboardInterrupt) or task cancellation, every running job is\n  cancelled and then awaited, so each job's cleanup (finally blocks, async\n  context managers) finishes before the interrupt propagates. Jobs that have\n  not started yet are cancelled too; their bodies never run.\n- KeyboardInterrupt is re-raised after cleanup so the caller sees the stop.\n- If a job raises, the first exception is re-raised after all jobs finish;\n  remaining jobs are not cancelled (a failing job should not kill the batch).\n- max_concurrent must be >= 1.\n\"\"\"\n\nfrom __future__ import annotations\n\nimport asyncio\nfrom collections.abc import Awaitable, Callable, Iterable\nfrom typing import Any, TypeVar\n\nT = TypeVar(\"T\")\n\n\nasync def run_tasks(\n    tasks: Iterable[Callable[[], Awaitable[T]]],\n    max_concurrent: int,\n) -> list[T]:\n    \"\"\"Run all tasks, at most `max_concurrent` jobs in flight, until done.\n\n    Args:\n        tasks: zero-argument callables, each returning an awaitable job.\n        max_concurrent: maximum number of jobs running simultaneously.\n\n    Returns:\n        Job results in task order.\n\n    Raises:\n        ValueError: if max_concurrent < 1.\n        Exception: the first job error, after all jobs have finished.\n        KeyboardInterrupt / CancelledError: after all cleanup has run.\n    \"\"\"\n    if max_concurrent < 1:\n        raise ValueError(f\"max_concurrent must be >= 1, got {max_concurrent}\")\n\n    semaphore = asyncio.Semaphore(max_concurrent)\n\n    async def guarded(task: Callable[[], Awaitable[T]]) -> T:\n        async with semaphore:\n            return await task()\n\n    jobs = [asyncio.ensure_future(guarded(t)) for t in tasks]\n    try:\n        return await asyncio.gather(*jobs)\n    except (KeyboardInterrupt, asyncio.CancelledError):\n        # Stop the run, but let every job finish its cleanup first.\n        for job in jobs:\n            job.cancel()\n        # return_exceptions=True: collect cleanup-time errors, do not mask\n        # the interrupt; finally blocks still run to completion.\n        await asyncio.gather(*jobs, return_exceptions=True)\n        raise\n    except BaseException:\n        # A job raised: let the others finish normally, then re-raise the\n        # first error. gather() already delivered this exception, so the\n        # remaining jobs are still running; wait for them.\n        await asyncio.gather(*jobs, return_exceptions=True)\n        raise\n\n--- tmp/test_run.py ---\nimport asyncio\nimport time\n\nfrom run import run_tasks\n\nrunning = 0\npeak = 0\ncleaned = []\nresults = []\n\n\nasync def check(name, dur, fail=False):\n    global running, peak\n    running += 1\n    peak = max(peak, running)\n    try:\n        await asyncio.sleep(dur)\n        if fail:\n            raise RuntimeError(name)\n        results.append(name)\n        return name\n    finally:\n        running -= 1\n        cleaned.append(name)\n\n\nasync def t1():\n    global peak, results, cleaned\n    peak = 0\n    results = []\n    cleaned = []\n    out = await run_tasks([lambda d=d: check(f\"j{d}\", d / 10) for d in range(6)], 2)\n    assert out == [f\"j{d}\" for d in range(6)], out\n    assert peak == 2, peak\n    assert cleaned == [f\"j{d}\" for d in range(6)]\n    print(\"T1 cap+order+done OK, peak =\", peak)\n\n\nasync def t2():\n    global peak, cleaned\n    peak = 0\n    cleaned = []\n    runner = asyncio.create_task(run_tasks([lambda: check(\"c\", 5)], 2))\n    await asyncio.sleep(0.1)\n    runner.cancel()  # simulates Ctrl+C: asyncio.run cancels the main task\n    try:\n        await runner\n        raise AssertionError(\"expected CancelledError\")\n    except asyncio.CancelledError:\n        pass\n    assert cleaned == [\"c\"], cleaned\n    print(\"T2 cleanup-on-cancel OK, cleaned =\", cleaned)\n\n\nasync def t3():\n    global cleaned\n    cleaned = []\n    try:\n        await run_tasks(\n            [lambda: check(\"ok\", 0.05), lambda: check(\"bad\", 0.05, fail=True)], 2\n        )\n        raise AssertionError(\"expected RuntimeError\")\n    except RuntimeError as e:\n        assert str(e) == \"bad\"\n    assert sorted(cleaned) == [\"bad\", \"ok\"], cleaned\n    print(\"T3 error-after-all-done OK, cleaned =\", cleaned)\n\n\nasync def main():\n    await t1()\n    await t2()\n    await t3()\n    print(\"ALL OK\")\n\n\nasyncio.run(main())",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Created file successfully: <WORKSPACE>/run.py\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\test_run.py\" ok -> \"Created file successfully: <WORKSPACE>/tmp/test_run.py\"\n[step 1] edit \"<WORKSPACE>\\\\tmp\\\\test_run.py\" ok -> \"Edited <WORKSPACE>/tmp/test_run.py (1 replacement)\"\n[step 1] shell \"python tmp\\\\test_run.py\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\tmp\\\\test_run.py\\\", line 4, in <module>\\r\\n    from run import run_tasks\\r\\nModuleNotFoundError: No module named 'run'\"\n[step 1] shell \"python -X pythonpath=. tmp\\\\test_run.py\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\tmp\\\\test_run.py\\\", line 4, in <module>\\r\\n    from run import run_tasks\\r\\nModuleNotFoundError: No module named 'run'\"\n[step 1] shell \"$env:PYTHONPATH=\\\".\\\"; python tmp\\\\test_run.py\" ok -> \"T1 cap+order+done OK, peak = 2\\r\\nT2 cleanup-on-cancel OK, cleaned = ['c']\\r\\nT3 error-after-all-done OK, cleaned = ['ok', 'bad']\\r\\nALL OK\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   false
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 7,
+  "tool_calls": 6,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 2,
+  "file_writes": 3,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 3179,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1154
+ },
+ "deliverables": [],
+ "render": null
+}
