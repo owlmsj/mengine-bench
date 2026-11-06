@@ -22,7 +22,8 @@ The bench 2.0 to 2.2 runs (20 and 23 tasks) moved to history on 2026-11-04 (#187
 | 6 | **72.1** | home/qwen38-flash-next-exl3-605-256k low<br>opencode opencode v2.2.5 | 96.2 | 23/28 | 80.6 | 16.1 | 25 min 58 s | $0.00 (local) | [run](results/2026-11-06_opencode_home-qwen38-flash-next-exl3-605-256k_low_6271bb4f/summary.md) |
 | 7 | **71.6** | home/qwen38-flash-next-exl3-605-256k low<br>opencode opencode v2.2.5 | 94.8 | 22/28 | 79.0 | 18.6 | 25 min 21 s | $0.00 (local) | [run](results/2026-11-05_opencode_home-qwen38-flash-next-exl3-605-256k_low_0511702e/summary.md) |
 | 8 | **68.8** | home/qwen38-flash-next-exl3-605-256k low<br>pi 1.5.0 | 96.3 | 21/28 | 82.8 | 0.0 | 30 min 32 s | $0.00 (local) | [run](results/2026-11-06_pi_home-qwen38-flash-next-exl3-605-256k_low_6b7600c1/summary.md) |
-| 9 | **55.9** | maritaca/S5 low<br>opencode opencode v2.2.5 | 80.9 | 15/28 | 61.7 | 0.0 | 36 min 59 s | >= ~$0.15 | [run](results/2026-11-06_opencode_maritaca-S5_low_f64abf0d/summary.md) |
+| 9 | **68.4** | deepseek/deepseek-flash low<br>opencode opencode v2.2.5 | 95.7 | 23/28 | 82.2 | 0.0 | 36 min 08 s | >= $0.15 | [run](results/2026-11-06_opencode_deepseek-deepseek-flash_low_e7145efd/summary.md) |
+| 10 | **55.9** | maritaca/S5 low<br>opencode opencode v2.2.5 | 80.9 | 15/28 | 61.7 | 0.0 | 36 min 59 s | >= ~$0.15 | [run](results/2026-11-06_opencode_maritaca-S5_low_f64abf0d/summary.md) |
 
 <details><summary>Run details: tokens, turns, tools, hardware, config</summary>
 
@@ -36,13 +37,14 @@ The bench 2.0 to 2.2 runs (20 and 23 tasks) moved to history on 2026-11-04 (#187
 | 6 | home/qwen38-flash-next-exl3-605-256k | 2 | 4.33M | 169.9k | 0.0k | 389 | 440 | 0.7 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=local, server_gpu=2x RTX 5090 + 2x RTX 4090, ser... | owlmsj | 2026-11-06 |
 | 7 | home/qwen38-flash-next-exl3-605-256k | 3 | 5.60M | 156.4k | 0.0k | 362 | 397 | 0.1 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=local, server_gpu=2x RTX 5090 + 2x RTX 4090, ser... | owlmsj | 2026-11-05 |
 | 8 | home/qwen38-flash-next-exl3-605-256k | 3 | 4.77M | 185.7k | 0.0k | 335 | 419 | 0.2 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=local, server_gpu=2x RTX 5090 + 2x RTX 4090, ser... | owlmsj | 2026-11-06 |
-| 9 | maritaca/S5 | 7 | 1.59M | 292.0k | 170.8k | 421 | 454 | 0.1 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=maritaca, model=S5, tier=1, role=dev-r, account_... | owlmsj | 2026-11-06 |
+| 9 | deepseek/deepseek-flash | 4 | 5.23M | 250.1k | 110.4k | 422 | 510 | 0.7 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=deepseek-api, model=DeepSeek-V4.1-Flash-1017, ti... | owlmsj | 2026-11-06 |
+| 10 | maritaca/S5 | 7 | 1.59M | 292.0k | 170.8k | 421 | 454 | 0.1 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=maritaca, model=S5, tier=1, role=dev-r, account_... | owlmsj | 2026-11-06 |
 
 </details>
 
 Cost: `$x` as the harness reported it, `~$x` estimated from the run's tokens at API list prices, `$0.00 (local)` a local model, `>=` a lower bound (a step went unmeasured), `n/a` neither. Tool s: median seconds per tool call, `-` where the harness does not time each call.
 
-Read as ties, because the higher run keeps its lead in under 80% of 2000 draws of the tasks: #5 and #6 (61%), #6 and #7 (60%), #7 and #8 (63%). `mengine-bench analyze` shows the rest.
+Read as ties, because the higher run keeps its lead in under 80% of 2000 draws of the tasks: #5 and #6 (61%), #6 and #7 (60%), #7 and #8 (63%), #8 and #9 (62%). `mengine-bench analyze` shows the rest.
 
 ## Observations (not ranked)
 

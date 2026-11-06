@@ -1,0 +1,53 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [
+  "[goal] Add `./run.py` with `async def run_tasks(tasks, max_concurrent)`: zero-argument callables returning awaitables, bounded concurrency, all jobs finished on return, cleanup runs on Ctrl+C, Python 3.11+, stdlib only.\n\n[action] Wrote `run.py` using `asyncio.Semaphore`; each task callable is invoked only after a slot is acquired (lazy queue). On any `BaseException` (failure or cancellation) it cancels all jobs and awaits them with `return_exceptions=True` so `finally` blocks run, then re-raises. Added a scratch check in `tmp/check_run.py`.\n\nAssumptions the brief left open:\n- Task factories are called lazily, only when their slot is free, never eagerly for the whole list.\n- A job error propagates to the caller after stopping and awaiting the other jobs.\n- Cancellation stops queued jobs too and re-raises `CancelledError`.\n- `max_concurrent < 1` raises `ValueError`; empty task list returns immediately.\n- A task returning a non-awaitable surfaces Python's `TypeError`.\n\n[result] Checks pass, exact output:\n```\nconcurrency ok peak= 3\nlaziness ok\ncleanup ok [0, 1]\n```\non Python 3.13 and, rerun, verbatim identical on Python 3.14. The checks verify peak concurrency equals 3 for 9 jobs, only 2 of 6 factories invoked while slots are full, and both running jobs' `finally` code ran on cancellation. `run.py` is stdlib-only and uses no syntax newer than 3.11.\n\n[next] None. No browser tabs or apps were opened, so nothing to close."
+ ],
+ "diff": "A run.py\nA tmp/check_run.py\n\n--- run.py ---\n\"\"\"Concurrency helper for batch scripts.\n\n``run_tasks`` starts at most ``max_concurrent`` jobs at once. A task is a\nzero-argument callable that returns an awaitable; it is only called once a\nslot is free, so queued work is never started eagerly.\n\nCancellation (e.g. Ctrl+C handled by ``asyncio.run``) cancels the running\njobs and still awaits them, so their ``finally`` / cleanup code runs before\nthe interruption propagates.\n\"\"\"\n\nfrom __future__ import annotations\n\nimport asyncio\nfrom collections.abc import Awaitable, Callable, Iterable\nfrom typing import Any\n\nTaskFactory = Callable[[], Awaitable[Any]]\n\n\nasync def run_tasks(tasks: Iterable[TaskFactory], max_concurrent: int) -> None:\n    \"\"\"Run every job produced by ``tasks`` with bounded concurrency.\n\n    Returns once every job has finished. If the surrounding task is\n    cancelled, running and queued jobs are cancelled, their cleanup is\n    awaited, and ``CancelledError`` is re-raised.\n    \"\"\"\n    if max_concurrent < 1:\n        raise ValueError(\n            f\"max_concurrent must be >= 1, got {max_concurrent!r}\"\n        )\n\n    semaphore = asyncio.Semaphore(max_concurrent)\n\n    async def run_one(task: TaskFactory) -> None:\n        # The callable is invoked only after a slot is acquired, which keeps\n        # queued tasks lazy and never exceeds the concurrency limit.\n        async with semaphore:\n            await task()\n\n    jobs = [asyncio.ensure_future(run_one(task)) for task in tasks]\n    if not jobs:\n        return\n\n    try:\n        await asyncio.gather(*jobs)\n    except BaseException:\n        # Covers KeyboardInterrupt-driven cancellation as well as a job\n        # failing. Cancel the rest, then wait so cleanup code can run.\n        for job in jobs:\n            job.cancel()\n        await asyncio.gather(*jobs, return_exceptions=True)\n        raise\n\n\n--- tmp/check_run.py ---\nimport asyncio, sys\r\nfrom run import run_tasks\r\n\r\nasync def main():\r\n    active = 0\r\n    peak = 0\r\n    started = []\r\n    cleaned = []\r\n\r\n    def make(i):\r\n        async def job():\r\n            nonlocal active, peak\r\n            started.append(i)\r\n            active += 1\r\n            peak = max(peak, active)\r\n            try:\r\n                await asyncio.sleep(0.02)\r\n            finally:\r\n                active -= 1\r\n                cleaned.append(i)\r\n        return job\r\n\r\n    await run_tasks([make(i) for i in range(9)], 3)\r\n    assert peak == 3, peak\r\n    assert sorted(cleaned) == list(range(9))\r\n    assert len(started) == 9\r\n    print(\"concurrency ok peak=\", peak)\r\n\r\n    # laziness: only first max_concurrent callables invoked at start\r\n    calls = []\r\n    gate = asyncio.Event()\r\n    def factory(i):\r\n        calls.append(i)\r\n        async def job():\r\n            await gate.wait()\r\n        return job\r\n    t = asyncio.ensure_future(run_tasks([lambda i=i: factory(i)() for i in range(6)], 2))\r\n    await asyncio.sleep(0.01)\r\n    assert calls == [0, 1], calls\r\n    gate.set()\r\n    await t\r\n    print(\"laziness ok\")\r\n\r\n    # cancellation runs cleanup\r\n    cleaned2 = []\r\n    async def long_job(i):\r\n        try:\r\n            await asyncio.sleep(10)\r\n        finally:\r\n            cleaned2.append(i)\r\n    t = asyncio.ensure_future(run_tasks([lambda i=i: long_job(i) for i in range(3)], 2))\r\n    await asyncio.sleep(0.01)\r\n    t.cancel()\r\n    try:\r\n        await t\r\n    except asyncio.CancelledError:\r\n        pass\r\n    assert sorted(cleaned2) == [0, 1], cleaned2\r\n    print(\"cleanup ok\", sorted(cleaned2))\r\n\r\nasyncio.run(main())\r\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Created file successfully: <WORKSPACE>/run.py\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\check_run.py\" ok -> \"Created file successfully: <WORKSPACE>/tmp/check_run.py\"\n[step 1] shell \"python tmp/check_run.py\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\tmp\\\\check_run.py\\\", line 2, in <module>\\r\\n    from run import run_tasks\\r\\nModuleNotFoundError: No module named 'run'\"\n[step 1] shell \"$env:PYTHONPATH=(Get-Location).Path; python tmp/check_run.py\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\tmp\\\\check_run.py\\\", line 61, in <module>\\r\\n    asyncio.run(main())\\r\\n    ~~~~~~~~~~~^^^^^^^^\\r\\n  File \\\"<HOME>\\\\AppData\\\\Roaming\\\\uv\\\\python\\\\cpython-3.13-windows-x86_64-none\\\\Lib\\\\asyncio\\\\runners.py\\\", line 196, in run\\r\\n    return runner.run(main)\\r\\n           ~~~~~~~~~~^^^^^^\\r[... 967 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>\\\\tmp\\\\check_run.py\" ok -> \"Edited <WORKSPACE>/tmp/check_run.py (1 replacement)\"\n[step 1] shell \"$env:PYTHONPATH=(Get-Location).Path; python tmp/check_run.py\" failed -> \"concurrency ok peak= 3\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\tmp\\\\check_run.py\\\", line 61, in <module>\\r\\n    asyncio.run(main())\\r\\n    ~~~~~~~~~~~^^^^^^^^\\r\\n  File \\\"<HOME>\\\\AppData\\\\Roaming\\\\uv\\\\python\\\\cpython-3.13-windows-x86_64-none\\\\Lib\\\\asyncio\\\\runners.py\\\", line 196, in run\\r\\n    return runner.run(main)\\r\\n    [... 1285 chars cut by the benchmark]\"\n[step 1] shell \"$env:PYTHONPATH=(Get-Location).Path; (Get-Content tmp/check_run.py) -replace 'lambda i=i: factory\\\\(i\\\\)','lambda i=i: factory(i)()' -replace 'lambda i=i: \\\\(lambda: long_job\\\\(i\\\\)\\\\)','lambda i=i: long_job(i)' | Set-Content tmp/check_run.py; python tmp/check_run.py\" ok -> \"concurrency ok peak= 3\\r\\nlaziness ok\\r\\ncleanup ok [0, 1]\"\n[step 1] shell \"py -0p 2>$null; if (Get-Command python3.11 -ErrorAction SilentlyContinue) { python3.11 --version }\" ok -> \"*               <HOME>\\\\Code\\\\mengine-bench\\\\.venv\\\\Scripts\\\\python.exe\\r\\n -V:3.14          <HOME>\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python314\\\\python.exe\"\n[step 1] shell \"$env:PYTHONPATH=(Get-Location).Path; & \\\"<HOME>\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python314\\\\python.exe\\\" tmp/check_run.py\" ok -> \"concurrency ok peak= 3\\r\\nlaziness ok\\r\\ncleanup ok [0, 1]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   false
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 10,
+  "tool_calls": 9,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 3,
+  "file_writes": 3,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 4535,
+  "reasoning_tokens": 2111,
+  "largest_turn_tokens": 1658
+ },
+ "deliverables": [],
+ "render": null
+}
