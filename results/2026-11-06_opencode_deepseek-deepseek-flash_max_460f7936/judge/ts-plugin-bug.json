@@ -1,0 +1,61 @@
+{
+ "task_id": "ts-plugin-bug",
+ "prompts": [
+  "Users of our harness plugins report that tool.after hooks run out of order, that sometimes a hook never runs, and that a failing hook is silently ignored. The hook bus and the plugin are in {WS}; the README there says how the bus must behave. Fix the bus. Its public API stays as it is, the tests in {WS}/test stay as they are, and package.json takes no dependencies."
+ ],
+ "answers": [
+  "[goal] Fix `tool.after` hook ordering, skipped handlers, and swallowed errors in the hook bus, matching the README contract without changing the public API, tests, or dependencies.\n\n[action] Rewrote only `src/bus.ts`:\n- Replaced `forEach(async ...)` fire-and-forget with a sequential `for...of` plus `await`, so handlers finish in subscription order and `emit` resolves only after all finish.\n- Let a handler throw/reject propagate the same error out of `emit`, which stops later handlers.\n- Snapshot the subscriber list at emit start, so unsubscribing or subscribing during an emit affects only the next emit.\n- Store subscriptions as identity records, making each unsubscribe remove exactly its own registration, idempotent on repeat calls, and dropping empty event lists.\n- Left `src/plugin.ts`, `test/bus.test.ts`, and `package.json` untouched.\n\n[result] `npm test`:\n```\n✔ emit calls a subscribed handler with the payload (0.7959ms)\n✔ unsubscribe removes the handler (0.1263ms)\nℹ tests 2\nℹ pass 2\nℹ fail 0\n```\nI also ran a temporary contract check (then removed it) covering: slow async handler ordered before the next handler; rejecting handler rejects `emit` with the identical error and later handlers do not run; self/other unsubscribe during emit still runs the remaining snapshot and applies from the next emit; subscription added during emit starts next emit; duplicate subscriptions unsubscribe independently; and the audit plugin yields notice once, then redacted output before the audit-log line, on both emits. It printed `all contract checks passed`.\n\n[next] Assumptions: README is the sole authority; subscriptions changed mid-emit apply only to the following emit; a throwing handler aborts that emit and propagates unchanged; the same function subscribed twice counts as two subscriptions. No browser or app was opened, so nothing to close."
+ ],
+ "diff": "M src/bus.ts\n\n--- src/bus.ts ---\n/**\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\n * handlers run one after another in subscription order, emit resolves after all of them,\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\n */\n\nexport type Handler<T> = (payload: T) => void | Promise<void>;\n\n/** One subscription. Removed by identity so duplicate handlers unsubscribe independently. */\ntype Registration = { handler: Handler<unknown> };\n\nexport class HookBus {\n  private handlers: Map<string, Registration[]> = new Map();\n\n  /** Subscribes a handler to an event; returns the function that unsubscribes it. */\n  on<T>(event: string, handler: Handler<T>): () => void {\n    const list = this.handlers.get(event) ?? [];\n    const registration: Registration = { handler: handler as Handler<unknown> };\n    list.push(registration);\n    this.handlers.set(event, list);\n\n    let subscribed = true;\n    return () => {\n      if (!subscribed) {\n        return;\n      }\n      subscribed = false;\n      const current = this.handlers.get(event);\n      if (!current) {\n        return;\n      }\n      const index = current.indexOf(registration);\n      if (index >= 0) {\n        current.splice(index, 1);\n      }\n      if (current.length === 0) {\n        this.handlers.delete(event);\n      }\n    };\n  }\n\n  /** Runs the handlers of an event with the payload, sequentially, in subscription order. */\n  async emit<T>(event: string, payload: T): Promise<void> {\n    // Snapshot: subscriptions changed during the emit apply from the next emit on.\n    const snapshot = this.handlers.get(event)?.slice() ?? [];\n    for (const registration of snapshot) {\n      await registration.handler(payload);\n    }\n  }\n\n  /** How many handlers an event has. */\n  count(event: string): number {\n    return this.handlers.get(event)?.length ?? 0;\n  }\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] search \"{\\\"pattern\\\": \\\"**/*\\\"}\" ok -> \"<WORKSPACE><WORKSPACE><WORKSPACE><WORKSPACE>\\\\README.md\\nC:\\\\Users\\\\MSTIIL~1\\\\AppData\\\\Local\\\\Temp\\\\mengine[... 130 chars cut by the benchmark]\"\n[step 1] shell \"Get-ChildItem -Force | Select-Object Mode,Name; Get-ChildItem -Recurse -File -Exclude node_modules | Select-Object -ExpandProperty FullName\" ok -> \"\\u001b[32;1mMode \\u001b[0m\\u001b[32;1m Name\\u001b[0m\\r\\n\\u001b[32;1m---- \\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\nd---- src\\r\\nd---- test\\r\\n-a--- AGENTS.md\\r\\n-a--- package.json\\r\\n-a--- <WORKSPACE><WORKSPACE>\\\\src\\\\plugin.ts\\r\\nC:\\\\Users\\\\<USER>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-3fyqkns0\\\\work[... 292 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\README.md\" ok -> \"Read file <WORKSPACE>\\\\README.md, lines 1-19\\n1: # harness-hooks\\n2: \\n3: The hook bus our harness plugins use (OpenCode-style hooks such as `tool.before` and `tool.after`).\\n4: Plain TypeScript run by Node 24 directly (`npm test` runs `node --test`); no dependencies.\\n5: \\n6: ## How the bus behaves\\n7: \\n8: - `bus.on(event, handler)` subscr[... 853 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\package.json\" ok -> \"Read file <WORKSPACE>\\\\package.json, lines 1-9\\n1: {\\n2:   \\\"name\\\": \\\"harness-hooks\\\",\\n3:   \\\"version\\\": \\\"0.3.0\\\",\\n4:   \\\"private\\\": true,\\n5:   \\\"type\\\": \\\"module\\\",\\n6:   \\\"scripts\\\": {\\n7:     \\\"test\\\": \\\"node --test\\\"\\n8:   }\\n9: }\"\n[step 1] read \"<WORKSPACE>\\\\src\\\\bus.ts\" ok -> \"Read file <WORKSPACE>\\\\src\\\\bus.ts, lines 1-37\\n1: /**\\n2:  * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\\n3:  * handlers run one after another in subscription order, emit resolves after all of them,\\n4:  * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\\n5: [... 1090 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\test\\\\bus.test.ts\" ok -> \"Read file <WORKSPACE>\\\\test\\\\bus.test.ts, lines 1-21\\n1: import { test } from \\\"node:test\\\";\\n2: import assert from \\\"node:assert/strict\\\";\\n3: import { HookBus } from \\\"../src/bus.ts\\\";\\n4: \\n5: test(\\\"emit calls a subscribed handler with the payload\\\", async () => {\\n6:   const bus = new HookBus();\\n7:   const seen: string[] = [];\\n8:   bus.on<stri[... 424 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\src\\\\plugin.ts\" ok -> \"Read file <WORKSPACE>\\\\src\\\\plugin.ts, lines 1-26\\n1: import type { HookBus } from \\\"./bus.ts\\\";\\n2: \\n3: export type ToolResult = { tool: string; output: string };\\n4: \\n5: const PASSWORD = /password=\\\\S+/g;\\n6: \\n7: /** The redaction rules load asynchronously in production (from the workspace settings). */\\n8: async function loadRules(): Promi[... 763 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\src\\\\bus.ts\" ok -> \"Wrote file successfully: <WORKSPACE>/src/bus.ts\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\contract-check.ts\" ok -> \"Created file successfully: <WORKSPACE>/tmp/contract-check.ts\"\n[step 1] shell \"npm test 2>&1; node tmp/contract-check.ts 2>&1\" ok -> \"> harness-hooks@0.3.0 test\\n> node --test\\n\\n✔ emit calls a subscribed handler with the payload (0.7959ms)\\n✔ unsubscribe removes the handler (0.1263ms)\\nℹ tests 2\\nℹ suites 0\\nℹ pass 2\\nℹ fail 0\\nℹ cancelled 0\\nℹ skipped 0\\nℹ todo 0\\nℹ duration_ms 96.2522\\nall contract checks passed\"\n[step 1] shell \"Remove-Item -Recurse -Force tmp; Get-ChildItem -Recurse -File | Select-Object -ExpandProperty FullName; git status 2>$null\" failed -> \"<WORKSPACE><WORKSPACE><WORKSPACE><WORKSPACE>\\\\src\\\\bus.ts\\r\\nC:\\\\Users\\\\<USER>\\\\AppData\\\\Local\\\\Temp\\\\m[... 147 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "package.json takes no dependencies",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hidden handlers run in subscription order",
+   true
+  ],
+  [
+   "hidden emit resolves after every handler",
+   true
+  ],
+  [
+   "hidden a failing handler rejects emit",
+   true
+  ],
+  [
+   "hidden a handler that unsubscribes itself does not stop the others",
+   true
+  ],
+  [
+   "hidden the audit plugin redacts before it logs",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 7,
+  "tool_calls": 11,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 1,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 4961,
+  "reasoning_tokens": 2384,
+  "largest_turn_tokens": 1801
+ },
+ "deliverables": [],
+ "render": null
+}

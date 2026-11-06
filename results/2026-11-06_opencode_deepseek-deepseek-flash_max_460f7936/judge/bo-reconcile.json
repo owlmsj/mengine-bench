@@ -1,0 +1,49 @@
+{
+ "task_id": "bo-reconcile",
+ "prompts": [
+  "Finance has to chase June's receivables. The invoices, the bank statement and our reconciliation notes are in {WS}/backoffice. What do we still have to collect or fix? Record it in {WS}/result.json: unpaid and duplicated (invoice ids) and mismatched (id, invoiced, paid)."
+ ],
+ "answers": [
+  "**Goal:** Reconcile June's 40 invoices against the bank statement and record what Finance must chase.\n\n**Action:** Parsed every statement memo for invoice references (`inv1007`, `INV-1015`, `invoice 1023`), matched 38 payments to 37 invoices, and ignored the 3 non-invoice lines (unidentified PIX 1,500.00, CDB interest 1,204.33, bank fee -89.90).\n\n**Result:** Written to `result.json`:\n\n```json\n{\n  \"unpaid\": [\"INV-1008\", \"INV-1030\", \"INV-1033\"],\n  \"duplicated\": [\"INV-1015\"],\n  \"mismatched\": [\n    {\"id\": \"INV-1021\", \"invoiced\": 21320.36, \"paid\": 21070.36},\n    {\"id\": \"INV-1036\", \"invoiced\": 8619.16, \"paid\": 7757.24}\n  ]\n}\n```\n\n- Unpaid: INV-1008 (23,693.91), INV-1030 (8,092.29), INV-1033 (21,266.69) — 53,052.89 total, no statement line exists.\n- Duplicated: INV-1015 paid twice in full (1,904.29 on Jun 5 and Jun 17, \"resend\") — recover 1,904.29.\n- Mismatched: INV-1021 short 250.00; INV-1036 short 861.92 — 1,111.92 to collect.\n\n**How I know it is right:** All 40 invoice IDs are unique; 38 statement rows matched an invoice and 3 were deliberately excluded by the README rule; 37 matched invoices + 3 unpaid = 40. Each finding was re-grepped in the raw statement: only 1015 appears twice, and 1008/1030/1033 appear nowhere. The README's exclusivity rule puts INV-1015 only under duplicated. Assumptions: the June statement is the complete payment record, amounts are compared exactly to the cent, and a memo number matching an invoice ID identifies that invoice regardless of formatting. No browser or apps were opened, so there was nothing to close."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"unpaid\": [\"INV-1008\", \"INV-1030\", \"INV-1033\"],\n  \"duplicated\": [\"INV-1015\"],\n  \"mismatched\": [\n    {\"id\": \"INV-1021\", \"invoiced\": 21320.36, \"paid\": 21070.36},\n    {\"id\": \"INV-1036\", \"invoiced\": 8619.16, \"paid\": 7757.24}\n  ]\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem .\" ok -> \"Directory: <WORKSPACE>\\r\\n\\r\\n\\u001b[32;1mMode   \\u001b[0m\\u001b[32;1m              LastWriteTime\\u001b[0m \\u001b[32;1;3m        Length\\u001b[0m\\u001b[32;1m Name\\u001b[0m\\r\\n\\u001b[32;1m----   \\u001b[0m \\u001b[32;1m             -------------\\u001b[0m \\u001b[32;1m        ------\\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\nd----          06/11/2026    16:36                \\u001b[44;1mbackoffice\\u001b[0m\\r\\n-a---          06/11/2026    16:3[... 26 chars cut by the benchmark]\"\n[step 1] shell \"Get-ChildItem -Recurse -File .\\\\backoffice | Select-Object FullName, Length\" ok -> \"\\u001b[32;1mFullName                                                                                                        \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m--------                                                                                                        \\u001b[0m \\u001b[32;<WORKSPACE>\\\\backoffice\\\\bank_statement_june.csv  [... 247 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\backoffice\\\\README.md\" ok -> \"Read file <WORKSPACE>\\\\backoffice\\\\README.md, lines 1-7\\n1: # How we reconcile receivables\\n2: \\n3: - The bank memo cites the invoice in different formats.\\n4: - Ignore fees, interest and PIX transfers without an identifiable invoice.\\n5: - unpaid: invoices with no payment. duplicated: invoices paid more than once.\\n6: - mismatched: a singl[... 136 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\backoffice\\\\invoices.csv\" ok -> \"Read file <WORKSPACE>\\\\backoffice\\\\invoices.csv, lines 1-41\\n1: id,customer,amount,due_date\\n2: INV-1001,Kestrel Games,14387.10,2026-06-20\\n3: INV-1002,Coruja Labs,3751.37,2026-06-20\\n4: INV-1003,Arena Studio,3742.23,2026-06-20\\n5: INV-1004,Pampa Foods,10182.62,2026-06-20\\n6: INV-1005,Ateliê Norte,5192.93,2026-06-20\\n7: INV-1006,Vetor BI,163[... 1539 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\backoffice\\\\bank_statement_june.csv\" ok -> \"Read file <WORKSPACE>\\\\backoffice\\\\bank_statement_june.csv, lines 1-42\\n1: date,memo,amount\\n2: 2026-06-02,inv1007 payment,18866.76\\n3: 2026-06-17,PIX INV-1015 resend,1904.29\\n4: 2026-06-18,PIX INV-1016 PAMPA FOODS,4219.04\\n5: 2026-06-04,TED invoice 1023 Ateliê Norte,1714.10\\n6: 2026-06-25,PIX INV-1028 PAMPA FOODS,10327.03\\n7: 2026-06-18,TED[... 1662 chars cut by the benchmark]\"\n[step 1] shell \"@'\\nimport csv, re, json\\nfrom collections import defaultdict\\nfrom decimal import Decimal\\n\\ninv = {}\\nwith open(r\\\"backoffice/invoices.csv\\\", newline=\\\"\\\", encoding=\\\"utf-8-sig\\\") as f:\\n    for r in csv.DictReader(f):\\n        inv[r[\\\"id\\\"]] = Decimal(r[\\\"amount\\\"])\\n\\npays = defaultdict(list)\\nunmatched = []\\nwith open(r\\\"backoffice/bank_statement_june.csv\\\", newline=\\\"\\\", encoding=\\\"utf-8-sig\\\") as f:\\n    for r in csv.DictReader(f):\\n        m = re.search(r\\\"INV(?:OICE)?[\\\\s-]*(\\\\d{4})\\\", r[\\\"memo\\\"], re.I)\\n        if not m:\\n            unmatched.append((r[\\\"date\\\"], r[\\\"memo\\\"], r[\\\"amount\\\"]))\\n            continue\\n        iid = \\\"INV-\\\" + m.group(1)\\n        if iid not in inv:\\n            unmatched.append((r[\\\"date\\\"], r[\\\"memo\\\"], r[\\\"amount\\\"], \\\"id not in invoices\\\"))\\n            continue\\n        pays[iid].append((r[\\\"date\\\"], Decimal(r[\\\"amount\\\"]), r[\\\"memo\\\"]))\\n\\nunpaid = [i for i in inv if i not in pays]\\ndup = [i for i in inv if len(pays.get(i, [])) > 1]\\nmism = []\\nfor i, ps in pays.items():\\n    if len(ps) == 1 and ps[0][1] != inv[i]:\\n        mism.append({\\\"id\\\": i, \\\"invoiced\\\": float(inv[i]), \\\"paid\\\": float(ps[0][1])})\\n\\nprint(\\\"invoices\\\", len(inv), \\\"paid ids\\\", len(pays))\\nprint(\\\"unpaid\\\", sorted(unpaid))\\nprint(\\\"duplicated\\\", sorted(dup), {i: pays[i] for i in sorted(dup)})\\nprint(\\\"mismatched\\\", mism)\\nprint(\\\"ignored\\\", unmatched)\\ntotal = sum(inv[i] for i in unpaid) + sum(inv[m[\\\"id\\\"]] for m in mism)\\nprint(\\\"open value(unpaid+mismatch gap?)\\\", total)\\nprint(\\\"unpaid total\\\", sum(inv[i] for i in unpaid))\\nprint(\\\"dup double payments\\\", sum(inv[... 82 chars cut by the benchmark]\" ok -> \"invoices 40 paid ids 37\\r\\nunpaid ['INV-1008', 'INV-1030', 'INV-1033']\\r\\nduplicated ['INV-1015'] {'INV-1015': [('2026-06-17', Decimal('1904.29'), 'PIX INV-1015 resend'), ('2026-06-05', Decimal('1904.29'), 'PIX INV-1015 ARENA STUDIO')]}\\r\\nmismatched [{'id': 'INV-1036', 'invoiced': 8619.16, 'paid': 7757.24}, {'id': 'INV-1021', 'invoiced': 21320.36, 'paid': 21070.36}]\\r\\nignored [('2026-06-12', 'PIX receiv[... 226 chars cut by the benchmark]\"\n[step 1] shell \"@'\\nimport csv,re\\nfrom collections import Counter\\nids=[]\\nwith open(r\\\"backoffice/bank_statement_june.csv\\\",encoding=\\\"utf-8-sig\\\") as f:\\n    for r in csv.DictReader(f):\\n        m=re.search(r\\\"INV(?:OICE)?[\\\\s-]*(\\\\d{4})\\\",r[\\\"memo\\\"],re.I)\\n        if m: ids.append(\\\"INV-\\\"+m.group(1))\\nprint(\\\"rows matched\\\",len(ids),\\\"unique\\\",len(set(ids)))\\nprint([k for k,v in Counter(ids).items() if v>1])\\n'@ | Set-Content -Encoding utf8 tmp_calc2.py; python tmp_calc2.py\" ok -> \"rows matched 38 unique 37\\r\\n['INV-1015']\"\n[step 1] write \"<WORKSPACE>\\\\result.json\" ok -> \"Created file successfully: <WORKSPACE>/result.json\"\n[step 1] shell \"@'\\nimport csv\\nfrom collections import Counter\\nwith open(r\\\"backoffice/invoices.csv\\\",encoding=\\\"utf-8-sig\\\") as f:\\n    ids=[r[\\\"id\\\"] for r in csv.DictReader(f)]\\nprint(\\\"invoice rows\\\",len(ids),\\\"unique\\\",len(set(ids)),\\\"dups\\\",[k for k,v in Counter(ids).items() if v>1])\\n'@ | python -\" ok -> \"invoice rows 40 unique 40 dups []\"\n[step 1] shell \"python -c \\\"import json;d=json.load(open('result.json',encoding='utf-8'));print(d);print('unpaid',len(d['unpaid']),'dup',len(d['duplicated']),'mism',len(d['mismatched']))\\\"; Remove-Item tmp_calc.py,tmp_calc2.py\" ok -> \"{'unpaid': ['INV-1008', 'INV-1030', 'INV-1033'], 'duplicated': ['INV-1015'], 'mismatched': [{'id': 'INV-1021', 'invoiced': 21320.36, 'paid': 21070.36}, {'id': 'INV-1036', 'invoiced': 8619.16, 'paid': 7757.24}]}\\r\\nunpaid 3 dup 1 mism 2\"\n[step 1] shell \"Select-String -Path .\\\\backoffice\\\\bank_statement_june.csv -Pattern '1008|1030|1033|1021|1036|1015' | ForEach-Object { $_.Line }\" ok -> \"2026-06-17,PIX INV-1015 resend,1904.29\\r\\n2026-06-05,PIX INV-1015 ARENA STUDIO,1904.29\\r\\n2026-06-26,TED invoice 1036 Vetor BI,7757.24\\r\\n2026-06-07,PIX INV-1021 ARENA STUDIO,21070.36\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "unpaid invoices",
+   true
+  ],
+  [
+   "duplicated payments",
+   true
+  ],
+  [
+   "mismatched amounts",
+   true
+  ],
+  [
+   "invoiced vs paid on mismatches",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 11,
+  "tool_errors": 0,
+  "shell_commands": 7,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 3419,
+  "reasoning_tokens": 1390,
+  "largest_turn_tokens": 906
+ },
+ "deliverables": [],
+ "render": null
+}

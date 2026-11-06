@@ -1,0 +1,817 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Under the Wave off Kanagawa — a low-poly wallpaper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#eee2c6;
+    --ink:#1d3448;
+  }
+  html,body{height:100%;margin:0;background:var(--paper);overflow:hidden;}
+  body{font-family:"Shippori Mincho","Yu Mincho","Hiragino Mincho ProN",Georgia,serif;color:var(--ink);}
+  #scene{position:fixed;inset:0;}
+  #scene canvas{display:block;width:100%;height:100%;}
+  .vignette{
+    position:fixed;inset:0;z-index:3;pointer-events:none;
+    background:
+      radial-gradient(ellipse 78% 70% at 48% 44%, rgba(70,45,20,0) 42%, rgba(83,57,28,.13) 100%),
+      linear-gradient(to bottom, rgba(78,54,27,.06), rgba(78,54,27,0) 14%, rgba(78,54,27,0) 82%, rgba(78,54,27,.10));
+    mix-blend-mode:multiply;
+  }
+  .grain{
+    position:fixed;inset:0;z-index:4;pointer-events:none;opacity:.30;mix-blend-mode:multiply;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.86' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.28'/%3E%3C/svg%3E");
+    background-size:220px 220px;
+  }
+  .cartouche{
+    position:fixed;left:clamp(16px,4.2vw,70px);top:clamp(18px,6vh,72px);
+    z-index:5;display:flex;flex-direction:column;align-items:flex-start;gap:9px;
+    user-select:none;
+  }
+  .frame{
+    background:rgba(243,234,214,.82);
+    border:1px solid rgba(35,52,66,.55);
+    padding:11px 8px 12px;
+    box-shadow:0 1px 14px rgba(110,85,48,.14);
+  }
+  .kanji{
+    writing-mode:vertical-rl;text-orientation:upright;
+    font-family:"Shippori Mincho","Yu Mincho","Hiragino Mincho ProN",serif;
+    font-size:clamp(10px,1.02vw,13px);
+    font-weight:600;line-height:1.62;letter-spacing:.16em;
+    color:#263a49;
+  }
+  .seal{
+    writing-mode:vertical-rl;text-orientation:upright;
+    background:#a6402c;color:#f4e9d2;
+    font-size:10px;line-height:1.05;letter-spacing:.08em;
+    padding:5px 4px;border-radius:1px;
+    box-shadow:0 1px 6px rgba(90,40,25,.18);
+  }
+  .veil{
+    position:fixed;inset:0;z-index:9;display:grid;place-items:center;
+    background:#eee2c6;color:#415161;letter-spacing:.34em;
+    font-size:10px;text-transform:uppercase;
+    transition:opacity 1.5s cubic-bezier(.3,.1,.2,1);
+  }
+  .veil.ready{opacity:0;pointer-events:none;}
+  @media (prefers-reduced-motion: reduce){
+    .grain{opacity:.24;}
+  }
+</style>
+</head>
+<body>
+<div id="scene" aria-hidden="true"></div>
+<div class="vignette"></div>
+<div class="grain"></div>
+
+<aside class="cartouche" aria-label="Under the Wave off Kanagawa, from Thirty-six Views of Mount Fuji">
+  <div class="frame">
+    <div class="kanji">冨嶽三十六景<br>神奈川沖浪裏</div>
+  </div>
+  <div class="seal" aria-hidden="true">北斎</div>
+</aside>
+
+<div class="veil" id="veil">The Great Wave</div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+/* -------------------------------------------------------------------------
+   Under the Wave off Kanagawa — rebuilt from primitives.
+   The woodblock print is the reference for composition, palette and subjects:
+   one great breaking wave at left, Fuji low in the right trough, three
+   oshiokuri-bune with rowers, foam claws and warm paper sky.
+------------------------------------------------------------------------- */
+
+const PALETTE = {
+  ink:       0x162b3c,
+  deep:      0x173f61,
+  indigo:    0x1d4f75,
+  prussian:  0x255f86,
+  mid:       0x3b7597,
+  paleBlue:  0x9dc2c8,
+  foam:      0xf0e6d1,
+  foamLight: 0xf6efdf,
+  paper:     0xe9d8b0,
+  haze:      0xd9d0bd,
+  peach:     0xdfb78b,
+  peachLight:0xe9c9a3,
+  hullDark:  0x2a4051,
+  fuji:      0x596982,
+  fujiDark:  0x4c5b73,
+  seal:      0xa6402c
+};
+
+const container = document.getElementById('scene');
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false, powerPreference:'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.NoToneMapping;
+container.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0xd9d0bd, 64, 108);
+
+const camera = new THREE.PerspectiveCamera(17, window.innerWidth/window.innerHeight, 0.1, 400);
+camera.position.set(0, 6.5, 55);
+const CAMERA_HFOV = 28.8;
+
+function fitCamera(){
+  const w = window.innerWidth, h = window.innerHeight;
+  renderer.setSize(w,h);
+  camera.aspect = w/h;
+  camera.fov = THREE.MathUtils.radToDeg(2*Math.atan(Math.tan(THREE.MathUtils.degToRad(CAMERA_HFOV)/2)/camera.aspect));
+  camera.updateProjectionMatrix();
+}
+fitCamera();
+window.addEventListener('resize', fitCamera);
+
+/* ---------- palette and light ---------- */
+function mat(color, extra={}){
+  return new THREE.MeshStandardMaterial(Object.assign({
+    color, roughness:0.96, metalness:0.0, flatShading:true
+  }, extra));
+}
+const M = {
+  wave: mat(PALETTE.indigo),
+  waveDeep: mat(PALETTE.deep),
+  waveMid: mat(PALETTE.prussian),
+  foam: mat(PALETTE.foam, {roughness:1}),
+  foamLight: mat(PALETTE.foamLight, {roughness:1}),
+  peach: mat(PALETTE.peach),
+  peachLight: mat(PALETTE.peachLight),
+  ink: mat(PALETTE.ink, {roughness:0.9}),
+  hullDark: mat(PALETTE.hullDark),
+  fuji: mat(PALETTE.fuji),
+  inkSoft: new THREE.MeshBasicMaterial({ color: PALETTE.ink })
+};
+
+scene.add(new THREE.HemisphereLight(0xfff1d6, 0x435a68, 1.25));
+scene.add(new THREE.AmbientLight(0xffeed6, 0.30));
+
+const sun = new THREE.DirectionalLight(0xfff0da, 2.05);
+sun.position.set(-14, 22, 18);
+scene.add(sun);
+
+const fill = new THREE.DirectionalLight(0xbcd7e3, 0.62);
+fill.position.set(13, 4, 14);
+scene.add(fill);
+
+const rim = new THREE.DirectionalLight(0xffe9c7, 0.34);
+rim.position.set(2, -4, 8);
+scene.add(rim);
+
+/* ---------- procedural paper sky ---------- */
+function makePaperSky(){
+  const W = 1920, H = 1200;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d');
+
+  const grad = g.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0.00,'#ddc79b');
+  grad.addColorStop(0.16,'#e9d7b0');
+  grad.addColorStop(0.34,'#f2e7cd');
+  grad.addColorStop(0.52,'#f5eddb');
+  grad.addColorStop(0.64,'#eee4cf');
+  grad.addColorStop(0.71,'#ded5c1');
+  grad.addColorStop(0.80,'#d8d0bd');
+  grad.addColorStop(1.00,'#d2c9b6');
+  g.fillStyle = grad; g.fillRect(0,0,W,H);
+
+  // broad warm glow, like the printed paper catching light
+  const glow = g.createRadialGradient(W*0.47,H*0.42,40,W*0.47,H*0.42,W*0.62);
+  glow.addColorStop(0,'rgba(255,249,232,.55)');
+  glow.addColorStop(0.55,'rgba(255,246,225,.18)');
+  glow.addColorStop(1,'rgba(255,244,220,0)');
+  g.fillStyle = glow; g.fillRect(0,0,W,H);
+
+  // soft, wide cloud forms around the open sky
+  function cloud(cx,cy,rx,ry,alpha,tint){
+    g.save();
+    g.translate(cx,cy); g.scale(rx/ry,1);
+    const cg = g.createRadialGradient(0,0,ry*0.10,0,0,ry);
+    cg.addColorStop(0, alpha ? `rgba(${tint},${alpha})` : 'rgba(250,243,226,.35)');
+    cg.addColorStop(0.58,`rgba(${tint},${alpha*0.44})`);
+    cg.addColorStop(1,`rgba(${tint},0)`);
+    g.fillStyle = cg;
+    g.beginPath(); g.arc(0,0,ry,0,Math.PI*2); g.fill();
+    g.restore();
+  }
+  cloud(W*0.55,H*0.27, W*0.20,H*0.075, 0.30, '252,245,228');
+  cloud(W*0.63,H*0.33, W*0.25,H*0.055, 0.22, '250,241,221');
+  cloud(W*0.37,H*0.22, W*0.16,H*0.045, 0.18, '253,248,234');
+  cloud(W*0.80,H*0.46, W*0.22,H*0.038, 0.16, '243,232,208');
+  cloud(W*0.18,H*0.47, W*0.20,H*0.036, 0.13, '246,236,214');
+
+  // darker, grainy haze under the sky, behind Fuji
+  const haze = g.createLinearGradient(0,H*0.60,0,H*0.82);
+  haze.addColorStop(0,'rgba(184,175,156,0)');
+  haze.addColorStop(0.55,'rgba(185,176,157,.18)');
+  haze.addColorStop(1,'rgba(178,169,151,0)');
+  g.fillStyle = haze; g.fillRect(0,H*0.60,W,H*0.22);
+
+  // fibrous paper speckle
+  let seed = 1735;
+  const rnd = () => { seed = (seed*1664525 + 1013904223) % 4294967296; return seed/4294967296; };
+  for(let i=0;i<26000;i++){
+    const x = rnd()*W, y = rnd()*H;
+    const a = 0.012 + rnd()*0.035;
+    g.fillStyle = rnd() > 0.42 ? `rgba(105,82,50,${a})` : `rgba(255,250,235,${a*1.2})`;
+    const s = rnd() > 0.94 ? 1.8 : 0.8;
+    g.fillRect(x,y,s,s);
+  }
+  // faint long paper fibres
+  g.lineWidth = 1;
+  for(let i=0;i<150;i++){
+    const x = rnd()*W, y = rnd()*H, l = 6+rnd()*40;
+    g.strokeStyle = `rgba(116,92,57,${0.015+rnd()*0.02})`;
+    g.beginPath(); g.moveTo(x,y); g.lineTo(x+l,y+(rnd()-0.5)*2); g.stroke();
+  }
+
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+  return tex;
+}
+scene.background = makePaperSky();
+
+/* ---------- helpers ---------- */
+function extrude(shape, depth, bevel=0.1){
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth, bevelEnabled:true, bevelSegments:2,
+    steps:1, bevelSize:bevel, bevelThickness:bevel,
+    curveSegments:26
+  });
+  geo.computeVertexNormals();
+  return geo;
+}
+function tubeBetween(points2, z, radius, material, parent){
+  const pts = points2.map(p => new THREE.Vector3(p[0], p[1], z));
+  const curve = new THREE.CatmullRomCurve3(pts);
+  const mesh = new THREE.Mesh(new THREE.TubeGeometry(curve, 26, radius, 4, false), material);
+  mesh.frustumCulled = false;
+  parent.add(mesh);
+  return mesh;
+}
+function blob(r, sx, sy, sz, material){
+  const geo = new THREE.IcosahedronGeometry(r, 0);
+  const m = new THREE.Mesh(geo, material);
+  m.scale.set(sx, sy, sz);
+  return m;
+}
+
+/* ---------- sea ---------- */
+function seaHeight(x,z){
+  return 0.30*Math.sin(x*0.33 + z*0.20)
+       + 0.18*Math.sin(x*0.13 - z*0.37 + 2.1)
+       + 0.10*Math.sin(x*0.70 + z*0.55 + 4.0)
+       + 0.06*Math.sin(x*1.6 - z*1.1);
+}
+function buildSea(){
+  const geo = new THREE.PlaneGeometry(190, 100, 132, 66);
+  geo.rotateX(-Math.PI/2);
+  const p = geo.attributes.position;
+  for(let i=0;i<p.count;i++){
+    const x = p.getX(i), z = p.getZ(i);
+    p.setY(i, seaHeight(x,z));
+  }
+  const flat = geo.toNonIndexed();
+  const fp = flat.attributes.position;
+  const colors = new Float32Array(fp.count*3);
+  const deep = new THREE.Color(0x173d5e);
+  const mid = new THREE.Color(0x23577c);
+  const light = new THREE.Color(0x386f92);
+  const pale = new THREE.Color(0x8fb6be);
+  const haze = new THREE.Color(0xd9d0bd);
+  const ca = new THREE.Color(), cb = new THREE.Color();
+  for(let i=0;i<fp.count;i+=3){
+    const y = (fp.getY(i)+fp.getY(i+1)+fp.getY(i+2))/3;
+    const x = (fp.getX(i)+fp.getX(i+1)+fp.getX(i+2))/3;
+    const z = (fp.getZ(i)+fp.getZ(i+1)+fp.getZ(i+2))/3;
+    const jitter = 0.06*Math.sin(x*3.1+z*1.7);
+    const t = THREE.MathUtils.clamp((y+0.22)/0.9 + jitter, 0, 1);
+    ca.copy(deep).lerp(mid, Math.pow(t,0.8));
+    if(y > 0.34) ca.lerp(light, 0.55);
+    if(y > 0.52) ca.lerp(pale, 0.5);
+    const fogT = THREE.MathUtils.clamp((-z - 6)/28, 0, 1);
+    ca.lerp(haze, fogT*0.96);
+    for(let k=0;k<3;k++){ colors[(i+k)*3]=ca.r; colors[(i+k)*3+1]=ca.g; colors[(i+k)*3+2]=ca.b; }
+  }
+  flat.setAttribute('color', new THREE.BufferAttribute(colors,3));
+  const mesh = new THREE.Mesh(flat, new THREE.MeshStandardMaterial({ vertexColors:true, flatShading:true, roughness:1, metalness:0 }));
+  mesh.position.set(0, 2.9, 16);
+  mesh.rotation.y = 0.015;
+  scene.add(mesh);
+  return mesh;
+}
+buildSea();
+
+/* ---------- long foam lines on the water ---------- */
+function seaLines(){
+  const group = new THREE.Group();
+  const lines = [
+    [[-1.5,3.5,-6],[1.2,3.55,-3.5],[4.0,3.6,-2.6],[7.5,3.55,-2.2],[11.5,3.45,-2.0]],
+    [[2.0,3.5,-1],[5.0,3.55,0.5],[8.6,3.55,1.4],[12.6,3.4,1.8]],
+    [[-3.2,3.55,3],[0.4,3.65,4.1],[4.4,3.7,4.6],[8.8,3.55,4.8]],
+    [[5.0,3.6,7.0],[8.6,3.65,7.5],[12.5,3.55,7.2]],
+    [[-8.0,3.65,8.5],[-4.4,3.72,9.2],[-0.8,3.75,9.0],[3.0,3.7,8.6]],
+    [[7.5,3.6,12.6],[11.2,3.65,12.2],[15,3.5,11.4]],
+    [[-11.5,3.7,14.2],[-7.0,3.8,15.0],[-2.6,3.78,14.6],[2.0,3.72,14.0]]
+  ];
+  const pale = new THREE.MeshBasicMaterial({ color:0xbcd4d4, transparent:true, opacity:0.72 });
+  const cream = new THREE.MeshBasicMaterial({ color:0xeadfc5, transparent:true, opacity:0.85 });
+  lines.forEach((pts,i)=>{
+    const curve = new THREE.CatmullRomCurve3(pts.map(p=>new THREE.Vector3(...p)));
+    const t = new THREE.Mesh(new THREE.TubeGeometry(curve, 36, 0.045 + (i%2)*0.015, 3, false), i%3===0 ? cream : pale);
+    group.add(t);
+  });
+  scene.add(group);
+}
+seaLines();
+
+/* ---------- Mount Fuji ---------- */
+function buildFuji(){
+  const group = new THREE.Group();
+  group.position.set(4.35, 2.78, -8);
+
+  const body = new THREE.Mesh(new THREE.ConeGeometry(1.82, 2.22, 9, 1), M.fuji);
+  body.position.y = 1.08;
+  body.rotation.y = 0.34;
+  group.add(body);
+
+  // a lower skirt makes the cone read as a mountain, not a triangle
+  const skirt = new THREE.Mesh(new THREE.ConeGeometry(2.35, 0.42, 9, 1), M.fuji);
+  skirt.position.y = 0.20;
+  skirt.rotation.y = 0.34;
+  group.add(skirt);
+
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(0.78, 0.92, 9, 1), M.foamLight);
+  cap.position.y = 1.80;
+  cap.rotation.y = 0.42;
+  group.add(cap);
+
+  // snow rills running down the front slope
+  for(let i=0;i<7;i++){
+    const a = -0.85 + i*0.28;
+    const r = 0.62;
+    const drip = new THREE.Mesh(new THREE.ConeGeometry(0.075 + (i%3)*0.018, 0.34 + (i%4)*0.12, 3), M.foamLight);
+    drip.position.set(Math.sin(a)*r, 1.27 - (i%2)*0.06, Math.cos(a)*r*0.62 + 0.22);
+    drip.rotation.z = Math.PI + Math.sin(a)*0.25;
+    drip.rotation.x = 0.18;
+    group.add(drip);
+  }
+
+  scene.add(group);
+  return group;
+}
+buildFuji();
+
+/* haze band in front of Fuji, made in code */
+function fujiHaze(){
+  const c = document.createElement('canvas'); c.width = 512; c.height = 256;
+  const g = c.getContext('2d');
+  g.clearRect(0,0,512,256);
+  const grad = g.createLinearGradient(0,0,0,256);
+  grad.addColorStop(0,'rgba(221,213,196,0)');
+  grad.addColorStop(0.36,'rgba(221,213,196,.45)');
+  grad.addColorStop(0.63,'rgba(218,209,191,.72)');
+  grad.addColorStop(1,'rgba(216,207,189,0)');
+  g.fillStyle = grad; g.fillRect(0,0,512,256);
+  const side = g.createLinearGradient(0,0,512,0);
+  side.addColorStop(0,'rgba(0,0,0,1)');
+  side.addColorStop(0.16,'rgba(0,0,0,0)');
+  side.addColorStop(0.84,'rgba(0,0,0,0)');
+  side.addColorStop(1,'rgba(0,0,0,1)');
+  g.globalCompositeOperation = 'destination-out';
+  g.fillStyle = side; g.fillRect(0,0,512,256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(34, 7),
+    new THREE.MeshBasicMaterial({map:tex, transparent:true, depthWrite:false, opacity:0.85, fog:false}));
+  m.position.set(4, 3.35, -7.4);
+  scene.add(m);
+}
+fujiHaze();
+
+/* ---------- the great wave ---------- */
+function waveShape(){
+  const s = new THREE.Shape();
+  s.moveTo(0.00, 0.00);
+  s.bezierCurveTo(0.10, 2.00, 2.20, 5.20, 4.60, 7.45);
+  s.bezierCurveTo(5.60, 8.35, 6.70, 8.92, 7.70, 8.86);
+  s.bezierCurveTo(9.10, 8.80, 10.70, 8.00, 12.10, 6.88);
+  s.bezierCurveTo(13.00, 6.18, 13.38, 5.72, 13.18, 5.35);
+  s.bezierCurveTo(12.92, 5.04, 12.35, 5.16, 11.72, 5.62);
+  s.bezierCurveTo(11.18, 5.32, 10.78, 4.58, 10.48, 3.66);
+  s.bezierCurveTo(10.16, 2.66, 9.98, 1.55, 9.90, 0.62);
+  s.bezierCurveTo(8.90, 0.18, 6.80, 0.02, 5.10, 0.00);
+  s.bezierCurveTo(3.20, 0.00, 1.40, 0.00, 0.00, 0.00);
+  return s;
+}
+function foamCapShape(){
+  const s = new THREE.Shape();
+  s.moveTo(3.10, 6.80);
+  s.bezierCurveTo(4.20, 7.85, 5.75, 8.60, 7.30, 8.72);
+  s.bezierCurveTo(8.90, 8.85, 10.50, 8.36, 11.72, 7.48);
+  s.bezierCurveTo(12.55, 6.90, 13.05, 6.25, 13.20, 5.78);
+  s.bezierCurveTo(13.28, 5.48, 13.05, 5.28, 12.75, 5.34);
+  s.bezierCurveTo(12.38, 5.46, 12.28, 5.86, 12.22, 6.28);
+  s.bezierCurveTo(12.02, 7.05, 11.20, 7.62, 10.20, 7.90);
+  s.bezierCurveTo(8.95, 8.25, 7.60, 8.14, 6.45, 7.76);
+  s.bezierCurveTo(5.35, 7.40, 4.40, 6.74, 3.70, 6.10);
+  s.closePath();
+  return s;
+}
+function makeClawCluster(parent, x, y, z, seed){
+  const cluster = new THREE.Group();
+  cluster.position.set(x,y,z);
+  const n = 2 + (seed % 2);
+  for(let i=0;i<n;i++){
+    const h = 0.40 + ((seed*7 + i*13) % 10)*0.062;
+    const r = 0.075 + ((seed*5 + i*3) % 4)*0.020;
+    const geo = new THREE.ConeGeometry(r, h, 4, 1);
+    const cone = new THREE.Mesh(geo, M.foam);
+    cone.position.set(-0.10 - i*0.13, -h/2 + 0.04, 0.06*i);
+    cone.rotation.z = Math.PI - 0.30 + i*0.23;
+    cone.rotation.x = 0.12;
+    cluster.add(cone);
+  }
+  parent.add(cluster);
+  return cluster;
+}
+function buildGreatWave(){
+  const group = new THREE.Group();
+  group.position.set(-12.8, 2.40, -0.2);
+  group.scale.setScalar(1.22);
+  group.rotation.y = -0.075;
+
+  const body = new THREE.Mesh(extrude(waveShape(), 1.35, 0.14), M.wave);
+  group.add(body);
+
+  // deeper colour at the left flank; a light hollow beneath the curl
+  const flankShape = new THREE.Shape();
+  flankShape.moveTo(0.55,0.2);
+  flankShape.bezierCurveTo(0.7,1.9,1.5,3.8,2.75,5.35);
+  flankShape.bezierCurveTo(2.2,4.3,1.6,2.4,1.35,0.3);
+  flankShape.closePath();
+  const flank = new THREE.Mesh(extrude(flankShape, 0.06, 0.02), M.waveDeep);
+  flank.position.z = 1.32;
+  group.add(flank);
+
+  const hollowShape = new THREE.Shape();
+  hollowShape.moveTo(6.02,5.72);
+  hollowShape.bezierCurveTo(6.55,5.46,6.94,5.28,7.36,5.32);
+  hollowShape.bezierCurveTo(6.98,4.86,6.54,4.62,6.08,4.70);
+  hollowShape.bezierCurveTo(5.91,5.02,5.92,5.39,6.02,5.72);
+  const hollow = new THREE.Mesh(extrude(hollowShape, 0.05, 0.02), M.waveMid);
+  hollow.position.z = 1.36;
+  group.add(hollow);
+
+  // big pale foam band along the crest
+  const cap = new THREE.Mesh(extrude(foamCapShape(), 0.28, 0.06), M.foam);
+  cap.position.z = 1.33;
+  group.add(cap);
+
+  // scalloped, rounded foam ridge, slightly proud of the face
+  const crestPts = [
+    [2.95,6.78],[3.55,7.50],[4.25,7.96],[5.05,8.24],[5.90,8.33],
+    [6.66,8.13],[7.30,7.72],[7.79,7.12],[8.12,6.42],[8.22,5.85]
+  ];
+  const crestCurve = new THREE.CatmullRomCurve3(crestPts.map(p=>new THREE.Vector3(p[0],p[1],1.55)));
+  for(let i=0;i<=19;i++){
+    const pt = crestCurve.getPoint(i/19);
+    const b = blob(0.35 + (i%3)*0.045, 1.20, 0.72, 1.05, M.foam);
+    b.position.copy(pt);
+    b.rotation.set(0.2*i, 0.8*i, 0.2);
+    group.add(b);
+  }
+
+  // hanging foam claws, the signature of the print
+  const claws = new THREE.Group();
+  const clawAt = [
+    [6.55,7.85],[7.10,7.47],[7.60,6.95],[7.95,6.30],[8.12,5.70],[7.72,5.48]
+  ];
+  clawAt.forEach((p,i)=>makeClawCluster(claws, p[0], p[1], 1.78, i+1));
+  group.add(claws);
+
+  // foam veins streaming down the blue face
+  const veins = [
+    [[6.35,7.10],[6.00,6.35],[5.92,5.62],[5.52,4.95]],
+    [[5.92,6.08],[6.12,5.25],[5.86,4.35],[5.40,3.66]],
+    [[5.30,4.70],[4.93,3.96],[4.88,3.14],[4.56,2.43]],
+    [[4.58,3.62],[4.22,2.96],[4.26,2.08],[3.98,1.35]],
+    [[3.90,2.82],[3.58,2.10],[3.62,1.38]],
+    [[3.10,4.24],[2.82,3.45],[2.93,2.70]],
+    [[2.48,5.02],[2.26,4.36],[2.32,3.70]],
+    [[6.66,6.66],[6.34,5.98],[6.10,5.34]]
+  ];
+  veins.forEach((v,i)=>{
+    tubeBetween(v, 1.50 + i*0.002, 0.045 + (i%3)*0.013, M.foam, group);
+  });
+
+  // jagged foam avalanche at the foot
+  const foamFoot = new THREE.Shape();
+  foamFoot.moveTo(-3.65, -0.55);
+  foamFoot.lineTo(-3.15, 0.55);
+  foamFoot.lineTo(-2.55, 1.45);
+  foamFoot.lineTo(-2.28, 0.82);
+  foamFoot.lineTo(-1.80, 2.10);
+  foamFoot.lineTo(-1.22, 1.18);
+  foamFoot.lineTo(-0.82, 2.48);
+  foamFoot.lineTo(-0.30, 1.36);
+  foamFoot.lineTo(0.22, 2.10);
+  foamFoot.lineTo(0.55, 1.02);
+  foamFoot.lineTo(0.92, 1.62);
+  foamFoot.lineTo(1.08, 0.34);
+  foamFoot.lineTo(1.32, 0.02);
+  foamFoot.lineTo(0.62, -0.42);
+  foamFoot.lineTo(-0.62, -0.78);
+  foamFoot.lineTo(-2.20, -0.88);
+  foamFoot.lineTo(-3.25, -0.72);
+  foamFoot.closePath();
+  const foot = new THREE.Mesh(extrude(foamFoot, 0.18, 0.05), M.foam);
+  foot.position.set(1.05, 1.66, 2.05);
+  group.add(foot);
+
+  // a few navy splashes running over the white foot
+  const footCurves = [
+    [[0.2,0.12],[0.55,0.75],[0.4,1.25],[0.72,1.72]],
+    [[-0.5,0.2],[-0.35,0.85],[-0.55,1.3]],
+    [[-1.4,0.05],[-1.15,0.55],[-1.32,1.0]]
+  ];
+  footCurves.forEach((v,i)=>{
+    const p = v.map(q=>new THREE.Vector3(q[0]+1.05, q[1]+1.66, 2.3));
+    const curve = new THREE.CatmullRomCurve3(p);
+    group.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 18, 0.055, 4, false), M.wave));
+  });
+
+  // low-poly foam boulders around the foot
+  const boulders = [
+    [-2.7,1.55,2.5,0.55],[-1.9,1.35,2.8,0.42],[-0.9,1.2,2.65,0.38],
+    [0.4,1.2,2.9,0.32],[-3.4,1.1,2.2,0.36],[1.3,0.9,2.6,0.28]
+  ];
+  boulders.forEach((b,i)=>{
+    const m = blob(b[3], 1.25, 0.66, 0.9, M.foam);
+    m.position.set(b[0],b[1],b[2]);
+    m.rotation.set(i*0.7, i*1.1, i*0.3);
+    group.add(m);
+  });
+
+  scene.add(group);
+  return { group, claws };
+}
+const greatWave = buildGreatWave();
+
+/* ---------- foreground rollers (paper-cut wave layers) ---------- */
+function buildRoller(width, height, flip){
+  const g = new THREE.Group();
+  const w = width, h = height;
+  const s = new THREE.Shape();
+  if(flip){
+    s.moveTo(w*0.52,0);
+    s.bezierCurveTo(w*0.55,h*0.46, w*0.33,h*0.87, w*0.02,h*0.98);
+    s.bezierCurveTo(-w*0.24,h*1.05, -w*0.43,h*0.72, -w*0.47,h*0.30);
+    s.bezierCurveTo(-w*0.50,h*0.16, -w*0.52,h*0.04, -w*0.52,0);
+  } else {
+    s.moveTo(-w*0.52,0);
+    s.bezierCurveTo(-w*0.55,h*0.42, -w*0.34,h*0.84, -w*0.08,h*0.98);
+    s.bezierCurveTo(w*0.20,h*1.12, w*0.43,h*0.72, w*0.47,h*0.28);
+    s.bezierCurveTo(w*0.50,h*0.14, w*0.52,h*0.04, w*0.52,0);
+  }
+  s.closePath();
+  const body = new THREE.Mesh(extrude(s, 1.15, 0.12), M.waveDeep);
+  g.add(body);
+
+  const crest = [];
+  const sign = flip ? -1 : 1;
+  for(let i=0;i<9;i++){
+    const t = i/8;
+    const x = sign*(w*0.46 - t*w*0.86);
+    const y = h*(0.27 + Math.sin(t*Math.PI*0.92)*0.68);
+    crest.push([x,y]);
+  }
+  const curve = new THREE.CatmullRomCurve3(crest.map(p=>new THREE.Vector3(p[0],p[1],1.18)));
+  for(let i=0;i<=17;i++){
+    const pt = curve.getPoint(i/17);
+    const b = blob(0.30 + (i%3)*0.05, 1.3, 0.65, 1.05, M.foam);
+    b.position.copy(pt);
+    b.rotation.set(i*0.5, i*0.8, i*0.2);
+    g.add(b);
+  }
+  return g;
+}
+const rollers = [];
+[
+  {x:-15.5,y:2.05,z:19,s:1.55,flip:false,phase:0.4},
+  {x:9.2,y:2.35,z:15.5,s:1.25,flip:true,phase:2.1},
+  {x:-13.4,y:0.6,z:27,s:1.9,flip:true,phase:4.2},
+  {x:12.6,y:0.4,z:25,s:1.65,flip:false,phase:1.3}
+].forEach(cfg=>{
+  const g = buildRoller(7.2, 4.4, cfg.flip);
+  g.position.set(cfg.x, cfg.y, cfg.z);
+  g.scale.setScalar(cfg.s);
+  g.rotation.y = cfg.flip ? 0.06 : -0.05;
+  scene.add(g);
+  rollers.push({group:g, baseY:cfg.y, baseRot:g.rotation.z, phase:cfg.phase});
+});
+
+/* ---------- boats ---------- */
+function buildBoat(){
+  const boat = new THREE.Group();
+
+  const hullShape = new THREE.Shape();
+  hullShape.moveTo(-3.35,0.64);
+  hullShape.bezierCurveTo(-2.95,0.30, -2.15,0.02, -0.70,-0.05);
+  hullShape.bezierCurveTo(1.05,-0.11, 2.55,0.07, 3.22,0.48);
+  hullShape.lineTo(3.43,0.90);
+  hullShape.bezierCurveTo(2.98,0.58, 2.15,0.43, 0.60,0.41);
+  hullShape.bezierCurveTo(-1.38,0.39, -2.62,0.58, -3.32,0.90);
+  hullShape.closePath();
+  const hullGeo = extrude(hullShape, 0.52, 0.045);
+  hullGeo.translate(0,0,-0.26);
+  const hull = new THREE.Mesh(hullGeo, M.peach);
+  boat.add(hull);
+
+  // dark inner rim and deck shadow
+  const deck = new THREE.Mesh(new THREE.BoxGeometry(4.8,0.035,0.30), M.hullDark);
+  deck.position.set(0.05,0.47,0.02);
+  boat.add(deck);
+  const rim = new THREE.Mesh(new THREE.BoxGeometry(5.2,0.045,0.07), new THREE.MeshStandardMaterial({color:0x263b4c, roughness:1}));
+  rim.position.set(-0.05,0.53,0.27);
+  boat.add(rim);
+  const rim2 = rim.clone(); rim2.position.z = -0.27; boat.add(rim2);
+
+  // rowers: dark bent figures with a pale head, and long oars
+  const skin = new THREE.MeshStandardMaterial({color:0xcfa783, roughness:1, flatShading:true});
+  for(let i=0;i<7;i++){
+    const x = -2.30 + i*0.78;
+    const person = new THREE.Group();
+    person.position.set(x, 0.52, 0.02 + (i%2)*0.03);
+    const torso = new THREE.Mesh(new THREE.ConeGeometry(0.085,0.30,5), M.ink);
+    torso.position.y = 0.10;
+    torso.rotation.x = 0.28;
+    person.add(torso);
+    const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.056,0), skin);
+    head.position.set(0.02,0.28,0.035);
+    person.add(head);
+    person.rotation.z = -0.06;
+    boat.add(person);
+
+    const oar = new THREE.Mesh(new THREE.CylinderGeometry(0.012,0.015,1.45,3), M.foamLight);
+    oar.position.set(x+0.08,0.63,0.62);
+    oar.rotation.x = -1.18;
+    oar.rotation.z = 0.32;
+    boat.add(oar);
+  }
+
+  // bows use a tiny pale crest, as on the print's boats
+  const bow = new THREE.Mesh(new THREE.ConeGeometry(0.14,0.93,4), M.foamLight);
+  bow.position.set(3.26,0.88,0);
+  bow.rotation.z = -0.42;
+  boat.add(bow);
+
+  const wake = new THREE.Group();
+  for(let i=0;i<3;i++){
+    const b = blob(0.20+i*0.035, 1.7,0.5,0.7, M.foam);
+    b.position.set(-3.55-i*0.24, -0.02, (i-1)*0.13);
+    wake.add(b);
+  }
+  boat.add(wake);
+  return boat;
+}
+
+const boats = [];
+const boatSpecs = [
+  { x:-8.35, y:4.78, z:2.15, s:1.00, rz:-0.40, ry: 2.92, phase:0.3 },
+  { x: 3.15, y:3.26, z:2.30, s:1.02, rz:-0.055, ry: 0.20, phase:2.0 },
+  { x: 0.35, y:3.12, z:22.5, s:1.22, rz: 0.095, ry: 0.10, phase:4.4 }
+];
+boatSpecs.forEach(cfg=>{
+  const b = buildBoat();
+  b.position.set(cfg.x,cfg.y,cfg.z);
+  b.rotation.set(0,cfg.ry,cfg.rz);
+  b.scale.setScalar(cfg.s);
+  scene.add(b);
+  boats.push({group:b, baseY:cfg.y, baseRZ:cfg.rz, phase:cfg.phase});
+});
+
+/* ---------- spray particles ---------- */
+function sprayTexture(){
+  const c = document.createElement('canvas'); c.width=64; c.height=64;
+  const g = c.getContext('2d');
+  const rg = g.createRadialGradient(32,32,1,32,32,30);
+  rg.addColorStop(0,'rgba(255,250,238,1)');
+  rg.addColorStop(0.55,'rgba(248,240,222,.9)');
+  rg.addColorStop(1,'rgba(248,240,222,0)');
+  g.fillStyle = rg; g.beginPath(); g.arc(32,32,30,0,Math.PI*2); g.fill();
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+const spray = (()=>{
+  const count = 190;
+  const pos = new Float32Array(count*3);
+  const base = new Float32Array(count*3);
+  const phase = new Float32Array(count);
+  let s = 991;
+  const rnd = () => { s = (s*1664525+1013904223)%4294967296; return s/4294967296; };
+  for(let i=0;i<count;i++){
+    // most spray sits around the curling lip and the foam foot
+    let x,y,z;
+    if(i<100){
+      x = -4.4 + rnd()*7.0; y = 7.2 + rnd()*4.5; z = 0.4 + rnd()*3.6;
+    } else if(i<155){
+      x = -8.0 + rnd()*5.0; y = 3.0 + rnd()*3.4; z = 1.8 + rnd()*3.0;
+    } else {
+      x = 0.5 + rnd()*5.5; y = 3.0 + rnd()*2.1; z = 8 + rnd()*14;
+    }
+    base[i*3]=x; base[i*3+1]=y; base[i*3+2]=z;
+    pos[i*3]=x; pos[i*3+1]=y; pos[i*3+2]=z;
+    phase[i]=rnd()*Math.PI*2;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+  const m = new THREE.PointsMaterial({
+    size:0.16, map:sprayTexture(), transparent:true, depthWrite:false,
+    opacity:0.86, color:0xf7efdb, sizeAttenuation:true, alphaTest:0.04
+  });
+  const p = new THREE.Points(geo,m);
+  p.frustumCulled = false;
+  scene.add(p);
+  return { points:p, base, phase, count };
+})();
+
+/* ---------- gentle camera drift ---------- */
+const pointer = {x:0, y:0, tx:0, ty:0};
+window.addEventListener('pointermove', (e)=>{
+  pointer.tx = (e.clientX/window.innerWidth)*2 - 1;
+  pointer.ty = (e.clientY/window.innerHeight)*2 - 1;
+}, {passive:true});
+window.addEventListener('pointerleave', ()=>{ pointer.tx=0; pointer.ty=0; });
+
+const clock = new THREE.Clock();
+const motion = reducedMotion ? 0 : 1;
+
+function animate(){
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  // pointer easing + lazy breathing drift
+  pointer.x += (pointer.tx - pointer.x)*0.028;
+  pointer.y += (pointer.ty - pointer.y)*0.028;
+  const driftX = Math.sin(t*0.11)*0.52 + Math.sin(t*0.27)*0.17;
+  const driftY = Math.cos(t*0.09)*0.22;
+  camera.position.x = driftX*motion + pointer.x*0.95;
+  camera.position.y = 6.5 + driftY*motion + pointer.y*0.38;
+  camera.position.z = 55;
+  camera.lookAt(0, 6.42 + pointer.y*0.12, 0);
+
+  // wave breathing
+  greatWave.group.rotation.z = 0.0035*Math.sin(t*0.31)*motion;
+  greatWave.group.rotation.y = -0.075 + 0.006*Math.sin(t*0.19)*motion;
+  greatWave.claws.rotation.z = 0.016*Math.sin(t*0.47)*motion;
+  greatWave.claws.rotation.x = 0.07 + 0.015*Math.sin(t*0.33+1.0)*motion;
+
+  // boats ride slow swells
+  boats.forEach(b=>{
+    b.group.position.y = b.baseY + 0.085*Math.sin(t*0.62 + b.phase)*motion;
+    b.group.rotation.z = b.baseRZ + 0.024*Math.sin(t*0.51 + b.phase)*motion;
+    b.group.rotation.x = 0.013*Math.sin(t*0.43 + b.phase + 0.8)*motion;
+  });
+
+  // near rollers
+  rollers.forEach(r=>{
+    r.group.position.y = r.baseY + 0.06*Math.sin(t*0.38 + r.phase)*motion;
+    r.group.rotation.z = 0.007*Math.sin(t*0.3 + r.phase)*motion;
+  });
+
+  // spray loop
+  const arr = spray.points.geometry.attributes.position.array;
+  for(let i=0;i<spray.count;i++){
+    const j = i*3;
+    arr[j+1] = spray.base[j+1] + 0.32*Math.sin(t*0.55 + spray.phase[i])*motion;
+    arr[j] = spray.base[j] + 0.12*Math.cos(t*0.41 + spray.phase[i])*motion;
+  }
+  spray.points.geometry.attributes.position.needsUpdate = true;
+
+  renderer.render(scene, camera);
+}
+animate();
+
+// reveal
+requestAnimationFrame(()=>requestAnimationFrame(()=>{
+  document.getElementById('veil').classList.add('ready');
+}));
+</script>
+</body>
+</html>
