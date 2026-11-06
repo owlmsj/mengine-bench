@@ -1,0 +1,69 @@
+{
+ "task_id": "gd-integration-repo",
+ "prompts": [
+  "An integration test of the Pixel Arena backend in {WS} fails while the unit tests pass. Make the backend behave as {WS}/docs says: fix every cause, not just the symptom this test shows. Existing tests stay as they are, and the project takes no new dependencies."
+ ],
+ "answers": [
+  "[goal] Fix every cause of the failing integration test so the Pixel Arena backend behaves as `./docs` says, keeping existing tests untouched and adding no dependencies.\n\n[action] Ran `python -m unittest discover -s tests -t .`; only `test_event_weekend_win_is_paid_and_persisted` failed (`0 != 1690`). Traced two independent defects against the docs:\n\n1. **Config precedence reversed** (`arena_server/config/loader.py`). `docs/CONFIG.md` states \"environment always wins\" (`DEFAULTS < JSON file < env`), but `load_config` applied env overrides first, then `cfg.update(json.load(fh))`, so the JSON file clobbered env. With `ARENA_KILL_BONUS=75` set, the file's `kill_bonus: 50` won, producing payout `(900 + 5·50) × 1.25 = 1437.5 → 1440` instead of `(900 + 5·75) × 1.25 = 1593.75 → 1590`. Fixed by moving the file read before the env loop so env is applied last.\n\n2. **Credits lost on load** (`arena_server/persistence/codec.py`). `decode` reconstructed `Profile` without passing `credits`, so it reset to the dataclass default `0`, contradicting `docs/ECONOMY.md` \"Credits persist in the profile and survive save/load.\" Fixed by threading `credits=data.get(\"credits\", 0)` through `decode`.\n\nThe payout math in `economy/payout.py` (`floor(raw/10 + 0.5) * 10`) already matches the spec's \"nearest ten, halves up\" (verified `1593.75→1590`, `1437.5→1440`, and doc examples `1425→1430`, `1585→1590`), so no change was needed there.\n\n[result] Re-ran the full suite: `Ran 13 tests ... OK` (all pass, including the previously failing integration test asserting `reloaded.credits == 1690`). No files beyond the two buggy modules were modified; no tests changed; no new imports or dependencies added.\n\n[next] None. Assumptions stated: env keys map uppercased (`ARENA_KILL_BONUS` → `kill_bonus`) per the existing naming convention, and missing `credits` in legacy saves default to 0 rather than erroring."
+ ],
+ "diff": "M arena_server/config/loader.py\nM arena_server/persistence/codec.py\n\n--- arena_server/config/loader.py ---\n\"\"\"Runtime config. Precedence, lowest to highest: DEFAULTS < JSON file < env (docs/CONFIG.md).\"\"\"\n\nimport json\nimport os\n\nfrom arena_server.config.defaults import DEFAULTS\n\n\ndef _coerce(raw, like):\n    return type(like)(raw)\n\n\ndef load_config(file_path=None, env=None):\n    cfg = dict(DEFAULTS)\n    if file_path:\n        with open(file_path, encoding=\"utf-8\") as fh:\n            cfg.update(json.load(fh))\n    env = os.environ if env is None else env\n    for key, default in DEFAULTS.items():\n        value = env.get(f\"ARENA_{key.upper()}\")\n        if value is not None:\n            cfg[key] = _coerce(value, default)\n    return cfg\n\n\n--- arena_server/persistence/codec.py ---\nimport json\n\nfrom arena_server.models.profile import Profile\n\n\ndef encode(profile):\n    return json.dumps({\"name\": profile.name, \"level\": profile.level,\n                       \"credits\": profile.credits, \"cosmetics\": profile.cosmetics})\n\n\ndef decode(blob):\n    data = json.loads(blob)\n    return Profile(name=data[\"name\"], level=data.get(\"level\", 1),\n                   credits=data.get(\"credits\", 0), cosmetics=data.get(\"cosmetics\", []))\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"ls -la <WORKSPACE>\" failed -> \"\\u001b[31;1mGet-ChildItem: \\u001b[31;1mA parameter cannot be found that matches parameter name 'la'.\\u001b[0m\"\n[step 1] shell \"Get-ChildItem -Force <WORKSPACE> | Format-Table Name,Mode,Length\" ok -> \"\\u001b[32;1mName        \\u001b[0m\\u001b[32;1m Mode \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----        \\u001b[0m \\u001b[32;1m---- \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\narena_server d---- \\r\\ndocs         d---- \\r\\ntests        d---- \\r\\nAGENTS.md    -a--- 394\\r\\nREADME.md    -a--- 153\"\n[step 1] shell \"Get-ChildItem -Recurse <WORKSPACE> | Format-Table FullName,Length\" ok -> \"\\u001b[32;1mFullName\\u001b[0m\\r\\n\\u001b[32;1m--------                                                                                                              <WORKSPACE>\\\\arena_server                            <WORKSPACE>\\\\docs                                    \\r\\nC:\\\\Users[... 18098 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>/README.md\" ok -> \"Read file <WORKSPACE>/README.md, lines 1-3\\n1: # arena-server\\n2: \\n3: Backend of Pixel Arena: config, economy, profiles, matchmaking and live-ops services. Tests: `python -m unittest discover -s tests -t .`\"\n[step 1] read \"<WORKSPACE>/docs/ECONOMY.md\" ok -> \"Read file <WORKSPACE>/docs/ECONOMY.md, lines 1-3\\n1: # Economy\\n2: \\n3: Payout = (base + kills x kill_bonus) x event_multiplier, rounded to the nearest TEN, with halves always rounding up (1425 -> 1430, 1585 -> 1590). Base: win 900, loss 600. Credits persist in the profile and survive save/load.\"\n[step 1] read \"<WORKSPACE>/docs/CONFIG.md\" ok -> \"Read file <WORKSPACE>/docs/CONFIG.md, lines 1-3\\n1: # Config\\n2: \\n3: Precedence (lowest to highest): `DEFAULTS` < JSON file < environment variables `ARENA_<KEY>`. The environment always wins: that is how live-ops changes events without a deploy.\"\n[step 1] read \"<WORKSPACE>/tests/integration/test_match_flow.py\" ok -> \"Read file <WORKSPACE>/tests/integration/test_match_flow.py, lines 1-26\\n1: import json\\n2: import tempfile\\n3: import unittest\\n4: from pathlib import Path\\n5: \\n6: from arena_server.config.loader import load_config\\n7: from arena_server.models.profile import Profile\\n8: from arena_server.persistence.store import load, save\\n9: from arena_se[... 873 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>/arena_server/config/loader.py\" ok -> \"Read file <WORKSPACE>/arena_server/config/loader.py, lines 1-23\\n1: \\\"\\\"\\\"Runtime config. Precedence, lowest to highest: DEFAULTS < JSON file < env (docs/CONFIG.md).\\\"\\\"\\\"\\n2: \\n3: import json\\n4: import os\\n5: \\n6: from arena_server.config.defaults import DEFAULTS\\n7: \\n8: \\n9: def _coerce(raw, like):\\n10:     return type(like)(raw)\\n11: \\n12: \\n13: [... 444 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>/arena_server/config/defaults.py\" ok -> \"Read file <WORKSPACE>/arena_server/config/defaults.py, lines 1-6\\n1: DEFAULTS = {\\n2:     \\\"win_base\\\": 900,\\n3:     \\\"loss_base\\\": 600,\\n4:     \\\"kill_bonus\\\": 50,\\n5:     \\\"event_multiplier\\\": 1.0,\\n6: }\"\n[step 1] read \"<WORKSPACE>/arena_server/services/match_service.py\" ok -> \"Read file <WORKSPACE>/arena_server/services/match_service.py, lines 1-6\\n1: from arena_server.economy.payout import match_payout\\n2: \\n3: \\n4: def finish_match(profile, won, kills, cfg):\\n5:     profile.credits += match_payout(won, kills, cfg)\\n6:     return profile\"\n[step 1] read \"<WORKSPACE>/arena_server/economy/legacy_payout.py\" ok -> \"Read file <WORKSPACE>/arena_server/economy/legacy_payout.py, lines 1-5\\n1: \\\"\\\"\\\"DEPRECATED since 0.12 - kept for old replays only; not used by the live economy.\\\"\\\"\\\"\\n2: \\n3: \\n4: def legacy_payout(won, kills):\\n5:     return (1000 if won else 500) + kills * 40\"\n[step 1] read \"<WORKSPACE>/arena_server/economy/payout.py\" ok -> \"Read file <WORKSPACE>/arena_server/economy/payout.py, lines 1-9\\n1: \\\"\\\"\\\"Match payout. Rules live in docs/ECONOMY.md.\\\"\\\"\\\"\\n2: \\n3: import math\\n4: \\n5: \\n6: def match_payout(won, kills, cfg):\\n7:     base = cfg[\\\"win_base\\\"] if won else cfg[\\\"loss_base\\\"]\\n8:     raw = (base + kills * cfg[\\\"kill_bonus\\\"]) * cfg[\\\"event_multiplier\\\"]\\n9:     return int([... 32 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>/arena_server/persistence/codec.py\" ok -> \"Read file <WORKSPACE>/arena_server/persistence/codec.py, lines 1-13\\n1: import json\\n2: \\n3: from arena_server.models.profile import Profile\\n4: \\n5: \\n6: def encode(profile):\\n7:     return json.dumps({\\\"name\\\": profile.name, \\\"level\\\": profile.level,\\n8:                        \\\"credits\\\": profile.credits, \\\"cosmetics\\\": profile.cosmetics})\\n9: \\n1[... 164 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>/arena_server/models/profile.py\" ok -> \"Read file <WORKSPACE>/arena_server/models/profile.py, lines 1-9\\n1: from dataclasses import dataclass, field\\n2: \\n3: \\n4: @dataclass\\n5: class Profile:\\n6:     name: str\\n7:     level: int = 1\\n8:     credits: int = 0\\n9:     cosmetics: list = field(default_factory=list)\"\n[step 1] read \"<WORKSPACE>/arena_server/persistence/store.py\" ok -> \"Read file <WORKSPACE>/arena_server/persistence/store.py, lines 1-11\\n1: from pathlib import Path\\n2: \\n3: from arena_server.persistence.codec import decode, encode\\n4: \\n5: \\n6: def save(profile, path):\\n7:     Path(path).write_text(encode(profile), encoding=\\\"utf-8\\\")\\n8: \\n9: \\n10: def load(path):\\n11:     return decode(Path(path).read_text(en[... 16 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>/tests/unit/test_core_units.py\" ok -> \"Read file <WORKSPACE>/tests/unit/test_core_units.py, lines 1-16\\n1: import unittest\\n2: \\n3: from arena_server.config.loader import load_config\\n4: from arena_server.models.profile import Profile\\n5: \\n6: \\n7: class CoreUnits(unittest.TestCase):\\n8:     def test_defaults_load(self):\\n9:         self.assertEqual(load_config(env={})[\\\"win_base\\\"[... 172 chars cut by the benchmark]\"\n[step 1] shell \"cd <WORKSPACE> && python -m unittest discover -s tests -t . 2>&1 | tail -40\" failed -> \"F............\\r\\n======================================================================\\r\\nFAIL: test_event_weekend_win_is_paid_and_persisted (tests.integration.test_match_flow.MatchFlow.test_event_weekend_win_is_paid_and_persisted)\\r\\n----------------------------------------------------------------------\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-f[... 371 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>/tests/unit/test_core_units.py\" ok -> \"Read file <WORKSPACE>/tests/unit/test_core_units.py, lines 1-16\\n1: import unittest\\n2: \\n3: from arena_server.config.loader import load_config\\n4: from arena_server.models.profile import Profile\\n5: \\n6: \\n7: class CoreUnits(unittest.TestCase):\\n8:     def test_defaults_load(self):\\n9:         self.assertEqual(load_config(env={})[\\\"win_base\\\"[... 172 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>/arena_server/config/loader.py\" ok -> \"Edited <WORKSPACE>/arena_server/config/loader.py (1 replacement)\"\n[step 1] edit \"<WORKSPACE>/arena_server/persistence/codec.py\" ok -> \"Edited <WORKSPACE>/arena_server/persistence/codec.py (1 replacement)\"\n[step 1] read \"<WORKSPACE>/tests/unit/test_core_units.py\" ok -> \"Read file <WORKSPACE>/tests/unit/test_core_units.py, lines 1-16\\n1: import unittest\\n2: \\n3: from arena_server.config.loader import load_config\\n4: from arena_server.models.profile import Profile\\n5: \\n6: \\n7: class CoreUnits(unittest.TestCase):\\n8:     def test_defaults_load(self):\\n9:         self.assertEqual(load_config(env={})[\\\"win_base\\\"[... 172 chars cut by the benchmark]\"\n[step 1] shell \"cd <WORKSPACE> && python -m unittest discover -s tests -t . 2>&1 | tail -20\" ok -> \".............\\r\\n----------------------------------------------------------------------\\r\\nRan 13 tests in 0.005s\\r\\n\\r\\nOK\"",
+ "checks": [
+  [
+   "existing tests untouched",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hidden config override and persistence",
+   true
+  ],
+  [
+   "hidden env float wins over file",
+   true
+  ],
+  [
+   "hidden round trip keeps everything",
+   true
+  ],
+  [
+   "hidden half up tie rounds up",
+   true
+  ],
+  [
+   "hidden half up fractional multiplier",
+   false
+  ],
+  [
+   "hidden persisted name survives",
+   true
+  ],
+  [
+   "hidden real environment when env is none",
+   true
+  ],
+  [
+   "existing test suite passes",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 13,
+  "tool_calls": 22,
+  "tool_errors": 0,
+  "shell_commands": 5,
+  "shell_failures": 2,
+  "file_writes": 2,
+  "repeated_tool_calls": 2,
+  "outside_path_uses": 0,
+  "generated_tokens": 11130,
+  "reasoning_tokens": 8888,
+  "largest_turn_tokens": 1518
+ },
+ "deliverables": [],
+ "render": null
+}

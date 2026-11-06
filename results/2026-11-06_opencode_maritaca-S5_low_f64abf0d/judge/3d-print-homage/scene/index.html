@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>The Great Wave off Kanagawa — low poly 3D wallpaper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500&family=Spectral:wght@300;400&display=swap" rel="stylesheet"/>
+<style>
+  :root{ --ink:#173059; --cream:#efe6cf; }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ width:100%; height:100%; background:#0c1a2e; overflow:hidden; }
+  body{ font-family:'Spectral',Georgia,serif; color:var(--ink); }
+  #app{ position:fixed; inset:0; }
+  canvas{ display:block; width:100%; height:100%; }
+  .plate{
+    position:fixed; left:50%; bottom:clamp(18px,4vh,40px); transform:translateX(-50%);
+    text-align:center; z-index:5; pointer-events:none; user-select:none;
+    opacity:.92; mix-blend-mode:multiply;
+  }
+  .plate .jp{ font-family:'Shippori Mincho',serif; font-size:clamp(15px,2.4vw,26px); letter-spacing:.18em; }
+  .plate .en{ font-size:clamp(9px,1.1vw,13px); letter-spacing:.34em; text-transform:uppercase; opacity:.6; margin-top:6px; }
+  .plate .by{ font-size:clamp(8px,.9vw,11px); letter-spacing:.18em; opacity:.45; margin-top:3px; font-style:italic; }
+  .sig{
+    position:fixed; top:clamp(14px,3vh,30px); right:clamp(14px,3vw,34px); z-index:5;
+    writing-mode:vertical-rl; font-family:'Shippori Mincho',serif;
+    font-size:clamp(10px,1.3vw,16px); letter-spacing:.22em; opacity:.5;
+    border-right:1px solid rgba(23,48,89,.35); padding-right:8px; pointer-events:none;
+  }
+  @media (max-width:640px){ .sig{ display:none; } }
+</style>
+<script type="importmap">
+{ "imports": { "three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="app"></div>
+<div class="sig">北斎</div>
+<div class="plate">
+  <div class="jp">神奈川沖浪裏</div>
+  <div class="en">The Great Wave off Kanagawa</div>
+  <div class="by">after Katsushika Hokusai · low poly tribute</div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+window.__errs=[];
+window.addEventListener('error',e=>{window.__errs.push(String(e.message||e)+' @'+(e.lineno||'?'));});
+
+/* ──────────────── palette (sampled from the print) ──────────────── */
+const C = {
+  deepBlue : new THREE.Color('#173059'),
+  indigo   : new THREE.Color('#2c5a86'),
+  pale     : new THREE.Color('#8cafc4'),
+  foam     : new THREE.Color('#f0efe8'),
+  tan      : new THREE.Color('#cba378'),
+  cream    : new THREE.Color('#efe6cf'),
+  haze     : new THREE.Color('#5b5e5b'),
+  gold     : new THREE.Color('#e8b4a0'),
+};
+
+/* ──────────────── renderer / camera ──────────────── */
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false, preserveDrawingBuffer:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(app.clientWidth, app.clientHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+app.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = C.cream.clone();
+scene.fog = new THREE.Fog(C.haze.clone(), 60, 190);
+
+const camera = new THREE.OrthographicCamera(-16, 16, 12, -12, 0.1, 400);
+camera.position.set(0, 4.2, 60);
+camera.lookAt(0, 2.2, 0);
+const BASE_FRUSTUM = 16;
+
+/* ──────────────── lights ──────────────── */
+scene.add(new THREE.AmbientLight(C.foam.clone(), 0.62));
+const sun = new THREE.DirectionalLight(C.gold.clone(), 0.95);
+sun.position.set(-26, 34, 40);
+scene.add(sun);
+const shade = new THREE.DirectionalLight(C.deepBlue.clone(), 0.45);
+shade.position.set(30, 18, -20);
+scene.add(shade);
+const skyFill = new THREE.HemisphereLight(C.pale.clone(), C.deepBlue.clone(), 0.30);
+skyFill.position.set(0, 20, 0);
+scene.add(skyFill);
+
+/* ──────────────── water surface + swell field ──────────────── */
+const SEA_W = 150, SEA_D = 70;
+const seaGeo = new THREE.PlaneGeometry(SEA_W, SEA_D, 200, 90);
+seaGeo.rotateX(-Math.PI / 2);
+
+// analytic gentle swell field used by both the mesh and the boats
+const SWELL = [ // amplitude, freqU, freqV, phase, tilt(dir)
+  [0.30, 0.055, 0.020, 0.6, 0.0],
+  [0.24, 0.038, 0.045, 2.3, 0.0],
+  [0.18, 0.080, 0.030, 4.1, 0.0],
+];
+function swellAt(x, z, t){
+  let h = 0, sx = 0, sz = 0;
+  for(const [a,fu,fv,ph] of SWELL){
+    const k = fu*x + fv*z + ph + t*0.7;
+    h += Math.sin(k)*a;
+    sx += Math.cos(k)*a*fu;
+    sz += Math.cos(k)*a*fv;
+  }
+  return {h, sx, sz};
+}
+
+const seaMat = new THREE.ShaderMaterial({
+  side: THREE.DoubleSide,
+  uniforms:{
+    uTime:{value:0},
+    cDeep:{value:C.deepBlue.clone()},
+    cMid:{value:C.indigo.clone()},
+    cPale:{value:C.pale.clone()},
+    cFoam:{value:C.foam.clone()},
+  },
+  vertexShader:`
+    uniform float uTime;
+    varying vec3 vView;
+    varying float vH;
+    varying float vSpray;
+    void main(){
+      vec3 p = position;
+      float h = 0.0;
+      float amp = 0.30;
+      for(int i=0;i<3;i++){
+        float k = 0.055*p.x + 0.020*p.z + 0.6 + uTime*0.7;
+        h += sin(k)*amp;
+        amp *= 0.8;
+      }
+      p.y += h;
+      vH = h;
+      vec4 mv = modelViewMatrix * vec4(p,1.0);
+      vView = -mv.xyz;
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader:`
+    precision highp float;
+    uniform vec3 cDeep,cMid,cPale,cFoam;
+    varying vec3 vView;
+    varying float vH;
+    void main(){
+      vec3 n = normalize(cross(dFdx(vView), dFdy(vView)));
+      float fres = pow(1.0 - max(dot(n, vec3(0.,0.,1.)),0.), 2.5);
+      float h = clamp((vH+0.5)/1.0, 0., 1.);
+      vec3 col = mix(cDeep, cMid, h);
+      col = mix(col, cPale, smoothstep(0.45,0.8,h));
+      float spray = smoothstep(0.62,0.95,h);
+      col = mix(col, cFoam, spray*0.9);
+      col += cFoam * fres * 0.22;
+      gl_FragColor = vec4(col, 1.0);
+    }`,
+});
+const sea = new THREE.Mesh(seaGeo, seaMat);
+sea.position.set(0, 0, 10);
+scene.add(sea);
+
+/* ──────────────── THE GREAT WAVE (sculpted band geometry) ──────────────── */
+// Profile across the wave (x: tail→crest→trough→rider), sampled from the print.
+const PROF_X = [-6.2,-5.0,-3.8,-2.6,-1.4,-0.2, 1.1, 2.4, 3.8, 5.2, 6.6, 8.2, 9.8,11.6];
+const PROF_H = [ 0.5, 0.9, 1.7, 3.3, 5.0, 5.4, 4.2, 2.4, 1.1, 0.4, 0.35,0.5, 0.8, 1.4 ];
+const PROF_Z = [ 0.0,-0.4,-1.0,-1.6,-2.0,-2.1,-1.6,-0.8,-0.2, 0.4, 0.9, 1.3, 1.7, 2.1 ];
+
+function makeWaveBand(profiles, opts){
+  const {depthSegs=4, taper=0.45, twist=0.30, droop=0.10} = opts;
+  const R = [];
+  for(const s of profiles){
+    const pts=[];
+    for(let i=0;i<=depthSegs;i++){
+      const f=i/depthSegs;
+      const rBase = 1.6*(1-f)*(1-f*taper) + 0.55*(1-f);
+      const cx = Math.cos(s.cx=Math.PI*0.5+f*twist)*rBase;
+      const cy = Math.sin(s.cy=Math.PI*0.5+f*twist)*rBase;
+      pts.push(new THREE.Vector3(cx, cy, -(f*depthSegs*0.0)) );
+    }
+    R.push(pts);
+  }
+  const geo=new THREE.BufferGeometry();
+  const pos=[],uv=[],idx=[];
+  let vi=0;
+  for(let ri=0;ri<profiles.length;ri++){
+    const pf=profiles[ri], row=R[ri];
+    for(let ci=0;ci<=depthSegs;ci++){
+      const f=ci/depthSegs, w=f*2-1;
+      const x=pf.x + (ci===0?0:row[ci].x) ;
+      const y=pf.y + row[ci].y - droop*f*f;
+      pos.push(x,y,z=>0);
+    }
+  }
+  // simpler explicit grid
+  pos.length=0; uv.length=0; vi=0;
+  const rows=[], cols=[];
+  for(let ri=0;ri<profiles.length;ri++){
+    const pf=profiles[ri];
+    for(let ci=0;ci<=depthSegs;ci++){
+      const f=ci/depthSegs;
+      const rBase = 1.6*(1-f)*(1-f*taper)+0.55*(1-f);
+      const ang = Math.PI*0.5 + f*twist;
+      const lx = Math.cos(ang)*rBase;
+      const ly = Math.sin(ang)*rBase - droop*f*f;
+      rows.push([pf.x+lx, pf.y+ly]);
+      cols.push(ci);
+      uv.push(f, ri/(profiles.length-1));
+    }
+  }
+  for(let ri=0;ri<profiles.length;ri++)
+    for(let ci=0;ci<=depthSegs;ci++)
+      pos.push(rows[ri*(depthSegs+1)+ci][0], rows[ri*(depthSegs+1)+ci][1], 0);
+  for(let ri=0;ri<profiles.length-1;ri++)
+    for(let ci=0;ci<depthSegs;ci++){
+      const a=vi++, b=vi++;
+      idx.push(a,b, a+1, b,b+1,a+1);
+    }
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv,2));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+const waveProfiles = PROF_X.map((x,i)=>({x, y:PROF_H[i], z:PROF_Z[i]}));
+const waveGeo = makeWaveBand(waveProfiles, {depthSegs:8, taper:0.5, twist:0.34, droop:0.12});
+
+const rockMat = new THREE.MeshStandardMaterial({color:C.deepBlue.clone(), roughness:0.95, metalness:0.05, flatShading:true});
+const sandMat = new THREE.MeshStandardMaterial({color:C.foam.clone(), roughness:1.0, metalness:0.0, flatShading:true});
+const rootMat = new THREE.MeshStandardMaterial({color:new THREE.Color('#122844'), roughness:1.0, flatShading:true});
+const trunkMat = new THREE.MeshStandardMaterial({color:new THREE.Color('#20314a'), roughness:1.0, flatShading:true});
+const leafMat = new THREE.MeshStandardMaterial({color:new THREE.Color('#22406a'), roughness:1.0, flatShading:true});
+const mistMat = new THREE.MeshBasicMaterial({color:C.pale.clone(), transparent:true, opacity:0.22, depthWrite:false});
+
+function addRock(x,y,z,scale,color){
+  const g=new THREE.IcosahedronGeometry(1,0);
+  const m=new THREE.Mesh(g, color||rockMat);
+  m.scale.set(scale[0],scale[1],scale[2]);
+  m.position.set(x,y,z);
+  m.rotation.set(Math.random()*6,Math.random()*6,Math.random()*6);
+  scene.add(m);
+  return m;
+}
+function addTree(x,y,z,h){
+  const trunk=new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.12,h*0.5,5), trunkMat);
+  trunk.position.set(x,y+h*0.25,z); scene.add(trunk);
+  for(let i=0;i<3;i++){
+    const cone=new THREE.Mesh(new THREE.ConeGeometry(0.5-i*0.12,h*0.22,6), leafMat);
+    cone.position.set(x,y+h*(0.5+i*0.16),z);
+    cone.rotation.set(0,Math.random()*6,0);
+    scene.add(cone);
+  }
+}
+
+/* ──────────────── MOUNT FUJI ──────────────── */
+(function buildFuji(){
+  const Z=-52, baseY=0;
+  const R=6.4, H=9.8;           // wide-ish snow volcano
+  // layered cones
+  const layers=[
+    {r:R,   y:baseY,       mat:rockMat},
+    {r:R*0.78,y:baseY+H*0.18, mat:rockMat},
+    {r:R*0.55,y:baseY+H*0.45, mat:sandMat},
+    {r:R*0.30,y:baseY+H*0.74, mat:sandMat},
+    {r:R*0.12,y:baseY+H*0.96, mat:sandMat},
+  ];
+  for(const L of layers){
+    const g=new THREE.ConeGeometry(L.r, H*0.34, 8, 1, true);
+    const m=new THREE.Mesh(g, L.mat);
+    m.position.set(0, L.y + H*0.17, Z);
+    m.rotation.y = Math.random()*6;
+    scene.add(m);
+  }
+  // ridged slopes (icosphere shells) for faceted volume
+  for(let i=0;i<7;i++){
+    const a=i/7;
+    const rad=R*(1-a*0.55);
+    const yy=baseY + a*H*0.9;
+    const m=addRock((Math.random()-0.5)*rad*1.2, yy, Z+(Math.random()-0.5)*rad*0.6, [rad*0.6, H*0.16, rad*0.6], rockMat);
+  }
+  // snow cap
+  const cap=new THREE.Mesh(new THREE.ConeGeometry(R*0.16, H*0.14, 8), new THREE.MeshStandardMaterial({color:C.foam.clone(),roughness:0.9,flatShading:true}));
+  cap.position.set(0, baseY+H*1.0, Z);
+  scene.add(cap);
+  // surrounding mist shelf
+  for(let i=0;i<5;i++){
+    const m=new THREE.Mesh(new THREE.BoxGeometry(R*2.4,0.18,R*2.4), mistMat);
+    m.position.set((Math.random()-0.5)*4, baseY+H*0.3+i*0.5, Z+(Math.random()-0.5)*4);
+    scene.add(m);
+  }
+})();
+
+/* ──────────────── background land + tree line (framing) ──────────────── */
+(function buildLand(){
+  const g=new THREE.PlaneGeometry(40, 14, 1, 1);
+  g.rotateX(-Math.PI/2);
+  const m=new THREE.Mesh(g, new THREE.MeshStandardMaterial({color:new THREE.Color('#1b3252'), roughness:1, flatShading:true}));
+  m.position.set(0, 0.02, -20);
+  scene.add(m);
+  // rolling hills silhouettes
+  for(let i=0;i<6;i++){
+    const hill=new THREE.Mesh(new THREE.IcosahedronGeometry(1,0), new THREE.MeshStandardMaterial({color:new THREE.Color('#16304e'),roughness:1,flatShading:true}));
+    hill.scale.set(6+Math.random()*4, 1.4+Math.random()*1.2, 3+Math.random()*2);
+    hill.position.set(-18+i*6+Math.random()*2, 0.4, -14-Math.random()*6);
+    scene.add(hill);
+  }
+  // conifers along the ridge
+  for(let i=0;i<9;i++){
+    addTree(-20+i*4.6+Math.random()*1.5, 0.6, -12-Math.random()*4, 3.2+Math.random()*1.6);
+  }
+  // near shore sand lip
+  const lip=new THREE.Mesh(new THREE.PlaneGeometry(40,6,1,1), new THREE.MeshStandardMaterial({color:new THREE.Color('#d8ccb0'),roughness:1,flatShading:true}));
+  lip.geometry.rotateX(-Math.PI/2);
+  lip.position.set(0,0.05,-2);
+  scene.add(lip);
+})();
+
+/* ──────────────── BOATS (low-poly wooden hulls) ──────────────── */
+const boats=[];
+function buildBoat(len=2.6){
+  const g=new THREE.Group();
+  // hull: stretched octahedron
+  const hullGeo=new THREE.OctahedronGeometry(1,0);
+  const hull=new THREE.Mesh(hullGeo, new THREE.MeshStandardMaterial({color:C.tan.clone(),roughness:0.85,metalness:0.05,flatShading:true}));
+  hull.scale.set(len, 0.42, 0.95);
+  g.add(hull);
+  // deck sheer
+  const deck=new THREE.Mesh(new THREE.BoxGeometry(len*0.9,0.1,0.7), new THREE.MeshStandardMaterial({color:new THREE.Color('#b98a5e'),roughness:0.9,flatShading:true}));
+  deck.position.y=0.32; g.add(deck);
+  // gunwales
+  for(const s of[-1,1]){
+    const rail=new THREE.Mesh(new THREE.BoxGeometry(len*0.95,0.16,0.12), trunkMat);
+    rail.position.set(0,0.45,s*0.42); g.add(rail);
+  }
+  // oars
+  const oarMat=new THREE.MeshStandardMaterial({color:new THREE.Color('#9c6b3f'),roughness:0.9,flatShading:true});
+  const N=5;
+  for(let i=0;i<N;i++){
+    for(const s of[-1,1]){
+      const oar=new THREE.Mesh(new THREE.CylinderGeometry(0.035,0.035,len*0.62,4), oarMat);
+      oar.rotation.x=Math.PI/2; oar.rotation.z=s*1.0;
+      oar.position.set(-len*0.35+i*(len*0.7/(N-1)), 0.30, s*0.5);
+      g.add(oar);
+    }
+  }
+  // crewmen (seated rowers)
+  const skin=new THREE.MeshStandardMaterial({color:new THREE.Color('#e8d4b0'),roughness:0.8,flatShading:true});
+  const gi=new THREE.MeshStandardMaterial({color:C.indigo.clone(),roughness:0.8,flatShading:true});
+  for(let i=0;i<N;i++){
+    const px=-len*0.35+i*(len*0.7/(N-1));
+    for(const s of[-1,1]){
+      const body=new THREE.Mesh(new THREE.CapsuleGeometry(0.13,0.2,4,4), gi);
+      body.position.set(px,0.45,s*0.26); body.rotation.x=0.5; g.add(body);
+      const head=new THREE.Mesh(new THREE.SphereGeometry(0.09,6,6), skin);
+      head.position.set(px,0.62,s*0.26); g.add(head);
+    }
+  }
+  // raised prow
+  const prow=new THREE.Mesh(new THREE.ConeGeometry(0.18,len*0.25,4), trunkMat);
+  prow.rotation.z=-0.5; prow.position.set(len*0.45,0.4,0); g.add(prow);
+  // mast stub
+  const mast=new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,0.5,4), trunkMat);
+  mast.position.set(-len*0.1,0.55,0); g.add(mast);
+  return g;
+}
+
+function placeBoat(x,z,heading,tilt,amp,kind){
+  const len = kind==='big'?2.9: kind==='mid'?2.3:1.7;
+  const b=buildBoat(len);
+  b.userData={x0:x, z0:z, heading, tilt, amp, phase:Math.random()*6, kind};
+  b.position.set(x,0,z);
+  scene.add(b);
+  boats.push(b);
+}
+
+// three cargo boats in the great wave's trough, bow bearing right (+X)
+placeBoat(-1.4, -6.0, 0.10, 0.18, 0.55, 'big');   // foreground rider, most tilted
+placeBoat( 4.2, -8.0, 0.05, 0.10, 0.40, 'mid');   // mid trough right-of-Fuji
+placeBoat(-7.2, -5.2, 0.14, 0.22, 0.65, 'small'); // trailing in the swell behind the crest
+
+/* ──────────────── WAVE CREATURE sculpted bands (the claw crest) ──────────────── */
+// We rebuild the band cleanly here so normals face outward/down toward viewer.
+function waveCreatureMesh(profiles, opts, material){
+  const {twist=0.5, drop=0.16}=opts;
+  const pos=[], uv=[], idx=[];
+  const rows=profiles.length, cols=7;
+  for(let ri=0;ri<rows;ri++){
+    const pf=profiles[ri];
+    for(let ci=0;ci<=cols;ci++){
+      const f=ci/cols;
+      const r=(1-f)*(1.5)+0.5*(1-f*0.6);
+      const ang=Math.PI*0.5+f*twist;
+      const lx=Math.cos(ang)*r;
+      const ly=Math.sin(ang)*r-drop*f*f;
+      pos.push(pf.x+lx, pf.y+ly, pf.z*(0.6)+ (1-f)*0.6);
+      uv.push(f, ri/(rows-1));
+    }
+  }
+  for(let ri=0;ri<rows-1;ri++)
+    for(let ci=0;ci<cols;ci++){
+      const a=ri*(cols+1)+ci;
+      idx.push(a, a+cols+1, a+1, a+1, a+cols+1, a+cols+2);
+    }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+  geo.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  const m=new THREE.Mesh(geo, material);
+  m.castShadow=true; m.receiveShadow=true;
+  return m;
+}
+
+const matDeep = new THREE.MeshStandardMaterial({color:C.deepBlue.clone(),roughness:0.95,metalness:0.05,flatShading:true,side:THREE.DoubleSide});
+const matPale = new THREE.MeshStandardMaterial({color:C.pale.clone(),roughness:0.9,flatShading:true,side:THREE.DoubleSide});
+
+for(let i=0;i<waveProfiles.length-1;i++){
+  const seg=waveProfiles.slice(i,i+2);
+  if(seg.length<2) continue;
+  const fine=[];
+  for(let j=0;j<=8;j++){
+    const f=j/8;
+    fine.push({
+      x: seg[0].x+(seg[1].x-seg[0].x)*f,
+      y: seg[0].y+(seg[1].y-seg[0].y)*f - Math.sin(f*Math.PI)*0.5,
+      z: seg[0].z+(seg[1].z-seg[0].z)*f,
+    });
+  }
+  const m=waveCreatureMesh(fine,{twist:0.45,drop:0.14}, (i%2===0)?matDeep:matDeep);
+  m.position.set(0,0.0,0);
+  m.userData.baseY=0;
+  scene.add(m);
+}
+
+// foam streaks along crests
+(function foamStreaks(){
+  const matF=new THREE.MeshBasicMaterial({color:C.foam.clone(),transparent:true,opacity:0.5,depthWrite:false,side:THREE.DoubleSide});
+  for(let i=0;i<7;i++){
+    const x=-5+i*1.6+Math.random()*0.6;
+    const st=new THREE.Mesh(new THREE.PlaneGeometry(0.18, 1.0+Math.random()*1.6), matF);
+    st.position.set(x, 3.4+Math.random()*1.4, -1.5-Math.random()*1.5);
+    st.rotation.set(-0.2+Math.random()*0.4, 0, Math.random()*0.4);
+    scene.add(st);
+  }
+})();
+
+/* ──────────────── spray particles ──────────────── */
+const SPRAY_N=240;
+const sprayGeo=new THREE.BufferGeometry();
+const sp=new Float32Array(SPRAY_N*3);
+const sv=[];
+for(let i=0;i<SPRAY_N;i++){
+  const u=Math.random(), v=Math.random();
+  const x=-6+u*16, y=2+v*4, z=-6-v*8;
+  sp[i*3]=x; sp[i*3+1]=y; sp[i*3+2]=z;
+  sv.push({vx:(Math.random()-0.5)*0.4, vy:-Math.random()*0.8-0.2, vz:(Math.random()-0.5)*0.3, life:Math.random()});
+}
+sprayGeo.setAttribute('position',new THREE.InstancedBufferAttribute(sp,3));
+const sprayMat=new THREE.PointsMaterial({color:C.foam.clone(),size:0.10,transparent:true,opacity:0.75,sizeAttenuation:true});
+const spray=new THREE.Points(sprayGeo,sprayMat);
+scene.add(spray);
+
+/* ──────────────── wind & rain of tiny drops ──────────────── */
+const DROP_N=160;
+const dropGeo=new THREE.BufferGeometry();
+const dp=new Float32Array(DROP_N*3);
+const dv=[];
+for(let i=0;i<DROP_N;i++){
+  dp[i*3]=(Math.random()-0.5)*24;
+  dp[i*3+1]=Math.random()*12;
+  dp[i*3+2]=-2-Math.random()*10;
+  dv.push({vy:-2-Math.random()*3, vx:-1.5-Math.random()});
+}
+dropGeo.setAttribute('position',new THREE.InstancedBufferAttribute(dp,3));
+const dropMat=new THREE.PointsMaterial({color:C.pale.clone(),size:0.06,transparent:true,opacity:0.35,sizeAttenuation:true});
+const drops=new THREE.Points(dropGeo,dropMat);
+scene.add(drops);
+
+/* ──────────────── slow camera sway (gentle motion) ──────────────── */
+let t=0;
+const clock=new THREE.Clock();
+
+/* ──────────────── resize ──────────────── */
+function resize(){
+  const w=app.clientWidth, h=app.clientHeight;
+  renderer.setSize(w,h);
+  const aspect=w/h;
+  const frustumHalf = BASE_FRUSTUM;
+  camera.left=-frustumHalf;
+  camera.right=frustumHalf;
+  camera.top=frustumHalf/aspect;
+  camera.bottom=-frustumHalf/aspect;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize',resize);
+resize();
+
+/* ──────────────── animate ──────────────── */
+function tick(){
+  requestAnimationFrame(tick);
+  const dt=Math.min(clock.getDelta(),0.05);
+  t+=dt;
+  const time=t;
+
+  sea.material.uniforms.uTime.value=time;
+
+  // boats ride the analytical swell
+  for(const b of boats){
+    const u=b.userData;
+    const s=swellAt(u.x0,u.z0,time);
+    b.position.x=u.x0;
+    b.position.z=u.z0;
+    b.position.y=3.5+s.h+Math.sin(time*1.1+u.phase)*0.18;
+    b.rotation.z = -u.heading + s.sx*0.5 + Math.sin(time*0.9+u.phase)*0.06;
+    b.rotation.x = u.tilt + s.sz*0.4;
+    b.rotation.y = Math.sin(time*0.5+u.phase)*0.05;
+  }
+
+  // spray cycle
+  const arr=spray.geometry.attributes.position.array;
+  for(let i=0;i<SPRAY_N;i++){
+    const v=sv[i];
+    v.life-=dt*0.6;
+    if(v.life<=0){
+      v.life=1;
+      arr[i*3]=-6+Math.random()*16;
+      arr[i*3+1]=2+Math.random()*4;
+      arr[i*3+2]=-6-Math.random()*8;
+      v.vx=(Math.random()-0.5)*0.4; v.vy=-Math.random()*0.8-0.2; v.vz=(Math.random()-0.5)*0.3;
+    }
+    arr[i*3]+=v.vx*dt; arr[i*3+1]+=v.vy*dt; arr[i*3+2]+=v.vz*dt;
+  }
+  spray.geometry.attributes.position.needsUpdate=true;
+  sprayMat.opacity=0.5+0.3*Math.sin(time*1.3);
+
+  // drops drift
+  const da=drops.geometry.attributes.position.array;
+  for(let i=0;i<DROP_N;i++){
+    const v=dv[i];
+    da[i*3]+=v.vx*dt; da[i*3+1]+=v.vy*dt;
+    if(da[i*3+1]<0){ da[i*3+1]=12; da[i*3]=(Math.random()-0.5)*24; }
+    if(da[i*3]<-12){ da[i*3]=12; }
+  }
+  drops.geometry.attributes.position.needsUpdate=true;
+
+  // gentle camera breathing / parallax
+  camera.position.x = Math.sin(time*0.18)*1.6;
+  camera.position.y = 4.2 + Math.sin(time*0.24)*0.8;
+  camera.lookAt(Math.sin(time*0.1)*0.6, 2.2, -6);
+
+  renderer.render(scene,camera);
+
+  // self-probe: sample pixels inside the same rAF that draws (for live validation)
+  try{
+    const gl=renderer.getContext();
+    const W=renderer.domElement.width, H=renderer.domElement.height;
+    const bb=new Uint8Array(4);
+    const rd=(x,y)=>{ gl.readPixels(x,H-y-1,1,1,gl.RGBA,gl.UNSIGNED_BYTE,bb); return '#'+[bb[0],bb[1],bb[2]].map(v=>v.toString(16).padStart(2,'0')).join(''); };
+    window.__probe={frame:performance.now(), sky:rd(W>>1,90), upper:rd(W>>1,(H*0.35)|0), mid:rd(W>>1,(H*0.55)|0), lowL:rd((W*0.25)|0,(H*0.78)|0), lowR:rd((W*0.72)|0,(H*0.8)|0)};
+    window.__err=null;
+  }catch(e){ window.__err=String(e); }
+}
+tick();
+</script>
+</body>
+</html>
