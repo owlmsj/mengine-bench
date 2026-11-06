@@ -11,7 +11,7 @@ the Score, and a Cost kept apart.
 | **Score** | `0.5 x Correct % + 0.25 x Judge + 0.25 x Speed x Correct % / 100`, one decimal, from the published values. Speed pays only for work that is right. Only once judged. |
 | **Time** | Total agent wall seconds. Grading and judging are excluded; a timeout counts its full time. On Codex the clock stops at the final event (`turn.completed`); a process still alive 5 s later is ended and flagged, not counted as a timeout. |
 | **Cost** | One column (#162): `$x` exact when the harness reports it, else `~$x`, the run's tokens at public API list prices (below), so subscription and API runs compare; `$0.00 (local)` for local inference, `>=` a lower bound, `n/a` neither. No points per dollar. |
-| **Thinking, Tools, Tool s** | Reasoning tokens, tool calls, and the median seconds per tool call where the harness times each call (opencode, AGY, Claude Code event stamps; `-` on Codex, never estimated). Statistics only, no points (#162). |
+| **Thinking, Tools, Tool s** | Reasoning tokens, tool calls, and the median seconds per tool call where the harness times each call (opencode, AGY, pi, Claude Code event stamps; `-` on Codex, never estimated). Statistics only, no points (#162). |
 
 The formulas live in `mengine_bench/scoring.py`. Runs compare when they ran the
 same bench major.minor (2.0.x), or an older minor the owner kept ranked by decision (`RANKED_WITH_CURRENT`, #139), marked on
@@ -227,7 +227,7 @@ formula can be refined later from many runs.
 | `generated_tokens`, `reasoning_tokens` | Everything generated, reasoning included, and the reasoning part; on Claude, a run stopped before its result gives a lower bound |
 | `largest_turn_tokens` | The largest single turn; Claude does not report it |
 | `first_tool_s`, `first_write_s`, `last_event_s` | Seconds from the first event; opencode only |
-| `tool_s`, `wait_s` | Time in tools, and between turns (prefill, queue); opencode only, plus `tool_s` on AGY |
+| `tool_s`, `wait_s` | Time in tools, and between turns (prefill, queue); opencode only, plus `tool_s` on AGY and pi |
 | `turn_tps_median` | Median generated tokens per second, turns of 500 tokens or more; opencode and AGY |
 
 A value a harness does not report is `null`, never 0.

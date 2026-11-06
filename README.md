@@ -3,7 +3,7 @@
 **How well does your coding agent do real work, and how fast?** 28 everyday jobs,
 one Score, 12 to 25 minutes for the ranked setups so far (measured on bench 2.6). Every result is public and auditable.
 
-It grades the whole **agent**: the harness (Claude Code, Codex CLI, opencode, AGY or your
+It grades the whole **agent**: the harness (Claude Code, Codex CLI, opencode, AGY, pi or your
 own command) + the model + its effort + your hardware + your configuration. Change
 any of them and you have a different agent. It is an educational benchmark, not an
 official one: use it to learn how your setup behaves and to compare it with others.
@@ -101,6 +101,7 @@ Chromium); without one, their page checks are left out and the run says so.
 | Codex CLI | `codex` | `gpt-6.1-terra` | estimated at list prices ([docs/SCORING.md](docs/SCORING.md)); another model takes `--price input=X,cached=Y,output=Z` (USD per 1M tokens) |
 | opencode | `opencode` | `provider/model` | reported by the harness |
 | AGY | `agy` | `gemini-4-argon`, with `--effort high` | not reported |
+| pi | `pi` | `provider/model`, with `--effort low` (`--thinking`) | reported by the harness |
 | anything else | `cmd` | any label | `--cmd "my-agent --prompt-file {prompt_file}"` |
 
 Two tips for a fair run:
@@ -138,7 +139,7 @@ Paste this into a new session of the agent you want to measure:
 
 ````text
 Benchmark yourself with mengine-bench (https://github.com/owlmsj/mengine-bench).
-1. Find your harness (claude, codex, opencode or agy), the exact model id that CLI
+1. Find your harness (claude, codex, opencode, agy or pi), the exact model id that CLI
    accepts and your effort.
 2. Clone the repo if needed, cd into it, run `uv sync`.
 3. Run `uv run mengine-bench run --agent <harness> --model <model> [--effort
@@ -155,7 +156,7 @@ Report only values copied from command output. Never print credentials.
 
 - **Evals are open briefs.** Each states the context, the problem and the outcome wanted. How to get there is the agent's call; the result in `result.json` and the files it delivers are what get checked, never the chat.
 - **Everything its harness gives it** is allowed: shell, web, browsers, MCP servers, skills, subagents. Every step's prompt says so, and asks the agent to close the browser tabs, windows and apps it opened before it finishes. Reading the reference, the hidden tests or a published answer is not: the run gets rejected.
-- **Personal instructions count as configuration.** `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.config/opencode/AGENTS.md`, `~/.gemini/GEMINI.md` and any `CLAUDE.md` or `AGENTS.md` above the temp dir are recorded by name and shown on the leaderboard. Move them aside for a plain run.
+- **Personal instructions count as configuration.** `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.config/opencode/AGENTS.md`, `~/.gemini/GEMINI.md`, `~/.pi/agent/AGENTS.md` and any `CLAUDE.md` or `AGENTS.md` above the temp dir are recorded by name and shown on the leaderboard. Move them aside for a plain run.
 - **Memory across sessions is off inside the bench, on Codex and Claude** (`--disable memories`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY`). Daily use keeps it on. It carries earlier runs into this one, the same leak as an earlier workspace left on disk.
 - **Rankings compare the same bench version**, or an older minor the owner kept ranked, marked on its row (a row marked "rubric 2.5" waits for its re-judge). Older rankings stay on the leaderboard as history, with the Scores of their own formula.
 
