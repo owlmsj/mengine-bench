@@ -1,0 +1,57 @@
+{
+ "task_id": "ir-server-logs",
+ "prompts": [
+  "The game went down in June and we owe the team an incident report. The logs and their notes are in {WS}/logs. When did it start and end, how long was it, did we keep our monthly availability target, and why did it happen? Record it in {WS}/result.json: start, end, minutes_down, availability_june_pct, slo_999_ok, root_cause."
+ ],
+ "answers": [
+  "\n\n[goal] June incident report: window, duration, SLO, root cause → `./result.json`.\n\n[action] Read `logs/README.md` (defines: down = first save error → \"server ready\"; SLO 99.9%; one incident), grepped all 3 logs (5396 lines) for error/fatal/ready/disk lines, timed the window, computed availability over 30 days = 43200 min.\n\n[result] `./result.json` (valid JSON, verified by re-parse):\n- start `2026-06-02T03:17:42` (first `ERROR SaveGame failed: ... No space left on device`, line 251)\n- end `2026-06-02T03:53:31` (`INFO server ready, accepting players`, line 294)\n- minutes_down `35.82` (35 min 49 s = 2149 s)\n- availability_june_pct `99.9171` → slo_999_ok `true` (budget at 99.9% is 43.2 min; we used 35.8)\n- root cause: `/data` full. `WARN disk /data usage 97% (free 3.1 GB)` at 03:10:02 → autosave ENOSPC → unresponsive → `FATAL watchdog` → 41 restart attempts all `exited code 137` → recovered only after `backup rotation freed 38.2 GB` at 03:52:10.\n\nAssumptions: timestamps are local/server-clock, single timezone; availability counts the whole June (43200 min) with this one outage as the only downtime; minutes_down rounded to 2 decimals.\n\nExcluded as noise: `RCON auth failed from 203.0.113.12` on 06-01 (auth noise, no downtime); `mem_gb` 21.8–28.6 across the whole window, so exit 137 is the watchdog's SIGKILL, not OOM.\n\n[nnext] Optional follow-ups: alert on `/data` > 90% and make backup rotation run before the save path, not after; add a disk-full-aware restart backoff so the watchdog stops burning 41 attempts."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"start\": \"2026-06-02T03:17:42\",\n  \"end\": \"2026-06-02T03:53:31\",\n  \"minutes_down\": 35.82,\n  \"availability_june_pct\": 99.9171,\n  \"slo_999_ok\": true,\n  \"root_cause\": \"Disk /data filled to 100% (warned at 97%, only 3.1 GB free at 03:10:02). Autosave could not write /data/game/Saved/Level.sav (ENOSPC at 03:17:42), the server became unresponsive, the watchdog killed it (exit 137) and every restart attempt failed for ~34 minutes because the save directory was still full. Recovery only happened when backup rotation freed 38.2 GB at 03:52:10, letting the server start at 03:53:31. Not a memory issue (mem_gb stayed ~22-28 GB) and not the 06-01 RCON auth failures from 203.0.113.12, which were unrelated noise.\"\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"find ./logs -type f | head -50; echo ---; du -sh ./logs\" ok -> \"./logs/gameserver-2026-06-01.log\\n./logs/gameserver-2026-06-02.log\\n./logs/gameserver-2026-06-03.log\\n./logs/README.md\\n---\\n341K\\t./logs\"\n[step 1] read \"./logs/README.md\" ok -> \"Dedicated game server. Monthly availability SLO: 99.9%. Down = from the first save error to the 'server ready' line. June has 30 days; there is only one incident.\"\n[step 1] shell \"cd ./logs; wc -l *.log; echo ---; grep -nEi \\\"error|fatal|critical|panic|crash|down|outage|restart|OOM|exception\\\" *.log | head -60\" ok -> \"1800 gameserver-2026-06-01.log\\n  1794 gameserver-2026-06-02.log\\n  1802 gameserver-2026-06-03.log\\n  5396 total\\n---\\ngameserver-2026-06-01.log:685:2026-06-01 09:12:40 ERROR RCON auth failed from 203.0.113.12 (bad password)\\ngameserver-2026-06-02.log:251:2026-06-02 03:17:42 ERROR SaveGame failed: write /data/game/Saved/Level.sav: No space left on device\\ngameserver-2026-06-02.log:252:2026-06-02 03:18:00[... 4282 chars cut by the benchmark]\"\n[step 1] shell \"cd ./logs; grep -n \\\"server ready\\\" *.log; echo ---; sed -n '240,252p;288,320p' gameserver-2026-06-02.log\" ok -> \"gameserver-2026-06-02.log:294:2026-06-02 03:53:31 INFO server ready, accepting players\\n---\\n2026-06-02 03:09:37 INFO player joined steam_6619460972680713 players=19\\n2026-06-02 03:10:02 WARN disk /data usage 97% (free 3.1 GB)\\n2026-06-02 03:10:44 INFO player joined steam_7879220472709941 players=20\\n2026-06-02 03:11:11 INFO player left players=19\\n2026-06-02 03:11:51 INFO autosave ok 388 ms\\n2026-06-02 [... 2727 chars cut by the benchmark]\"\n[step 1] shell \"cd ./logs; grep -c \\\"No space left\\\" *.log; grep -n \\\"FATAL\\\\|server ready\\\\|usage 9[0-9]%\\\\|usage 100\\\\|freed\\\\|OOM\\\\|killed\\\" *.log; echo ---; head -3 gameserver-2026-06-01.log; tail -2 gameserver-2026-06-03.log\\npython3 - <<'EOF'\\nfrom datetime import datetime\\ns=datetime(2026,6,2,3,17,42); e=datetime(2026,6,2,3,53,31)\\nd=(e-s).total_seconds(); m=d/60\\ntot=30*24*60\\nav=(tot-m)/tot*100\\nprint(int(d), m, round(m,2), round(av,4), av>=99.9)\\nEOF\" failed -> \"gameserver-2026-06-01.log:0\\ngameserver-2026-06-02.log:2\\ngameserver-2026-06-03.log:0\\ngameserver-2026-06-02.log:241:2026-06-02 03:10:02 WARN disk /data usage 97% (free 3.1 GB)\\ngameserver-2026-06-02.log:253:2026-06-02 03:18:05 FATAL watchdog: server unresponsive for 20s, restarting\\ngameserver-2026-06-02.log:292:2026-06-02 03:52:10 INFO backup rotation freed 38.2 GB on /data\\ngameserver-2026-06-02.log:[... 619 chars cut by the benchmark]\"\n[step 1] write \"./result.json\" ok -> \"Successfully wrote to ./result.json\"\n[step 1] shell \"cd .; node -e \\\"const r=require('./result.json');console.log(JSON.stringify(r,null,1))\\\" 2>&1 | head -12\" ok -> \"{\\n \\\"start\\\": \\\"2026-06-02T03:17:42\\\",\\n \\\"end\\\": \\\"2026-06-02T03:53:31\\\",\\n \\\"minutes_down\\\": 35.82,\\n \\\"availability_june_pct\\\": 99.9171,\\n \\\"slo_999_ok\\\": true,\\n \\\"root_cause\\\": \\\"Disk /data filled to 100% (warned at 97%, only 3.1 GB free at 03:10:02). Autosave could not write /data/game/Saved/Level.sav (ENOSPC at 03:17:42), the server became unresponsive, the watchdog killed it (exit 137) and every restart attempt[... 307 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "incident start",
+   true
+  ],
+  [
+   "incident end",
+   true
+  ],
+  [
+   "minutes down",
+   true
+  ],
+  [
+   "June availability",
+   true
+  ],
+  [
+   "SLO 99.9 met",
+   true
+  ],
+  [
+   "root cause = /data disk full",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 7,
+  "tool_calls": 7,
+  "tool_errors": 1,
+  "shell_commands": 5,
+  "shell_failures": 1,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2148,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 717
+ },
+ "deliverables": [],
+ "render": null
+}
