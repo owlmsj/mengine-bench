@@ -1,0 +1,79 @@
+{
+ "task_id": "cmp-handoff",
+ "prompts": [
+  "You are handing this debugging work to a colleague who will never see {WS}/session/transcript.md. Write {WS}/HANDOFF.md, at most 1000 characters, so they can carry on from where it really stands.",
+  "You just took over this work, and {WS}/HANDOFF.md is all you have. Where was the recipe applied, what are the final decode speed and VRAM, which quantization was discarded, what is still pending, and which command measures it again? Record it in {WS}/result.json: file_line, final_decode, final_vram_mib, discarded_quant, pending, measure_command."
+ ],
+ "answers": [
+  "\n\n[goal] Write ./HANDOFF.md (≤1000 chars) capturing the real state of the local-9b @128k debugging work.\n\n[action] Read `session/transcript.md` (only other file besides AGENTS.md; no repo present), filtered out the repeated filler steps, and kept only the four substantive turns: the invalid first measurement, the fix, the quant comparison, and the pending README item.\n\n[result] `workspace/HANDOFF.md`, 1000 bytes (`wc -c`), covering: accepted 38.0 t/s / 7697 MiB with `--no-mmproj-offload -ub 512`; rejected 37.8 t/s / 7881 MiB as WDDM-ceiling + 1494 MiB sysmem spill; Q6_K dropped, Q4_K_M as fallback; recipe locations; and 4 open items.\n\n[how I know] Every number and path is a verbatim quote from transcript lines: step 10 measurement, the WARNING step (7881 MiB ceiling / 1494 MiB shared), the `--no-mmproj-offload -ub 512` step (7697 MiB, 38.0 t/s median of 3), the Q6_K/Q4_K_M step, the apply step (start_server.ps1:165, profiles/local/local-9b.json), and the final \"Pending: update the evals README\" step. The \"no post-apply verification\" gap is a negative finding: no measurement step appears after the apply step. Size confirmed by `wc -c` = 1000.\n\n[next] Colleague should re-run the measure script through `start_server.ps1` to confirm the applied recipe, then fix the stale `check_vision.ps1` citation. No browser tabs or apps were opened, nothing to close.",
+  "\n\n[goal] Extract recipe apply-site, final perf, discarded quant, pending work, re-measure command from the handoff; record in ./result.json.\n\n[action] Read ./HANDOFF.md (only AGENTS.md + HANDOFF.md exist here; the repo, `scripts/`, `profiles/` and `session/transcript.md` it cites are absent). Wrote ./result.json, validated it parses.\n\n[result]\n- Applied to: `scripts/start_server.ps1:165` (local9 block) + `profiles/local/local-9b.json`; recipe = `--no-mmproj-offload` + `-ub 512`.\n- Final: 38.0 t/s decode, 7697 MiB VRAM, no spill, median of 3. The earlier 37.8 t/s / 7881 MiB run is invalid (1494 MiB Shared Usage = WDDM sysmem spill).\n- Discarded quant: **Q6_K** (7.03 GiB, does not fit 128k). Q4_K_M (7305 MiB / 40.4 t/s) was *kept* as fallback, so not counted as discarded.\n- Pending: (1) post-apply re-measure through `start_server.ps1` — never done, do first; (2) evals README cites deleted `check_vision.ps1`; (3) scratchpad temp-file names unreviewed; (4) nothing committed, diffs formatting-only.\n- Measure command: `pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`\n\nAssumptions stated in result.json: `file_line` = primary apply target (start_server.ps1:165) with the profile as secondary; discarded = Q6_K only; final = accepted median-of-3, not the rejected run.\n\nHow I know it's right: every field is a byte-level quote from HANDOFF.md lines quoted above; I could not reproduce the numbers because the repo is not in this workspace, and result.json says so explicitly. No browser/app was opened, so nothing to close.\n\n[next] On the real repo: run the measure command via `start_server.ps1` to close pending item 1 before anything else."
+ ],
+ "diff": "A HANDOFF.md\nA result.json\nD session/transcript.md\n\n--- HANDOFF.md ---\n# HANDOFF\n\nTask: measure local-9b Q5 at 128k ctx (llama.cpp).\n\nAccepted result: 38.0 t/s decode, 7697 MiB VRAM, no spill, needs\n`--no-mmproj-offload` + `-ub 512`. Median of 3 via\n`pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`.\n\nRejected: first run 37.8 t/s / 7881 MiB sat on the WDDM ceiling with 1494 MiB\nin Shared Usage (sysmem spill): invalid.\nQ6_K (7.03 GiB) does not fit 128k, dropped. Q4_K_M fits: 7305 MiB / 40.4 t/s,\nkept as fallback only.\n\nApplied to: scripts/start_server.ps1:165 (local9 block), profiles/local/local-9b.json.\n\nOpen:\n1. No post-apply verification: recipe was written but never re-measured through\n   start_server.ps1. Do this first.\n2. evals README still cites check_vision.ps1, a deleted file.\n3. Scratchpad temp-file names flagged repeatedly, never reviewed.\n4. Nothing committed; diffs so far were formatting-only.\n\nAssumption: repo not in this workspace (only AGENTS.md + session/transcript.md);\npaths/numbers quoted from transcript, unverified here.\n\n--- result.json ---\n{\n  \"file_line\": \"scripts/start_server.ps1:165 (local9 block); also profiles/local/local-9b.json\",\n  \"final_decode\": \"38.0 t/s\",\n  \"final_vram_mib\": 7697,\n  \"discarded_quant\": \"Q6_K (7.03 GiB, does not fit 128k ctx); Q4_K_M kept only as fallback\",\n  \"pending\": [\n    \"Post-apply verification: recipe was written into start_server.ps1 but never re-measured through it (do this first)\",\n    \"evals README still cites check_vision.ps1, a deleted file\",\n    \"Scratchpad temp-file names were flagged repeatedly, never reviewed\",\n    \"Nothing committed; diffs so far were formatting-only\"\n  ],\n  \"measure_command\": \"pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024\",\n  \"notes\": {\n    \"recipe\": \"requires --no-mmproj-offload + -ub 512\",\n    \"rejected_run\": \"37.8 t/s / 7881 MiB with 1494 MiB Shared Usage (WDDM sysmem spill) is invalid\",\n    \"measurement\": \"median of 3 runs\",\n    \"source\": \"HANDOFF.md only; referenced repo, scripts/ and session/transcript.md are absent from this workspace, so numbers are quoted, not reproduced\",\n    \"assumptions\": [\n      \"file_line = the primary apply target quoted in HANDOFF (start_server.ps1 line 165), profile listed as secondary\",\n      \"discarded_quant = Q6_K (explicitly 'dropped'); Q4_K_M was retained as fallback, not discarded\",\n      \"final numbers are the accepted 38.0 t/s / 7697 MiB median-of-3, not the rejected first run\"\n    ]\n  }\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && ls -la && echo \\\"---\\\" && ls -la session 2>/dev/null && echo \\\"---\\\" && find . -maxdepth 2 -not -path \\\"*/node_modules/*\\\" | head -50\" ok -> \"total 1\\ndrwxr-xr-x 1 <USER> 197121   0 Nov  6 11:22 .\\ndrwxr-xr-x 1 <USER> 197121   0 Nov  6 11:22 ..\\n-rw-r--r-- 1 <USER> 197121 394 Nov  6 11:22 AGENTS.md\\ndrwxr-xr-x 1 <USER> 197121   0 Nov  6 11:22 session\\n---\\ntotal 12\\ndrwxr-xr-x 1 <USER> 197121    0 Nov  6 11:22 .\\ndrwxr-xr-x 1 <USER> 197121    0 Nov  6 11:22 ..\\n-rw-r--r-- 1 <USER> 197121 9954 Nov  6 11:22 transcript.m[... 53 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>/session/transcript.md\" ok -> \"[agent] Opened the GPU panel; the graphs say nothing the counter does not already say. (step 0)\\n[tool] ok, 764 lines of output omitted\\n\\n[user] The local model needs 128k. Measure local-9b Q5 at that context.\\n\\n[agent] Checked the flag documentation in --help; the text did not help much. (step 2)\\n[tool] ok, 872 lines of output omitted\\n\\n[agent] Reviewed the diff: formatting only, no behavior change. [... 9553 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<HOME>/AppData/Local/Temp/mengine-bench-fresh-ke4662kq\\\" && ls -la && ls -la workspace/session\" ok -> \"total 4708\\ndrwxr-xr-x 1 <USER> 197121 0 Nov  6 11:22 .\\ndrwxr-xr-x 1 <USER> 197121 0 Nov  6 11:22 ..\\ndrwxr-xr-x 1 <USER> 197121 0 Nov  6 11:22 workspace\\ntotal 12\\ndrwxr-xr-x 1 <USER> 197121    0 Nov  6 11:22 .\\ndrwxr-xr-x 1 <USER> 197121    0 Nov  6 11:22 ..\\n-rw-r--r-- 1 <USER> 197121 9954 Nov  6 11:22 transcript.md\"\n[step 1] write \"<WORKSPACE>/HANDOFF.md\" ok -> \"Successfully wrote to <WORKSPACE>/HANDOFF.md\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && wc -c HANDOFF.md\" ok -> \"1039 HANDOFF.md\"\n[step 1] edit \"<WORKSPACE>/HANDOFF.md\" ok -> \"Successfully replaced 2 block(s) in <WORKSPACE>/HANDOFF.md.\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && wc -c HANDOFF.md && cat HANDOFF.md\" ok -> \"1000 HANDOFF.md\\n# HANDOFF\\n\\nTask: measure local-9b Q5 at 128k ctx (llama.cpp).\\n\\nAccepted result: 38.0 t/s decode, 7697 MiB VRAM, no spill, needs\\n`--no-mmproj-offload` + `-ub 512`. Median of 3 via\\n`pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`.\\n\\nRejected: first run 37.8 t/s / 7881 MiB sat on the WDDM ceiling with 1494 MiB\\nin Shared Usage (sysmem spill): invalid.\\nQ6_K (7.03 GiB) d[... 616 chars cut by the benchmark]\"\n[step 2] read \"./HANDOFF.md\" ok -> \"# HANDOFF\\n\\nTask: measure local-9b Q5 at 128k ctx (llama.cpp).\\n\\nAccepted result: 38.0 t/s decode, 7697 MiB VRAM, no spill, needs\\n`--no-mmproj-offload` + `-ub 512`. Median of 3 via\\n`pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`.\\n\\nRejected: first run 37.8 t/s / 7881 MiB sat on the WDDM ceiling with 1494 MiB\\nin Shared Usage (sysmem spill): invalid.\\nQ6_K (7.03 GiB) does not fit 128k[... 600 chars cut by the benchmark]\"\n[step 2] shell \"ls -la\" ok -> \"total 5\\ndrwxr-xr-x 1 <USER> 197121    0 Nov  6 11:22 .\\ndrwxr-xr-x 1 <USER> 197121    0 Nov  6 11:22 ..\\n-rw-r--r-- 1 <USER> 197121  394 Nov  6 11:22 AGENTS.md\\n-rw-r--r-- 1 <USER> 197121 1000 Nov  6 11:22 HANDOFF.md\"\n[step 2] write \"./result.json\" ok -> \"Successfully wrote to ./result.json\"\n[step 2] shell \"cd ./ && python -c \\\"import json;print(json.load(open('result.json'))['final_decode'])\\\" 2>/dev/null || node -e \\\"console.log(JSON.parse(require('fs').readFileSync('result.json','utf8')).final_decode)\\\"\" ok -> \"38.0 t/s\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "summary exists and fits in 1000 characters",
+   true
+  ],
+  [
+   "summary keeps `--no-mmproj-offload`",
+   true
+  ],
+  [
+   "summary keeps `-ub 512`",
+   true
+  ],
+  [
+   "summary keeps `7697`",
+   true
+  ],
+  [
+   "answer file_line",
+   true
+  ],
+  [
+   "answer final_decode",
+   true
+  ],
+  [
+   "answer final_vram_mib",
+   true
+  ],
+  [
+   "answer discarded_quant",
+   true
+  ],
+  [
+   "answer pending",
+   true
+  ],
+  [
+   "answer measure_command",
+   true
+  ],
+  [
+   "does not repeat the spilled VRAM as final",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 12,
+  "tool_calls": 11,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 0,
+  "file_writes": 3,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 4030,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 776
+ },
+ "deliverables": [],
+ "render": null
+}

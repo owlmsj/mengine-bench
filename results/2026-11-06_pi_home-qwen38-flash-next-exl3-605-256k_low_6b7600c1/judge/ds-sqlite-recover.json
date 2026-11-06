@@ -1,0 +1,51 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [],
+ "diff": "A recovered.json\nA tmp_recover.py\n\n--- recovered.json ---\n[\r\n  {\r\n    \"item\": \"trail map\",\r\n    \"price\": 0\r\n  },\r\n  {\r\n    \"item\": \"matchbox\",\r\n    \"price\": 1\r\n  },\r\n  {\r\n    \"item\": \"tent stake\",\r\n    \"price\": 2.75\r\n  },\r\n  {\r\n    \"item\": \"lantern\",\r\n    \"price\": 0\r\n  },\r\n  {\r\n    \"item\": \"rope coil\",\r\n    \"price\": 0\r\n  },\r\n  {\r\n    \"item\": \"water filter\",\r\n    \"price\": 39.9\r\n  },\r\n  {\r\n    \"item\": \"sleeping bag\",\r\n    \"price\": 0\r\n  },\r\n  {\r\n    \"item\": \"camp stove\",\r\n    \"price\": 1\r\n  },\r\n  {\r\n    \"item\": \"compass\",\r\n    \"price\": 15.5\r\n  },\r\n  {\r\n    \"item\": \"first aid kit\",\r\n    \"price\": 0.99\r\n  }\r\n]\n\n--- tmp_recover.py ---\nimport json, struct\n\nd = open('prices.db','rb').read()\nprint('file size', len(d))\nptype = d[0]\ncell_count = struct.unpack('>H', d[3:5])[0]\ncontent_start = struct.unpack('>H', d[5:7])[0]\nfrag = d[7]\nptrs = [struct.unpack('>H', d[8+2*i:10+2*i])[0] for i in range(cell_count)]\nprint('page type', hex(ptype), 'cells', cell_count, 'content_start', content_start, 'frag', frag)\nprint('ptrs', ptrs)\n\ndef varint(b, i):\n    v = 0\n    for k in range(9):\n        c = b[i+k]\n        if k == 8: v = (v<<8)|c; return v, i+9\n        v = (v<<7)|(c&0x7f)\n        if not c & 0x80: return v, i+1+k\n    raise ValueError\n\ndef serial_len(t):\n    if t == 0: return 0\n    if t <= 4: return t-1 if t else 0\n    if t == 5: return 6\n    if t == 6: return 8\n    if t == 7: return 8\n    if t in (8,9): return 0\n    if t >= 12 and t % 2 == 0: return (t-12)//2\n    return (t-13)//2\n\nrows = []\nfor p in ptrs:\n    try:\n        plen, i = varint(d, p)\n        rowid, i = varint(d, i)\n        hdr_start = i\n        hlen, i = varint(d, i)\n        types = []\n        while i < hdr_start + hlen:\n            t, i = varint(d, i)\n            types.append(t)\n        body = hdr_start + hlen\n        vals = []\n        ok = True\n        for t in types:\n            n = serial_len(t)\n            if body + n > len(d):\n                ok = False\n                break\n            raw = d[body:body+n]\n            if t == 0: v = None\n            elif t == 8: v = 0\n            elif t == 9: v = 1\n            elif t in (1,2,3,4,5,6): v = int.from_bytes(raw,'big',signed=True)\n            elif t == 7: v = struct.unpack('>d', raw)[0]\n            elif t >= 13 and t % 2 == 1: v = raw.decode('utf-8')\n            else: v = raw\n            vals.append(v)\n            body += n\n        print(f'ptr={p} rowid={rowid} plen={plen} types={types} vals={vals} complete={ok and body==hdr_start+hlen+plen}')\n        if ok: rows.append((rowid, vals))\n    except Exception as e:\n        print('ptr', p, 'FAILED', e)\n\nrows.sort()\nout = []\nfor rowid, vals in rows:\n    item = next((v for v in vals if isinstance(v, str)), None)\n    price = next((v for v in vals if isinstance(v, (int, float))), None)\n    if item is None or price is None: continue\n    out.append({'item': item, 'price': price})\njson.dump(out, open('recovered.json','w'), indent=2, ensure_ascii=False)\nprint(json.dumps(out, ensure_ascii=False))\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && ls -la && ls -la prices.db && xxd prices.db | head -40\" ok -> \"total 5\\ndrwxr-xr-x 1 <USER> 197121    0 Nov  6 11:34 .\\ndrwxr-xr-x 1 <USER> 197121    0 Nov  6 11:34 ..\\n-rw-r--r-- 1 <USER> 197121  394 Nov  6 11:34 AGENTS.md\\n-rw-r--r-- 1 <USER> 197121 4096 Nov  6 11:34 prices.db\\n-rw-r--r-- 1 <USER> 197121 4096 Nov  6 11:34 prices.db\\n00000000: 0d00 0000 0a0f 3d00 0ff1 0fe3 0fcb 0fbd  ......=.........\\n00000010: 0fad 0f93 0f7f 0f6d 0f58 0f3d 0000[... 2607 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && xxd -s 3840 prices.db && echo \\\"--- nonzero regions ---\\\" && python -c \\\"\\nd=open('prices.db','rb').read()\\nprint(len(d))\\nruns=[]\\ni=0\\nwhile i<len(d):\\n    if d[i]!=0:\\n        j=i\\n        while j<len(d) and not (d[j]==0 and all(x==0 for x in d[j:j+8])):\\n            j+=1\\n        runs.append((i,j)); i=j\\n    else: i+=1\\nprint([(hex(a),hex(b)) for a,b in runs])\\n\\\"\" ok -> \"00000f00: 0000 0000 0000 0000 0000 0000 0000 0000  ................\\n00000f10: 0000 0000 0000 0000 0000 0000 0000 0000  ................\\n00000f20: 0000 0000 0000 0000 0000 0000 0000 0000  ................\\n00000f30: 0000 0000 0000 0000 0000 0000 0019 0a04  ................\\n00000f40: 0027 0766 6972 7374 2061 6964 206b 6974  .'.first aid kit\\n00000f50: 3fef ae14 7ae1 47ae 1309 0400 1b07 636f  ?...z.G..[... 756 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && cat > tmp_recover.py <<'EOF'\\nimport json, struct\\n\\nd = open('prices.db','rb').read()\\nprint('file size', len(d))\\nptype = d[0]\\ncell_count = struct.unpack('>H', d[3:5])[0]\\ncontent_start = struct.unpack('>H', d[5:7])[0]\\nfrag = d[7]\\nptrs = [struct.unpack('>H', d[8+2*i:10+2*i])[0] for i in range(cell_count)]\\nprint('page type', hex(ptype), 'cells', cell_count, 'content_start', content_start, 'frag', frag)\\nprint('ptrs', ptrs)\\n\\ndef varint(b, i):\\n    v = 0\\n    for k in range(9):\\n        c = b[i+k]\\n        if k == 8: v = (v<<8)|c; return v, i+9\\n        v = (v<<7)|(c&0x7f)\\n        if not c & 0x80: return v, i+1+k\\n    raise ValueError\\n\\ndef serial_len(t):\\n    if t == 0: return 0\\n    if t <= 4: return t-1 if t else 0\\n    if t == 5: return 6\\n    if t == 6: return 8\\n    if t == 7: return 8\\n    if t in (8,9): return 0\\n    if t >= 12 and t % 2 == 0: return (t-12)//2\\n    return (t-13)//2\\n\\nrows = []\\nfor p in ptrs:\\n    try:\\n        plen, i = varint(d, p)\\n        rowid, i = varint(d, i)\\n        hdr_start = i\\n        hlen, i = varint(d, i)\\n        types = []\\n        while i < hdr_start + hlen:\\n            t, i = varint(d, i)\\n            types.append(t)\\n        body = hdr_start + hlen\\n        vals = []\\n        ok = True\\n        for t in types:\\n            n = serial_len(t)\\n            if body + n > len(d):\\n                ok = False\\n                break\\n            raw = d[body:body+n]\\n            if t == 0: v = None\\n[... 984 chars cut by the benchmark]\" ok -> \"file size 4096\\r\\npage type 0xd cells 10 content_start 3901 frag 0\\r\\nptrs [4081, 4067, 4043, 4029, 4013, 3987, 3967, 3949, 3928, 3901]\\r\\nptr=4081 rowid=1 plen=13 types=[0, 31, 8] vals=[None, 'trail map', 0] complete=False\\r\\nptr=4067 rowid=2 plen=12 types=[0, 29, 9] vals=[None, 'matchbox', 1] complete=False\\r\\nptr=4043 rowid=3 plen=22 types=[0, 33, 7] vals=[None, 'tent stake', 2.75] complete=False\\r\\nptr=40[... 982 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   false
+  ],
+  [
+   "rows with fractional prices recovered",
+   true
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   true
+  ],
+  [
+   "no row that is not in the table",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 3,
+  "tool_calls": 3,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 6127,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 5039
+ },
+ "deliverables": [],
+ "render": null
+}

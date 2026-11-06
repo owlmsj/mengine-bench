@@ -1,0 +1,57 @@
+{
+ "task_id": "infra-gpu-fit",
+ "prompts": [
+  "We want to serve the model described in {WS}/MODEL.md on rented GPUs. Today's offers are in {WS}/offers.csv and our rental rules in {WS}/POLICY.md. Pick the cheapest way to serve it under the policy and justify the choice. Record it in {WS}/result.json with weights_gb, kv_cache_gb, total_gb, offer_id, usd_per_hour and usd_per_month."
+ ],
+ "answers": [
+  "\n\n[goal] Pick cheapest compliant GPU rental for arena-coder-70b, write ./result.json.\n\n[action] Sized the deployment, filtered offers.csv against POLICY.md, wrote result.json.\n\nSizing (GB = 10^9 bytes, per MODEL.md):\n- Weights: 70e9 params x 1 byte (FP8) = 70.000 GB\n- KV cache: 327,680 B/token x 32,768 tokens x 4 sequences = 42,949,672,960 B = 42.94967296 GB\n- Runtime overhead: 8 GB (flat, not per GPU)\n- Total needed: 120.94967296 GB\n\nOffer screen (usable = gpu_count x vram, in_stock=yes, region in us-east/us-central/eu-west, price <= $4.00):\n\n| offer | region | usable GB | $/h | verdict |\n|---|---|---|---|---|\n| of-101 | us-east | 96 | 1.79 | too small |\n| of-104 | us-east | 80 | 1.29 | too small |\n| of-108 | eu-west | 160 | 3.10 | not in stock |\n| of-111 | ap-southeast | 192 | 2.98 | region not allowed |\n| of-113 | us-central | 96 | 1.84 | too small |\n| of-117 | us-central | 160 | 3.58 | **compliant, cheapest** |\n| of-120 | eu-west | 141 | 3.79 | compliant, +$0.21/h |\n| of-124 | us-east | 192 | 3.92 | compliant, +$0.34/h |\n| of-129 | us-east | 180 | 4.89 | over hourly cap |\n| of-133 | us-central | 282 | 7.10 | over hourly cap |\n| of-137 | sa-east | 160 | 3.20 | region not allowed |\n\n[result] `of-117` (voltbay, us-central, 2x H100 80GB): 160 GB usable >= 120.95 GB needed, $3.58/h, $2,613.40/month at 730 h. File written and read back to confirm.\n\nAssumptions stated: KV math uses the per-token figure as already covering all layers and K+V, so no extra factor; overhead added once regardless of GPU count; no headroom/reservation buffer added since policy sets none; hourly cap is inclusive of exactly $4.00 (no offer sits there anyway); tensor parallelism requires all GPUs of one offer, so usable memory is the full gpu_count x vram.\n\n[next] Nothing open. If you want fault tolerance or a memory safety margin, of-120 (141 GB, $3.79/h) is the next compliant step up; of-117 leaves only ~39 GB slack.\n\nHow I know it is right: the sizing and the filter were computed by script over the actual files (output quoted above), not by eye; every one of the 11 offers is accounted for with a specific pass/fail reason, and the three compliant offers are ranked with their price deltas, so of-117 is provably the cheapest survivor. No browser tabs or apps were opened."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"weights_gb\": 70.0,\n  \"kv_cache_gb\": 42.94967296,\n  \"total_gb\": 120.94967296,\n  \"offer_id\": \"of-117\",\n  \"usd_per_hour\": 3.58,\n  \"usd_per_month\": 2613.4\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"./MODEL.md\" ok -> \"# Model to serve: arena-coder-70b\\n\\n| property | value |\\n| --- | --- |\\n| parameters | 70 billion |\\n| weight precision | 8-bit (FP8) |\\n| KV cache | 327,680 bytes per token (FP16, all layers, K and V) |\\n| context we want per sequence | 32,768 tokens |\\n| concurrent sequences | 4 |\\n| runtime overhead | 8 GB for the whole deployment (CUDA context, activations), whatever the GPU count |\\n\\nEvery sequence m[... 270 chars cut by the benchmark]\"\n[step 1] read \"./POLICY.md\" ok -> \"# Rental policy\\n\\n- Hourly cap: US$ 4 per hour for the whole deployment. Nothing above it is rented.\\n- Rent only offers that are in stock now (`in_stock` = yes).\\n- Allowed regions: us-east, us-central, eu-west.\\n- `usd_per_hour` in offers.csv is the price of the whole offer (all its GPUs), not per GPU.\\n- One offer per deployment; we do not combine offers.\\n- Monthly cost = hourly price x 730 hours.\"\n[step 1] read \"./offers.csv\" ok -> \"offer_id,provider,region,gpu,gpu_count,vram_gb_per_gpu,usd_per_hour,in_stock\\nof-101,cloudnine,us-east,RTX PRO 6000,1,96,1.79,yes\\nof-104,cloudnine,us-east,A100 80GB,1,80,1.29,yes\\nof-108,gridrent,eu-west,H100 80GB,2,80,3.1,no\\nof-111,gridrent,ap-southeast,RTX PRO 6000,2,96,2.98,yes\\nof-113,voltbay,us-central,L40S,2,48,1.84,yes\\nof-117,voltbay,us-central,H100 80GB,2,80,3.58,yes\\nof-120,cloudnine,eu-west,[... 199 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && python -c \\\"\\nw=70e9; kv=327680*32768*4; tot=(w+kv+8e9)/1e9\\nprint(w/1e9, kv/1e9, tot)\\nneed=tot\\nfor l in open('offers.csv').read().splitlines()[1:]:\\n    oid,prov,reg,gpu,n,v,price,stock=l.split(',')\\n    usable=int(n)*float(v); price=float(price)\\n    ok = stock=='yes' and reg in ('us-east','us-central','eu-west') and price<=4 and usable>=need\\n    print(oid, reg, usable, price, 'OK' if ok else 'no')\\n\\\"\" ok -> \"70.0 42.94967296 120.94967296\\r\\nof-101 us-east 96.0 1.79 no\\r\\nof-104 us-east 80.0 1.29 no\\r\\nof-108 eu-west 160.0 3.1 no\\r\\nof-111 ap-southeast 192.0 2.98 no\\r\\nof-113 us-central 96.0 1.84 no\\r\\nof-117 us-central 160.0 3.58 OK\\r\\nof-120 eu-west 141.0 3.79 OK\\r\\nof-124 us-east 192.0 3.92 OK\\r\\nof-129 us-east 180.0 4.89 no\\r\\nof-133 us-central 282.0 7.1 no\\r\\nof-137 sa-east 160.0 3.2 no\"\n[step 1] write \"./result.json\" ok -> \"Successfully wrote to ./result.json\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && cat result.json && python -c \\\"print(3.58*730)\\\"\" ok -> \"{\\n  \\\"weights_gb\\\": 70.0,\\n  \\\"kv_cache_gb\\\": 42.94967296,\\n  \\\"total_gb\\\": 120.94967296,\\n  \\\"offer_id\\\": \\\"of-117\\\",\\n  \\\"usd_per_hour\\\": 3.58,\\n  \\\"usd_per_month\\\": 2613.4\\n}2613.4\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "weights size",
+   true
+  ],
+  [
+   "KV cache size",
+   true
+  ],
+  [
+   "total memory needed",
+   true
+  ],
+  [
+   "cheapest feasible offer",
+   true
+  ],
+  [
+   "hourly price",
+   true
+  ],
+  [
+   "monthly price",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 6,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1917,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 866
+ },
+ "deliverables": [],
+ "render": null
+}
