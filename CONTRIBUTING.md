@@ -112,7 +112,7 @@ the checklist below is the gate, run by the maintainer on the release branch.
   bump is one pull request whose body holds this checklist with its outputs.
 - **Patch** (2.6.x): grader or runner fixes that change no task, prompt or limit. Published runs that kept their
   workspaces are regraded with `mengine-bench regrade results/<run>`, never run again.
-- **Minor** (2.7.0): a task, prompt, limit, check or rubric change. The catalog changes only on a train, and a
+- **Minor** (2.7.0): a task, prompt, limit, check, rubric or Score formula change (#210). The catalog changes only on a train, and a
   candidate waits in `docs/CANDIDATES.md` until then.
 - **Checklist**, in order, every output quoted in the PR:
   1. `uv run pytest -q` green on the release branch (load-sensitive tests run alone when the host is busy).

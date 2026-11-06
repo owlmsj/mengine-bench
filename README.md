@@ -1,7 +1,7 @@
 # mengine-bench
 
 **How well does your coding agent do real work, and how fast?** 28 everyday jobs,
-one Score, 12 to 25 minutes for the ranked setups so far (measured on bench 2.6). Every result is public and auditable.
+one Score, 12 to 37 minutes for the ranked runs so far (measured on bench 2.3 to 2.6). Every result is public and auditable.
 
 It grades the whole **agent**: the harness (Claude Code, Codex CLI, opencode, AGY, pi or your
 own command) + the model + its effort + your hardware + your configuration. Change
@@ -12,22 +12,22 @@ It is short on purpose. The jobs are basic and easy to check by hand, so a good 
 separates setups on the quality of the work and on speed, and a rerun shows when a setup got slower or worse.
 Long-horizon work is out of scope.
 
-Results: [LEADERBOARD.md](LEADERBOARD.md). Five setups are ranked on bench 2.6 (2026-11-04), from 88.4 (Codex
-gpt-6.1-terra low, 11 min 53 s) to 73.7 (Codex gpt-6.1-sol low, 24 min 50 s); the board holds the current order.
+Results: [LEADERBOARD.md](LEADERBOARD.md). Twelve runs are ranked with the bench 2.7 formula (2026-11-06), from 92.8
+(Codex gpt-6.1-terra low, 11 min 53 s) to 63.3 (opencode maritaca/S5 low, 36 min 59 s); the board holds the current order.
 
 ## How a run is graded
 
-**Score = 0.5 x Correct % + 0.25 x Judge + 0.25 x Speed x Correct % / 100.** Speed pays only for work that is right.
+**Score = 0.5 x Correct % + 0.35 x Judge + 0.15 x Speed x Correct % / 100.** Speed pays only for work that is right.
 
 | | The question | How it is measured |
 | --- | --- | --- |
 | **Correct** | Did it do the job? | Deterministic checks on what was delivered: hidden tests, numbers within tolerance, file state. Anyone can reproduce them. |
 | **Judge** | Is the work good? | One LLM vote per task (Claude Opus 5.5, xhigh), with subscores, blind to the model and the speed. |
-| **Speed** | Was it quick? | 100 at 5 min of total agent time or less, 0 at 30 min or more, linear in between. |
+| **Speed** | Was it quick? | 100 at 10 min of total agent time or less, 0 at 40 min or more, linear in between. |
 
-Example, the Codex gpt-6.1-terra low run (#192): Correct 99.1, Judge 83.7 and 11 min 53 s (Speed 72.5)
-give 0.5 x 99.1 + 0.25 x 83.7 + 0.25 x 72.5 x 99.1 / 100 = **88.4**. It missed only the sources check of one task, and
-its time cost it about 7 points. Cost, exact or estimated at API list prices, is shown too, but never counts.
+Example, the Codex gpt-6.1-terra low run (#192): Correct 99.1, Judge 83.7 and 11 min 53 s (Speed 93.7)
+give 0.5 x 99.1 + 0.35 x 83.7 + 0.15 x 93.7 x 99.1 / 100 = **92.8** (bench 2.7 formula, #210). It missed only the
+sources check of one task, and its time cost it about 1 point. Cost, exact or estimated at API list prices, is shown too, but never counts.
 
 Formulas and edge cases: [docs/SCORING.md](docs/SCORING.md).
 
@@ -90,7 +90,7 @@ uv run mengine-bench run --agent claude --model claude-sonnet-5-5 --effort high
 ```
 
 The dry run prints the plan and runs nothing. The task limits add up to 62 minutes at
-worst, plus setup and grading; the ranked runs took 12 to 25 minutes. A run ends with `privacy check: clean`. Read
+worst, plus setup and grading; the ranked runs took 12 to 37 minutes. A run ends with `privacy check: clean`. Read
 `results/<run>/summary.md`, whose "Failed checks" say what each check expected and received, then publish it with
 `uv run mengine-bench submit results/<run>`. Grading the three pages needs a Chromium-family browser (Edge, Chrome or
 Chromium); without one, their page checks are left out and the run says so.
@@ -164,7 +164,7 @@ Report only values copied from command output. Never print credentials.
 - **Everything its harness gives it** is allowed: shell, web, browsers, MCP servers, skills, subagents. Every step's prompt says so, and asks the agent to close the browser tabs, windows and apps it opened before it finishes. Reading the reference, the hidden tests or a published answer is not: the run gets rejected.
 - **Personal instructions count as configuration.** `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.config/opencode/AGENTS.md`, `~/.gemini/GEMINI.md`, `~/.pi/agent/AGENTS.md` and any `CLAUDE.md` or `AGENTS.md` above the temp dir are recorded by name and shown on the leaderboard. Move them aside for a plain run.
 - **Memory across sessions is off inside the bench, on Codex and Claude** (`--disable memories`, `CLAUDE_CODE_DISABLE_AUTO_MEMORY`). Daily use keeps it on. It carries earlier runs into this one, the same leak as an earlier workspace left on disk.
-- **Rankings compare the same bench version**, or an older minor the owner kept ranked, marked on its row (a row marked "rubric 2.5" waits for its re-judge). Older rankings stay on the leaderboard as history, with the Scores of their own formula.
+- **Rankings compare the same bench version**, or an older minor the owner kept ranked, marked on its row (a row marked "rubric 2.5" waits for its re-judge). A setup (harness, model, effort) keeps its 3 most recent runs ranked; older reruns fold below the table. Older rankings stay on the leaderboard as history, with the Scores of their own formula.
 
 ## Privacy
 

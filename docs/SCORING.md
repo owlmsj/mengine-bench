@@ -1,4 +1,4 @@
-# Scoring (bench 2.6)
+# Scoring (bench 2.7)
 
 A run of an agent (harness + model + configuration) gets three numbers folded into
 the Score, and a Cost kept apart.
@@ -7,8 +7,8 @@ the Score, and a Cost kept apart.
 | --- | --- |
 | **Correct %** | `100 x mean(c_i)` over every task. Deterministic: anyone reproduces it with `run` and `selftest`. |
 | **Judge** | Mean of one rubric vote per task, 0-100. Set by the maintainer with `mengine-bench judge`. |
-| **Speed** | 100 at 5 min of Time or less, 0 at 30 min or more, linear in between: `100 x (1800 - Time) / 1500`. |
-| **Score** | `0.5 x Correct % + 0.25 x Judge + 0.25 x Speed x Correct % / 100`, one decimal, from the published values. Speed pays only for work that is right. Only once judged. |
+| **Speed** | 100 at 10 min of Time or less, 0 at 40 min or more, linear in between: `100 x (2400 - Time) / 1800` (#210). |
+| **Score** | `0.5 x Correct % + 0.35 x Judge + 0.15 x Speed x Correct % / 100`, one decimal, from the published values. Speed pays only for work that is right. Only once judged. |
 | **Time** | Total agent wall seconds. Grading and judging are excluded; a timeout counts its full time. On Codex the clock stops at the final event (`turn.completed`); a process still alive 5 s later is ended and flagged, not counted as a timeout. |
 | **Cost** | One column (#162): `$x` exact when the harness reports it, else `~$x`, the run's tokens at public API list prices (below), so subscription and API runs compare; `$0.00 (local)` for local inference, `>=` a lower bound, `n/a` neither. No points per dollar. |
 | **Thinking, Tools, Tool s** | Reasoning tokens, tool calls, and the median seconds per tool call where the harness times each call (opencode, AGY, pi, Claude Code event stamps; `-` on Codex, never estimated). Statistics only, no points (#162). |
@@ -114,6 +114,18 @@ Bench 2.6.1 (#205): no task, prompt or limit changes. A process that exits while
 crashes the task; a browser profile dir (a `Local State` file at its root, or a name the runner already skips) is left
 out of the workspace archive; `mengine-bench redo results/<run>` reruns only the crashed tasks of a bundle and
 records them under `redo`.
+
+Bench 2.7 (#210, owner 2026-11-06) changes only the Score: Judge 0.35 and Speed 0.15, from 0.25 each (Correct stays
+0.5), and Speed is 100 at 10 min or less and 0 at 40 min or more, from 5 and 30 min. On the old line one minute cost
+about 1.67 Score points against 0.5 per Correct point, so Opus 5.5 high (99.2 Correct, 83.4 Judge, 19 min) ranked
+below Opus 5.5 low (97.3, 78.0, 13 min); Speed is also the noisiest part (one Opus low setup took 12.8 to 17.3 min over
+4 runs) and Judge the stablest (77.2 to 78.2). No task, prompt, limit, check or rubric changes. The 2.3 to 2.6 rows
+stay ranked, each marked with its version, and the leaderboard recomputes their Speed and Score with the 2.7 formula
+from each run's published Correct %, Judge and Time; no run is run or judged again, no bundle or number is edited by
+hand. History sections keep the Speed and Score of their own version.
+The ranking also shows each run's date, and a preset (harness name, model and effort; not the harness patch version
+or run id) keeps its 3 most recent runs ranked, by date then start time; its older runs fold below the table with the
+same columns. A preset with two or more ranked runs shows its Score min-max and mean in a folded table (#210).
 
 Separately, ties come from the published tasks: draw the tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as
@@ -303,8 +315,8 @@ Three tasks, Claude Code (harness USD):
 - Correct % = 100 x (1.00 + 0.60 + 0.00) / 3 = 53.3; Solved 1/3
 - Judge = (80 + 60 + 30) / 3 = 56.7
 - Time = 120 + 300 + 900 = 1320 s (22 min 00 s)
-- Speed = 100 x (1800 - 1320) / 1500 = 32.0
-- Score = 0.5 x 53.3 + 0.25 x 56.7 + 0.25 x 32.0 x 53.3 / 100 = 45.1
+- Speed = 100 x (2400 - 1320) / 1800 = 60.0
+- Score = 0.5 x 53.3 + 0.35 x 56.7 + 0.15 x 60.0 x 53.3 / 100 = 51.3
 - Cost = 0.40 + 0.90 = >= $1.30 (harness), a lower bound because C has no usage
 
 With `--price input=1.25,cached=0.125,output=10`, a Codex step of 2,000,000
