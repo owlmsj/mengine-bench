@@ -1,0 +1,48 @@
+{
+ "task_id": "ds-sql-funnel",
+ "prompts": [
+  "Product wants to know where players drop off on each platform. The data is in {WS}/analytics.db and our reporting rules are in {WS}/METRICS.md. Where do we lose the most players? Record it in {WS}/result.json: funnel (per platform, players at each step) and biggest_drop (per platform, the step)."
+ ],
+ "answers": [
+  "**[goal]** Find the step where each platform loses the most players, following METRICS.md, and write the answer to `./result.json`.\n\n**[action]** Read METRICS.md and the database tables, checked the data for problems, then built each player's funnel in Python and wrote the file.\n- Excluded test accounts (34 users with `is_test=1`) and 15 events from players not in `users`.\n- A step counts only if it happens at or after that player's previous step; its time is the first such occurrence. Same-second events count, because the rules say \"at or after\".\n- Biggest drop = the step with the lowest conversion (its players / previous step's players).\n- Assumptions: every player is counted at all steps they reach, even without a purchase. Platform is taken from `users.platform`; only `pc` and `steamdeck` exist. I also wrote the conversion rates to the file so the numbers can be checked.\n\n**[result]**\n| platform | install | tutorial_complete | first_match | purchase | biggest drop |\n|---|---|---|---|---|---|\n| pc | 470 | 389 (0.8277) | 326 (0.838) | 269 (0.8252) | **purchase** |\n| steamdeck | 192 | 128 (0.6667) | 87 (0.6797) | 61 (0.7011) | **tutorial_complete** |\n\nHow I know it's right:\n- The data had no quirks that needed cleaning: timestamps all use one format (19 characters each), there are only the 4 expected event names, and no user ID appears twice.\n- Each count is no higher than the step before it, as an ordered funnel requires.\n- Each biggest drop is the minimum of the conversion values printed in `result.json`.\n\nCaveat: on pc the result is close. Purchase converts at 0.8252 and tutorial_complete at 0.8277, so a small change in the data could swap them. Steam Deck loses players faster at every step; its worst is the tutorial (one in three installers never finish it).\n\n**[next]** None needed. Product could check the Steam Deck tutorial first, since that is the biggest loss in the data. I opened no browser tabs or apps."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\r\n  \"funnel\": {\r\n    \"pc\": {\r\n      \"install\": 470,\r\n      \"tutorial_complete\": 389,\r\n      \"first_match\": 326,\r\n      \"purchase\": 269\r\n    },\r\n    \"steamdeck\": {\r\n      \"install\": 192,\r\n      \"tutorial_complete\": 128,\r\n      \"first_match\": 87,\r\n      \"purchase\": 61\r\n    }\r\n  },\r\n  \"biggest_drop\": {\r\n    \"pc\": \"purchase\",\r\n    \"steamdeck\": \"tutorial_complete\"\r\n  },\r\n  \"conversion\": {\r\n    \"pc\": {\r\n      \"tutorial_complete\": 0.8277,\r\n      \"first_match\": 0.838,\r\n      \"purchase\": 0.8252\r\n    },\r\n    \"steamdeck\": {\r\n      \"tutorial_complete\": 0.6667,\r\n      \"first_match\": 0.6797,\r\n      \"purchase\": 0.7011\r\n    }\r\n  }\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd \\\"<WORKSPACE>\\\"; ls; cat METRICS.md; python -c \\\"\\nimport sqlite3;c=sqlite3.connect('analytics.db')\\nfor n,s in c.execute('select name,sql from sqlite_master'):print(s)\\nfor t, in c.execute(\\\\\\\"select name from sqlite_master where type='table'\\\\\\\").fetchall():\\n  print(t,c.execute(f'select count(*) from {t}').fetchone(),c.execute(f'select * from {t} limit 5').fetchall())\\n\\\"\" ok -> \"AGENTS.md\\nMETRICS.md\\nanalytics.db\\n# How we report the funnel\\n\\nSteps, in order: install, tutorial_complete, first_match, purchase.\\nA step counts only at or after the same player's previous step, with no time limit; its time is the first valid occurrence.\\nTest accounts and events from unknown players do not count.\\nA step's conversion is its players over the previous step's players. The biggest drop [... 571 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\"; cat AGENTS.md; python -c \\\"\\nimport sqlite3;c=sqlite3.connect('analytics.db')\\nfor q in ['select platform,is_test,count(*) from users group by 1,2','select name,count(*) from events group by 1','select length(ts),count(*),min(ts),max(ts) from events group by 1','select count(*) from events where user_id not in (select user_id from users)','select user_id,count(*) from users group by 1 having count(*)>1']:print(q,c.execute(q).fetchall())\\n\\\"\" ok -> \"Use any skill, tool or MCP server you have. Write local files only inside this directory.\\nYou may read installed tools and skills outside it, but not other task workspaces, runs or benchmark answers.\\nOther programs run on this machine: stop only the processes you started, by their id, never by name.\\nDo not print credentials, environment variables or personal data: this session is published.\\nselect[... 540 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\"; python -I -c \\\"\\nimport sqlite3,json,collections\\nc=sqlite3.connect('analytics.db')\\nsteps=['install','tutorial_complete','first_match','purchase']\\nusers={u:p for u,p in c.execute('select user_id,platform from users where is_test=0')}\\nev=collections.defaultdict(lambda:collections.defaultdict(list))\\nfor u,n,t in c.execute('select user_id,name,ts from events'):\\n  if u in users and n in steps: ev[u][n].append(t)\\nfunnel={p:dict.fromkeys(steps,0) for p in sorted(set(users.values()))}\\nfor u,p in users.items():\\n  prev=None\\n  for s in steps:\\n    ok=[t for t in ev[u][s] if prev is None or t>=prev]\\n    if not ok: break\\n    prev=min(ok); funnel[p][s]+=1\\nconv={p:{s:round(f[s]/f[steps[i-1]],4) for i,s in enumerate(steps) if i} for p,f in funnel.items()}\\nbig={p:min(cv,key=cv.get) for p,cv in conv.items()}\\njson.dump({'funnel':funnel,'biggest_drop':big,'conversion':conv},open('result.json','w'),indent=2)\\nprint(open('result.json').read())\\n\\\"\" ok -> \"{\\r\\n  \\\"funnel\\\": {\\r\\n    \\\"pc\\\": {\\r\\n      \\\"install\\\": 470,\\r\\n      \\\"tutorial_complete\\\": 389,\\r\\n      \\\"first_match\\\": 326,\\r\\n      \\\"purchase\\\": 269\\r\\n    },\\r\\n    \\\"steamdeck\\\": {\\r\\n      \\\"install\\\": 192,\\r\\n      \\\"tutorial_complete\\\": 128,\\r\\n      \\\"first_match\\\": 87,\\r\\n      \\\"purchase\\\": 61\\r\\n    }\\r\\n  },\\r\\n  \\\"biggest_drop\\\": {\\r\\n    \\\"pc\\\": \\\"purchase\\\",\\r\\n    \\\"steamdeck\\\": \\\"tutorial_complete\\\"\\r\\n  },\\r\\n  \\\"conversion\\\": {\\r\\n    \\\"pc\\\": {[... 226 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "players per step on pc",
+   true
+  ],
+  [
+   "players per step on steamdeck",
+   true
+  ],
+  [
+   "biggest drop on each platform",
+   true
+  ],
+  [
+   "final answer does not contradict biggest drops",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 4,
+  "tool_calls": 3,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1876,
+  "reasoning_tokens": 130
+ },
+ "deliverables": [],
+ "render": null
+}

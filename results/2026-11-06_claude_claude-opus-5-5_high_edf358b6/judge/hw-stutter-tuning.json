@@ -1,0 +1,56 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "**[goal]** Find what causes the hitches on arena-01 and which settings fix them without touching PCIe link speed (Gen5 x4) or BIOS overclock settings. Nothing was applied to this machine.\n\n**[action]** Matched the PresentMon frame times second by second against the sensor log (both start at second 0), checked the result against settings.json, and wrote `result.json`.\n\n**[result]**\n- Average FPS is **137.29** (1000 / mean MsBetweenPresents, 8238 frames). The 1% low is **45.35** (p99 = 22.05 ms).\n- **Cause:** power saving (ASPM L1) on the GPU's PCIe slot, `pcie_aspm_rp1_gpu=L1`. Every 4 seconds (s 2, 6, 10 … 58) the sensor log shows `gpu_pcie_link_state=L1`. Each of those seconds has about 117 frames instead of 144, and about 12 of them take 20 to 24 ms instead of about 7 ms. All 15 seconds with slow frames are L1 seconds, and no other second has a frame above 20 ms.\n- **Ruled out:**\n  - The Defender burst at s 43-45 (MsMpEng, DPC latency 396-455 us, disk 80-94%) causes no slow frames: max frame time stays at 7.7-8.1 ms.\n  - The disk bursts at s 13, 27 and 52 cause none either.\n- **Change:** `pcie_aspm_rp1_gpu`: `L1` → `disabled`. This turns off power saving only. Link speed stays Gen5 x4 and XMP, PBO and core ratio are not touched, so both constraints hold.\n\n**Assumptions:**\n- Only settings tied to the hitches change. The power plan, Defender and the other settings had no measurable effect, so they stay.\n- \"From\" is the value in the settings dump. \"To\" is the BIOS value `disabled`, the same value the chipset port already uses.\n\n**[next]** On the rig, disable ASPM on the GPU port in the BIOS. Then take another one-minute PresentMon capture of the same replay: the 4-second pattern should be gone, and the 1% low should move close to the steady 7.5 ms frame time (about 130 FPS or more; this is an estimate, not measured). No browser or apps were opened."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"avg_fps\": 137.29,\n  \"low_1pct_fps\": 45.35,\n  \"cause\": \"PCIe ASPM L1 on the GPU root port (pcie_aspm_rp1_gpu=L1): every 4 s (s 2,6,10,...,58) the GPU link drops to L1 (sensor gpu_pcie_link_state=L1) and exactly those seconds carry ~12 frames of 20-24 ms vs ~7 ms normal; 15 of 15 hitch seconds coincide with L1, 0 hitches elsewhere. Defender scan (s 43-45, MsMpEng, DPC 400+ us, disk 80-94%) and disk bursts (s 13, 27, 52) produce no frame-time spikes, so they are not the cause.\",\n  \"changes\": [\n    {\"setting\": \"pcie_aspm_rp1_gpu\", \"from\": \"L1\", \"to\": \"disabled\"}\n  ]\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && ls -la && for f in *; do echo \\\"== $f\\\"; head -c 1500 \\\"$f\\\"; echo; done\" ok -> \"total 9\\ndrwxr-xr-x 1 <USER> 197121    0 Nov  6 15:48 .\\ndrwxr-xr-x 1 <USER> 197121    0 Nov  6 15:48 ..\\n-rw-r--r-- 1 <USER> 197121  394 Nov  6 15:48 AGENTS.md\\n-rw-r--r-- 1 <USER> 197121  774 Nov  6 15:48 NOTES.md\\ndrwxr-xr-x 1 <USER> 197121    0 Nov  6 15:48 capture\\n-rw-r--r-- 1 <USER> 197121 2429 Nov  6 15:48 settings.json\\n== AGENTS.md\\nUse any skill, tool or MCP server you h[... 2718 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && sed -n 60,200p settings.json; ls -la capture; for f in capture/*; do echo \\\"== $f\\\"; head -5 \\\"$f\\\"; wc -l \\\"$f\\\"; done\" ok -> \"\\\"setting\\\": \\\"fullscreen_optimizations\\\",\\n      \\\"value\\\": \\\"enabled\\\",\\n      \\\"where\\\": \\\"Windows\\\"\\n    },\\n    {\\n      \\\"setting\\\": \\\"pcie_aspm_rp0_nvme\\\",\\n      \\\"value\\\": \\\"L1\\\",\\n      \\\"where\\\": \\\"BIOS\\\"\\n    },\\n    {\\n      \\\"setting\\\": \\\"pcie_aspm_rp1_gpu\\\",\\n      \\\"value\\\": \\\"L1\\\",\\n      \\\"where\\\": \\\"BIOS\\\"\\n    },\\n    {\\n      \\\"setting\\\": \\\"pcie_aspm_rp2_chipset\\\",\\n      \\\"value\\\": \\\"disabled\\\",\\n      \\\"where\\\": \\\"BIOS\\\"\\n    },\\n    {\\n    [... 2009 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && cat capture/sensors.csv | column -t -s, ; python -I -c \\\"\\nimport csv\\nr=list(csv.DictReader(open('capture/presentmon.csv')))\\nr=[x for x in r if x['Application']=='Arena.exe']\\nms=[float(x['MsBetweenPresents']) for x in r]\\nimport statistics as s\\nprint(len(ms), 1000/s.mean(ms))\\nsm=sorted(ms); import math\\nk=0.99*(len(sm)-1); f=math.floor(k); p=sm[f]+(sm[min(f+1,len(sm)-1)]-sm[f])*(k-f)\\nprint('p99',p,1000/p, 'dur',float(r[-1]['TimeInSeconds'])+ms[-1])\\nfrom collections import Counter\\nprint(Counter(int(float(x['TimeInSeconds'])) for x in r if float(x['MsBetweenPresents'])>20))\\nprint(set(x['Application'] for x in csv.DictReader(open('capture/presentmon.csv'))))\\n\\\"\" ok -> \"time_s  cpu_clock_mhz  cpu_util_pct  gpu_clock_mhz  gpu_pcie_link_state  gpu_pcie_link_speed  dpc_latency_us  disk_active_pct  top_cpu_process\\n0       5354           35            2724           L0                   Gen5 x4              52              1                Arena.exe\\n1       5350           40            2754           L0                   Gen5 x4              88              4         [... 8183 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && python -I -c \\\"\\nimport csv,statistics as s\\nr=list(csv.DictReader(open('capture/presentmon.csv')))\\nfrom collections import defaultdict\\nd=defaultdict(list)\\nfor x in r: d[int(float(x['TimeInSeconds']))].append(float(x['MsBetweenPresents']))\\nfor k in sorted(d): print(k,len(d[k]),round(s.mean(d[k]),2),max(d[k]),sorted(d[k])[-13:-11])\\n\\\"\" ok -> \"0 144 6.98 7.841 [7.376, 7.393]\\r\\n1 144 6.94 7.667 [7.366, 7.367]\\r\\n2 118 8.47 22.853 [7.441, 20.636]\\r\\n3 144 6.96 7.549 [7.347, 7.354]\\r\\n4 144 6.92 7.671 [7.382, 7.408]\\r\\n5 143 6.98 7.98 [7.437, 7.48]\\r\\n6 118 8.48 22.988 [7.545, 21.136]\\r\\n7 144 6.96 7.68 [7.359, 7.361]\\r\\n8 143 6.96 7.699 [7.387, 7.39]\\r\\n9 144 6.97 7.628 [7.364, 7.376]\\r\\n10 118 8.49 22.494 [7.6, 21.297]\\r\\n11 143 6.97 7.671 [7.394, 7.416]\\r\\n12[... 1637 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && cat > result.json <<'EOF'\\n{\\n  \\\"avg_fps\\\": 137.29,\\n  \\\"low_1pct_fps\\\": 45.35,\\n  \\\"cause\\\": \\\"PCIe ASPM L1 on the GPU root port (pcie_aspm_rp1_gpu=L1): every 4 s (s 2,6,10,...,58) the GPU link drops to L1 (sensor gpu_pcie_link_state=L1) and exactly those seconds carry ~12 frames of 20-24 ms vs ~7 ms normal; 15 of 15 hitch seconds coincide with L1, 0 hitches elsewhere. Defender scan (s 43-45, MsMpEng, DPC 400+ us, disk 80-94%) and disk bursts (s 13, 27, 52) produce no frame-time spikes, so they are not the cause.\\\",\\n  \\\"changes\\\": [\\n    {\\\"setting\\\": \\\"pcie_aspm_rp1_gpu\\\", \\\"from\\\": \\\"L1\\\", \\\"to\\\": \\\"disabled\\\"}\\n  ]\\n}\\nEOF\\npython -I -c \\\"import json;print(json.load(open('result.json'))['changes'])\\\"\" ok -> \"[{'setting': 'pcie_aspm_rp1_gpu', 'from': 'L1', 'to': 'disabled'}]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 5,
+  "tool_errors": 0,
+  "shell_commands": 5,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2678,
+  "reasoning_tokens": 436
+ },
+ "deliverables": [],
+ "render": null
+}

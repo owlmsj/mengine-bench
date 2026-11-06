@@ -1,0 +1,48 @@
+{
+ "task_id": "ds-ab-playtest",
+ "prompts": [
+  "We playtested two versions of the Pixel Arena tutorial and have to pick one for the next release. The export and its notes are in {WS}/telemetry. Should we ship B instead of A? Give a recommendation a skeptical lead would accept. Record it in {WS}/result.json with ship_b, sessions_a, sessions_b, completion_rate_a, completion_rate_b and p_value."
+ ],
+ "answers": [
+  "**[goal]** Decide whether Pixel Arena ships tutorial B instead of A, using the README's release rule (the gain in tutorial completion must be significant at 5%), and record the result in `./result.json`.\n\n**[action]**\n- Cleaned the export the way `telemetry/README.md` describes: one row per unique `session_id`, and `variant` trimmed and uppercased.\n- The raw file has 1870 rows. 70 of them are resent copies of sessions already in the file. None of the copies disagree with the original (`conflicts 0`).\n- Ran a two-sided two-proportion z-test with a pooled standard error. The script is `tmp/ab_analysis.py`, which wrote `result.json`.\n\n**[result]**\n- Script output:\n  - `unique sessions 1800 conflicts 0`\n  - `Counter({'B': 900, 'A': 900}) Counter({'B': 420, 'A': 342})`\n  - `pa=0.3800 pb=0.4667 z=3.7210 p_two=0.0002 p_one=0.0001`\n- `result.json`: `{\"ship_b\": true, \"sessions_a\": 900, \"sessions_b\": 900, \"completion_rate_a\": 0.38, \"completion_rate_b\": 0.4667, \"p_value\": 0.0002}`\n- **Recommendation: ship B.** Completion goes from 38.0% to 46.7%, a gain of 8.7 percentage points. That is significant even with the stricter two-sided test (p ≈ 0.0002, far below 0.05).\n- Assumptions:\n  - I used a two-sided test as the conservative choice. A one-sided test gives p = 0.0001, so the decision is the same either way.\n  - Each session counts as one observation. Some players appear in more than one session, and I did not correct for that. With a z-score of 3.7, it is very unlikely to change the decision.\n- Why I trust it: I counted every raw spelling of `variant` (b, B, \" B\", a, A, \" A\"), and they all map cleanly to A or B. Every `completed_tutorial` value is 0 or 1. Without removing the duplicates, the counts would have been inflated.\n\n**[next]** Nothing is blocking the release. Watch B's completion rate after release to confirm the gain holds. No browser tabs or apps were opened."
+ ],
+ "diff": "A result.json\nA tmp/ab_analysis.py\n\n--- result.json ---\n{\r\n  \"ship_b\": true,\r\n  \"sessions_a\": 900,\r\n  \"sessions_b\": 900,\r\n  \"completion_rate_a\": 0.38,\r\n  \"completion_rate_b\": 0.4667,\r\n  \"p_value\": 0.0002\r\n}\n\n--- tmp/ab_analysis.py ---\nimport csv, json, math, sys\nfrom collections import Counter\npath = sys.argv[1]\nrows = list(csv.DictReader(open(path, newline='', encoding='utf-8')))\nprint(\"raw rows\", len(rows))\nprint(\"variants raw\", Counter(r['variant'] for r in rows))\nprint(\"completed raw\", Counter(r['completed_tutorial'] for r in rows))\nby_session = {}\nconflicts = 0\nfor r in rows:\n    sid = r['session_id'].strip()\n    rec = (r['variant'].strip().upper(), r['completed_tutorial'].strip())\n    if sid in by_session and by_session[sid] != rec:\n        conflicts += 1\n        print(\"conflict\", sid, by_session[sid], rec)\n    by_session.setdefault(sid, rec)\nprint(\"unique sessions\", len(by_session), \"conflicts\", conflicts)\nn = Counter(); k = Counter()\nfor v, c in by_session.values():\n    if c not in ('0', '1'):\n        raise ValueError(f\"completed_tutorial={c!r}, expected '0' or '1'\")\n    n[v] += 1; k[v] += int(c)\nprint(n, k)\nna, nb, ka, kb = n['A'], n['B'], k['A'], k['B']\npa, pb = ka/na, kb/nb\npp = (ka+kb)/(na+nb)\nse = math.sqrt(pp*(1-pp)*(1/na+1/nb))\nz = (pb-pa)/se\np_two = math.erfc(abs(z)/math.sqrt(2))\np_one = 0.5*math.erfc(z/math.sqrt(2))\nprint(f\"pa={pa:.4f} pb={pb:.4f} z={z:.4f} p_two={p_two:.4f} p_one={p_one:.4f}\")\ntry:\n    from scipy.stats import fisher_exact, chi2_contingency\n    print(\"fisher\", fisher_exact([[kb, nb-kb],[ka, na-ka]]))\n    print(\"chi2 yates\", chi2_contingency([[kb, nb-kb],[ka, na-ka]]))\nexcept ImportError:\n    print(\"no scipy\")\nout = {\"ship_b\": bool(p_two < 0.05 and pb > pa), \"sessions_a\": na, \"sessions_b\": nb,\n       \"completion_rate_a\": round(pa, 4), \"completion_rate_b\": round(pb, 4), \"p_value\": round(p_two, 4)}\njson.dump(out, open(sys.argv[2], 'w'), indent=2)\nprint(json.dumps(out))\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd telemetry; ls -la; for f in *; do echo \\\"== $f\\\"; head -c 1500 \\\"$f\\\"; echo; done; wc -l *\" ok -> \"total 45\\ndrwxr-xr-x 1 <USER> 197121     0 Nov  6 15:37 .\\ndrwxr-xr-x 1 <USER> 197121     0 Nov  6 15:37 ..\\n-rw-r--r-- 1 <USER> 197121   361 Nov  6 15:37 README.md\\n-rw-r--r-- 1 <USER> 197121 41587 Nov  6 15:37 playtest_ab.csv\\n== README.md\\n# Playtest A/B - Pixel Arena tutorial\\n\\nExport from arena-panel. The ETL resends sessions: `session_id` is the unique key (repeated rows are the sam[... 1784 chars cut by the benchmark]\"\n[step 1] shell \"cd ..; mkdir -p tmp; cat > tmp/ab_analysis.py <<'EOF'\\nimport csv, json, math, sys\\nfrom collections import Counter\\npath = sys.argv[1]\\nrows = list(csv.DictReader(open(path, newline='', encoding='utf-8')))\\nprint(\\\"raw rows\\\", len(rows))\\nprint(\\\"variants raw\\\", Counter(r['variant'] for r in rows))\\nprint(\\\"completed raw\\\", Counter(r['completed_tutorial'] for r in rows))\\nby_session = {}\\nconflicts = 0\\nfor r in rows:\\n    sid = r['session_id'].strip()\\n    rec = (r['variant'].strip().upper(), r['completed_tutorial'].strip())\\n    if sid in by_session and by_session[sid] != rec:\\n        conflicts += 1\\n        print(\\\"conflict\\\", sid, by_session[sid], rec)\\n    by_session.setdefault(sid, rec)\\nprint(\\\"unique sessions\\\", len(by_session), \\\"conflicts\\\", conflicts)\\nn = Counter(); k = Counter()\\nfor v, c in by_session.values():\\n    if c not in ('0', '1'):\\n        raise ValueError(f\\\"completed_tutorial={c!r}, expected '0' or '1'\\\")\\n    n[v] += 1; k[v] += int(c)\\nprint(n, k)\\nna, nb, ka, kb = n['A'], n['B'], k['A'], k['B']\\npa, pb = ka/na, kb/nb\\npp = (ka+kb)/(na+nb)\\nse = math.sqrt(pp*(1-pp)*(1/na+1/nb))\\nz = (pb-pa)/se\\np_two = math.erfc(abs(z)/math.sqrt(2))\\np_one = 0.5*math.erfc(z/math.sqrt(2))\\nprint(f\\\"pa={pa:.4f} pb={pb:.4f} z={z:.4f} p_two={p_two:.4f} p_one={p_one:.4f}\\\")\\ntry:\\n    from scipy.stats import fisher_exact, chi2_contingency\\n    print(\\\"fisher\\\", fisher_exact([[kb, nb-kb],[ka, na-ka]]))\\n    print(\\\"chi2 yates\\\", chi2_contingency([[kb, nb-kb],[ka, na-ka]]))\\nexcept ImportError:\\n    print(\\\"no scipy\\\")\\nout = {\\\"sh[... 322 chars cut by the benchmark]\" ok -> \"raw rows 1870\\r\\nvariants raw Counter({'b': 323, 'B': 322, 'A': 318, ' A': 316, 'a': 304, ' B': 287})\\r\\ncompleted raw Counter({'0': 1080, '1': 790})\\r\\nunique sessions 1800 conflicts 0\\r\\nCounter({'B': 900, 'A': 900}) Counter({'B': 420, 'A': 342})\\r\\npa=0.3800 pb=0.4667 z=3.7210 p_two=0.0002 p_one=0.0001\\r\\nno scipy\\r\\n{\\\"ship_b\\\": true, \\\"sessions_a\\\": 900, \\\"sessions_b\\\": 900, \\\"completion_rate_a\\\": 0.38, \\\"completio[... 37 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "deduplicated session counts",
+   true
+  ],
+  [
+   "completion rates",
+   true
+  ],
+  [
+   "the gain is significant",
+   true
+  ],
+  [
+   "ship decision",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 3,
+  "tool_calls": 2,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2004,
+  "reasoning_tokens": 156
+ },
+ "deliverables": [],
+ "render": null
+}
