@@ -237,7 +237,9 @@ def run_cost_text(result: dict[str, object]) -> str:
     if estimate == "$0.00 (local)":
         return estimate
     bound = ">= " if totals.get("cost_lower_bound") else ""
-    if totals.get("cost_basis") == "harness" and isinstance(usd, (int, float)):
+    # #202: opencode reports 0 for a model it has no price for; a declared --price is then the cost.
+    harness_unpriced = usd == 0 and bool(result.get("price_per_mtok")) and estimate.startswith("~")
+    if totals.get("cost_basis") == "harness" and isinstance(usd, (int, float)) and not harness_unpriced:
         return f"{bound}${usd:.2f}"
     return bound + estimate if estimate.startswith("~") else estimate
 

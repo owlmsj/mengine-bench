@@ -334,7 +334,10 @@ def test_a_complete_1_7_run_stays_complete_in_2_0() -> None:
     ({"cost_usd": None, "cost_basis": None, "cost_lower_bound": True}, None, "claude-sonnet-5-5", ">= ~$5.40"),
     ({"cost_usd": 0.0, "cost_basis": "price"}, {"input": 0, "cached": 0, "output": 0}, "local-27b", "$0.00 (local)"),
     ({"cost_usd": None, "cost_basis": None}, None, "unpriced-model", "n/a"),
-], ids=["exact", "exact-bound", "estimate", "estimate-bound", "local", "neither"])
+    # #202: opencode reports 0 for a model it has no price for; the declared --price is the cost then.
+    ({"cost_usd": 0.0, "cost_basis": "harness", "cost_lower_bound": True}, {"input": 0.091, "cached": 0.0091, "output": 0.4551},
+     "maritaca/S5", ">= ~$0.15"),
+], ids=["exact", "exact-bound", "estimate", "estimate-bound", "local", "neither", "harness-zero-declared-price"])
 def test_one_cost_cell_is_exact_estimated_local_or_na_162(totals: dict[str, object], price: object, model: str,
                                                         expected: str) -> None:
     result = {"agent": {"model": model}, "price_per_mtok": price, "config": {},
