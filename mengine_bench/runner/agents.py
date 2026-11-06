@@ -1,4 +1,4 @@
-"""Agent adapters: one interface over Claude Code, Codex CLI, opencode, AGY and any command.
+"""Agent adapters: one interface over Claude Code, Codex CLI, opencode, AGY, pi and any command.
 
 Flags were read from each CLI's `--help` (claude 2.1, codex-cli 0.162,
 opencode 2.0). Adapters only build argv lists (never shell strings) and parse
@@ -7,7 +7,8 @@ because inlined long-context documents exceed the Windows command-line limit.
 
 A step succeeds only with exit 0 AND the adapter's terminal completion event
 (claude `result` success, codex `turn.completed`, opencode `step_finish`
-reason `stop`, agy `result` SUCCESS); a success-looking prefix of a truncated stream is a crash
+reason `stop`, agy `result` SUCCESS, pi's last assistant message with stopReason
+`stop`); a success-looking prefix of a truncated stream is a crash
 (release review R16).
 
 `judge_invocation` is the judge's argv (release review R17): judges read
@@ -31,7 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
 
-AGENT_NAMES = ("claude", "codex", "opencode", "agy", "cmd")
+AGENT_NAMES = ("claude", "codex", "opencode", "agy", "pi", "cmd")
 # Stay well under the 32767-char Windows command line with flags and paths.
 ARGV_PROMPT_LIMIT = 24_000
 VERSION_TIMEOUT_S = 20
@@ -146,6 +147,32 @@ def _agy_usage(usage: object) -> Usage:
                  _token_count(tokens.get("thinking_tokens")), None, "none")
 
 
+def _pi_usage(usage: object) -> Usage:
+    tokens = _usage_mapping(usage)
+    # pi's input leaves cache reads and writes out (input + output + cacheRead + cacheWrite == totalTokens in the
+    # recorded stream); its output already holds reasoning (docs/message-types.md:90), as on Claude and Codex.
+    cost = _usd_cost(_usage_mapping(tokens.get("cost")).get("total"))
+    return Usage(
+        _known_sum([_token_count(tokens.get("input")), _token_count(tokens.get("cacheRead")),
+                    _token_count(tokens.get("cacheWrite"))]),
+        _token_count(tokens.get("cacheRead")), _token_count(tokens.get("output")),
+        _token_count(tokens.get("reasoning")), cost, "harness" if cost is not None else "none",
+    )
+
+
+def pi_assistant_messages(events: list[dict[str, object]]) -> list[Mapping[str, object]]:
+    """Each completed assistant message: `message_end` is pi's authoritative copy (docs/json.md:68)."""
+    messages = [_usage_mapping(event.get("message")) for event in events if event.get("type") == "message_end"]
+    return [message for message in messages if message.get("role") == "assistant"]
+
+
+def pi_message_text(message: Mapping[str, object]) -> str:
+    content = message.get("content")
+    blocks = content if isinstance(content, list) else []
+    texts = [_usage_mapping(block).get("text") for block in blocks if _usage_mapping(block).get("type") == "text"]
+    return "".join(text for text in texts if isinstance(text, str))
+
+
 def agy_tool_result(info: Mapping[str, object]) -> tuple[int | None, str]:
     """A finished call's exit code, if it ran a command, and its output without AGY's wrapping."""
     output = info.get("output")
@@ -222,6 +249,9 @@ def partial_answer(stdout: str) -> str:
     events = split_jsonl(stdout)
     if any(event.get("type") in ("step_start", "step_finish", "text") for event in events):
         return _opencode_step_text(_opencode_final_step(events))
+    if any(event.get("type") in ("agent_start", "turn_start", "message_end") for event in events):
+        texts = [pi_message_text(message) for message in pi_assistant_messages(events)]
+        return next((text for text in reversed(texts) if text.strip()), "")
     replies: list[object] = []
     known = False
     for event in events:
@@ -333,6 +363,25 @@ def parse_agy_stream(stdout: str, exit_code: int) -> Parsed:
         raise AgentError(f"received no text in result {json.dumps(final)[:200]}; expected a non-empty answer")
     session = final.get("conversation_id")
     return Parsed(answer=answer, session_id=session if isinstance(session, str) else None, usage=_agy_usage(final.get("usage")))
+
+
+def parse_pi_jsonl(stdout: str, exit_code: int) -> Parsed:
+    _require_exit_zero(exit_code)
+    events = split_jsonl(stdout)
+    messages = pi_assistant_messages(events)
+    if not messages:
+        raise AgentError(f"received no assistant message_end in {len(events)} events; expected a final message")
+    final = messages[-1]
+    if final.get("stopReason") != "stop":
+        raise AgentError(f"received last stopReason={final.get('stopReason')!r} "
+                         f"errorMessage={final.get('errorMessage')!r}; expected stopReason='stop'")
+    answer = pi_message_text(final)
+    if not answer.strip():
+        raise AgentError(f"received no text in the last assistant message of {len(events)} events; "
+                         "expected a non-empty answer")
+    session = next((event.get("id") for event in events if event.get("type") == "session"), None)
+    usage = sum_usage([_pi_usage(message.get("usage")) for message in messages])
+    return Parsed(answer=answer, session_id=session if isinstance(session, str) else None, usage=usage)
 
 
 def _final_step_answered(events: list[dict[str, object]]) -> bool:
@@ -551,6 +600,50 @@ class AgyAgent:
         return _cli_version("agy")
 
 
+PI_FINAL_EVENT = '{"type":"agent_settled"'
+# Judge: no tools, extensions, MCP, skills, prompt templates, context files or project-trusted resources
+# (docs/cli.md:119-126, 194-215, 239).
+PI_JUDGE_FLAGS = ("--no-tools", "--no-extensions", "--no-mcp", "--no-skills", "--no-prompt-templates",
+                  "--no-context-files", "--no-approve")
+
+
+@dataclass
+class PiAgent:
+    """`pi -p --mode json --no-session` (pi coding agent 1.5.0); effort is `--thinking`.
+
+    The prompt always goes through stdin: pi reads piped stdin as the first prompt, trimmed
+    (dist/main.js:52-68, 735-744), so no length or newline goes through the .cmd shim. Attachments
+    are `@path` arguments, resolved from the cwd and sent as image content (docs/cli.md:35,39;
+    dist/cli/file-processor.js:33-54); pi appends their `<file>` tags after the stdin text
+    (dist/cli/initial-message.js:7-18). `agent_settled` ends a print run (docs/json.md:48).
+    """
+
+    model: str
+    effort: str | None
+    name: str = "pi"
+
+    def _argv(self) -> list[str]:
+        argv = [_executable("pi"), "-p", "--mode", "json", "--no-session", "--model", self.model]
+        return argv + ["--thinking", self.effort] if self.effort else argv
+
+    def invocation(self, prompt: str, prompt_file: Path, workspace: Path,
+                   attachments: Sequence[str]) -> Invocation:
+        argv = [*self._argv(), *(f"@{attachment}" for attachment in attachments)]
+        return Invocation(argv=argv, stdin_text=prompt, final_event=PI_FINAL_EVENT)
+
+    def judge_invocation(self, prompt: str, workdir: Path, attachments: Sequence[str],
+                         prompt_file: Path | None = None, system_prompt: str | None = None) -> Invocation:
+        # The rules travel in stdin, as for Codex: a multi-line --system-prompt would cross the pi.cmd shim.
+        argv = [*self._argv(), *PI_JUDGE_FLAGS, *(f"@{attachment}" for attachment in attachments)]
+        return Invocation(argv=argv, stdin_text=_with_rules(prompt, system_prompt))
+
+    def parse(self, stdout: str, exit_code: int) -> Parsed:
+        return parse_pi_jsonl(stdout, exit_code)
+
+    def version(self) -> str | None:
+        return _cli_version("pi")
+
+
 CMD_PLACEHOLDERS = ("{prompt_file}", "{workspace}", "{model}", "{effort}")
 
 
@@ -617,6 +710,8 @@ def make_agent(name: str, model: str, effort: str | None, cmd_template: str | No
         return OpencodeAgent(model=model, effort=effort)
     if name == "agy":
         return AgyAgent(model=model, effort=effort)
+    if name == "pi":
+        return PiAgent(model=model, effort=effort)
     if name == "cmd":
         if not cmd_template:
             raise ValueError("received agent 'cmd' without a template; expected --cmd TEMPLATE")
