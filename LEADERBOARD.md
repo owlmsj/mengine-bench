@@ -21,6 +21,7 @@ The bench 2.0 to 2.2 runs (20 and 23 tasks) moved to history on 2026-11-04 (#187
 | 5 | **73.7** | gpt-6.1-sol low<br>codex codex-cli 0.165.0 | 96.6 | 25/28 | 81.7 | 20.6 | 24 min 50 s | ~$4.69 | [run](results/2026-11-03_codex_gpt-6.1-sol_low_35d7a1b8/summary.md) (bench 2.5, rubric 2.5) |
 | 6 | **72.1** | home/qwen38-flash-next-exl3-605-256k low<br>opencode opencode v2.2.5 | 96.2 | 23/28 | 80.6 | 16.1 | 25 min 58 s | $0.00 (local) | [run](results/2026-11-06_opencode_home-qwen38-flash-next-exl3-605-256k_low_6271bb4f/summary.md) |
 | 7 | **71.6** | home/qwen38-flash-next-exl3-605-256k low<br>opencode opencode v2.2.5 | 94.8 | 22/28 | 79.0 | 18.6 | 25 min 21 s | $0.00 (local) | [run](results/2026-11-05_opencode_home-qwen38-flash-next-exl3-605-256k_low_0511702e/summary.md) |
+| 8 | **55.9** | maritaca/S5 low<br>opencode opencode v2.2.5 | 80.9 | 15/28 | 61.7 | 0.0 | 36 min 59 s | >= ~$0.15 | [run](results/2026-11-06_opencode_maritaca-S5_low_f64abf0d/summary.md) |
 
 <details><summary>Run details: tokens, turns, tools, hardware, config</summary>
 
@@ -33,6 +34,7 @@ The bench 2.0 to 2.2 runs (20 and 23 tasks) moved to history on 2026-11-04 (#187
 | 5 | gpt-6.1-sol | 0 | 5.60M | 65.8k | 4.9k | 29 | 182 | - | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=codex, tier=0, role=default, service_tier=fast, i... | owlmsj | 2026-11-03 |
 | 6 | home/qwen38-flash-next-exl3-605-256k | 2 | 4.33M | 169.9k | 0.0k | 389 | 440 | 0.7 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=local, server_gpu=2x RTX 5090 + 2x RTX 4090, ser... | owlmsj | 2026-11-06 |
 | 7 | home/qwen38-flash-next-exl3-605-256k | 3 | 5.60M | 156.4k | 0.0k | 362 | 397 | 0.1 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=local, server_gpu=2x RTX 5090 + 2x RTX 4090, ser... | owlmsj | 2026-11-05 |
+| 8 | maritaca/S5 | 7 | 1.59M | 292.0k | 170.8k | 421 | 454 | 0.1 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=maritaca, model=S5, tier=1, role=dev-r, account_... | owlmsj | 2026-11-06 |
 
 </details>
 
@@ -119,12 +121,12 @@ Read as ties, because the higher run keeps its lead in under 80% of 2000 draws o
 | 4 | **87.5** | claude-sonnet-5-5 medium<br>claude 2.1.316 (Claude Code) | 93.3 | 14/15 | 78.1 | 85.5 | 8 min 38 s | $2.18 | [run](results/2026-11-01_claude_claude-sonnet-5-5_medium_d5787b15/summary.md) (bench 1.7, rubric 2.5) |
 | 5 | **81.8** | zai/glm-5.3-flash low<br>opencode opencode v2.2.2 | 89.2 | 12/15 | 70.7 | 79.1 | 10 min 14 s | >= $0.06 | [run](results/2026-11-02_opencode_zai-glm-5.3-flash_low_5b875183/summary.md) (bench 1.7, rubric 2.5) |
 | 6 | **79.2** | zai/glm-5.3-flash low<br>opencode opencode v2.2.2 | 97.7 | 13/15 | 73.9 | 14.4 | 26 min 24 s | >= $0.07 | [run](results/2026-11-02_opencode_zai-glm-5.3-flash_low_66a6ff1a/summary.md) (bench 1.7, rubric 2.5) |
-| 7 | **78.4** | qwen-cloud/qwen3.8-flash medium<br>opencode opencode v2.2.2 | 94.9 | 12/15 | 78.7 | 12.6 | 26 min 51 s | >= $0.00 | [run](results/2026-11-02_opencode_qwen-cloud-qwen3.8-flash_medium_b6b04602/summary.md) (bench 1.7, rubric 2.5) |
+| 7 | **78.4** | qwen-cloud/qwen3.8-flash medium<br>opencode opencode v2.2.2 | 94.9 | 12/15 | 78.7 | 12.6 | 26 min 51 s | >= ~$0.10 | [run](results/2026-11-02_opencode_qwen-cloud-qwen3.8-flash_medium_b6b04602/summary.md) (bench 1.7, rubric 2.5) |
 | 8 | **76.5** | alibaba/qwen3.8-flash medium<br>opencode opencode v2.2.2 | 95.3 | 13/15 | 76.3 | 1.4 | 29 min 39 s | >= $0.10 | [run](results/2026-11-02_opencode_alibaba-qwen3.8-flash_medium_9a36d70a/summary.md) (bench 1.7, rubric 2.5) |
 | 9 | **76.2** | zai/glm-5.3-flash low<br>opencode opencode v2.2.2 | 90.7 | 12/15 | 73.5 | 24.7 | 23 min 50 s | >= $0.11 | [run](results/2026-11-02_opencode_zai-glm-5.3-flash_low_fd73fe19/summary.md) (bench 1.7, rubric 2.5) |
 | 10 | **75.0** | zai/glm-5.3-flash low<br>opencode opencode v2.2.2 | 89.8 | 11/15 | 72.9 | 21.2 | 24 min 41 s | >= $0.06 | [run](results/2026-11-02_opencode_zai-glm-5.3-flash_low_170cc4e9/summary.md) (bench 1.7, rubric 2.5) |
 | 11 | **73.7** | alibaba/qwen3.8-flash medium<br>opencode opencode v2.2.2 | 90.8 | 13/15 | 72.7 | 7.5 | 28 min 07 s | >= $0.08 | [run](results/2026-11-02_opencode_alibaba-qwen3.8-flash_medium_7909d3ce/summary.md) (bench 1.7, rubric 2.5) |
-| 12 | **68.9** | qwen-cloud/qwen3.8-flash medium<br>opencode opencode v2.2.2 | 80.0 | 12/15 | 68.0 | 32.2 | 21 min 58 s | >= $0.00 | [run](results/2026-11-02_opencode_qwen-cloud-qwen3.8-flash_medium_dec421df/summary.md) (bench 1.7, rubric 2.5) |
+| 12 | **68.9** | qwen-cloud/qwen3.8-flash medium<br>opencode opencode v2.2.2 | 80.0 | 12/15 | 68.0 | 32.2 | 21 min 58 s | >= ~$0.09 | [run](results/2026-11-02_opencode_qwen-cloud-qwen3.8-flash_medium_dec421df/summary.md) (bench 1.7, rubric 2.5) |
 
 <details><summary>Run details: tokens, turns, tools, hardware, config</summary>
 
