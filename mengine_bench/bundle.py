@@ -19,6 +19,7 @@ import gzip
 import io
 import json
 import os
+import posixpath
 import re
 import shutil
 import stat
@@ -32,6 +33,7 @@ from mengine_bench.redact import (
     LocalNames, PathScope, find_leaks, find_leak_strings, leak_matches, local_names, redact_paths, redact_text, redact_value,
 )
 from mengine_bench.report import render_summary
+from mengine_bench.runner.task_run import BROWSER_PROFILE_DIRS
 
 RESULT_NAME = "result.json"
 SUMMARY_NAME = "summary.md"
@@ -41,6 +43,8 @@ WORKSPACE_BYTES = 20 * 1024 * 1024
 WORKSPACE_EXPANDED_BYTES = 200 * 1024 * 1024
 WORKSPACE_MEMBERS = 20_000
 WORKSPACE_EXCLUDED = frozenset({"target", "node_modules", ".venv", "__pycache__"})
+# #205: every Chromium user-data dir has this file at its root, whatever the agent named the dir.
+BROWSER_PROFILE_MARKER = "Local State"
 _STEP_FILE = re.compile(r"^step-(?P<label>.+)\.(?P<stream>stdout|stderr)\.txt$")
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -245,8 +249,7 @@ def _workspace_files(workspace: Path) -> list[Path]:
     sources: list[Path] = []
     expanded = 0
     for root, directories, files in os.walk(workspace, followlinks=False):
-        directories[:] = sorted(name for name in directories
-                                if name not in WORKSPACE_EXCLUDED and not _linked(Path(root) / name))
+        directories[:] = sorted(name for name in directories if _archived_dir(Path(root) / name))
         for name in sorted(files):
             source = Path(root) / name
             if _linked(source) or not stat.S_ISREG(source.stat().st_mode):
@@ -255,6 +258,45 @@ def _workspace_files(workspace: Path) -> list[Path]:
             sources.append(source)
             _workspace_budget(len(sources), expanded)
     return sources
+
+
+def _archived_dir(path: Path) -> bool:
+    if _linked(path) or path.name in WORKSPACE_EXCLUDED or path.name in BROWSER_PROFILE_DIRS:
+        return False
+    # #205: a browser profile holds History, Sessions and Favicons with the home path; never publish it.
+    return not (path / BROWSER_PROFILE_MARKER).is_file()
+
+
+def _excluded_dir(name: str, profiles: set[str]) -> str | None:
+    """The directory that keeps archive member `name` out of a workspace archive, or None to keep it."""
+    parts = name.split("/")[:-1]
+    for depth, part in enumerate(parts, start=1):
+        directory = "/".join(parts[:depth])
+        if part in WORKSPACE_EXCLUDED or part in BROWSER_PROFILE_DIRS or directory in profiles:
+            return directory
+    return None
+
+
+def repack_workspace(path: Path) -> list[str]:
+    """Rewrite an archived workspace without the dirs `_write_workspace` now leaves out; return those dirs (#205).
+
+    Kept members are copied byte for byte: they were redacted when the run wrote them.
+    """
+    with tarfile.open(path, "r:gz") as archive:
+        members = workspace_members(archive)
+        profiles = {posixpath.dirname(member.name) for member in members
+                    if posixpath.basename(member.name) == BROWSER_PROFILE_MARKER and posixpath.dirname(member.name)}
+        dropped = {member.name: _excluded_dir(member.name, profiles) for member in members}
+        if not any(dropped.values()):
+            return []
+        compressed = io.BytesIO()
+        with gzip.GzipFile(fileobj=compressed, mode="wb", mtime=0) as zipped:
+            with tarfile.open(fileobj=zipped, mode="w|") as repacked:
+                for member in members:
+                    if dropped[member.name] is None:
+                        repacked.addfile(member, archive.extractfile(member) if member.isfile() else None)
+    path.write_bytes(compressed.getvalue())
+    return sorted({directory for directory in dropped.values() if directory is not None})
 
 
 def workspace_members(archive: tarfile.TarFile) -> list[tarfile.TarInfo]:
