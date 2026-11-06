@@ -4,7 +4,7 @@ They come from the stream rather than from `Usage`, so a run stopped at its limi
 still has them. None means the harness does not report that value, never zero:
 only opencode stamps its events, so the time fields are None for Claude and Codex;
 AGY reports each step's duration, so it has tool time and turn rates.
-Per-call tool time (#162) comes from opencode's tool clock, AGY's step duration and, on Claude Code, the stamps
+Per-call tool time (#162) comes from opencode's tool clock, AGY's step duration, pi's durationMs and, on Claude Code, the stamps
 of a tool_use event and of its result; Codex gives none, so its median stays None, never an estimate.
 """
 
@@ -16,7 +16,7 @@ from datetime import datetime
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, field
 
-from mengine_bench.runner.agents import agy_tool_result, split_jsonl
+from mengine_bench.runner.agents import agy_tool_result, pi_assistant_messages, pi_tool_results, split_jsonl
 
 SHELL_TOOLS = frozenset({"bash", "shell", "run_command"})
 WRITE_TOOLS = frozenset({"write", "edit", "multiedit", "notebookedit", "apply_patch", "patch", "write_file", "edit_file",
@@ -303,12 +303,39 @@ def _agy_turn(stats: RunStats, step: Mapping[str, object]) -> None:
         stats.turn_rates.append(generated / seconds)
 
 
+def _pi_stats(events: list[dict[str, object]]) -> RunStats:
+    """Turns are assistant message_end events; a call counts on its start, as on opencode, with its end's verdict."""
+    stats = RunStats(tool_s=0.0)
+    seen: set[str] = set()
+    for message in pi_assistant_messages(events):
+        usage = _mapping(message.get("usage"))
+        cached = _count(usage.get("cacheRead"))
+        stats.model_turns += 1
+        # pi's output already holds reasoning (docs/message-types.md:90).
+        _note_tokens(stats, _count(usage.get("input")) + _count(usage.get("cacheWrite")) + cached, cached,
+                     _count(usage.get("output")), _count(usage.get("reasoning")))
+    ends = pi_tool_results(events)
+    for event in events:
+        if event.get("type") != "tool_execution_start":
+            continue
+        end = ends.get(str(event.get("toolCallId")), {})
+        if type(end.get("durationMs")) is int:
+            stats.tool_s += end["durationMs"] / 1000
+            stats.tool_call_s.append(end["durationMs"] / 1000)
+        exit_code = _mapping(_mapping(end.get("result")).get("structuredContent")).get("exit_code")
+        _note_tool(stats, seen, str(event.get("toolName") or ""), event.get("args"), failed=end.get("isError") is True,
+                   exit_code=exit_code)
+    return stats
+
+
 def stream_stats(stdout: str) -> RunStats:
     """Statistics of one step's stream; a stream from an unknown harness gives empty ones."""
     events = split_jsonl(stdout)
     kinds = {event.get("type") for event in events}
     if any(event.get("event") == "step_update" for event in events):
         return _agy_stats(events)
+    if kinds & {"tool_execution_start", "agent_start", "turn_start"}:
+        return _pi_stats(events)
     if kinds & {"step_start", "step_finish", "tool_use"}:
         return _opencode_stats(events)
     if kinds & {"turn.started", "turn.completed", "item.completed"}:

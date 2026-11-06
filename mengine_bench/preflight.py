@@ -5,8 +5,8 @@ contamination), so a run refuses to start while any is left on disk.
 
 Agent harnesses also load instruction files on their own: Claude Code reads
 ~/.claude/CLAUDE.md and every CLAUDE.md above its cwd, Codex reads
-~/.codex/AGENTS.md, opencode reads ~/.config/opencode/AGENTS.md and
-the project's AGENTS.md. Since #23 those
+~/.codex/AGENTS.md, opencode reads ~/.config/opencode/AGENTS.md, pi reads
+~/.pi/agent/AGENTS.md, and they read the project's AGENTS.md. Since #23 those
 are part of the configuration under test: they are warnings, recorded by file
 name only in result.json `config.personal_instructions`, never a block.
 """
@@ -30,11 +30,15 @@ def global_instruction_files(agent: str, home: Path, env: Mapping[str, str]) -> 
     claude_home = Path(env.get("CLAUDE_CONFIG_DIR") or home / ".claude")
     codex_home = Path(env.get("CODEX_HOME") or home / ".codex")
     config_home = Path(env.get("XDG_CONFIG_HOME") or home / ".config")
+    pi_home = Path(env.get("PI_CODING_AGENT_DIR") or home / ".pi" / "agent")
     candidates = {
         "claude": [claude_home / "CLAUDE.md"],
         "codex": [codex_home / "AGENTS.md", codex_home / "AGENTS.override.md"],
         "opencode": [config_home / "opencode" / "AGENTS.md"],
         "agy": [home / ".gemini" / "GEMINI.md"],
+        # pi 1.5.0 docs/configuration.md:18-20; AGENTS.MD and CLAUDE.MD name the same files on Windows.
+        "pi": [pi_home / name for name in ("AGENTS.override.md", "AGENTS.md", "CLAUDE.md", "SYSTEM.md",
+                                           "APPEND_SYSTEM.md")],
     }.get(agent, [])
     return [path for path in candidates if path.is_file()]
 

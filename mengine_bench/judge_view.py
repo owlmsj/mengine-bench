@@ -14,7 +14,7 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from mengine_bench.runner.agents import agy_tool_result, split_jsonl
+from mengine_bench.runner.agents import agy_tool_result, pi_tool_results, split_jsonl
 from mengine_bench.runner.trace import codex_opened_urls
 
 # A harness may write its scripts inside shell commands; most of those fit here (#70).
@@ -40,6 +40,7 @@ _KINDS = {"bash": "shell", "shell": "shell", "powershell": "shell", "run_command
 _OPENCODE = {"step_start", "step_finish", "tool_use"}
 _CODEX = {"turn.started", "turn.completed", "item.completed"}
 _CLAUDE = {"assistant", "user"}
+_PI = {"tool_execution_start", "agent_start", "turn_start"}
 
 
 def _mapping(value: object) -> Mapping[str, object]:
@@ -203,12 +204,32 @@ def _agy_calls(step: int, events: list[dict[str, object]]) -> Iterator[str]:
         yield _line(step, kind, info.get("parameters"), ok, output)
 
 
+def _pi_calls(step: int, events: list[dict[str, object]]) -> Iterator[str]:
+    """One line per finished call: the start holds the arguments, the end the result (pi docs/json.md:105-107)."""
+    ends = pi_tool_results(events)
+    for event in events:
+        end = ends.get(str(event.get("toolCallId")))
+        if event.get("type") != "tool_execution_start" or end is None:
+            continue
+        result = _mapping(end.get("result"))
+        exit_code = _mapping(result.get("structuredContent")).get("exit_code")
+        ok = end.get("isError") is not True and exit_code in (None, 0)
+        kind = _kind(str(event.get("toolName") or ""))
+        text = _blocks_text(result.get("content"))
+        if kind == "web_search":
+            yield _search_line(step, kind, event.get("args"), ok, None, text)
+            continue
+        yield _line(step, kind, event.get("args"), ok, text)
+
+
 def stream_calls(step: int, stdout: str) -> list[str] | None:
     """One line per tool call, or None when the stream is no known harness's."""
     events = split_jsonl(stdout)
     kinds = {event.get("type") for event in events}
     if any(event.get("event") == "step_update" for event in events):
         return list(_agy_calls(step, events))
+    if kinds & _PI:
+        return list(_pi_calls(step, events))
     if kinds & _OPENCODE:
         return list(_opencode_calls(step, events))
     if kinds & _CODEX:
@@ -251,6 +272,8 @@ def _tool_output_texts(events: list[dict[str, object]]) -> Iterator[str]:
         update = _mapping(event.get("step_update"))
         if update.get("step_type") == "tool":
             yield agy_tool_result(_mapping(update.get("tool_info")))[1]
+        if event.get("type") == "tool_execution_end":
+            yield _blocks_text(_mapping(event.get("result")).get("content"))
         part = _mapping(event.get("part"))
         if event.get("type") == "tool_use":
             yield str(_mapping(part.get("state")).get("output") or "")
