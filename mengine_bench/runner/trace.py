@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
 from mengine_bench.core import ToolCall
-from mengine_bench.runner.agents import split_jsonl
+from mengine_bench.runner.agents import pi_tool_results, split_jsonl
 
 
 def _mapping(value: object) -> Mapping[str, object]:
@@ -34,6 +34,9 @@ def _call(name: object, inputs: object, *, failed: bool = False) -> ToolCall:
 
 def _event_calls(event: Mapping[str, object], failures: set[str]) -> list[ToolCall]:
     kind = event.get("type")
+    if kind == "tool_execution_start":
+        # pi: the start holds the arguments; `failures` has the ids whose end failed (#198).
+        return [_call(event.get("toolName"), event.get("args"), failed=str(event.get("toolCallId")) in failures)]
     if kind == "assistant":
         return [_call(block.get("name"), block.get("input"), failed=str(block.get("id")) in failures)
                 for block in _blocks(event) if block.get("type") == "tool_use"]
@@ -61,6 +64,11 @@ def _event_calls(event: Mapping[str, object], failures: set[str]) -> list[ToolCa
     return []
 
 
+def _pi_failed(end: Mapping[str, object]) -> bool:
+    exit_code = _mapping(_mapping(end.get("result")).get("structuredContent")).get("exit_code")
+    return end.get("isError") is True or exit_code not in (None, 0)
+
+
 def codex_opened_urls(item: Mapping[str, object]) -> list[str]:
     """Structured opened views are fetch evidence; search snippets are not (#171)."""
     action = _mapping(item.get("action"))
@@ -83,6 +91,7 @@ def tool_trace(streams: Sequence[str], workspace: Path | None = None,
         events = split_jsonl(stream)
         failures = {str(block.get("tool_use_id")) for event in events if event.get("type") == "user"
                     for block in _blocks(event) if block.get("type") == "tool_result" and block.get("is_error")}
+        failures |= {call for call, end in pi_tool_results(events).items() if _pi_failed(end)}
         calls.extend(call for event in events for call in _event_calls(event, failures))
     return tuple(calls)
 

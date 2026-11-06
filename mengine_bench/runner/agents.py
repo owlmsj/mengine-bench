@@ -173,6 +173,11 @@ def pi_message_text(message: Mapping[str, object]) -> str:
     return "".join(text for text in texts if isinstance(text, str))
 
 
+def pi_tool_results(events: list[dict[str, object]]) -> dict[str, Mapping[str, object]]:
+    """Each finished call's tool_execution_end by toolCallId; its start holds the arguments (docs/json.md:105-107)."""
+    return {str(event.get("toolCallId")): event for event in events if event.get("type") == "tool_execution_end"}
+
+
 def agy_tool_result(info: Mapping[str, object]) -> tuple[int | None, str]:
     """A finished call's exit code, if it ran a command, and its output without AGY's wrapping."""
     output = info.get("output")

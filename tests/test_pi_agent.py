@@ -11,7 +11,11 @@ from pathlib import Path
 
 import pytest
 
+from mengine_bench.judge_view import tool_log, tool_outputs
+from mengine_bench.preflight import global_instruction_files
 from mengine_bench.runner.agents import AgentError, PiAgent, Usage, make_agent, partial_answer
+from mengine_bench.runner.stats import stream_stats
+from mengine_bench.runner.trace import shell_commands, tool_trace
 
 STREAM = (Path(__file__).parent / "fixtures" / "pi" / "stream.jsonl").read_text(encoding="utf-8")
 ANSWER = "Created `hello.txt` with the word KIWI.\n\n`cat hello.txt` printed:\n\n```\nKIWI\n```"
@@ -93,3 +97,51 @@ def test_partial_answer_takes_the_last_assistant_text_of_a_stream_stopped_mid_tu
     events = _events()
     final = max(index for index, event in enumerate(events) if event["type"] == "message_start")
     assert partial_answer(_stream(events[:final + 2])) == "I'll create the file and read it back."
+
+
+def _failed_shell(command: str, exit_code: int) -> list[dict[str, object]]:
+    call = {"toolCallId": "call_x", "toolName": "bash", "args": {"command": command}}
+    result = {"content": [{"type": "text", "text": "1 failed"}], "structuredContent": {"exit_code": exit_code}}
+    return [{"type": "tool_execution_start", **call},
+            {"type": "tool_execution_end", "toolCallId": "call_x", "toolName": "bash", "result": result,
+             "isError": True, "durationMs": 500}]
+
+
+def test_the_statistics_count_turns_calls_tokens_and_tool_time() -> None:
+    events = _events()
+    stats = stream_stats(_stream([*events[:-4], *_failed_shell("pytest", 1), *events[-4:]]))
+    assert stats.model_turns == 2
+    assert (stats.tool_calls, stats.tool_errors, stats.shell_commands, stats.shell_failures) == (3, 1, 2, 1)
+    assert (stats.file_writes, stats.repeated_tool_calls, stats.outside_path_uses) == (1, 0, 0)
+    # pi's output already holds reasoning (docs/message-types.md:90): generated is output, as on Claude and Codex.
+    assert (stats.input_tokens, stats.cached_input_tokens, stats.generated_tokens, stats.reasoning_tokens) == (
+        1607 + 211 + 1536, 1536, 135, 0)
+    assert stats.largest_turn_tokens == 111
+    assert stats.tool_call_s == [0.013, 0.125, 0.5] and stats.tool_s == pytest.approx(0.638)
+
+
+def test_the_judge_reads_the_same_log_as_for_any_harness() -> None:
+    events = _events()
+    log = tool_log([_stream([*events[:-4], *_failed_shell("pytest", 1), *events[-4:]])])
+    assert log.split("\n") == ['[step 1] write "hello.txt" ok -> "Successfully wrote to hello.txt"',
+                               '[step 1] shell "cat hello.txt" ok -> "KIWI"',
+                               '[step 1] shell "pytest" failed -> "1 failed"']
+    assert "deepseek" not in log
+    assert tool_outputs([STREAM]) == ["Successfully wrote to hello.txt", "KIWI\n"]
+
+
+def test_the_checks_see_each_call_once_with_its_inputs() -> None:
+    trace = tool_trace([_stream([*_events(), *_failed_shell("pytest", 1)])])
+    assert [(call.name, call.failed) for call in trace] == [("write", False), ("bash", False), ("bash", True)]
+    assert shell_commands(trace) == ["cat hello.txt", "pytest"]
+
+
+def test_its_personal_instructions_count_as_configuration(tmp_path: Path) -> None:
+    home_rules = tmp_path / ".pi" / "agent" / "AGENTS.md"
+    home_rules.parent.mkdir(parents=True)
+    home_rules.write_text("rules", encoding="utf-8")
+    assert global_instruction_files("pi", tmp_path, {}) == [home_rules]
+    moved = tmp_path / "pi-home"
+    moved.mkdir()
+    (moved / "APPEND_SYSTEM.md").write_text("more", encoding="utf-8")
+    assert global_instruction_files("pi", tmp_path, {"PI_CODING_AGENT_DIR": str(moved)}) == [moved / "APPEND_SYSTEM.md"]
