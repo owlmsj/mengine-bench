@@ -265,7 +265,33 @@ def page_hook(name: str) -> str:
     push({kind: "media", src: String(this.currentSrc || this.src || "").slice(0, 24)});
     return play.apply(this, args);
   };
-  const bench = Object.freeze({sounds: () => log.splice(0, log.length), hold, release});
+  // The score a player reads (#214): canvas text with "score" and a number, or a "score" label then a number, and
+  // else a DOM element named score. Read by the scripted basic play, never by the judge.
+  const toInt = (text) => parseInt(String(text).replace(/[.,\\s]/g, ""), 10);
+  let drawnScore = null, labelBefore = false;
+  const readDrawn = (text) => {
+    const t = String(text), found = t.match(/score\\D{0,3}?(\\d[\\d.,]*)/i);
+    if (found) { drawnScore = toInt(found[1]); labelBefore = false; return; }
+    if (labelBefore && /^\\s*\\d[\\d.,]*\\s*$/.test(t)) drawnScore = toInt(t);
+    labelBefore = /^\\s*score\\s*:?\\s*$/i.test(t);
+  };
+  if (window.CanvasRenderingContext2D) for (const m of ["fillText", "strokeText"]) {
+    const draw = CanvasRenderingContext2D.prototype[m];
+    CanvasRenderingContext2D.prototype[m] = function (text, ...rest) {
+      try { readDrawn(text); } catch (e) {}
+      return draw.call(this, text, ...rest);
+    };
+  }
+  const domScore = () => {
+    for (const el of document.querySelectorAll("[id*=score i], [class*=score i]")) {
+      const found = el.textContent.match(/\\d[\\d.,]*/);
+      if (found) return toInt(found[0]);
+    }
+    const found = (document.body ? document.body.innerText : "").match(/score\\D{0,3}?(\\d[\\d.,]*)/i);
+    return found ? toInt(found[1]) : null;
+  };
+  const score = () => drawnScore !== null ? drawnScore : domScore();
+  const bench = Object.freeze({sounds: () => log.splice(0, log.length), hold, release, score});
   Object.defineProperty(window, __NAME__, {value: bench, enumerable: false});
 })();""".replace("__MAX__", str(MAX_LOGGED_SOUNDS)).replace("__NAME__", json.dumps(name))
 
@@ -296,6 +322,10 @@ class PlayDriver(Protocol):
 
     def drain(self) -> tuple[list[dict[str, object]], list[str]]:
         """Sounds started and page errors thrown since the last drain."""
+        ...
+
+    def score(self) -> int | None:
+        """The score the page shows now, or None when it shows none (#214)."""
         ...
 
     def hold(self) -> None:
@@ -370,6 +400,12 @@ class ChromiumPlayDriver:
     def _bench(self, method: str) -> Mapping[str, object]:
         return self.session.call("Runtime.evaluate", expression=f"window[{json.dumps(self.hook_name)}].{method}()",
                                  returnByValue=True)
+
+    def score(self) -> int | None:
+        """The score the page shows now, as the hook reads it (#214), or None when it shows none."""
+        value = self._bench("score").get("result", {})
+        found = value.get("value") if isinstance(value, dict) else None
+        return found if isinstance(found, int) else None
 
     def hold(self) -> None:
         self._bench("hold")
