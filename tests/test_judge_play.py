@@ -269,7 +269,10 @@ const draw = () => { g.fillStyle = '#fff'; g.fillRect(0, 0, 1440, 900); g.fillSt
   g.font = '64px sans-serif'; g.fillText('Score ' + score, 40, 100); };
 addEventListener('pointerdown', () => { score += 1; ctx = ctx || new AudioContext(); const o = ctx.createOscillator();
   o.frequency.value = 660; o.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.05); draw(); });
-addEventListener('keydown', (e) => { if (e.code === 'Space') { score += 10; draw(); throw new Error('space'); } });
+addEventListener('keydown', (e) => { if (e.code !== 'Space') return; score += 10; draw();
+  const o = ctx.createOscillator(); o.frequency.setValueAtTime(300, ctx.currentTime);
+  o.frequency.exponentialRampToValueAtTime(600, ctx.currentTime + 0.05); o.connect(ctx.destination); o.start();
+  throw new Error('space'); });
 draw();</script>"""
 
 
@@ -284,5 +287,7 @@ def test_the_driver_plays_a_real_page_and_hears_what_it_starts(tmp_path: Path) -
         after = driver.frame()
         sounds, errors = driver.drain()
     assert before[:8] == after[:8] == b"\x89PNG\r\n\x1a\n" and before != after
-    assert [(s["kind"], s["hz"], s["state"]) for s in sounds] == [("oscillator", 660, "running")]
+    # A pitch set by automation shows where it starts and ends, not the node's default 440.
+    assert [(s["kind"], s["hz"], s["state"]) for s in sounds] == [("oscillator", 660, "running"),
+                                                               ("oscillator", "300->600", "running")]
     assert errors and "space" in errors[0]

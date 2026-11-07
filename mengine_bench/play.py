@@ -200,13 +200,27 @@ def sound_hook(name: str) -> str:
   const t0 = performance.now();
   const push = (entry) => { if (log.length < %d) log.push(Object.assign({t: Math.round(performance.now() - t0)}, entry)); };
   const state = (node) => { try { return node.context.state; } catch (e) { return "?"; } };
+  // A pitch set by automation is not in .value at start: keep the first and the last value scheduled.
+  const planned = new WeakMap();
+  if (window.AudioParam) for (const m of ["setValueAtTime", "linearRampToValueAtTime", "exponentialRampToValueAtTime",
+                                          "setTargetAtTime"]) {
+    const set = AudioParam.prototype[m];
+    AudioParam.prototype[m] = function (value, ...rest) {
+      const seen = planned.get(this);
+      planned.set(this, seen ? [seen[0], value] : [value, value]);
+      return set.call(this, value, ...rest);
+    };
+  }
+  const pitch = (param) => { const seen = planned.get(param);
+    return seen ? (seen[0] === seen[1] ? Math.round(seen[0]) : Math.round(seen[0]) + "->" + Math.round(seen[1]))
+                : Math.round(param.value); };
   const wrap = (proto, describe) => {
     if (!proto || !proto.start) return;
     const start = proto.start;
     proto.start = function (...args) { try { push(describe(this)); } catch (e) {} return start.apply(this, args); };
   };
   if (window.OscillatorNode) wrap(OscillatorNode.prototype, (n) => ({kind: "oscillator", wave: n.type,
-    hz: Math.round(n.frequency.value), state: state(n)}));
+    hz: pitch(n.frequency), state: state(n)}));
   if (window.AudioBufferSourceNode) wrap(AudioBufferSourceNode.prototype, (n) => ({kind: "buffer",
     s: n.buffer ? Math.round(n.buffer.duration * 100) / 100 : 0, state: state(n)}));
   const play = HTMLMediaElement.prototype.play;
