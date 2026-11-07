@@ -1,0 +1,79 @@
+{
+ "task_id": "cmp-handoff",
+ "prompts": [
+  "You are handing this debugging work to a colleague who will never see {WS}/session/transcript.md. Write {WS}/HANDOFF.md, at most 1000 characters, so they can carry on from where it really stands.",
+  "You just took over this work, and {WS}/HANDOFF.md is all you have. Where was the recipe applied, what are the final decode speed and VRAM, which quantization was discarded, what is still pending, and which command measures it again? Record it in {WS}/result.json: file_line, final_decode, final_vram_mib, discarded_quant, pending, measure_command."
+ ],
+ "answers": [
+  "\n\n[goal] Write ./HANDOFF.md (≤1000 chars) capturing the real state of the debugging session.\n\n[action] Read session/transcript.md, filtered the repeated filler steps down to the six signal lines (steps 30, 15, 42, 45, 63, 76 equivalents), and wrote HANDOFF.md from them.\n\n[result] `<WORKSPACE>\\HANDOFF.md`, 870 chars (verified via `(Get-Content -Raw).Length`). Findings: baseline 128k run (37.8 t/s, 7881 MiB) was invalid because 7881 MiB is the WDDM ceiling with 1494 MiB spilled to shared memory; `--no-mmproj-offload -ub 512` removes the spill (7697 MiB, 38.0 t/s median of 3); Q6_K dropped, Q4_K_M fallback; recipe applied to scripts/start_server.ps1:165 and profiles/local/local-9b.json; open item is the evals README citing deleted check_vision.ps1. How I know it is right: every claim is a verbatim fact from the transcript's substantive lines; the transcript's other lines are duplicated status noise with no new facts. Assumption stated in the file: this workspace contains only AGENTS.md and session/transcript.md, so the cited repo edits could not be verified here and are flagged for the colleague. No browser tabs or apps were opened, nothing to close.\n\n[next] None; nothing further can be verified without the actual repo.",
+  "\n\n[goal] Extract the handoff facts and record them in ./result.json.\n\n[action] Read ./HANDOFF.md, inventoried the workspace, wrote ./result.json with the six required keys, then parsed it back to confirm validity and all keys present.\n\n[result] ./result.json now holds:\n- file_line: `scripts/start_server.ps1:165 (local9 block); also profiles/local/local-9b.json`\n- final_decode: `38.0 t/s (median of 3 runs)`\n- final_vram_mib: `7697`\n- discarded_quant: `Q6_K (7.03 GiB, does not fit at 128k context)`\n- pending: update the evals README that still cites the deleted `check_vision.ps1`; diff `scripts/start_server.ps1` and `profiles/local/local-9b.json` to confirm the edits landed; rerun the measurement to confirm no Shared Usage spill\n- measure_command: `scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`\n\nValidation output: `file_line,final_decode,final_vram_mib,discarded_quant,pending,measure_command` (ConvertFrom-Json round-trip, no error).\n\nHow I know it is right: every value is a direct quote from HANDOFF.md lines 6-13. Line 9 is the only statement of where the recipe was applied. Line 7 gives the final pair (7697 MiB, 38.0 t/s, median of 3) after the `--no-mmproj-offload` + `-ub 512` fix; line 6's 37.8 t/s at 7881 MiB is explicitly marked Invalid (WDDM ceiling, 1494 MiB spilled to RAM), so it is not the final number. Line 8 names Q6_K as dropped for not fitting; Q4_K_M was kept as fallback, not discarded. Line 11-13 is the Open block, and line 6 carries the measurement command verbatim.\n\nAssumptions and limits:\n- The handoff's claimed numbers are taken as reported, not re-derived. The referenced artifacts do not exist in this folder: `Test-Path` returned `False` for `session/transcript.md`, `scripts` and `profiles`, and a recursive file listing shows only AGENTS.md and HANDOFF.md. So the two diffs and the measurement rerun listed under pending are not executable here; they need the repo that holds those files.\n- \"Discarded quantization\" read as the dropped one (Q6_K); the baseline Q5 and the fallback Q4_K_M are still in play.\n- I kept `final_vram_mib` numeric (7697) since the key name carries the unit; the spill check is folded into the pending rerun item.\n- No browser tabs, windows or apps were opened, so nothing to close."
+ ],
+ "diff": "A HANDOFF.md\nA result.json\nD session/transcript.md\n\n--- HANDOFF.md ---\n# HANDOFF: local-9b Q5 at 128k\n\nGoal: run local-9b Q5 at 128k context on this GPU.\n\nSettled:\n- Baseline (scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024): 37.8 t/s at 7881 MiB. Invalid: 7881 MiB is the WDDM ceiling; Shared Usage showed 1494 MiB spilled to RAM.\n- Fix: --no-mmproj-offload + -ub 512 removes the spill. Final: 7697 MiB, 38.0 t/s (median of 3).\n- Q6_K (7.03 GiB) does not fit at 128k; dropped. Q4_K_M fits (7305 MiB, 40.4 t/s), kept only as fallback.\n- Recipe applied at scripts/start_server.ps1:165 (local9 block) and profiles/local/local-9b.json.\n\nOpen:\n- evals README still cites check_vision.ps1, a deleted file; update it.\n- This folder holds only session/transcript.md, so the two edits above are unverified here: diff those files and rerun measure_decode.ps1 to confirm.\n\nMethod: judge fit by the Shared Usage counter, not dedicated VRAM alone.\n\n--- result.json ---\n{\n  \"file_line\": \"scripts/start_server.ps1:165 (local9 block); also profiles/local/local-9b.json\",\n  \"final_decode\": \"38.0 t/s (median of 3 runs)\",\n  \"final_vram_mib\": 7697,\n  \"discarded_quant\": \"Q6_K (7.03 GiB, does not fit at 128k context)\",\n  \"pending\": [\n    \"evals README still cites check_vision.ps1, a deleted file; update it\",\n    \"Diff scripts/start_server.ps1 and profiles/local/local-9b.json to confirm the recipe edits landed\",\n    \"Rerun measure_decode.ps1 to confirm 38.0 t/s at 7697 MiB with no Shared Usage spill\"\n  ],\n  \"measure_command\": \"scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024\"\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem -Force | Select-Object Name,Length; if (Test-Path session) { Get-ChildItem -Recurse session | Select-Object FullName,Length }\" ok -> \"Name      Length\\r\\n----      ------\\r\\nsession   \\r\\nAGENTS.md 394\\r\\n          9954\"\n[step 1] read \"session/transcript.md\" ok -> \"Read file session/transcript.md, lines 1-225\\n1: [agent] Opened the GPU panel; the graphs say nothing the counter does not already say. (step 0)\\n2: [tool] ok, 764 lines of output omitted\\n3: \\n4: [user] The local model needs 128k. Measure local-9b Q5 at that context.\\n5: \\n6: [agent] Checked the flag documentation in --help; the text did not help much. (step 2)\\n7: [tool] ok, 872 lines of output omitted[... 10615 chars cut by the benchmark]\"\n[step 1] write \"HANDOFF.md\" ok -> \"Created file successfully: HANDOFF.md\"\n[step 1] shell \"(Get-Content HANDOFF.md -Raw).Length\" ok -> \"870\"\n[step 2] read \"<WORKSPACE>\\\\HANDOFF.md\" ok -> \"Read file <WORKSPACE>\\\\HANDOFF.md, lines 1-15\\n1: # HANDOFF: local-9b Q5 at 128k\\n2: \\n3: Goal: run local-9b Q5 at 128k context on this GPU.\\n4: \\n5: Settled:\\n6: - Baseline (scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024): 37.8 t/s at 7881 MiB. Invalid: 7881 MiB is the WDDM ceiling; Shared Usage showed 1494 MiB spilled to RAM.\\n7: -[... 632 chars cut by the benchmark]\"\n[step 2] shell \"Get-ChildItem -Recurse -File | Select-Object FullName, Length\" ok -> \"FullName                                                                                 Length\\r\\n--------                                                                                 <WORKSPACE>\\\\AGENTS.md     <WORKSPACE>\\\\HANDOFF.md    870\"\n[step 2] write \"<WORKSPACE>\\\\result.json\" ok -> \"Created file successfully: <WORKSPACE>/result.json\"\n[step 2] shell \"$j = Get-Content result.json -Raw | ConvertFrom-Json; $j.PSObject.Properties.Name -join ','; Test-Path session/transcript.md, scripts, profiles\" ok -> \"file_line,final_decode,final_vram_mib,discarded_quant,pending,measure_command\\r\\nFalse\\r\\nFalse\\r\\nFalse\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "summary exists and fits in 1000 characters",
+   true
+  ],
+  [
+   "summary keeps `--no-mmproj-offload`",
+   true
+  ],
+  [
+   "summary keeps `-ub 512`",
+   true
+  ],
+  [
+   "summary keeps `7697`",
+   true
+  ],
+  [
+   "answer file_line",
+   true
+  ],
+  [
+   "answer final_decode",
+   true
+  ],
+  [
+   "answer final_vram_mib",
+   true
+  ],
+  [
+   "answer discarded_quant",
+   true
+  ],
+  [
+   "answer pending",
+   true
+  ],
+  [
+   "answer measure_command",
+   true
+  ],
+  [
+   "does not repeat the spilled VRAM as final",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 10,
+  "tool_calls": 8,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 3604,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1511
+ },
+ "deliverables": [],
+ "render": null
+}

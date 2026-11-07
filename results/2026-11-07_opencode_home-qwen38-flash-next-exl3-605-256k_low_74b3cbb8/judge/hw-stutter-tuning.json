@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "\n\n[goal] Find the hitch cause in rig arena-01 from the capture/sensor/settings/notes, propose fixes within the owner's constraints, record in ./result.json.\n\n[action] Parsed presentmon.csv (8238 presented frames, 60 s, one process/swapchain), computed the owner's own metrics, found frame-time bursts, then joined them by timestamp to the 1 s sensor log and cross-checked each candidate setting in settings.json. Nothing applied to this host.\n\n[result]\n- avg_fps 137.29 (mean MsBetweenPresents 7.284 ms; frames/60 s = 137.3, agrees). 1% low 45.35 fps (p99 frame time 22.05 ms).\n- Cause: PCIe ASPM L1 on the GPU root port (BIOS `pcie_aspm_rp1_gpu` = L1). 15 identical stall bursts of 12 frames at ~21.9-22.0 ms (median 6.96 ms) start at t = 2.40, 6.41, 10.40 ... every 4.0 s. The sensor log on the same clock shows `gpu_pcie_link_state=L1` at exactly seconds 2,6,10,...,58 and L0 elsewhere. Frames in L0 seconds: mean 6.95 ms, max 8.2 ms. Frames in L1 seconds: mean 8.5 ms, max 23.7 ms. `MsUntilRenderComplete` stays ~4-5 ms inside the stalls, so the GPU is not slow, the link wake is. That is why the average looks fine and the 1% low collapses.\n- Ruled out with data: Defender quick scan (MsMpEng top CPU, 80-94% disk at t=43-46) and disk spikes at t=13/27/52 gave no frame-time elevation (max 8.1 ms at t=44, 7.8 ms at t=52); CPU never throttled (min 5150 MHz, max util 59%, max DPC 455 µs), so power plan, core parking and min processor state are not the trigger; GPU clocks held 2710-2759 MHz.\n- Change: `pcie_aspm_rp1_gpu` L1 → disabled (BIOS power management, not an overclock, and it does not touch the Gen5 x4 link the constraints freeze). Written to ./result.json with avg_fps, low_1pct_fps, cause, changes.\n\nAssumptions: ASPM is allowed since the constraint only freezes XMP/PBO/core ratio and the PCIe link speed/width; the NVMe root port's L1 is left alone because its disk activity shows no frame-time cost; only changes the evidence supports are listed.\n\n[next] If the BIOS is locked, the Windows-side equivalent is power plan Balanced → High Performance with PCI Express Link State Power Management set to Off; re-run the same replay and confirm p99 frame time returns to ~8 ms (1% low ~120 fps).\n\nNo browser tabs, windows or apps were opened, so nothing to close."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"avg_fps\": 137.29,\n  \"low_1pct_fps\": 45.35,\n  \"cause\": \"PCIe ASPM L1 on the GPU root port (BIOS pcie_aspm_rp1_gpu=L1). The PresentMon capture shows 15 identical stall bursts of 12 frames each at ~21.9-22.0 ms (vs 6.96 ms median), starting at t=2.40, 6.41, 10.40 ... every 4.0 s. The 1 s sensor log on the same clock records gpu_pcie_link_state=L1 at exactly those seconds (2,6,10,...,58) and L0 everywhere else; frames during L0 seconds average 6.95 ms (max 8.2 ms), frames during L1 seconds average 8.5 ms (max 23.7 ms). MsUntilRenderComplete stays ~4-5 ms inside the stalls, so the GPU is not slow: the cost is the link waking from L1 low-power state, so average FPS (137.3) looks fine while the 1% low collapses to 45.4. Ruled out by the data: Defender quick scan (MsMpEng top CPU and 80-94% disk at t=43-46, plus disk spikes at t=13/27/52) produced no frame-time elevation (max 8.1 ms at t=44, 7.8 ms at t=52); CPU never throttled (min 5150 MHz, max util 59%, max DPC 455 us) so power plan / core parking / min processor state are not the trigger; GPU clocks stayed 2710-2759 MHz. Gen5 x4 link speed itself is not at fault and stays unchanged.\",\n  \"changes\": [\n    {\n      \"setting\": \"pcie_aspm_rp1_gpu\",\n      \"from\": \"L1\",\n      \"to\": \"disabled\"\n    }\n  ]\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"ls ..; ls\" ok -> \"Directory: <HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-hebzv_bh\\r\\n\\r\\nMode                 LastWriteTime         Length Name\\r\\n----                 -------------         ------ ----\\r\\nd----          07/11/2026    20:10                workspace\\r\\n\\r\\n    Directory: <WORKSPACE>\\r\\n\\r\\nMode                 LastWriteTime         Leng[... 308 chars cut by the benchmark]\"\n[step 1] shell \"cat NOTES.md; echo ---; cat settings.json; echo ---; ls capture\" ok -> \"# Owner notes - rig \\\"arena-01\\\"\\r\\n\\r\\nThe game hitches every few seconds even though the average frame rate looks fine.\\r\\nCapture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\r\\ntaken at the same time (same clock: second 0 of both files is the same instant).\\r\\nsettings.json is a dump of the rig's current settings.\\r\\n\\r\\nHow we measure:\\r\\n- Average FPS = frames presented di[... 3298 chars cut by the benchmark]\"\n[step 1] shell \"head -3 capture/presentmon.csv; echo ---; head -20 capture/sensors.csv; echo ---; wc -l capture/presentmon.csv capture/sensors.csv\" failed -> \"head: The term 'head' is not recognized as a name of a cmdlet, function, script file, or executable program.\\r\\nCheck the spelling of the name, or if a path was included, verify that the path is correct and try again.\\r\\n---\\r\\nhead: The term 'head' is not recognized as a name of a cmdlet, function, script file, or executable program.\\r\\nCheck the spelling of the name, or if a path was included, verify th[... 255 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"import sys; f=open('capture/presentmon.csv'); [print(next(f).rstrip()) for _ in range(3)]; f=open('capture/sensors.csv'); [print(next(f).rstrip()) for _ in range(6)]; import subprocess\\\"\" ok -> \"Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.000000,6.861,6.847,0.294,4.901,5.568\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.006861,6.773,6.812,0.387,4.013,6.252\\r\\ntime_s,cpu_clock_mhz,cpu_util_pct,g[... 309 chars cut by the benchmark]\"\n[step 1] write \"analyze.py\" ok -> \"Created file successfully: analyze.py\"\n[step 1] shell \"python analyze.py\" ok -> \"frames=8238 dur_ms=67 avg_fps=122894.31 mean_ms=7.284 avg_fps_def=137.29 p99_ms=22.048 low1pct=45.36\\r\\nmedian=6.96 thr=33.00 hitches=0\\r\\n\\r\\nSensor rows with anomalies:\\r\\n  t=  2 pcie=L1\\r\\n  t=  6 pcie=L1\\r\\n  t= 10 pcie=L1\\r\\n  t= 13 disk=92\\r\\n  t= 14 pcie=L1\\r\\n  t= 18 pcie=L1\\r\\n  t= 22 pcie=L1\\r\\n  t= 26 pcie=L1\\r\\n  t= 27 disk=86\\r\\n  t= 30 pcie=L1\\r\\n  t= 34 pcie=L1\\r\\n  t= 38 pcie=L1\\r\\n  t= 42 pcie=L1\\r\\n  t= 43 disk=[... 201 chars cut by the benchmark]\"\n[step 1] write \"inspect.py\" ok -> \"Created file successfully: inspect.py\"\n[step 1] shell \"python inspect.py\" ok -> \"8238\\r\\n{('7316', '0x000001F2A8C40000', '0'): 8238}\\r\\nt range 0.0 59.999207 monotonic True\\r\\nlast rows:\\r\\n{'Application': 'Arena.exe', 'ProcessID': '7316', 'SwapChainAddress': '0x000001F2A8C40000', 'Runtime': 'DXGI', 'SyncInterval': '0', 'PresentFlags': '512', 'Dropped': '0', 'TimeInSeconds': '59.985024', 'MsBetweenPresents': '7.055', 'MsBetweenDisplayChange': '7.056', 'MsInPresentAPI': '0.325', 'MsUnt[... 2266 chars cut by the benchmark]\"\n[step 1] write \"corr.py\" ok -> \"Created file successfully: corr.py\"\n[step 1] shell \"python corr.py\" ok -> \"bursts: 15\\r\\n start=  2.40 n=12 max= 22.9 avg= 21.9\\r\\n start=  6.41 n=12 max= 23.0 avg= 22.0\\r\\n start= 10.40 n=12 max= 22.5 avg= 21.9\\r\\n start= 14.40 n=12 max= 23.7 avg= 21.9\\r\\n start= 18.40 n=12 max= 22.9 avg= 22.0\\r\\n start= 22.40 n=12 max= 23.0 avg= 22.2\\r\\n start= 26.40 n=12 max= 22.2 avg= 21.9\\r\\n start= 30.41 n=12 max= 23.2 avg= 22.2\\r\\n start= 34.41 n=12 max= 22.8 avg= 21.9\\r\\n start= 38.41 n=12 max= 22.9[... 650 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv,statistics\\nms=sorted(float(r['MsBetweenPresents']) for r in csv.DictReader(open('capture/presentmon.csv')) if r['Dropped']=='0')\\nn=len(ms); mean=statistics.mean(ms)\\nlin=ms[int(0.99*(n-1))]\\nimport math\\nk=0.99*(n-1); f=math.floor(k); p99i=ms[f]+(k-f)*(ms[f+1]-ms[f])\\nprint(n, round(mean,4), round(1000/mean,2), 'p99_idx', p99i, round(1000/p99i,2), 'p99_lin', round(p99i,3), round(1000/p99i,2), 'frames/60', round(n/60,2))\\nsens=list(csv.DictReader(open('capture/sensors.csv')))\\nprint('max util', max(int(r['cpu_util_pct']) for r in sens))\\n\\\"\" ok -> \"8238 7.2841 137.29 p99_idx 22.04863 45.35 p99_lin 22.049 45.35 frames/60 137.3\\r\\nmax util 59\"\n[step 1] write \"result.json\" ok -> \"Created file successfully: result.json\"\n[step 1] shell \"python -c \\\"import json;d=json.load(open('result.json'));print(d['avg_fps'],d['low_1pct_fps'],d['changes'])\\\"; rm analyze.py, inspect.py, corr.py; ls\" ok -> \"137.29 45.35 [{'setting': 'pcie_aspm_rp1_gpu', 'from': 'L1', 'to': 'disabled'}]\\r\\n\\r\\n    Directory: <WORKSPACE>\\r\\n\\r\\nMode                 LastWriteTime         Length Name\\r\\n----                 -------------         ------ ----\\r\\nd----          07/11/2026    20:10                capture\\r\\n-a---          07/11/2026    20:10            394 [... 197 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 14,
+  "tool_calls": 13,
+  "tool_errors": 0,
+  "shell_commands": 9,
+  "shell_failures": 1,
+  "file_writes": 4,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 7323,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1794
+ },
+ "deliverables": [],
+ "render": null
+}
