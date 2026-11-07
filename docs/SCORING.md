@@ -215,8 +215,10 @@ visible defects or one state weak, 10-19 unfinished, off brief or landing only (
 inert), 0-9 broken.
 
 A page that only shows itself when played, such as a game, declares `judge_play`: up to three lines on what to try (#213).
-Before the vote the stored page opens in headless Chromium with real time, driven over the DevTools protocol, and the
-judge plays it in up to 5 turns. Each turn is one tool-less call through the same adapter and isolation as the vote: it
+Before the vote the stored page opens in headless Chromium, driven over the DevTools protocol, and the judge plays it
+in up to 5 turns. The page runs in real time during the judge's actions and is held while it thinks: a script injected
+before the page defers its animation frames and timers and stops its clock, so a game does not run on between turns and
+resumes without a jump (the first live play lost two games to balloons that escaped while the judge thought). Each turn is one tool-less call through the same adapter and isolation as the vote: it
 sees the latest frames and the log so far and replies with JSON actions (move, press, release, click, key, wait; at most
 12 per turn). A script injected before the page loads logs every sound the page starts, with its time, wave and pitch or
 length; the judge reads the log, it does not hear the sound. The vote then gets the play frames (`play-NN.png`, at most

@@ -8,6 +8,7 @@ import json
 import socket
 import struct
 import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -140,6 +141,12 @@ class FakeDriver:
     def act(self, action: play.PlayAction) -> None:
         self.done.append(action.text())
 
+    def hold(self) -> None:
+        self.done.append("hold")
+
+    def release(self) -> None:
+        self.done.append("release")
+
     def frame(self) -> bytes:
         if self.fail_after is not None and self.shots >= self.fail_after:
             raise play.CdpError("received EOF from DevTools; expected more frames")
@@ -181,7 +188,8 @@ def test_the_judge_plays_turn_by_turn_on_the_frames_of_the_last_turn(tmp_path: P
     assert [files for _, files, _ in asked] == [("play-00.png",), ("play-01.png", "play-02.png")]
     assert all(rules == play.PLAY_SYSTEM_PROMPT for _, _, rules in asked)
     assert "build a game" in asked[0][0] and "start it" in asked[0][0]
-    assert driver.done == ["click 10,20 +shot", "wait 5ms"] * 2
+    # The page clock stops before each frame the judge reads and runs again only for its actions.
+    assert driver.done == ["hold", *["release", "click 10,20 +shot", "wait 5ms", "hold"] * 2]
     assert list(record.frames) == [f"play-0{n}.png" for n in range(5)]
     assert (tmp_path / "play" / "play-04.png").read_bytes() == b"frame 5"
     log = play.play_log_text(record)
@@ -291,3 +299,33 @@ def test_the_driver_plays_a_real_page_and_hears_what_it_starts(tmp_path: Path) -
     assert [(s["kind"], s["hz"], s["state"]) for s in sounds] == [("oscillator", 660, "running"),
                                                                ("oscillator", "300->600", "running")]
     assert errors and "space" in errors[0]
+
+
+HELD_PAGE = """<!doctype html><body style="margin:0"><canvas id="c" width="1440" height="900"></canvas><script>
+const g = document.getElementById('c').getContext('2d'); let x = 0, last = performance.now(), biggest = 0;
+const tick = (now) => { const dt = now - last; last = now; biggest = Math.max(biggest, dt); x = (x + dt / 4) % 1400;
+  g.fillStyle = '#fff'; g.fillRect(0, 0, 1440, 900); g.fillStyle = '#c00'; g.fillRect(x, 400, 40, 40);
+  requestAnimationFrame(tick); };
+requestAnimationFrame(tick); setInterval(() => { window.ticks = (window.ticks || 0) + 1; }, 100);</script>"""
+
+
+@pytest.mark.skipif(visual.find_browser() is None, reason="no Chromium-family browser on PATH")
+def test_a_held_page_waits_for_the_judge_and_resumes_without_a_jump(tmp_path: Path) -> None:
+    # #213: in the first live play balloons escaped while the judge thought, and it blamed the game for it.
+    page = tmp_path / "page.html"
+    page.write_text(HELD_PAGE, encoding="utf-8")
+    evaluate = "[performance.now(), window.ticks || 0, biggest]"
+    with play.open_play_driver(page) as driver:
+        assert isinstance(driver, play.ChromiumPlayDriver)
+        driver.hold()
+        before = driver.frame()
+        clock = driver.session.call("Runtime.evaluate", expression=evaluate, returnByValue=True)["result"]["value"]
+        time.sleep(1.5)
+        assert driver.frame() == before
+        held = driver.session.call("Runtime.evaluate", expression=evaluate, returnByValue=True)["result"]["value"]
+        driver.session.call("Runtime.evaluate", expression="biggest = 0")
+        driver.release()
+        driver.act(play.PlayAction("wait", ms=300))
+        after = driver.session.call("Runtime.evaluate", expression=evaluate, returnByValue=True)["result"]["value"]
+    assert held[0] - clock[0] < 50 and held[1] == clock[1], "no page time and no interval tick while held"
+    assert after[2] < 500, "the first frame after the release sees a normal step, not the 1.5 s the judge took"

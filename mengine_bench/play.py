@@ -63,7 +63,7 @@ KEYS: dict[str, tuple[str, str, int, str]] = {
 
 PLAY_SYSTEM_PROMPT = f"""You are playtesting a web page for the mengine-bench judge, before the vote on it. You have no tools, no file system and nobody to ask: you act only by replying with one JSON object.
 
-Each turn the message gives the brief the page was built for, what to try, the log of the turns so far and the latest frames of the page, attached in the order it names. A frame is the {VIEW_W}x{VIEW_H} viewport; coordinates are its pixels, origin top left. The pointer and any pressed button stay as you left them between turns, and the page keeps running while you think.
+Each turn the message gives the brief the page was built for, what to try, the log of the turns so far and the latest frames of the page, attached in the order it names. A frame is the {VIEW_W}x{VIEW_H} viewport; coordinates are its pixels, origin top left. The pointer and any pressed button stay as you left them between turns. The page is paused while you think and runs only during your actions, so time passes in a turn only through them: a wait lets the page run.
 
 Reply with ONLY this JSON object, with no fences and no text before or after:
 {{"notes": "<what the frames show and what you try next, two sentences at most>", "actions": [<up to {MAX_ACTIONS} actions>], "done": <true or false>}}
@@ -193,12 +193,46 @@ class CdpSession:
 # ---------------------------------------------------------------- sounds ---
 
 
-def sound_hook(name: str) -> str:
-    """Records each sound source the page starts, readable only through window[name] (a name the page cannot know)."""
+def page_hook(name: str) -> str:
+    """Installed before the page: a page clock the bench can hold, and a log of each sound source the page starts.
+
+    Both sit behind window[name], a name the page cannot know. Holding defers animation frames and timers and stops
+    the page's performance.now and Date.now, so a game does not run on while the judge thinks (#213: the first live
+    play lost two games to balloons that escaped between turns). Release resumes the clock without a jump. The DevTools
+    virtual time stopped performance.now but not animation frames in headless Chromium, hence this shim.
+    """
     return """(() => {
+  const realNow = performance.now.bind(performance), realDateNow = Date.now.bind(Date);
+  const nativeRaf = window.requestAnimationFrame.bind(window), nativeCancel = window.cancelAnimationFrame.bind(window);
+  const nativeTimeout = window.setTimeout.bind(window), nativeInterval = window.setInterval.bind(window);
+  let held = false, heldAt = 0, heldTotal = 0, deferred = [];
+  const paused = () => heldTotal + (held ? realNow() - heldAt : 0);
+  const vnow = () => realNow() - paused();
+  performance.now = vnow;
+  Date.now = () => Math.round(realDateNow() - paused());
+  let nextRaf = 1;
+  const rafs = new Map();
+  window.requestAnimationFrame = (cb) => {
+    const id = nextRaf++;
+    const run = () => { if (!rafs.has(id)) return; if (held) { deferred.push(run); return; } rafs.delete(id); cb(vnow()); };
+    rafs.set(id, nativeRaf(run));
+    return id;
+  };
+  window.cancelAnimationFrame = (id) => { const native = rafs.get(id); rafs.delete(id); if (native) nativeCancel(native); };
+  window.setTimeout = (fn, ms, ...args) => typeof fn !== "function" ? nativeTimeout(fn, ms, ...args)
+    : nativeTimeout(function run() { if (held) { deferred.push(run); return; } fn(...args); }, ms);
+  window.setInterval = (fn, ms, ...args) => typeof fn !== "function" ? nativeInterval(fn, ms, ...args)
+    : nativeInterval(() => { if (!held) fn(...args); }, ms);
+  const hold = () => { if (!held) { held = true; heldAt = realNow(); } };
+  const release = () => {
+    if (!held) return;
+    heldTotal += realNow() - heldAt; held = false;
+    const due = deferred; deferred = [];
+    due.forEach((run) => { try { run(); } catch (e) { nativeTimeout(() => { throw e; }, 0); } });
+  };
   const log = [];
-  const t0 = performance.now();
-  const push = (entry) => { if (log.length < %d) log.push(Object.assign({t: Math.round(performance.now() - t0)}, entry)); };
+  const t0 = vnow();
+  const push = (entry) => { if (log.length < __MAX__) log.push(Object.assign({t: Math.round(vnow() - t0)}, entry)); };
   const state = (node) => { try { return node.context.state; } catch (e) { return "?"; } };
   // A pitch set by automation is not in .value at start: keep the first and the last value scheduled.
   const planned = new WeakMap();
@@ -228,8 +262,9 @@ def sound_hook(name: str) -> str:
     push({kind: "media", src: String(this.currentSrc || this.src || "").slice(0, 24)});
     return play.apply(this, args);
   };
-  Object.defineProperty(window, %s, {value: () => log.splice(0, log.length), enumerable: false});
-})();""" % (MAX_LOGGED_SOUNDS, json.dumps(name))
+  const bench = Object.freeze({sounds: () => log.splice(0, log.length), hold, release});
+  Object.defineProperty(window, __NAME__, {value: bench, enumerable: false});
+})();""".replace("__MAX__", str(MAX_LOGGED_SOUNDS)).replace("__NAME__", json.dumps(name))
 
 
 # ---------------------------------------------------------------- driver ---
@@ -260,19 +295,27 @@ class PlayDriver(Protocol):
         """Sounds started and page errors thrown since the last drain."""
         ...
 
+    def hold(self) -> None:
+        """Stop the page clock while the judge thinks."""
+        ...
+
+    def release(self) -> None:
+        """Run the page clock again, without a jump."""
+        ...
+
 
 class ChromiumPlayDriver:
-    """One headless page in real time; the pointer and its button persist between actions."""
+    """One headless page whose clock runs only during actions; the pointer and its button persist between them."""
 
     def __init__(self, session: CdpSession, hook_name: str) -> None:
         self.session = session
         self.hook_name = hook_name
         self.pointer = (VIEW_W // 2, VIEW_H // 2)
-        self.held = False
+        self.pressed = False
 
     def _mouse(self, kind: str, x: int, y: int) -> None:
-        buttons = 1 if self.held else 0
-        button = "left" if kind != "mouseMoved" or self.held else "none"
+        buttons = 1 if self.pressed else 0
+        button = "left" if kind != "mouseMoved" or self.pressed else "none"
         self.session.call("Input.dispatchMouseEvent", type=kind, x=x, y=y, button=button, buttons=buttons,
                           clickCount=1 if kind != "mouseMoved" else 0)
         self.pointer = (x, y)
@@ -291,16 +334,16 @@ class ChromiumPlayDriver:
             self._glide(x, y, action.ms)
         elif action.do == "down":
             self._glide(x, y, 0)
-            self.held = True
+            self.pressed = True
             self._mouse("mousePressed", x, y)
         elif action.do == "up":
-            self.held = False
+            self.pressed = False
             self._mouse("mouseReleased", x, y)
         elif action.do == "click":
             self._glide(x, y, 0)
-            self.held = True
+            self.pressed = True
             self._mouse("mousePressed", x, y)
-            self.held = False
+            self.pressed = False
             self._mouse("mouseReleased", x, y)
         elif action.do == "key":
             self._key(action.key, action.ms)
@@ -319,9 +362,18 @@ class ChromiumPlayDriver:
         shot = self.session.call("Page.captureScreenshot", format="png")
         return base64.b64decode(str(shot.get("data", "")))
 
+    def _bench(self, method: str) -> Mapping[str, object]:
+        return self.session.call("Runtime.evaluate", expression=f"window[{json.dumps(self.hook_name)}].{method}()",
+                                 returnByValue=True)
+
+    def hold(self) -> None:
+        self._bench("hold")
+
+    def release(self) -> None:
+        self._bench("release")
+
     def drain(self) -> tuple[list[dict[str, object]], list[str]]:
-        found = self.session.call("Runtime.evaluate", expression=f"window[{json.dumps(self.hook_name)}]()",
-                                  returnByValue=True)
+        found = self._bench("sounds")
         value = found.get("result", {})
         sounds = value.get("value") if isinstance(value, dict) else None
         errors = [_exception_text(event) for event in self.session.events if event.get("method") == "Runtime.exceptionThrown"]
@@ -383,7 +435,7 @@ def open_play_driver(html: Path, browser_argv: Sequence[str] | None = None) -> I
         for method in ("Page.enable", "Runtime.enable"):
             session.call(method)
         session.call("Emulation.setDeviceMetricsOverride", width=VIEW_W, height=VIEW_H, deviceScaleFactor=1, mobile=False)
-        session.call("Page.addScriptToEvaluateOnNewDocument", source=sound_hook(hook_name))
+        session.call("Page.addScriptToEvaluateOnNewDocument", source=page_hook(hook_name))
         session.call("Page.navigate", url=html.resolve().as_uri())
         time.sleep(LOAD_SETTLE_S)
         yield ChromiumPlayDriver(session, hook_name)
@@ -545,6 +597,8 @@ def play_page(agent: Agent, html: Path, brief: str, goals: str, workdir: Path, t
 
 def _play_turns(agent: Agent, driver: PlayDriver, brief: str, goals: str, workdir: Path, timeout_s: float,
                 turns: int, record: PlayRecord) -> None:
+    # Held before the capture, so the frame the judge reads is the state it resumes from.
+    driver.hold()
     latest = [record.save_frame(driver.frame())]
     sounds, errors = driver.drain()
     record.turns.append(PlayTurn(0, "", (), latest, sounds, errors))
@@ -557,11 +611,13 @@ def _play_turns(agent: Agent, driver: PlayDriver, brief: str, goals: str, workdi
             record.problems.append(f"turn {turn}: {error}")
             return
         latest = []
+        driver.release()
         for action in plan.actions:
             driver.act(action)
             if action.shot:
                 latest.append(record.save_frame(driver.frame()))
         time.sleep(END_SETTLE_S)
+        driver.hold()
         latest.append(record.save_frame(driver.frame()))
         sounds, errors = driver.drain()
         record.turns.append(PlayTurn(turn, plan.notes, plan.actions, latest, sounds, errors))
