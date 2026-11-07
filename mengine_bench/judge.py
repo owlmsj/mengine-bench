@@ -246,20 +246,20 @@ def workspace_diff(before: dict[str, bytes], after: dict[str, bytes]) -> str:
 
 
 def _ask(agent: Agent, prompt: str, audit: Path, timeout_s: float,
-         files: Mapping[str, Path] | None = None) -> str:
+         files: Mapping[str, Path] | None = None, system_prompt: str = JUDGE_SYSTEM_PROMPT) -> str:
     """One judge call. `audit` names the prompt record kept next to the run;
     the process itself runs in a fresh system-temp cwd holding only `files`
-    (name -> source), so no run workspace is a parent or sibling of it."""
+    (name -> source), so no run workspace is a parent or sibling of it. The play turns pass their own rules (#213)."""
     audit.parent.mkdir(parents=True, exist_ok=True)
     prompt_file = audit.parent / f"{audit.name}.prompt.md"
-    prompt_file.write_text(f"{JUDGE_SYSTEM_PROMPT}\n\n{prompt}", encoding="utf-8")
+    prompt_file.write_text(f"{system_prompt}\n\n{prompt}", encoding="utf-8")
     copies = dict(files or {})
     with tempfile.TemporaryDirectory(prefix="mengine-bench-judge-") as tmp:
         cwd = Path(tmp)
         for name, source in copies.items():
             shutil.copyfile(source, cwd / name)
         call = agent.judge_invocation(prompt, cwd, tuple(copies), prompt_file=prompt_file.resolve(),
-                                      system_prompt=JUDGE_SYSTEM_PROMPT)
+                                      system_prompt=system_prompt)
         env = None if call.env is None else {**os.environ, **call.env}
         result = process.run_process(call.argv, cwd, timeout_s, stdin_text=call.stdin_text, env=env)
     if result.timed_out:

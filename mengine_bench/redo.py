@@ -153,6 +153,8 @@ def _drop_task_files(bundle: Path, task_id: str) -> None:
     frames = [path for path in judge_dir.glob(f"{task_id}*.png")
               if path.name in (f"{task_id}.png", f"{task_id}-1s.png", f"{task_id}-4s.png")
               or path.name.startswith(f"{task_id}-state-")] if judge_dir.is_dir() else []
+    # #213: the play of that vote too.
+    frames += list(judge_dir.glob(f"{task_id}-play*")) if judge_dir.is_dir() else []
     for path in [*(bundle / relative for relative in _task_paths(task_id)), *frames]:
         if path.is_dir() and not path.is_symlink():
             shutil.rmtree(path)

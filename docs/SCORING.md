@@ -214,6 +214,21 @@ text. The rendered bands are tighter: 27-30 finished with every state the brief 
 visible defects or one state weak, 10-19 unfinished, off brief or landing only (a state the brief asks for is missing or
 inert), 0-9 broken.
 
+A page that only shows itself when played, such as a game, declares `judge_play`: up to three lines on what to try (#213).
+Before the vote the stored page opens in headless Chromium, driven over the DevTools protocol, and the judge plays it
+in up to 5 turns, on the owner's laptop as a player sees it: 1280x720 CSS pixels at device pixel ratio 1.5 (1920x1200
+at 150%), frames scaled back to 1280x720 (the 91-point Opus probe drew a canvas that a scaled screen crops, invisible at
+ratio 1). The page runs in real time during the judge's actions and is held while it thinks: a script injected
+before the page defers its animation frames and timers and stops its clock, so a game does not run on between turns and
+resumes without a jump (the first live play lost two games to balloons that escaped while the judge thought). Each turn is one tool-less call through the same adapter and isolation as the vote: it
+sees the latest frames and the log so far and replies with JSON actions (move, press, release, click, key, wait; at most
+12 per turn). A script injected before the page loads logs every sound the page starts, with its time, wave and pitch or
+length; the judge reads the log, it does not hear the sound. The vote then gets the play frames (`play-NN.png`, at most
+11) after the state frames, and the play log as trusted text, and grades what the play shows under rendered like a state
+the brief asks for. A browser that fails mid-play leaves the frames seen so far and a note. The bundle keeps the frames
+and the log as `judge/<task>-play-NN.png` and `judge/<task>-play.json`. The rubric text is unchanged, so no other task
+needs a new vote.
+
 The judge reads the task prompt, the check results, the final answers, each page whole, the agent's other changes
 and one tool log with the same shape for every harness. It does not read the raw stream, which carries the model id.
 
@@ -250,7 +265,7 @@ formula can be refined later from many runs.
 A value a harness does not report is `null`, never 0.
 
 Isolation: each call is a new judge process in a new empty temp directory
-(holding only the frames and references for visual tasks) with tools off where the CLI
+(holding only the frames and references for visual tasks; a play turn, the frames of its last turn) with tools off where the CLI
 allows it. Agent-written evidence sits in `<<<EVIDENCE <marker> <name>>>>`
 blocks; the marker is a hash of the evidence, so the agent cannot forge the
 closing line.
