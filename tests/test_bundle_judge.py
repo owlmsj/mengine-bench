@@ -358,7 +358,7 @@ def test_again_rewrites_a_published_bundle_that_has_only_the_final_frame(
 
 def test_every_rendered_task_has_its_reference() -> None:
     pages = [task.id for task in catalog.all_tasks() if task.render_target is not None]
-    assert sorted(pages) == ["3d-print-homage", "web-mondrian-landing", "web-word-universe"]
+    assert sorted(pages) == ["3d-print-homage", "web-archery-game", "web-mondrian-landing", "web-word-universe"]
     for task_id in pages:
         references = bundle_judge._reference_images(task_id).values()
         assert len(references) == 1 and all(path.stat().st_size > 10_000 for path in references)

@@ -9,7 +9,7 @@ judged runs of the current bench version are ranked. A setup (harness, model and
 3 most recent runs ranked; its older runs fold below the table (#210). Older rankings stay below as history:
 their Scores and Speeds use that version's formula and do not compare with the table above.
 
-Bench 2.3 to 2.6 runs stay in this ranking (#153, #161, #164, #185, #187, #210): they ran the same 28-task catalog, each row marked with its version, and every Score and Speed here use the 2.7 formula (#210), recomputed from the row's published Correct %, Judge and Time; no run was run or judged again.
+Bench 2.3 to 2.7 runs stay in this ranking (#153, #161, #164, #185, #187, #210, #218): they ran the 28-task catalog, without web-archery-game (added in 2.8, #218), each row marked with its version, and every Score and Speed here use the 2.7 formula (#210), recomputed from the row's published Correct %, Judge and Time; no run was run or judged again.
 A row marked 2.4 or older was graded without the 2.5 checks (fetched sources, workspace writes and more, #164); a row marked 2.3 also lacks the 2.4 check that cu-social-cycle and cu-webmail
 close the tabs and apps they opened; a row marked "rubric 2.5" keeps its 2.5 judge votes until it is judged again (#185).
 The bench 2.0 to 2.2 runs (20 and 23 tasks) moved to history on 2026-11-04 (#187), with the Scores of their own version.
@@ -27,7 +27,7 @@ The bench 2.0 to 2.2 runs (20 and 23 tasks) moved to history on 2026-11-04 (#187
 | 9 | **81.7** | home/qwen38-flash-next-exl3-605-256k low<br>pi 1.5.0 | 2026-11-06 | 96.3 | 21/28 | 82.8 | 31.6 | 30 min 32 s | $0.00 (local) | [run](results/2026-11-06_pi_home-qwen38-flash-next-exl3-605-256k_low_6b7600c1/summary.md) (bench 2.6) |
 | 10 | **81.0** | home/qwen38-flash-next-exl3-605-256k xhigh<br>opencode opencode v2.2.5 | 2026-11-06 | 93.6 | 21/28 | 78.5 | 48.2 | 25 min 32 s | $0.00 (local) | [run](results/2026-11-06_opencode_home-qwen38-flash-next-exl3-605-256k_xhigh_86f26532/summary.md) (bench 2.6) |
 | 11 | **78.5** | deepseek/deepseek-flash low<br>opencode opencode v2.2.5 | 2026-11-06 | 95.7 | 23/28 | 82.2 | 12.9 | 36 min 08 s | >= $0.15 | [run](results/2026-11-06_opencode_deepseek-deepseek-flash_low_e7145efd/summary.md) (bench 2.6) |
-| 12 | **71.8** | deepseek/deepseek-flash max<br>opencode opencode v2.2.5 | 2026-11-06 | 88.8 | 17/28 | 78.3 | 0.0 | 45 min 57 s | >= $0.14 | [run](results/2026-11-06_opencode_deepseek-deepseek-flash_max_460f7936/summary.md) |
+| 12 | **71.8** | deepseek/deepseek-flash max<br>opencode opencode v2.2.5 | 2026-11-06 | 88.8 | 17/28 | 78.3 | 0.0 | 45 min 57 s | >= $0.14 | [run](results/2026-11-06_opencode_deepseek-deepseek-flash_max_460f7936/summary.md) (bench 2.7) |
 | 13 | **63.3** | maritaca/S5 low<br>opencode opencode v2.2.5 | 2026-11-06 | 80.9 | 15/28 | 61.7 | 10.0 | 36 min 59 s | >= ~$0.15 | [run](results/2026-11-06_opencode_maritaca-S5_low_f64abf0d/summary.md) (bench 2.6) |
 
 <details><summary>Run details: tokens, turns, tools, hardware, config</summary>

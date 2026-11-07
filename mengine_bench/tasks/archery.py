@@ -5,7 +5,7 @@ score, a start and an end, in the spirit of the side-view shareware archery game
 feel and sound are the agent's call. The checks stay basic (the page runs, draws, takes the mouse, makes sound, needs
 nothing beside itself, and a scripted basic play raises its score); the main grade is the judge, which plays the
 stored page (#213).
-A candidate (docs/CANDIDATES.md) until a release train moves it into the catalog: at most one minor a week.
+In the catalog since bench 2.8.0 (#218), a day after its probe, at the owner's request.
 """
 
 from __future__ import annotations

@@ -56,9 +56,10 @@ def test_limits_fit_the_measured_times_and_pin_the_worst_case() -> None:
     # 114.0 s, media-voice 28.9 s, cu-webmail 53.7 s, web-fact-search 25.1 s, file-media-edit 51.6 s.
     # #155, bench 2.3.1: the two site tasks take the rule from Sonnet 5.5 low browser-route probes (Claude in Chrome):
     # cu-social-cycle 127.6 and 118.2 s, cu-webmail 128.0 and 126.3 s, so 180 s each and a 62 min worst case.
+    # #218, bench 2.8: web-archery-game takes the rule from its Opus 5.5 xhigh probe, 232.7 s -> 300 s; 67 min worst.
     tasks = catalog.all_tasks()
     worst = sum(task.timeout_s * len(task.steps) for task in tasks)
-    assert worst == 3720, worst
+    assert worst == 4020, worst
     assert {task.id: task.timeout_s for task in tasks} == {
         "ds-ab-playtest": 180, "bo-pnl-runway": 150, "bo-reconcile": 90, "cmp-handoff": 90, "cfg-source-drift": 60,
         "doc-lab-pdf": 60, "ds-sql-funnel": 90, "ue-packaged-bug": 90, "git-merge-conflict": 90, "infra-gpu-fit": 60,
@@ -66,7 +67,8 @@ def test_limits_fit_the_measured_times_and_pin_the_worst_case() -> None:
         "hw-stutter-tuning": 90, "ts-plugin-bug": 60, "web-mondrian-landing": 300, "3d-print-homage": 420,
         "web-plan-ranking": 210, "web-word-universe": 360,
         "txt-regex-log": 60, "ds-sqlite-recover": 60, "py-async-cancel": 60,
-        "cu-social-cycle": 180, "media-voice": 60, "cu-webmail": 180, "web-fact-search": 60, "file-media-edit": 90}
+        "cu-social-cycle": 180, "media-voice": 60, "cu-webmail": 180, "web-fact-search": 60, "file-media-edit": 90,
+        "web-archery-game": 300}
 
 
 def test_a_run_folder_with_read_only_git_objects_is_removed(tmp_path: Path) -> None:

@@ -19,7 +19,6 @@ workspace fails. Agent time is not measured for any of them; the number below is
 | `gd-lockstep-desync` | `hard_context` | Cross-process replay determinism (`gd-integration-repo`) | 5 min | Medium: familiar RNG and ordering defects | Compare replay hashes across hash seeds, then RNG ownership and action order against RULES.md |
 | `lc-contract` | `hard_context` | Price precedence across a long contract and its annexes (`doc-lab-pdf`) | 3 min | High: searchable document with fixed terms | Read clause 7, the volume and prepayment discounts and signed annex C; recompute the annual quote |
 | `cmp-meeting-decisions` | `compaction_web` | Decisions, owners, deadlines and a conditional hire carried to a fresh session (`cmp-handoff`) | 3 min per step | High | Compare the meeting's decision turns with `DECISIONS.md` and `result.json` |
-| `web-archery-game` | `archery` | An open game brief judged by play (#214): before the vote the judge plays the page, start to game over, and reads the log of the sounds it started (#213) (`web-mondrian-landing`) | 5 min | Low: an open brief graded mostly by play | Open `game/index.html` and play one game: start, pull and shoot, pop a balloon, reach the end, restart; read `judge/<task>-play.json` |
 | `cmp-agent-trajectory` | `compaction_web` | Current state rebuilt from a chronological tool-event log (`cmp-handoff`) | 3 min per step | Medium to high | Read events 96, 150 and 157-159, then compare `STATE.md` and `result.json` |
 
 ## Not ported

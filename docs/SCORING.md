@@ -1,4 +1,4 @@
-# Scoring (bench 2.7)
+# Scoring (bench 2.8)
 
 A run of an agent (harness + model + configuration) gets three numbers folded into
 the Score, and a Cost kept apart.
@@ -126,6 +126,13 @@ hand. History sections keep the Speed and Score of their own version.
 The ranking also shows each run's date, and a preset (harness name, model and effort; not the harness patch version
 or run id) keeps its 3 most recent runs ranked, by date then start time; its older runs fold below the table with the
 same columns. A preset with two or more ranked runs shows its Score min-max and mean in a folded table (#210).
+
+Bench 2.8 (#218, owner 2026-11-07) adds one task, `web-archery-game` (#214): the first level of an archery game
+of our own from an open brief, with basic checks (mouse, sound, nothing beside the page, the page runs and draws, and
+a scripted basic play raises the score) and a judge that plays it before the vote (#213). Limit 300 s from the
+Opus 5.5 xhigh probe (232.7 s), so the worst case is 67 min. The Score formula and the rubric text do not change. The
+ranking stays alive (owner): the 2.3 to 2.7 rows stay ranked, each marked with its version and date, without a vote
+on the new task; from 2.8 on a new minor never wipes the ranking.
 
 Separately, ties come from the published tasks: draw the tasks again with
 replacement, 2000 times, seeded, and count how often the higher run stays ahead. Under 80% the two neighbours read as

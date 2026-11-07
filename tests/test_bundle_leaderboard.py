@@ -199,13 +199,16 @@ def test_leaderboard_ranks_the_current_major_minor_only(tmp_path: Path) -> None:
     assert board.ranked == 2 and board.history == 1 and board.unranked == []
 
 
-def test_2_3_to_2_6_runs_stay_ranked_in_2_7_and_2_0_to_2_2_are_history_187_210(tmp_path: Path) -> None:
+def test_2_3_to_2_7_runs_stay_ranked_in_2_8_and_2_0_to_2_2_are_history_187_210_218(tmp_path: Path) -> None:
     # #139, #151, #153, #161, #164: the owner kept every 2.x run ranked and marked. #187 (owner, 2026-11-04): one
     # catalog per ranking; the 20- and 23-task rows (2.0 to 2.2) are history, the 28-task rows (2.3 on) stay, marked.
-    # #210: 2.7 changes only the Score formula, so the 2.6 rows stay ranked too.
-    added = leaderboard.TASKS_ADDED_IN_2_2 | leaderboard.TASKS_ADDED_IN_2_3
+    # #210: 2.7 changes only the Score formula, so the 2.6 rows stay ranked too. #218 (owner, 2026-11-07): 2.8 adds
+    # web-archery-game and the ranking stays alive: the 28-task 2.7 rows stay ranked, marked, without that task.
+    # The archery module sorts first in the catalog: the 2.0 to 2.2 fixtures never had it, as the real runs.
+    added = leaderboard.TASKS_ADDED_IN_2_2 | leaderboard.TASKS_ADDED_IN_2_3 | leaderboard.TASKS_ADDED_IN_2_8
     old_ids = [task.id for task in catalog.all_tasks() if task.id not in added]
-    v22_ids = [task.id for task in catalog.all_tasks() if task.id not in leaderboard.TASKS_ADDED_IN_2_3]
+    v22_ids = [task.id for task in catalog.all_tasks()
+               if task.id not in leaderboard.TASKS_ADDED_IN_2_3 | leaderboard.TASKS_ADDED_IN_2_8]
     results = tmp_path / "results"
     _write_result(results, "v20", 90.0, model="v20-model", bench_version="2.0.0", task_ids=old_ids)
     _write_result(results, "v21", 85.0, model="v21-model", bench_version="2.1.1", task_ids=old_ids)
@@ -214,15 +217,17 @@ def test_2_3_to_2_6_runs_stay_ranked_in_2_7_and_2_0_to_2_2_are_history_187_210(t
     _write_result(results, "v24", 70.0, model="v24-model", bench_version="2.4.0")
     _write_result(results, "v25", 65.0, model="v25-model", bench_version="2.5.2")
     _write_result(results, "v26", 60.0, model="v26-model", bench_version="2.6.1")
-    _write_result(results, "v27", 55.0, model="v27-model")
+    v27_ids = [task.id for task in catalog.all_tasks() if task.id not in leaderboard.TASKS_ADDED_IN_2_8]
+    _write_result(results, "v27", 55.0, model="v27-model", bench_version="2.7.0", task_ids=v27_ids)
+    _write_result(results, "v28", 50.0, model="v28-model")
     _write_result(results, "v21-short", 99.0, model="short-model", bench_version="2.1.1", task_ids=old_ids[1:])
     _write_result(results, "v17", 99.0, model="v17-model", bench_version="1.7.3", task_ids=[TASK])
     board = leaderboard.build_leaderboard(results, tmp_path)
-    assert board.ranked == 5 and board.history == 3
+    assert board.ranked == 6 and board.history == 3
     text = board.markdown
-    assert "Bench 2.3 to 2.6 runs stay in this ranking (#153, #161, #164, #185, #187, #210)" in text
+    assert "Bench 2.3 to 2.7 runs stay in this ranking (#153, #161, #164, #185, #187, #210, #218)" in text
     assert "The bench 2.0 to 2.2 runs (20 and 23 tasks) moved to history" in " ".join(text.split())
-    order = [text.index(mark) for mark in ("v23-model", "v24-model", "v25-model", "v26-model", "v27-model",
+    order = [text.index(mark) for mark in ("v23-model", "v24-model", "v25-model", "v26-model", "v27-model", "v28-model",
                                            "## Bench 2.2 (history)",
                                            "v22-model", "## Bench 2.1 (history)", "v21-model", "## Bench 2.0 (history)",
                                            "v20-model", "## Not ranked")]
@@ -231,7 +236,8 @@ def test_2_3_to_2_6_runs_stay_ranked_in_2_7_and_2_0_to_2_2_are_history_187_210(t
     assert "[run](results/v24/summary.md) (bench 2.4) |" in text
     assert "[run](results/v25/summary.md) (bench 2.5) |" in text
     assert "[run](results/v26/summary.md) (bench 2.6) |" in text
-    assert "[run](results/v27/summary.md) |" in text
+    assert "[run](results/v27/summary.md) (bench 2.7) |" in text
+    assert "[run](results/v28/summary.md) |" in text
     assert text.index("[run](results/v20/summary.md) (bench 2.0) |") > text.index("## Bench 2.0 (history)")
     assert [name for name, _ in board.unranked] == ["results/v17", "results/v21-short"]
 
@@ -315,10 +321,10 @@ def test_ranked_rows_are_rescored_with_the_2_7_formula_from_published_time_and_h
     assert (stored["speed"], stored["score"]) == (74.0, 86.2), "the leaderboard never edits a bundle"
 
 
-def test_bench_is_version_2_7_0() -> None:
+def test_bench_is_version_2_8_0() -> None:
     import tomllib
     pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
-    assert __version__ == pyproject["project"]["version"] == "2.7.0"
+    assert __version__ == pyproject["project"]["version"] == "2.8.0"
 
 
 def test_leaderboard_ranks_only_the_official_judge(tmp_path: Path) -> None:
