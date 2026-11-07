@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import io
 import dataclasses
 import json
 import socket
@@ -116,7 +117,7 @@ def test_a_play_reply_becomes_bounded_actions() -> None:
 
 
 @pytest.mark.parametrize("reply,expected", [
-    ({"actions": [{"do": "click", "x": 1440, "y": 1}], "done": False}, "x=1440; expected an integer 0..1439"),
+    ({"actions": [{"do": "click", "x": 1280, "y": 1}], "done": False}, "x=1280; expected an integer 0..1279"),
     ({"actions": [{"do": "wait", "ms": 60_000}], "done": False}, "ms=60000; expected an integer 0..4000"),
     ({"actions": [{"do": "key", "key": "F5"}], "done": False}, "key 'F5'"),
     ({"actions": [{"do": "jump"}], "done": False}, "expected an object whose do is one of"),
@@ -329,3 +330,27 @@ def test_a_held_page_waits_for_the_judge_and_resumes_without_a_jump(tmp_path: Pa
         after = driver.session.call("Runtime.evaluate", expression=evaluate, returnByValue=True)["result"]["value"]
     assert held[0] - clock[0] < 50 and held[1] == clock[1], "no page time and no interval tick while held"
     assert after[2] < 500, "the first frame after the release sees a normal step, not the 1.5 s the judge took"
+
+
+# A canvas sized in device pixels with no CSS size: right at ratio 1, cropped on any scaled screen (#213, the Opus probe).
+SCALED_PAGE = """<!doctype html><style>html,body{margin:0;overflow:hidden}canvas{display:block}__CSS__</style>
+<canvas id="c"></canvas><script>
+const c = document.getElementById('c'), g = c.getContext('2d'), r = devicePixelRatio;
+c.width = innerWidth * r; c.height = innerHeight * r; g.scale(r, r);
+g.fillStyle = '#fff'; g.fillRect(0, 0, innerWidth, innerHeight);
+g.fillStyle = '#c00'; g.fillRect(innerWidth - 60, innerHeight - 60, 60, 60);</script>"""
+
+
+@pytest.mark.skipif(visual.find_browser() is None, reason="no Chromium-family browser on PATH")
+@pytest.mark.parametrize("css,corner_seen", [("", False), ("canvas{width:100vw;height:100vh}", True)])
+def test_the_judge_plays_on_a_scaled_laptop_screen(tmp_path: Path, css: str, corner_seen: bool) -> None:
+    # The owner opened the 91-point Opus game on a 150% screen and it was cropped; at ratio 1 the judge never saw it.
+    from PIL import Image
+
+    page = tmp_path / "page.html"
+    page.write_text(SCALED_PAGE.replace("__CSS__", css), encoding="utf-8")
+    with play.open_play_driver(page) as driver:
+        frame = Image.open(io.BytesIO(driver.frame())).convert("RGB")
+    assert frame.size == (play.VIEW_W, play.VIEW_H), "frames stay on the CSS grid the actions use"
+    red, green, blue = frame.getpixel((play.VIEW_W - 20, play.VIEW_H - 20))
+    assert (red > 150 and green < 80 and blue < 80) is corner_seen

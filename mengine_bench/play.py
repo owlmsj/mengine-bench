@@ -40,7 +40,10 @@ MAX_WAIT_MS = 4000
 MAX_MOVE_MS = 2000
 # One frame on request per turn plus the frame after the last action: 11 frames at most, few enough for one vote.
 MAX_SHOTS_PER_TURN = 1
-VIEW_W, VIEW_H = 1440, 900
+# The owner's laptop as a player sees it (#213): 1920x1200 at 150% leaves a browser page about 1280x720 CSS pixels at
+# device pixel ratio 1.5. At ratio 1 the judge played a game whose canvas overflows any scaled screen and never saw it.
+VIEW_W, VIEW_H = 1280, 720
+PLAY_DPR = 1.5
 LOAD_SETTLE_S = 2.0
 END_SETTLE_S = 0.15
 MOVE_STEP_S = 0.02
@@ -63,7 +66,7 @@ KEYS: dict[str, tuple[str, str, int, str]] = {
 
 PLAY_SYSTEM_PROMPT = f"""You are playtesting a web page for the mengine-bench judge, before the vote on it. You have no tools, no file system and nobody to ask: you act only by replying with one JSON object.
 
-Each turn the message gives the brief the page was built for, what to try, the log of the turns so far and the latest frames of the page, attached in the order it names. A frame is the {VIEW_W}x{VIEW_H} viewport; coordinates are its pixels, origin top left. The pointer and any pressed button stay as you left them between turns. The page is paused while you think and runs only during your actions, so time passes in a turn only through them: a wait lets the page run.
+Each turn the message gives the brief the page was built for, what to try, the log of the turns so far and the latest frames of the page, attached in the order it names. A frame is the {VIEW_W}x{VIEW_H} viewport of a laptop screen scaled to 150%; coordinates are its pixels, origin top left. The pointer and any pressed button stay as you left them between turns. The page is paused while you think and runs only during your actions, so time passes in a turn only through them: a wait lets the page run.
 
 Reply with ONLY this JSON object, with no fences and no text before or after:
 {{"notes": "<what the frames show and what you try next, two sentences at most>", "actions": [<up to {MAX_ACTIONS} actions>], "done": <true or false>}}
@@ -359,7 +362,9 @@ class ChromiumPlayDriver:
                           nativeVirtualKeyCode=vk)
 
     def frame(self) -> bytes:
-        shot = self.session.call("Page.captureScreenshot", format="png")
+        # Scaled back to CSS pixels: the frame and the action coordinates share one grid.
+        clip = {"x": 0, "y": 0, "width": VIEW_W, "height": VIEW_H, "scale": 1 / PLAY_DPR}
+        shot = self.session.call("Page.captureScreenshot", format="png", clip=clip)
         return base64.b64decode(str(shot.get("data", "")))
 
     def _bench(self, method: str) -> Mapping[str, object]:
@@ -434,7 +439,8 @@ def open_play_driver(html: Path, browser_argv: Sequence[str] | None = None) -> I
         hook_name = "__bench_" + secrets.token_hex(8)
         for method in ("Page.enable", "Runtime.enable"):
             session.call(method)
-        session.call("Emulation.setDeviceMetricsOverride", width=VIEW_W, height=VIEW_H, deviceScaleFactor=1, mobile=False)
+        session.call("Emulation.setDeviceMetricsOverride", width=VIEW_W, height=VIEW_H, deviceScaleFactor=PLAY_DPR,
+                     mobile=False)
         session.call("Page.addScriptToEvaluateOnNewDocument", source=page_hook(hook_name))
         session.call("Page.navigate", url=html.resolve().as_uri())
         time.sleep(LOAD_SETTLE_S)
