@@ -21,14 +21,15 @@ The bench 2.0 to 2.2 runs (20 and 23 tasks) moved to history on 2026-11-04 (#187
 | 3 | **89.0** | claude-opus-5-5 low<br>claude 2.1.318 (Claude Code) | 2026-11-03 | 97.3 | 23/28 | 78.0 | 89.2 | 13 min 14 s | $6.65 | [run](results/2026-11-03_claude_claude-opus-5-5_low_eb72035c/summary.md) (bench 2.5, rubric 2.5) |
 | 4 | **89.0** | claude-sonnet-5-5 low<br>claude 2.1.317 (Claude Code) | 2026-11-03 | 98.7 | 25/28 | 79.1 | 80.6 | 15 min 49 s | $3.19 | [run](results/2026-11-03_claude_claude-sonnet-5-5_low_cb2cc05a/summary.md) (bench 2.3, rubric 2.5) |
 | 5 | **87.0** | claude-opus-5-5 low<br>claude 2.1.318 (Claude Code) | 2026-11-04 | 97.3 | 25/28 | 77.9 | 75.7 | 17 min 17 s | $6.40 | [run](results/2026-11-04_claude_claude-opus-5-5_low_3d05f618/summary.md) (bench 2.6) |
-| 6 | **84.2** | gpt-6.1-sol low<br>codex codex-cli 0.165.0 | 2026-11-03 | 96.6 | 25/28 | 81.7 | 50.5 | 24 min 50 s | ~$4.69 | [run](results/2026-11-03_codex_gpt-6.1-sol_low_35d7a1b8/summary.md) (bench 2.5, rubric 2.5) |
-| 7 | **83.1** | home/qwen38-flash-next-exl3-605-256k low<br>opencode opencode v2.2.5 | 2026-11-06 | 96.2 | 23/28 | 80.6 | 46.8 | 25 min 58 s | $0.00 (local) | [run](results/2026-11-06_opencode_home-qwen38-flash-next-exl3-605-256k_low_6271bb4f/summary.md) (bench 2.6) |
-| 8 | **82.0** | home/qwen38-flash-next-exl3-605-256k low<br>opencode opencode v2.2.5 | 2026-11-05 | 94.8 | 22/28 | 79.0 | 48.9 | 25 min 21 s | $0.00 (local) | [run](results/2026-11-05_opencode_home-qwen38-flash-next-exl3-605-256k_low_0511702e/summary.md) (bench 2.6) |
-| 9 | **81.7** | home/qwen38-flash-next-exl3-605-256k low<br>pi 1.5.0 | 2026-11-06 | 96.3 | 21/28 | 82.8 | 31.6 | 30 min 32 s | $0.00 (local) | [run](results/2026-11-06_pi_home-qwen38-flash-next-exl3-605-256k_low_6b7600c1/summary.md) (bench 2.6) |
-| 10 | **81.0** | home/qwen38-flash-next-exl3-605-256k xhigh<br>opencode opencode v2.2.5 | 2026-11-06 | 93.6 | 21/28 | 78.5 | 48.2 | 25 min 32 s | $0.00 (local) | [run](results/2026-11-06_opencode_home-qwen38-flash-next-exl3-605-256k_xhigh_86f26532/summary.md) (bench 2.6) |
-| 11 | **78.5** | deepseek/deepseek-flash low<br>opencode opencode v2.2.5 | 2026-11-06 | 95.7 | 23/28 | 82.2 | 12.9 | 36 min 08 s | >= $0.15 | [run](results/2026-11-06_opencode_deepseek-deepseek-flash_low_e7145efd/summary.md) (bench 2.6) |
-| 12 | **71.8** | deepseek/deepseek-flash max<br>opencode opencode v2.2.5 | 2026-11-06 | 88.8 | 17/28 | 78.3 | 0.0 | 45 min 57 s | >= $0.14 | [run](results/2026-11-06_opencode_deepseek-deepseek-flash_max_460f7936/summary.md) (bench 2.7) |
-| 13 | **63.3** | maritaca/S5 low<br>opencode opencode v2.2.5 | 2026-11-06 | 80.9 | 15/28 | 61.7 | 10.0 | 36 min 59 s | >= ~$0.15 | [run](results/2026-11-06_opencode_maritaca-S5_low_f64abf0d/summary.md) (bench 2.6) |
+| 6 | **86.8** | home/qwen38-flash-next-exl3-605-256k low<br>opencode opencode v2.2.5 | 2026-11-07 | 99.1 | 26/29 | 84.3 | 52.3 | 24 min 19 s | $0.00 (local) | [run](results/2026-11-07_opencode_home-qwen38-flash-next-exl3-605-256k_low_74b3cbb8/summary.md) |
+| 7 | **84.2** | gpt-6.1-sol low<br>codex codex-cli 0.165.0 | 2026-11-03 | 96.6 | 25/28 | 81.7 | 50.5 | 24 min 50 s | ~$4.69 | [run](results/2026-11-03_codex_gpt-6.1-sol_low_35d7a1b8/summary.md) (bench 2.5, rubric 2.5) |
+| 8 | **83.1** | home/qwen38-flash-next-exl3-605-256k low<br>opencode opencode v2.2.5 | 2026-11-06 | 96.2 | 23/28 | 80.6 | 46.8 | 25 min 58 s | $0.00 (local) | [run](results/2026-11-06_opencode_home-qwen38-flash-next-exl3-605-256k_low_6271bb4f/summary.md) (bench 2.6) |
+| 9 | **82.0** | home/qwen38-flash-next-exl3-605-256k low<br>opencode opencode v2.2.5 | 2026-11-05 | 94.8 | 22/28 | 79.0 | 48.9 | 25 min 21 s | $0.00 (local) | [run](results/2026-11-05_opencode_home-qwen38-flash-next-exl3-605-256k_low_0511702e/summary.md) (bench 2.6) |
+| 10 | **81.7** | home/qwen38-flash-next-exl3-605-256k low<br>pi 1.5.0 | 2026-11-06 | 96.3 | 21/28 | 82.8 | 31.6 | 30 min 32 s | $0.00 (local) | [run](results/2026-11-06_pi_home-qwen38-flash-next-exl3-605-256k_low_6b7600c1/summary.md) (bench 2.6) |
+| 11 | **81.0** | home/qwen38-flash-next-exl3-605-256k xhigh<br>opencode opencode v2.2.5 | 2026-11-06 | 93.6 | 21/28 | 78.5 | 48.2 | 25 min 32 s | $0.00 (local) | [run](results/2026-11-06_opencode_home-qwen38-flash-next-exl3-605-256k_xhigh_86f26532/summary.md) (bench 2.6) |
+| 12 | **78.5** | deepseek/deepseek-flash low<br>opencode opencode v2.2.5 | 2026-11-06 | 95.7 | 23/28 | 82.2 | 12.9 | 36 min 08 s | >= $0.15 | [run](results/2026-11-06_opencode_deepseek-deepseek-flash_low_e7145efd/summary.md) (bench 2.6) |
+| 13 | **71.8** | deepseek/deepseek-flash max<br>opencode opencode v2.2.5 | 2026-11-06 | 88.8 | 17/28 | 78.3 | 0.0 | 45 min 57 s | >= $0.14 | [run](results/2026-11-06_opencode_deepseek-deepseek-flash_max_460f7936/summary.md) (bench 2.7) |
+| 14 | **63.3** | maritaca/S5 low<br>opencode opencode v2.2.5 | 2026-11-06 | 80.9 | 15/28 | 61.7 | 10.0 | 36 min 59 s | >= ~$0.15 | [run](results/2026-11-06_opencode_maritaca-S5_low_f64abf0d/summary.md) (bench 2.6) |
 
 <details><summary>Run details: tokens, turns, tools, hardware, config</summary>
 
@@ -39,27 +40,28 @@ The bench 2.0 to 2.2 runs (20 and 23 tasks) moved to history on 2026-11-04 (#187
 | 3 | claude-opus-5-5 | 0 | 5.23M | 57.2k | 4.6k | 132 | 114 | 0.7 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=claude-code, tier=0, role=default, instructions=~... | owlmsj | 2026-11-03 |
 | 4 | claude-sonnet-5-5 | 0 | 5.39M | 67.8k | 7.3k | 144 | 146 | 1.4 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=claude-code, tier=0, role=default, instructions=~... | owlmsj | 2026-11-03 |
 | 5 | claude-opus-5-5 | 0 | 5.08M | 61.3k | 4.6k | 138 | 130 | 2.1 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=claude-code, tier=0, role=default, instructions=~... | owlmsj | 2026-11-04 |
-| 6 | gpt-6.1-sol | 0 | 5.60M | 65.8k | 4.9k | 29 | 182 | - | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=codex, tier=0, role=default, service_tier=fast, i... | owlmsj | 2026-11-03 |
-| 7 | home/qwen38-flash-next-exl3-605-256k | 2 | 4.33M | 169.9k | 0.0k | 389 | 440 | 0.7 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=local, server_gpu=2x RTX 5090 + 2x RTX 4090, ser... | owlmsj | 2026-11-06 |
-| 8 | home/qwen38-flash-next-exl3-605-256k | 3 | 5.60M | 156.4k | 0.0k | 362 | 397 | 0.1 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=local, server_gpu=2x RTX 5090 + 2x RTX 4090, ser... | owlmsj | 2026-11-05 |
-| 9 | home/qwen38-flash-next-exl3-605-256k | 3 | 4.77M | 185.7k | 0.0k | 335 | 419 | 0.2 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=local, server_gpu=2x RTX 5090 + 2x RTX 4090, ser... | owlmsj | 2026-11-06 |
-| 10 | home/qwen38-flash-next-exl3-605-256k | 3 | 5.21M | 174.3k | 0.0k | 342 | 401 | 0.7 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=local, server_gpu=2x RTX 5090 + 2x RTX 4090, ser... | owlmsj | 2026-11-06 |
-| 11 | deepseek/deepseek-flash | 4 | 5.23M | 250.1k | 110.4k | 422 | 510 | 0.7 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=deepseek-api, model=DeepSeek-V4.1-Flash-1017, ti... | owlmsj | 2026-11-06 |
-| 12 | deepseek/deepseek-flash | 10 | 4.44M | 346.7k | 213.1k | 403 | 507 | 0.6 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=deepseek-api, model=DeepSeek-V4.1-Flash-1017, ti... | owlmsj | 2026-11-06 |
-| 13 | maritaca/S5 | 7 | 1.59M | 292.0k | 170.8k | 421 | 454 | 0.1 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=maritaca, model=S5, tier=1, role=dev-r, account_... | owlmsj | 2026-11-06 |
+| 6 | home/qwen38-flash-next-exl3-605-256k | 1 | 6.58M | 174.2k | 0.0k | 349 | 383 | 0.7 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=local, server_gpu=2x RTX 5090 + 2x RTX 4090, ser... | owlmsj | 2026-11-07 |
+| 7 | gpt-6.1-sol | 0 | 5.60M | 65.8k | 4.9k | 29 | 182 | - | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | harness=codex, tier=0, role=default, service_tier=fast, i... | owlmsj | 2026-11-03 |
+| 8 | home/qwen38-flash-next-exl3-605-256k | 2 | 4.33M | 169.9k | 0.0k | 389 | 440 | 0.7 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=local, server_gpu=2x RTX 5090 + 2x RTX 4090, ser... | owlmsj | 2026-11-06 |
+| 9 | home/qwen38-flash-next-exl3-605-256k | 3 | 5.60M | 156.4k | 0.0k | 362 | 397 | 0.1 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=local, server_gpu=2x RTX 5090 + 2x RTX 4090, ser... | owlmsj | 2026-11-05 |
+| 10 | home/qwen38-flash-next-exl3-605-256k | 3 | 4.77M | 185.7k | 0.0k | 335 | 419 | 0.2 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=local, server_gpu=2x RTX 5090 + 2x RTX 4090, ser... | owlmsj | 2026-11-06 |
+| 11 | home/qwen38-flash-next-exl3-605-256k | 3 | 5.21M | 174.3k | 0.0k | 342 | 401 | 0.7 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=local, server_gpu=2x RTX 5090 + 2x RTX 4090, ser... | owlmsj | 2026-11-06 |
+| 12 | deepseek/deepseek-flash | 4 | 5.23M | 250.1k | 110.4k | 422 | 510 | 0.7 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=deepseek-api, model=DeepSeek-V4.1-Flash-1017, ti... | owlmsj | 2026-11-06 |
+| 13 | deepseek/deepseek-flash | 10 | 4.44M | 346.7k | 213.1k | 403 | 507 | 0.6 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=deepseek-api, model=DeepSeek-V4.1-Flash-1017, ti... | owlmsj | 2026-11-06 |
+| 14 | maritaca/S5 | 7 | 1.59M | 292.0k | 170.8k | 421 | 454 | 0.1 | AMD Ryzen 9 8945HS w/ Radeon 780M Graphics, NVIDIA GeForce RTX 4070 Laptop GPU (8 GB), 31 GB | provider=maritaca, model=S5, tier=1, role=dev-r, account_... | owlmsj | 2026-11-06 |
 
 </details>
 
 Cost: `$x` as the harness reported it, `~$x` estimated from the run's tokens at API list prices, `$0.00 (local)` a local model, `>=` a lower bound (a step went unmeasured), `n/a` neither. Tool s: median seconds per tool call, `-` where the harness does not time each call.
 
-Read as ties, because the higher run keeps its lead in under 80% of 2000 draws of the tasks: #2 and #3 (54%), #3 and #4 (51%), #6 and #7 (63%), #7 and #8 (60%), #8 and #9 (54%), #9 and #10 (58%), #10 and #11 (73%). `mengine-bench analyze` shows the rest.
+Read as ties, because the higher run keeps its lead in under 80% of 2000 draws of the tasks: #2 and #3 (54%), #3 and #4 (51%), #5 and #6 (35%), #7 and #8 (63%), #8 and #9 (60%), #9 and #10 (54%), #10 and #11 (58%), #11 and #12 (73%). `mengine-bench analyze` shows the rest.
 
 <details><summary>Consistency of setups with several ranked runs</summary>
 
 | Setup | Ranked runs | Score min-max | Score mean |
 | --- | --- | --- | --- |
 | claude-opus-5-5 low<br>claude | 2 | 87.0-89.0 | 88.0 |
-| home/qwen38-flash-next-exl3-605-256k low<br>opencode | 2 | 82.0-83.1 | 82.5 |
+| home/qwen38-flash-next-exl3-605-256k low<br>opencode | 3 | 82.0-86.8 | 84.0 |
 
 </details>
 

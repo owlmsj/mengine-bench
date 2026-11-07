@@ -1,0 +1,57 @@
+{
+ "task_id": "ir-server-logs",
+ "prompts": [
+  "The game went down in June and we owe the team an incident report. The logs and their notes are in {WS}/logs. When did it start and end, how long was it, did we keep our monthly availability target, and why did it happen? Record it in {WS}/result.json: start, end, minutes_down, availability_june_pct, slo_999_ok, root_cause."
+ ],
+ "answers": [
+  "\n\n[g] Incident report for the June game-server outage into ./result.json.\n\n[a] Scanned all three June logs for non-INFO lines (covers WARN/ERROR/FATAL for the whole month); the only incident is on 2026-06-02. Applied the README's rule: down = first save error to the `server ready` line. Computed duration and availability with a short python script and wrote result.json.\n\n[r]\n- Start: 2026-06-02 03:17:42, first `ERROR SaveGame failed ... No space left on device`\n- End: 2026-06-02 03:53:31, `INFO server ready, accepting players`\n- minutes_down: 35.82 (exactly 2149 s = 35 min 49 s)\n- availability_june_pct: 99.917 (43200 June minutes minus 35.82)\n- slo_999_ok: true (99.917 ≥ 99.9)\n- root_cause: `/data` disk full (97% / 3.1 GB free warned at 03:10) → autosave ENOSPC → server unresponsive → watchdog restart loop (exit 137) until backup rotation freed 38.2 GB at 03:52:20.\n\nAssumptions: June = 30 days = 43200 minutes; only the one incident per README; timestamps are local, same clock throughout; minutes_down rounded to 2 decimals, availability to 3.\n\nEvidence: log lines gameserver-2026-06-02.log:251 (start), :294 (end), :241 (disk warn), :292 (backup rotation freed 38.2 GB); the non-INFO grep over all three files shows no other ERROR/FATAL incident in June (the 06-01 RCON auth failure is unrelated and non-fatal). Python output confirms 2149 s, 99.91709%, ≥99.9 true.\n\n[n] Nothing open; result.json is final. No browser or app windows were opened."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\r\n  \"start\": \"2026-06-02T03:17:42\",\r\n  \"end\": \"2026-06-02T03:53:31\",\r\n  \"minutes_down\": 35.82,\r\n  \"availability_june_pct\": 99.917,\r\n  \"slo_999_ok\": true,\r\n  \"root_cause\": \"Disk /data filled to 100% (97% with 3.1 GB free warned at 03:10); autosave writes to /data/game/Saved/Level.sav failed with ENOSPC (No space left on device) at 03:17:42, the server became unresponsive, and the watchdog restart loop kept failing (exit code 137) until backup rotation freed 38.2 GB on /data at 03:52:20, letting the server come back at 03:53:31.\"\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"ls -R logs\" ok -> \"Directory: <WORKSPACE>\\\\logs\\r\\n\\r\\nMode                 LastWriteTime         Length Name\\r\\n----                 -------------         ------ ----\\r\\n-a---          07/11/2026    20:04         112050 gameserver-2026-06-01.log\\r\\n-a---          07/11/2026    20:04         111743 gameserver-2026-06-02.log\\r\\n-a---          07/11/2026    20:04   [... 99 chars cut by the benchmark]\"\n[step 1] shell \"cat logs/README.md; head -5 logs/gameserver-2026-06-01.log; grep -c \\\"\\\" logs/*.log\" failed -> \"Dedicated game server. Monthly availability SLO: 99.9%. Down = from the first save error to the 'server ready' line. June has 30 days; there is only one incident.\\r\\nhead: The term 'head' is not recognized as a name of a cmdlet, function, script file, or executable program.\\r\\nCheck the spelling of the name, or if a path was included, verify that the path is correct and try again.\\r\\ngrep: The term 'gre[... 196 chars cut by the benchmark]\"\n[step 1] shell \"Select-String -Path logs\\\\*.log -Pattern 'save error','server ready' -SimpleMatch | ForEach-Object { \\\"$($_.Filename):$($_.LineNumber): $($_.Line)\\\" }\" ok -> \"gameserver-2026-06-02.log:294: 2026-06-02 03:53:31 INFO server ready, accepting players\"\n[step 1] shell \"Select-String -Path logs\\\\*.log -Pattern 'save|ready|CRITICAL|ERROR|FATAL' | Select-Object -First 40 | ForEach-Object { \\\"$($_.Filename):$($_.LineNumber): $($_.Line)\\\" }\" ok -> \"gameserver-2026-06-01.log:37: 2026-06-01 00:26:09 INFO autosave ok 333 ms\\r\\ngameserver-2026-06-01.log:43: 2026-06-01 00:30:35 INFO autosave ok 180 ms\\r\\ngameserver-2026-06-01.log:44: 2026-06-01 00:31:09 INFO autosave ok 328 ms\\r\\ngameserver-2026-06-01.log:48: 2026-06-01 00:34:34 INFO autosave ok 327 ms\\r\\ngameserver-2026-06-01.log:58: 2026-06-01 00:42:44 INFO autosave ok 249 ms\\r\\ngameserver-2026-06-01.log[... 2629 chars cut by the benchmark]\"\n[step 1] shell \"Select-String -Path logs\\\\*.log -Pattern 'autosave ok' -NotMatch | Where-Object { $_.Line -notmatch ' INFO ' } | ForEach-Object { \\\"$($_.Filename):$($_.LineNumber): $($_.Line)\\\" }\" ok -> \"gameserver-2026-06-01.log:685: 2026-06-01 09:12:40 ERROR RCON auth failed from 203.0.113.12 (bad password)\\r\\ngameserver-2026-06-02.log:241: 2026-06-02 03:10:02 WARN disk /data usage 97% (free 3.1 GB)\\r\\ngameserver-2026-06-02.log:251: 2026-06-02 03:17:42 ERROR SaveGame failed: write /data/game/Saved/Level.sav: No space left on device\\r\\ngameserver-2026-06-02.log:252: 2026-06-02 03:18:00 ERROR SaveGame f[... 4345 chars cut by the benchmark]\"\n[step 1] shell \"Get-Content logs\\\\gameserver-2026-06-02.log | Select-Object -Skip 238 -First 60; ''; '=== june3 tail ==='; Get-Content logs\\\\gameserver-2026-06-03.log -Tail 5\" ok -> \"2026-06-02 03:08:30 INFO heartbeat players=18 tick=64 mem_gb=26.6\\r\\n2026-06-02 03:09:37 INFO player joined steam_6619460972680713 players=19\\r\\n2026-06-02 03:10:02 WARN disk /data usage 97% (free 3.1 GB)\\r\\n2026-06-02 03:10:44 INFO player joined steam_7879220472709941 players=20\\r\\n2026-06-02 03:11:11 INFO player left players=19\\r\\n2026-06-02 03:11:51 INFO autosave ok 388 ms\\r\\n2026-06-02 03:12:58 INFO heart[... 4384 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nfrom datetime import datetime\\ns=datetime(2026,6,2,3,17,42); e=datetime(2026,6,2,3,53,31)\\nd=(e-s).total_seconds(); m=d/60; june=30*24*60\\navail=(june-m)/june*100\\nprint(d, m, avail, avail>=99.9)\\nimport json\\nr={'start':s.isoformat(),'end':e.isoformat(),'minutes_down':round(m,2),'availability_june_pct':round(avail,3),'slo_999_ok':bool(avail>=99.9),'root_cause':'Disk /data filled to 100% (97% with 3.1 GB free warned at 03:10); autosave writes to /data/game/Saved/Level.sav failed with ENOSPC (No space left on device) at 03:17:42, the server became unresponsive, and the watchdog restart loop kept failing (exit code 137) until backup rotation freed 38.2 GB on /data at 03:52:20, letting the server come back at 03:53:31.'}\\nopen('result.json','w').write(json.dumps(r,indent=2))\\n\\\"; cat result.json\" ok -> \"2149.0 35.81666666666667 99.91709104938272 True\\r\\n{\\r\\n  \\\"start\\\": \\\"2026-06-02T03:17:42\\\",\\r\\n  \\\"end\\\": \\\"2026-06-02T03:53:31\\\",\\r\\n  \\\"minutes_down\\\": 35.82,\\r\\n  \\\"availability_june_pct\\\": 99.917,\\r\\n  \\\"slo_999_ok\\\": true,\\r\\n  \\\"root_cause\\\": \\\"Disk /data filled to 100% (97% with 3.1 GB free warned at 03:10); autosave writes to /data/game/Saved/Level.sav failed with ENOSPC (No space left on device) at 03:17:42, the serv[... 186 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "incident start",
+   true
+  ],
+  [
+   "incident end",
+   true
+  ],
+  [
+   "minutes down",
+   true
+  ],
+  [
+   "June availability",
+   true
+  ],
+  [
+   "SLO 99.9 met",
+   true
+  ],
+  [
+   "root cause = /data disk full",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 7,
+  "shell_failures": 1,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2613,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 810
+ },
+ "deliverables": [],
+ "render": null
+}
