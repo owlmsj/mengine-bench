@@ -216,7 +216,9 @@ inert), 0-9 broken.
 
 A page that only shows itself when played, such as a game, declares `judge_play`: up to three lines on what to try (#213).
 Before the vote the stored page opens in headless Chromium, driven over the DevTools protocol, and the judge plays it
-in up to 5 turns. The page runs in real time during the judge's actions and is held while it thinks: a script injected
+in up to 5 turns, on the owner's laptop as a player sees it: 1280x720 CSS pixels at device pixel ratio 1.5 (1920x1200
+at 150%), frames scaled back to 1280x720 (the 91-point Opus probe drew a canvas that a scaled screen crops, invisible at
+ratio 1). The page runs in real time during the judge's actions and is held while it thinks: a script injected
 before the page defers its animation frames and timers and stops its clock, so a game does not run on between turns and
 resumes without a jump (the first live play lost two games to balloons that escaped while the judge thought). Each turn is one tool-less call through the same adapter and isolation as the vote: it
 sees the latest frames and the log so far and replies with JSON actions (move, press, release, click, key, wait; at most
