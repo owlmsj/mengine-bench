@@ -194,6 +194,8 @@ class EvalTask:
     judge_notes: str = ""
     # #184: states of the rendered page the judge sees as extra frames; needs an HTML deliverable.
     judge_states: tuple[JudgeState, ...] = ()
+    # #213: what the judge tries when it plays the rendered page before the vote, at most 3 lines; "" = no play.
+    judge_play: str = ""
 
     def __post_init__(self) -> None:
         if not self.steps:
@@ -218,9 +220,12 @@ class EvalTask:
         names = [state.name for state in self.judge_states]
         if len(set(names)) != len(names):
             raise ValueError(f"task {self.id!r} received judge_states {names}; expected unique names")
-        if len(self.judge_notes.splitlines()) > 3:
-            raise ValueError(f"task {self.id!r} received {len(self.judge_notes.splitlines())} lines of judge_notes; "
-                             f"expected at most 3")
+        if self.judge_play and self.render_target is None:
+            raise ValueError(f"task {self.id!r} received judge_play with deliverables {list(self.deliverables)}; "
+                             f"expected an HTML deliverable to play")
+        for kind, text in (("judge_notes", self.judge_notes), ("judge_play", self.judge_play)):
+            if len(text.splitlines()) > 3:
+                raise ValueError(f"task {self.id!r} received {len(text.splitlines())} lines of {kind}; expected at most 3")
 
     @property
     def render_target(self) -> str | None:
