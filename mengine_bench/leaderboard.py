@@ -40,7 +40,10 @@ TASKS_CHANGED_IN_2_0 = frozenset({"lc-changelog", "vis-chart", "ir-studio-wiki",
 TASKS_ADDED_IN_2_2 = frozenset({"txt-regex-log", "ds-sqlite-recover", "py-async-cancel"})
 # #153: bench 2.3 adds computer use and basic media. More 2.3 ids go here only; the note below follows.
 TASKS_ADDED_IN_2_3 = frozenset({"cu-social-cycle", "media-voice", "cu-webmail", "web-fact-search", "file-media-edit"})
-TASKS_THAT_CAME_AND_WENT = TASKS_CHANGED_SINCE_1_5 | TASKS_CHANGED_IN_2_0 | TASKS_ADDED_IN_2_2 | TASKS_ADDED_IN_2_3
+# #218: bench 2.8 adds the archery game, judged by play (#213, #214).
+TASKS_ADDED_IN_2_8 = frozenset({"web-archery-game"})
+TASKS_THAT_CAME_AND_WENT = (TASKS_CHANGED_SINCE_1_5 | TASKS_CHANGED_IN_2_0 | TASKS_ADDED_IN_2_2 | TASKS_ADDED_IN_2_3
+                            | TASKS_ADDED_IN_2_8)
 # #139: the owner kept the 2.0 runs ranked in 2.1, which only shortened the time limits (#137); they cost real runs.
 # #151: and kept the 2.0 and 2.1 runs ranked in 2.2, which added three tasks; #153: and all three in 2.3;
 # #161: and all four in 2.4, which adds a scored cleanup check to the two site tasks.
@@ -54,12 +57,16 @@ RANKED_WITH_CURRENT: dict[str, frozenset[str]] = {"2.1": frozenset({"2.0"}), "2.
                                                   # 20- and 23-task rows (2.0 to 2.2) move to history; one catalog per ranking.
                                                   "2.6": frozenset({"2.3", "2.4", "2.5"}),
                                                   # #210 (owner, 2026-11-06): 2.7 changes only the Score formula.
-                                                  "2.7": frozenset({"2.3", "2.4", "2.5", "2.6"})}
+                                                  "2.7": frozenset({"2.3", "2.4", "2.5", "2.6"}),
+                                                  # #218 (owner, 2026-11-07): 2.8 adds web-archery-game; the
+                                                  # 28-task rows stay ranked, marked, without a vote on it.
+                                                  "2.8": frozenset({"2.3", "2.4", "2.5", "2.6", "2.7"})}
 # #185: a rubric bump used to unrank every run until it was judged again (about 380 Opus xhigh votes for 2.6). The
 # older rubric's votes stay ranked until the owner re-judges, marked on the row as "(rubric 2.5)".
 RANKED_RUBRICS: dict[str, frozenset[str]] = {"2.6": frozenset({"2.5"})}
-RANKED_WITH_NOTE = ("Bench 2.3 to 2.6 runs stay in this ranking (#153, #161, #164, #185, #187, #210): they ran the "
-                    f"same {23 + len(TASKS_ADDED_IN_2_3)}-task catalog, each row marked with its version, and every Score and "
+RANKED_WITH_NOTE = ("Bench 2.3 to 2.7 runs stay in this ranking (#153, #161, #164, #185, #187, #210, #218): they ran the "
+                    f"{23 + len(TASKS_ADDED_IN_2_3)}-task catalog, without web-archery-game (added in 2.8, #218), each row "
+                    "marked with its version, and every Score and "
                     "Speed here use the 2.7 formula (#210), recomputed from the row's published Correct %, Judge and Time; "
                     "no run was run or judged again.\nA row marked 2.4 or older was graded without the 2.5 checks (fetched "
                     "sources, workspace writes and more, #164); a row marked 2.3 also lacks the 2.4 check that cu-social-cycle "

@@ -68,9 +68,9 @@ Consulting the reference, the hidden tests or a published answer, from this repo
 rejected on transcript review.
 
 Adding, removing or changing a task, prompt or check is a new bench minor
-version (1.7.0), and a new catalog is a major one (2.0.0). Runs of an older minor stay ranked only by an explicit
-owner decision recorded in `RANKED_WITH_CURRENT` (#139, #185), each row marked with its version; otherwise they move
-to history. Add every id that came or went to
+version (1.7.0), and a new catalog is a major one (2.0.0). The ranking stays alive across minors (owner, 2026-11-07,
+#218): a new minor adds its version to `RANKED_WITH_CURRENT` with every version already ranked, and each row shows
+its bench version and date; it is never wiped. Only an explicit owner decision moves runs to history (#187). Add every id that came or went to
 `TASKS_THAT_CAME_AND_WENT` in `mengine_bench/leaderboard.py`, or the older
 complete runs drop out of the leaderboard history.
 

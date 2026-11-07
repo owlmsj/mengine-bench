@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from mengine_bench import bundle_judge, catalog, visual
+from mengine_bench import bundle_judge, catalog, leaderboard, visual
 from mengine_bench.core import CheckResult
-from mengine_bench.candidates import archery
+from mengine_bench.tasks import archery
 
-TASK = next(task for task in catalog.candidate_tasks() if task.id == "web-archery-game")
+TASK = next(task for task in catalog.all_tasks() if task.id == "web-archery-game")
 LIVE = pytest.mark.skipif(visual.find_browser() is None, reason="no Chromium-family browser on PATH")
 
 
@@ -21,8 +21,10 @@ def _scripted_play(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
         monkeypatch.setattr(archery, "basic_play_scores", lambda page: [0, 0, 10])
 
 
-def test_it_waits_outside_the_catalog_for_a_release_train() -> None:
-    assert TASK.id not in {task.id for task in catalog.all_tasks()} and catalog.task_by_id(TASK.id) is TASK
+def test_it_is_in_the_catalog_since_2_8_and_no_longer_a_candidate() -> None:
+    # #218: the owner moved it in the day after its probe; the 28-task runs stay complete and ranked.
+    assert TASK.id not in {task.id for task in catalog.candidate_tasks()}
+    assert TASK.id in leaderboard.TASKS_ADDED_IN_2_8 <= leaderboard.TASKS_THAT_CAME_AND_WENT
 
 
 def _solved(tmp_path: Path, html: str | None = None) -> Path:
