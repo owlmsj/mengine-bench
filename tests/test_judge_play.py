@@ -142,6 +142,9 @@ class FakeDriver:
     def act(self, action: play.PlayAction) -> None:
         self.done.append(action.text())
 
+    def score(self) -> int | None:
+        return None
+
     def hold(self) -> None:
         self.done.append("hold")
 

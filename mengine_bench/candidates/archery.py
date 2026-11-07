@@ -2,8 +2,9 @@
 
 The owner's request (2026-11-07): an archer, a bow aimed with the mouse and pulled back for power, balloons to pop, a
 score, a start and an end, in the spirit of the side-view shareware archery games of the Windows 95 days. Look, play
-feel and sound are the agent's call. The checks stay basic (the page runs, draws, takes the mouse, makes sound, shows
-a score and needs nothing beside itself); the main grade is the judge, which plays the stored page (#213).
+feel and sound are the agent's call. The checks stay basic (the page runs, draws, takes the mouse, makes sound, needs
+nothing beside itself, and a scripted basic play raises its score); the main grade is the judge, which plays the
+stored page (#213).
 A candidate (docs/CANDIDATES.md) until a release train moves it into the catalog: at most one minor a week.
 """
 
@@ -14,6 +15,8 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from mengine_bench.core import CheckResult, EvalTask, Step, checkpoints, has, saw, write
+from mengine_bench.play import VIEW_H, VIEW_W, CdpError, PlayAction, open_play_driver
+from mengine_bench.visual import NO_BROWSER
 from mengine_bench.tasks.visual import (ALLOWED_FONT_URLS, LOADED_RESOURCE, OPENED, PAGE_GATE, _cut_short_page,
                                         _rendered_source, _visible_chars)
 
@@ -22,7 +25,15 @@ PAGE = "game/index.html"
 GAME_MIN_VISIBLE_CHARS = 1500
 MOUSE_CHECK = "takes the mouse: press and release"
 SOUND_CHECK = "makes its own sound"
-SCORE_CHECK = "keeps a score"
+SCORE_CHECK = "a scripted basic play raises the score"
+# Owner (2026-11-07): a script plays the most basic game and sees whether the score moves. Start = clicks down the
+# middle (a canvas title or a Play button) and Enter; then a sweep of pull-and-release shots to the right, where a
+# side-view archer shoots. Measured on the gold, the Opus probe and the Codex run, two plays each: all six rose by
+# the 6th shot, so 18 shots leave a wide margin; a play stops at the first rise.
+START_HEIGHTS = (0.5, 0.6, 0.7, 0.8)
+SHOT_TARGETS = tuple((fx, fy) for fy in (0.35, 0.5, 0.65) for fx in (0.5, 0.65, 0.8, 0.95))
+MAX_SHOTS = 18
+PULL_BACK = (-140, 90)
 SELF_CONTAINED_CHECK = "needs nothing beside the page"
 # Only the page is kept for the judge, so a sibling file or a remote one is missing when it is played.
 OUTSIDE_FILE = r"(^(https?:)?//)|\.(js|mjs|css|json|png|jpe?g|gif|webp|svg|mp3|wav|ogg|m4a|glb|gltf|woff2?)([?#].*)?$"
@@ -42,10 +53,51 @@ def _game_check(ws: Path, answers: Sequence[str]) -> CheckResult:
                          waived_at_limit=_cut_short_page(html))
     result.add(MOUSE_CHECK, has(html, r"(pointer|mouse)down") and has(html, r"(pointer|mouse)up"))
     result.add(SOUND_CHECK, has(html, r"\b(webkit)?AudioContext\b|\bnew\s+Audio\s*\(|<audio\b"))
-    result.add(SCORE_CHECK, has(html, r"\bscore|points\b|pontos|placar"))
     outside = _outside_files(html)
     result.add(SELF_CONTAINED_CHECK, bool(html.strip()) and not outside, saw(outside[:3], []))
+    if (ws / PAGE).is_file():
+        _add_score_check(result, ws / PAGE)
     return result
+
+
+def _add_score_check(result: CheckResult, page: Path) -> None:
+    """What the machine cannot run is a note, never a lost point, like the page checks (#82)."""
+    try:
+        reads = basic_play_scores(page)
+    except (CdpError, OSError) as error:
+        reason = NO_BROWSER if str(error) == NO_BROWSER else f"{type(error).__name__}: {str(error)[:120]}"
+        result.notes.append(f"basic play not run: {reason}")
+        return
+    result.add(SCORE_CHECK, score_rose(reads), saw(reads[-6:], "a score that rises after a few shots"))
+
+
+def score_rose(reads: Sequence[int | None]) -> bool:
+    """A score read after the start went above the first one read; a restart back to 0 does not hide an earlier rise."""
+    shown = [value for value in reads if value is not None]
+    return bool(shown) and max(shown) > shown[0]
+
+
+def basic_play_scores(page: Path) -> list[int | None]:
+    """The score after the start and after each shot, until it rises or the shots run out."""
+    reads: list[int | None] = []
+    with open_play_driver(page) as driver:
+        for fy in START_HEIGHTS:
+            driver.act(PlayAction("click", VIEW_W // 2, int(fy * VIEW_H)))
+            driver.act(PlayAction("wait", ms=150))
+        driver.act(PlayAction("key", key="Enter"))
+        driver.act(PlayAction("wait", ms=800))
+        reads.append(driver.score())
+        for shot in range(MAX_SHOTS):
+            fx, fy = SHOT_TARGETS[shot % len(SHOT_TARGETS)]
+            x, y = int(fx * (VIEW_W - 1)), int(fy * VIEW_H)
+            for action in (PlayAction("move", x, y, ms=80), PlayAction("down", x, y),
+                           PlayAction("move", max(0, x + PULL_BACK[0]), min(VIEW_H - 1, y + PULL_BACK[1]), ms=400),
+                           PlayAction("wait", ms=300), PlayAction("up"), PlayAction("wait", ms=600)):
+                driver.act(action)
+            reads.append(driver.score())
+            if score_rose(reads):
+                break
+    return reads
 
 
 def _game_reference(ws: Path) -> list[str]:

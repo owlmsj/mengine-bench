@@ -11,6 +11,14 @@ from mengine_bench.core import CheckResult
 from mengine_bench.candidates import archery
 
 TASK = next(task for task in catalog.candidate_tasks() if task.id == "web-archery-game")
+LIVE = pytest.mark.skipif(visual.find_browser() is None, reason="no Chromium-family browser on PATH")
+
+
+@pytest.fixture(autouse=True)
+def _scripted_play(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hermetic by default: the basic play reads a rising score; only the scripted-play tests open a browser."""
+    if "scripted_basic_play" not in request.node.name:
+        monkeypatch.setattr(archery, "basic_play_scores", lambda page: [0, 0, 10])
 
 
 def test_it_waits_outside_the_catalog_for_a_release_train() -> None:
@@ -58,9 +66,31 @@ def test_each_basic_check_fails_alone_when_its_part_is_missing(tmp_path: Path, o
     assert _failed(tmp_path, html.replace(old, new)) == [check]
 
 
-def test_a_page_without_any_score_fails_the_score_check(tmp_path: Path) -> None:
-    html = archery.GAME_REFERENCE.replace("score", "tally").replace("Score", "Tally").replace(" points", "")
-    assert _failed(tmp_path, html) == [archery.SCORE_CHECK]
+def test_a_score_that_never_rises_fails_only_the_score_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(archery, "basic_play_scores", lambda page: [0, 0, 0, None])
+    result = TASK.check(_solved(tmp_path), ["done"])
+    assert result.failed() == [archery.SCORE_CHECK]
+    assert result.details[archery.SCORE_CHECK] == "expected 'a score that rises after a few shots', received [0, 0, 0, None]"
+
+
+def test_without_a_browser_the_basic_play_is_a_note_never_a_lost_point(tmp_path: Path,
+                                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    def no_browser(page: Path) -> list[int | None]:
+        raise archery.CdpError(visual.NO_BROWSER)
+
+    monkeypatch.setattr(archery, "basic_play_scores", no_browser)
+    result = TASK.check(_solved(tmp_path), ["done"])
+    assert result.passed and archery.SCORE_CHECK not in dict(result.checks)
+    assert result.notes == [f"basic play not run: {visual.NO_BROWSER}"]
+
+
+@pytest.mark.parametrize("reads,rose", [
+    ([0, 0, 10], True), ([None, 0, 50, 0, 0], True), ([0, 0, 0], False), ([None, None], False), ([], False),
+    ([40, 40, 0, 10], False),
+])
+def test_a_rise_is_a_score_above_the_first_one_read(reads: list[int | None], rose: bool) -> None:
+    # A restart drops to 0 after an earlier rise and keeps it; a run that only restarts from a high title value does not.
+    assert archery.score_rose(reads) is rose
 
 
 @pytest.mark.parametrize("extra", [
@@ -80,7 +110,20 @@ def test_the_judge_plays_it_and_the_brief_names_what_it_tries() -> None:
         assert part in prompt, part
 
 
-@pytest.mark.skipif(visual.find_browser() is None, reason="no Chromium-family browser on PATH")
+@LIVE
+@pytest.mark.parametrize("change,rises", [(None, True), ("b.hit = true; score += 10;", False)])
+def test_a_scripted_basic_play_raises_the_gold_score_and_not_a_frozen_one(tmp_path: Path, change: str | None,
+                                                                          rises: bool) -> None:
+    html = archery.GAME_REFERENCE
+    if change:
+        assert change in html
+        html = html.replace(change, "b.hit = true;")
+    reads = archery.basic_play_scores(_solved(tmp_path, html) / archery.PAGE)
+    assert archery.score_rose(reads) is rises, reads
+    assert reads[0] == 0, "the score is read from the canvas text the game draws"
+
+
+@LIVE
 def test_the_reference_runs_and_draws_in_a_browser(tmp_path: Path) -> None:
     result = CheckResult()
     visual.add_page_checks(result, _solved(tmp_path) / archery.PAGE)
