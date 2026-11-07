@@ -77,6 +77,8 @@ Toolchains on the machine: Rust for `rs-lock-bug` (`cargo test`), Node.js 22.18 
 
 Details: [docs/TASKS.md](docs/TASKS.md).
 
+A standalone Unreal target-game experiment and its build guide are in [auxiliary/unreal-target](auxiliary/unreal-target/README.md). It is not a ranked task.
+
 ## Run it
 
 You need [uv](https://docs.astral.sh/uv/), the agent CLI you want to measure, logged
