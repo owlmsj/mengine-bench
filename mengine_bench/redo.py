@@ -24,6 +24,7 @@ from mengine_bench.bundle import (
 from mengine_bench.core import EvalTask
 from mengine_bench.leaderboard import major_minor
 from mengine_bench.redact import LocalNames, PathScope, local_names
+from mengine_bench.prices import finalize_run_cost
 from mengine_bench.report import RunMeta, TaskDetail, build_results, render_summary, totals_block
 from mengine_bench.run_command import JudgeEvidence, _utc_now, run_one_task
 from mengine_bench.runner.agents import Agent, Usage
@@ -196,3 +197,4 @@ def _rescore(result: dict[str, object], price: Price | None) -> None:
     # result.json keeps per-task medians only, so the run's medians stay as the first run measured them (#205).
     merged.update(turn_tps_median=old_stats.get("turn_tps_median"), tool_s_median=old_stats.get("tool_s_median"))
     totals.update(totals_block(run), timeouts=sum(row["status"] == "timeout" for row in rows), stats=merged)
+    finalize_run_cost(result)

@@ -12,6 +12,7 @@ from typing import NotRequired, TypedDict
 
 from mengine_bench import __version__
 from mengine_bench.core import EvalTask
+from mengine_bench.prices import finalize_run_cost, missing_price_warning, run_cost_text
 from mengine_bench.runner.agents import Usage
 from mengine_bench.runner.stats import RunStats, merge_stats, stats_record
 from mengine_bench.scoring import Price, RunScore, TaskScore, TokenTotals
@@ -122,7 +123,7 @@ def build_results(meta: RunMeta, run: RunScore, details: Mapping[str, TaskDetail
     }
     totals = {**totals_block(run), "timeouts": sum(task.status == "timeout" for task in run.tasks),
               "stats": stats_record(merge_stats(details[task.task_id]["stats"] for task in run.tasks))}
-    return {
+    result: dict[str, object] = {
         "schema": RESULT_SCHEMA, "bench_version": __version__, "bench_commit": dict(commit),
         "run_id": meta.run_id, "submitter": meta.submitter,
         "date": meta.date, "started_at": meta.started_at, "finished_at": meta.finished_at,
@@ -133,6 +134,8 @@ def build_results(meta: RunMeta, run: RunScore, details: Mapping[str, TaskDetail
         "totals": totals,
         "tasks": [_task_entry(task, details[task.task_id]) for task in run.tasks],
     }
+    finalize_run_cost(result)
+    return result
 
 
 def _fmt(value: object) -> str:
@@ -233,7 +236,7 @@ def render_summary(results: Mapping[str, object]) -> str:
         "| Score | Correct % | Solved | Judge | Speed | Time | Cost | Tokens |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
         f"| **{_fmt(totals['score'])}** | {_fmt(totals['correct'])} | {totals['solved']}/{totals['total']} | "
-        f"{_fmt(totals['judge'])} | {_fmt(totals.get('speed'))} | {time_text(totals['time_s'])} | {cost_text(totals)} | "
+        f"{_fmt(totals['judge'])} | {_fmt(totals.get('speed'))} | {time_text(totals['time_s'])} | {run_cost_text(results)} | "
         f"{tokens_text(totals.get('tokens'))} |",
         "",
         f"- Judge: {judge_text(results.get('judge'))}",
@@ -246,6 +249,15 @@ def render_summary(results: Mapping[str, object]) -> str:
         "first write |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
+    tokens = totals.get("tokens")
+    stats = totals.get("stats")
+    has_tokens = (isinstance(tokens, dict) and any(tokens.values())) or (
+        isinstance(stats, dict) and bool(stats.get("generated_tokens")))
+    if totals.get("cost_basis") == "n/a" and has_tokens:
+        warning = missing_price_warning(str(agent.get("model")), results.get("config") or {},
+                                        results.get("price_per_mtok"))
+        if warning:
+            lines.insert(7, f"- Cost warning: {warning}")
     tasks = results["tasks"]
     assert isinstance(tasks, list)
     for task in tasks:

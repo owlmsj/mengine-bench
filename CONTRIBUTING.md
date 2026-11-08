@@ -105,6 +105,8 @@ first and land the LEADERBOARD.md commit in a pull request of your own.
 
 ## Maintainer: releasing a bench version
 
+Before a release, review every row in `mengine_bench/prices.py` against its official source URL, update rates and read dates, and note tier or time-window limits (#195). Existing bundles keep their recorded rates.
+
 Fixes are cheap and runs are not, so versions ship in trains, not per fix (#185). There is no CI by decision (#11):
 the checklist below is the gate, run by the maintainer on the release branch.
 

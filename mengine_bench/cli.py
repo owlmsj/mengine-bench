@@ -19,12 +19,13 @@ from mengine_bench.bundle import bundle_leaks, run_scope, write_bundle
 from mengine_bench.bundle_judge import judge_bundle
 from mengine_bench.judge_calibrate import calibrate, parse_votes
 from mengine_bench.core import EvalTask, remove_tree, scratch_root
+from mengine_bench.prices import missing_price_warning, run_cost_text
 from mengine_bench.leaderboard import build_leaderboard, judged_runs, major_minor
 from mengine_bench.visual import find_browser
 from mengine_bench.preflight import blocking_problems, personal_instructions, shell_problems, toolchain_problems
 from mengine_bench.redact import LocalNames, local_names
 from mengine_bench.report import (
-    SUMMARIES_BEGIN, SUMMARIES_END, cost_text, render_task_summaries, render_tasks_table, replace_tasks_table,
+    SUMMARIES_BEGIN, SUMMARIES_END, render_task_summaries, render_tasks_table, replace_tasks_table,
     time_text,
 )
 from mengine_bench.environment import parse_config
@@ -269,6 +270,10 @@ def _run(args: argparse.Namespace) -> int:
         config: dict[str, object] = dict(parse_config(args.config))
     except ValueError as error:
         raise SystemExit(f"error: {error}") from error
+    declared = None if price is None else {"input": price.input, "cached": price.cached, "output": price.output}
+    price_warning = missing_price_warning(args.model, config, declared)
+    if price_warning and not args.dry_run:
+        print(f"preflight warning: {price_warning}")
     if args.submit and not args.dry_run:
         # Fail before the run, not 30 minutes later.
         try:
@@ -311,6 +316,8 @@ def _run(args: argparse.Namespace) -> int:
                     "blocked by the shell" if shell else
                     "clean" if not problems else f"blocked by {len(problems)} earlier run(s)"),
                 "config": config}
+        if price_warning:
+            plan["warnings"] = [price_warning]
         print(json.dumps(plan))
         return 0
     if problems:
@@ -329,7 +336,7 @@ def _run(args: argparse.Namespace) -> int:
     totals = results["totals"]
     assert isinstance(totals, dict)
     print(f"correct {totals['correct']}% solved {totals['solved']}/{totals['total']} time "
-          f"{time_text(totals['time_s'])} cost {cost_text(totals)}; Score waits for the judge")
+          f"{time_text(totals['time_s'])} cost {run_cost_text(results)}; Score waits for the judge")
     print(f"wrote bundle {bundle}")
     if args.work is None:
         # Raw transcripts are unredacted, and a later run's agent could read these solutions.

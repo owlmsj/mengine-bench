@@ -509,3 +509,14 @@ def test_leaderboard_links_available_visual_workspaces_for_all_runs(tmp_path: Pa
     assert "[web-archery-game](results/partial/workspace/web-archery-game.tar.gz)" in board
     assert "results/ranked/workspace/web-archery-game.tar.gz" not in board
     assert "results/partial/workspace/web-mondrian-landing.tar.gz" not in board
+
+
+def test_summary_and_board_agree_on_codex_list_price_195(tmp_path: Path) -> None:
+    from mengine_bench.report import render_summary
+    bundle = _write_result(tmp_path / "results", "codex", 90.0, model="gpt-6.1-terra")
+    result = json.loads((bundle / "result.json").read_text(encoding="utf-8"))
+    result["totals"].update(cost_usd=None, cost_basis="n/a", cost_lower_bound=False)
+    result["tasks"] = []
+    expected = leaderboard.run_cost_text(result)
+    assert expected.startswith("~$")
+    assert expected in render_summary(result)

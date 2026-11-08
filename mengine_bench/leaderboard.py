@@ -22,7 +22,7 @@ from mengine_bench import __version__, catalog
 from mengine_bench.analyze import tie_note
 from mengine_bench.bundle import RESULT_NAME, SUMMARY_NAME
 from mengine_bench.judge import OFFICIAL_JUDGE_EFFORT, OFFICIAL_JUDGE_MODEL, RUBRIC_VERSION
-from mengine_bench.prices import price_text
+from mengine_bench.prices import run_cost_text
 from mengine_bench.report import count_text, hardware_short_text, time_text, tokens_text
 from mengine_bench.runner.stats import stream_stats
 from mengine_bench.scoring import (CORRECT_SHARE, JUDGE_SHARE, SPEED_FULL_S, SPEED_SHARE, SPEED_ZERO_S, combined_score,
@@ -259,20 +259,6 @@ def _config_cell(config: object) -> str:
     text = ", ".join(parts) or "-"
     return text if len(text) <= CONFIG_CELL_CHARS else text[:CONFIG_CELL_CHARS - 3] + "..."
 
-
-def run_cost_text(result: dict[str, object]) -> str:
-    """#162: the harness's exact cost, else the list-price estimate (`~$x`, `$0.00 (local)`), else n/a."""
-    totals = result.get("totals")
-    totals = totals if isinstance(totals, dict) else {}
-    usd, estimate = totals.get("cost_usd"), price_text(result)
-    if estimate == "$0.00 (local)":
-        return estimate
-    bound = ">= " if totals.get("cost_lower_bound") else ""
-    # #202: opencode reports 0 for a model it has no price for; a declared --price is then the cost.
-    harness_unpriced = usd == 0 and bool(result.get("price_per_mtok")) and estimate.startswith("~")
-    if totals.get("cost_basis") == "harness" and isinstance(usd, (int, float)) and not harness_unpriced:
-        return f"{bound}${usd:.2f}"
-    return bound + estimate if estimate.startswith("~") else estimate
 
 
 def bundle_tool_s(bundle: Path, result: dict[str, object]) -> float | None:

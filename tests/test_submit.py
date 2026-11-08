@@ -45,7 +45,7 @@ def test_title_and_body_come_from_result_json() -> None:
     assert submit.pr_title(result) == "results: codex gpt-x low"
     body = submit.pr_body(result)
     for expected in ("| agent CLI and version | codex codex-cli 1.0 |", "| judge | pending: the maintainer runs `mengine-bench judge` on review |",
-                     "| Correct % / solved | 90.0 / 12/14 |", "| Judge / Score | 85.0 / 88.5 |", "| Cost | >= $3.20 (price) |", "| Time | 8 min 20 s |", "| config | personal_instructions=~/.codex/AGENTS.md; provider=openai |"):
+                     "| Correct % / solved | 90.0 / 12/14 |", "| Judge / Score | 85.0 / 88.5 |", "| Cost | >= ~$3.20 |", "| Time | 8 min 20 s |", "| config | personal_instructions=~/.codex/AGENTS.md; provider=openai |"):
         assert expected in body
 
 
