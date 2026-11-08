@@ -22,7 +22,8 @@ from mengine_bench import __version__
 from mengine_bench.bundle import RESULT_NAME, bundle_leaks
 from mengine_bench.leaderboard import major_minor
 from mengine_bench.redact import local_names
-from mengine_bench.report import config_text, cost_text, time_text
+from mengine_bench.report import config_text, time_text
+from mengine_bench.prices import run_cost_text
 
 UPSTREAM = "owlmsj/mengine-bench"
 UPSTREAM_BRANCH = "main"
@@ -87,7 +88,7 @@ def pr_body(result: Mapping[str, object]) -> str:
         ("Judge / Score", "pending (set by the maintainer's judge)" if totals.get("score") is None
          else f"{totals.get('judge')} / {totals.get('score')}"),
         ("Time", time_text(totals.get("time_s"))),
-        ("Cost", cost_text(totals)),
+        ("Cost", run_cost_text(result)),
         ("wall time", f"{result.get('started_at')} to {result.get('finished_at')}"),
         ("bench version and commit", f"{result['bench_version']} at {commit_text}"),
         ("machine", f"{environment.get('os')}, {environment.get('cpu')}, {environment.get('ram_gb')} GB RAM, "
