@@ -1,0 +1,67 @@
+{
+ "task_id": "file-media-edit",
+ "prompts": [
+  "Tidewater Studio is announcing its balloon launch. Two small jobs before the post goes out:\n\n1. `launch.jpg` becomes the feed picture: a 1080x1350 JPEG at `out/feed-photo.jpg`. The magenta balloon is the\n   subject, so it has to be fully in the picture and still look like itself.\n2. The park's permit form `permit-form.pdf` filled in with the details Ines sent in `event-details.txt`, saved at\n   `out/permit-filled.pdf` and flattened, so the answers can no longer be edited.\n\nKeep the originals as they are."
+ ],
+ "answers": [],
+ "diff": "A tmp/fill_permit.py\nA tmp/make_feed_photo.py\n\n--- tmp/fill_permit.py ---\n\"\"\"Fill permit-form.pdf with Ines's details and flatten so fields can't be edited.\n\nValues from event-details.txt:\n  organizer   -> Tidewater Studio\n  event_date  -> Saturday 5 December 2026\n  location    -> North Cove Lawn\n  attendees   -> about 40\n\"\"\"\nimport os\nimport pymupdf as fitz\n\nHERE = os.path.dirname(os.path.abspath(__file__))\nSRC = os.path.join(HERE, \"..\", \"permit-form.pdf\")\nOUT = os.path.join(HERE, \"..\", \"out\", \"permit-filled.pdf\")\n\nVALUES = {\n    \"organizer\": \"Tidewater Studio\",\n    \"event_date\": \"Saturday 5 December 2026\",\n    \"location\": \"North Cove Lawn\",\n    \"attendees\": \"about 40\",\n}\n\ndoc = fitz.open(SRC)\nfilled = {}\nfor page in doc:\n    for w in page.widgets() or []:\n        name = w.field_name\n        if name in VALUES:\n            w.field_value = VALUES[name]\n            w.update()\n            filled[name] = VALUES[name]\n\n# Flatten: bake field values (and any annotations) into page content and remove\n# the interactive form fields, so the answers can no longer be edited.\ndoc.flatten()\n\nos.makedirs(os.path.dirname(OUT), exist_ok=True)\ndoc.save(OUT, garbage=4, deflate=True)\ndoc.close()\n\n# Verify\ncheck = fitz.open(OUT)\nremaining = []\nfor page in check:\n    for w in page.widgets() or []:\n        remaining.append(w.field_name)\nprint(\"filled:\", filled)\nprint(\"remaining widgets after flatten:\", remaining)\nprint(\"has AcroForm:\", check.is_form_pdf)\n# Extract text to confirm values are baked in\ntext = \"\\n\".join(p.get_text() for p in check)\nfor v in VALUES.values():\n    print(\"contains %r:\" % v, v in text)\ncheck.close()\nprint(\"saved\", OUT)\n\n--- tmp/make_feed_photo.py ---\n\"\"\"Crop launch.jpg to a 1080x1350 (4:5) feed photo keeping the magenta balloon fully in frame.\n\nSource is 3000x2000 (3:2). Target 4:5 portrait. The whole balloon\n(envelope + ropes + basket) spans x 2350-2749, y 500-1070.\nCrop box (1800,300,3000,1800) = 1200x1500 (4:5), fully contains the balloon\nwith margin (left 550, right 251, top 200, bottom 730 to basket).\nScale 1200x1500 -> 1080x1350 is uniform 0.9, no distortion.\n\"\"\"\nfrom PIL import Image\nimport os\n\nSRC = os.path.join(os.path.dirname(__file__), \"..\", \"launch.jpg\")\nOUT = os.path.join(os.path.dirname(__file__), \"..\", \"out\", \"feed-photo.jpg\")\n\nim = Image.open(SRC).convert(\"RGB\")\ncrop = im.crop((1800, 300, 3000, 1800))  # 1200x1500\nout = crop.resize((1080, 1350), Image.LANCZOS)\nos.makedirs(os.path.dirname(OUT), exist_ok=True)\nout.save(OUT, \"JPEG\", quality=92)\nprint(\"saved\", OUT, out.size)",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\" ok -> \"Read directory <WORKSPACE>, entries 1-4\\nAGENTS.md\\nevent-details.txt\\nlaunch.jpg\\npermit-form.pdf\"\n[step 1] read \"<WORKSPACE>\\\\event-details.txt\" ok -> \"Read file <WORKSPACE>\\\\event-details.txt, lines 1-9\\n1: From: Ines Varga\\n2: Subject: balloon launch permit\\n3: \\n4: Details for the park permit:\\n5: \\n6: Organizer: Tidewater Studio\\n7: Date: Saturday 5 December 2026\\n8: Where: North Cove Lawn\\n9: People: about 40\"\n[step 1] read \"<WORKSPACE>\\\\launch.jpg\" ok -> \"Image read successfully\"\n[step 1] shell \"python -c \\\"import PIL; print(PIL.__version__)\\\" 2>&1; python -c \\\"import pypdf; print(pypdf.__version__)\\\" 2>&1\" ok -> \"13.0.0\\r\\n6.21.4\"\n[step 1] shell \"python -c \\\"\\nfrom pypdf import PdfReader\\nr = PdfReader('permit-form.pdf')\\nprint('pages', len(r.pages))\\nfor i,p in enumerate(r.pages):\\n    fields = p.get_fields()\\n    print('page', i, 'fields:', fields)\\n\\\"\" failed -> \"Traceback (most recent call last):\\r\\npages 1\\r\\n  File \\\"<string>\\\", line 6, in <module>\\r\\n    fields = p.get_fields()\\r\\n             ^^^^^^^^^^^^\\r\\nAttributeError: 'PageObject' object has no attribute 'get_fields'\"\n[step 1] shell \"python -c \\\"\\nfrom PIL import Image\\nimport numpy as np\\nim = Image.open('launch.jpg')\\nprint('size', im.size, 'mode', im.mode)\\na = np.array(im.convert('RGB'))\\n# magenta: high R, low G, high B\\nr,g,b = a[:,:,0].astype(int), a[:,:,1].astype(int), a[:,:,2].astype(int)\\nmask = (r>180)&(g<100)&(b>150)\\nys,xs = np.where(mask)\\nprint('balloon bbox x0,x1,y0,y1:', xs.min(), xs.max(), ys.min(), ys.max())\\nprint('count', len(xs))\\n\\\"\" ok -> \"size (3000, 2000) mode RGB\\r\\nballoon bbox x0,x1,y0,y1: 2350 2749 500 899\\r\\ncount 125582\"\n[step 1] shell \"python -c \\\"\\nfrom pypdf import PdfReader\\nr = PdfReader('permit-form.pdf')\\nfields = r.get_fields()\\nfor name, f in (fields or {}).items():\\n    print(repr(name), '->', f.get('/FT'), '| value:', repr(f.get('/V')), '| options:', f.get('/Opt'), '| states:', f.get('/_States_'))\\n\\\"\" ok -> \"'organizer' -> /Tx | value: None | options: None | states: None\\r\\n'event_date' -> /Tx | value: None | options: None | states: None\\r\\n'location' -> /Tx | value: None | options: None | states: None\\r\\n'attendees' -> /Tx | value: None | options: None | states: None\"\n[step 1] shell \"python -c \\\"\\nfrom PIL import Image\\nimport numpy as np\\nim = Image.open('launch.jpg')\\na = np.array(im.convert('RGB'))\\nr,g,b = a[:,:,0].astype(int), a[:,:,1].astype(int), a[:,:,2].astype(int)\\n# brown basket: r>g>b, mid-dark\\nmask = (r>100)&(r<190)&(g>60)&(g<130)&(b<80)&(r>g+20)&(g>b+10)\\nys,xs = np.where(mask)\\nprint('brown bbox x0,x1,y0,y1:', xs.min(), xs.max(), ys.min(), ys.max(), 'count', len(xs))\\n# sample colors near balloon\\nprint('color at (2550,700):', a[700,2550])\\nprint('color at (2550,950):', a[950,2550])\\n\\\"\" ok -> \"brown bbox x0,x1,y0,y1: 2510 2590 1010 1070 count 4785\\r\\ncolor at (2550,700): [225  31 190]\\r\\ncolor at (2550,950): [167 194 224]\"\n[step 1] shell \"python -c \\\"import pikepdf; print('pikepdf', pikepdf.__version__)\\\" 2>&1\\npython -c \\\"import fitz; print('pymupdf', fitz.__doc__)\\\" 2>&1\" ok -> \"\\u001b[31;1mTraceback (most recent call last):\\u001b[0m\\r\\n\\u001b[31;1m  File \\\"<string>\\\", line 1, in <module>\\u001b[0m\\r\\n\\u001b[31;1m    import pikepdf; print('pikepdf', pikepdf.__version__)\\u001b[0m\\r\\n\\u001b[31;1m    ^^^^^^^^^^^^^^\\u001b[0m\\r\\n\\u001b[31;1mModuleNotFoundError: No module named 'pikepdf'\\u001b[0m\\r\\npymupdf PyMuPDF 2.1: Python bindings for the MuPDF 1.28.6 library.\\r\\nPython 3.13 running on win32 (64-bit).\\r\\n\\r\\n\\u001b[31;1mC:\\\\Users\\\\<USER>\\\\Code\\\\[... 196 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\make_feed_photo.py\" ok -> \"Created file successfully: <WORKSPACE>/tmp/make_feed_photo.py\"\n[step 1] shell \"python tmp\\\\make_feed_photo.py\" ok -> \"saved <WORKSPACE>\\\\tmp\\\\..\\\\out\\\\feed-photo.jpg (1080, 1350)\"\n[step 1] shell \"python -c \\\"\\nfrom PIL import Image\\nimport numpy as np\\nim = Image.open('out/feed-photo.jpg')\\nprint('size', im.size)\\na = np.array(im.convert('RGB'))\\nr,g,b = a[:,:,0].astype(int), a[:,:,1].astype(int), a[:,:,2].astype(int)\\nmask = (r>180)&(g<100)&(b>150)\\nys,xs = np.where(mask)\\nprint('magenta bbox x0,x1,y0,y1:', xs.min(), xs.max(), ys.min(), ys.max())\\nW,H = im.size\\nprint('touches left edge:', xs.min()==0, 'right:', xs.max()==W-1, 'top:', ys.min()==0, 'bottom:', ys.max()==H-1)\\nprint('magenta width frac: %.2f' % ((xs.max()-xs.min())/W))\\n# brown basket\\nmask2 = (r>100)&(r<190)&(g>60)&(g<130)&(b<80)&(r>g+20)&(g>b+10)\\nys2,xs2 = np.where(mask2)\\nprint('basket bbox x0,x1,y0,y1:', xs2.min(), xs2.max(), ys2.min(), ys2.max())\\nprint('basket touches edge:', xs2.min()==0 or xs2.max()==W-1 or ys2.min()==0 or ys2.max()==H-1)\\n\\\"\" ok -> \"size (1080, 1350)\\r\\nmagenta bbox x0,x1,y0,y1: 496 855 180 539\\r\\ntouches left edge: False right: False top: False bottom: False\\r\\nmagenta width frac: 0.33\\r\\nbasket bbox x0,x1,y0,y1: 640 710 639 692\\r\\nbasket touches edge: False\"\n[step 1] read \"<WORKSPACE>\\\\out\\\\feed-photo.jpg\" ok -> \"Image read successfully\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\fill_permit.py\" ok -> \"Created file successfully: <WORKSPACE>/tmp/fill_permit.py\"\n[step 1] shell \"python tmp\\\\fill_permit.py 2>&1\" failed -> \"\\u001b[31;1mTraceback (most recent call last):\\u001b[0m\\r\\n\\u001b[31;1m  File \\\"<WORKSPACE>\\\\tmp\\\\fill_permit.py\\\", line 35, in <module>\\u001b[0m\\r\\n\\u001b[31;1m    doc.flatten()\\u001b[0m\\r\\n\\u001b[31;1m    ^^^^^^^^^^^\\u001b[0m\\r\\n\\u001b[31;1mAttributeError: 'Document' object has no attribute 'flatten'\\u001b[0m\"\n[step 1] shell \"python -c \\\"\\nimport pymupdf as fitz\\nprint('version', fitz.__version__ if hasattr(fitz,'__version__') else fitz.version)\\nprint('Doc.flatten:', hasattr(fitz.Document,'flatten'))\\nprint('Page.flatten:', hasattr(fitz.Page,'flatten'))\\nprint([m for m in dir(fitz.Document) if 'flat' in m.lower() or 'form' in m.lower()])\\nprint([m for m in dir(fitz.Page) if 'flat' in m.lower() or 'annot' in m.lower() or 'clean' in m.lower()])\\n\\\" 2>&1\" ok -> \"version 2.1\\r\\nDoc.flatten: False\\r\\nPage.flatten: False\\r\\n['FormFonts', '__format__', '_addFormFont', 'is_form_pdf']\\r\\n['_addAnnot_FromString', '_add_caret_annot', '_add_file_annot', '_add_freetext_annot', '_add_ink_annot', '_add_line_annot', '_add_redact_annot', '_add_stamp_annot', '_add_text_annot', '_delete_empty_annots', '_load_annot', '_reset_annot_refs', 'add_caret_annot', 'add_circle_annot', 'ad[... 403 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "the original photo and form left as they were",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "photo is a JPEG",
+   true
+  ],
+  [
+   "photo is exactly 1080x1350",
+   true
+  ],
+  [
+   "balloon fully in frame and undistorted",
+   true
+  ],
+  [
+   "permit organizer filled",
+   false
+  ],
+  [
+   "permit event_date filled",
+   false
+  ],
+  [
+   "permit location filled",
+   false
+  ],
+  [
+   "permit attendees filled",
+   false
+  ],
+  [
+   "permit flattened",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 14,
+  "tool_calls": 16,
+  "tool_errors": 0,
+  "shell_commands": 10,
+  "shell_failures": 2,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 8831,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 3637
+ },
+ "deliverables": [],
+ "render": null
+}

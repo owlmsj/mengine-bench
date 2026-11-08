@@ -1,0 +1,51 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [],
+ "diff": "A hexdump.py\nA inspect.py\nA parse.py\n\n--- hexdump.py ---\ndata = open(r'prices.db', 'rb').read()\nfor p in (0xff1, 0xfe3, 0xfcb):\n    print(hex(p), data[p:p+30].hex(' '))\nprint()\nprint(data[3901:4096].hex(' '))\n\n--- inspect.py ---\nimport struct\n\ndata = open(r'prices.db', 'rb').read()\nprint('file_len', len(data))\nprint('magic', data[:16])\npage_size = struct.unpack('>H', data[16:18])[0]\nprint('page_size', page_size)\ndb_size_pages = struct.unpack('>I', data[28:32])[0]\nprint('db_size_pages', db_size_pages)\nprint('hdr100_200', data[100:200])\nprint()\nprint('hex 0-100:', data[:100].hex())\n\n--- parse.py ---\nimport struct\n\ndata = open(r'prices.db', 'rb').read()\nn = len(data)\n\n# check for page boundaries at common page sizes\nfor ps in (512, 1024, 2048, 4096, 8192, 16384, 32768, 65536):\n    if n % ps == 0 and n > ps:\n        marks = [data[i] for i in range(0, n, ps)]\n        print(ps, 'boundary bytes:', marks)\n\nprint()\n# assume single 4096-byte table leaf page\nb0 = data[0]\nncells = struct.unpack('>H', data[3:5])[0]\ncell_start = struct.unpack('>H', data[5:7])[0]\nprint('type', b0, 'ncells', ncells, 'cell_start', cell_start)\nptrs = [struct.unpack('>H', data[8+2*i:10+2*i])[0] for i in range(ncells)]\nprint('cell ptrs', [hex(p) for p in ptrs])\n\ndef varint(buf, off):\n    v = 0\n    for i in range(9):\n        b = buf[off+i]\n        if i == 8:\n            v = (v << 8) | b\n            return v, off+9\n        v = (v << 7) | (b & 0x7F)\n        if not (b & 0x80):\n            return v, off+i+1\n    return v, off+9\n\ndef serial_type_size(st):\n    if st >= 12:\n        return (st-12)//2\n    return {0:0,1:1,2:2,3:3,4:4,5:6,6:8,7:8,8:0,9:0}.get(st, 0)\n\nrows = []\nfor p in ptrs:\n    payload_len, o = varint(data, p)\n    rowid, o = varint(data, o)\n    # payload may be overflowed; assume local (page 4096, max local = 4096-35=4061)\n    hdr_len, ho = varint(data, o)\n    hdr_end = o + hdr_len\n    stypes = []\n    q = ho\n    while q < hdr_end:\n        st, q = varint(data, q)\n        stypes.append(st)\n    vals = []\n    vo = hdr_end\n    for st in stypes:\n        sz = serial_type_size(st)\n        raw = data[vo:vo+sz]\n        vo += sz\n        if st == 0:\n            vals.append(None)\n        elif st in (1,2,3,4,5,6,8):\n            vals.append(int.from_bytes(raw, 'big', signed=True))\n        elif st == 7:\n            vals.append(struct.unpack('>d', raw)[0])\n        elif st >= 13 and st % 2 == 1:\n            vals.append(raw.decode('utf-8', 'replace'))\n        else:\n            vals.append(raw)\n    rows.append((rowid, vals))\n    print('rowid', rowid, 'payload_len', payload_len, 'stypes', stypes, 'vals', vals)\n\nprint()\nprint('total rows', len(rows))",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-Item .\\\\prices.db | Select-Object Length; python -c \\\"import sys; print(sys.version)\\\"\" ok -> \"3.13.14 (main, Jun 23 2026, 15:19:27) [MSC v.1944 64 bit (AMD64)]\\r\\n\\u001b[32;1mLength\\u001b[0m\\r\\n\\u001b[32;1m------\\u001b[0m\\r\\n  4096\"\n[step 1] shell \"python - <<'EOF'\\nimport struct\\ndata = open(r'prices.db','rb').read()\\nprint(len(data))\\nprint(data[:16])\\npage_size = struct.unpack('>H', data[16:18])[0]\\nprint('page_size', page_size)\\ndb_size_pages = struct.unpack('>I', data[28:32])[0]\\nprint('db_size_pages', db_size_pages)\\nprint(data[100:200])\\nEOF\" failed -> \"\"\n[step 1] write \"inspect.py\" ok -> \"Created file successfully: inspect.py\"\n[step 1] shell \"python inspect.py\" ok -> \"file_len 4096\\r\\nmagic b'\\\\r\\\\x00\\\\x00\\\\x00\\\\n\\\\x0f=\\\\x00\\\\x0f\\\\xf1\\\\x0f\\\\xe3\\\\x0f\\\\xcb\\\\x0f\\\\xbd'\\r\\npage_size 4013\\r\\ndb_size_pages 0\\r\\nhdr100_200 b'\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x0[... 345 chars cut by the benchmark]\"\n[step 1] write \"parse.py\" ok -> \"Created file successfully: parse.py\"\n[step 1] shell \"python parse.py\" ok -> \"512 boundary bytes: [13, 0, 0, 0, 0, 0, 0, 0]\\r\\n1024 boundary bytes: [13, 0, 0, 0]\\r\\n2048 boundary bytes: [13, 0]\\r\\n\\r\\ntype 13 ncells 10 cell_start 3901\\r\\ncell ptrs ['0xff1', '0xfe3', '0xfcb', '0xfbd', '0xfad', '0xf93', '0xf7f', '0xf6d', '0xf58', '0xf3d']\\r\\nrowid 1 payload_len 13 stypes [0, 31, 8] vals [None, 'trail map', 0]\\r\\nrowid 2 payload_len 12 stypes [0, 29, 9] vals [None, 'matchbox', b'']\\r\\nrowid 3[... 595 chars cut by the benchmark]\"\n[step 1] write \"hexdump.py\" ok -> \"Created file successfully: hexdump.py\"\n[step 1] shell \"python hexdump.py\" ok -> \"0xff1 0d 01 04 00 1f 08 74 72 61 69 6c 20 6d 61 70\\r\\n0xfe3 0c 02 04 00 1d 09 6d 61 74 63 68 62 6f 78 0d 01 04 00 1f 08 74 72 61 69 6c 20 6d 61 70\\r\\n0xfcb 16 03 04 00 21 07 74 65 6e 74 20 73 74 61 6b 65 40 06 00 00 00 00 00 00 0c 02 04 00 1d 09\\r\\n\\r\\n19 0a 04 00 27 07 66 69 72 73 74 20 61 69 64 20 6b 69 74 3f ef ae 14 7a e1 47 ae 13 09 04 00 1b 07 63 6f 6d 70 61 73 73 40 2f 00 00 00 00 00 00 10 08 04 00[... 429 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   false
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   false
+  ],
+  [
+   "rows with fractional prices recovered",
+   false
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   false
+  ],
+  [
+   "no row that is not in the table",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 9,
+  "tool_calls": 8,
+  "tool_errors": 1,
+  "shell_commands": 5,
+  "shell_failures": 0,
+  "file_writes": 3,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 5859,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 2600
+ },
+ "deliverables": [],
+ "render": null
+}
