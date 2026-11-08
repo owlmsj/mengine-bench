@@ -491,3 +491,21 @@ def test_a_preset_keeps_its_3_latest_runs_ranked_and_older_ones_fold_below_210(t
     consistency = text[text.index("| Setup | Ranked runs | Score min-max | Score mean |"):]
     assert "| same-model high<br>codex | 3 | 60.0-80.0 | 70.0 |" in consistency
     assert "other-model" not in consistency.split("</details>")[0], "one run shows no consistency"
+
+
+def test_leaderboard_links_available_visual_workspaces_for_all_runs(tmp_path: Path) -> None:
+    results = tmp_path / "results"
+    ranked = _write_result(results, "ranked", 90.0)
+    partial = _write_result(results, "partial", 80.0, task_ids=["web-archery-game"])
+    for bundle, names in [(ranked, ["web-mondrian-landing", "3d-print-homage", "file-media-edit"]),
+                          (partial, ["web-archery-game"])]:
+        folder = bundle / "workspace"
+        folder.mkdir()
+        for name in names:
+            (folder / f"{name}.tar.gz").write_bytes(b"fixture")
+    board = leaderboard.build_leaderboard(results, tmp_path).markdown
+    for name in ("web-mondrian-landing", "3d-print-homage", "file-media-edit"):
+        assert f"[{name}](results/ranked/workspace/{name}.tar.gz)" in board
+    assert "[web-archery-game](results/partial/workspace/web-archery-game.tar.gz)" in board
+    assert "results/ranked/workspace/web-archery-game.tar.gz" not in board
+    assert "results/partial/workspace/web-mondrian-landing.tar.gz" not in board

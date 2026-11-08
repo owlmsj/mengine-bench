@@ -28,6 +28,9 @@ from mengine_bench.runner.stats import stream_stats
 from mengine_bench.scoring import (CORRECT_SHARE, JUDGE_SHARE, SPEED_FULL_S, SPEED_SHARE, SPEED_ZERO_S, combined_score,
                                    speed_points)
 
+# #223: downloadable final workspaces of tasks whose deliverable is visual.
+VISUAL_WORKSPACES = ("web-mondrian-landing", "web-word-universe", "file-media-edit", "3d-print-homage",
+                     "web-archery-game")
 CONFIG_CELL_CHARS = 60
 # #99: an older run never had these tasks, so it stays complete and its ranking stays in the history.
 # Older runs stay in the history: they match the catalog apart from the tasks that came and went since (#99, #103).
@@ -399,8 +402,13 @@ def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
     history: dict[str, list[RankedBundle]] = {}
     observed: list[RankedBundle] = []
     observation_notes: dict[str, str] = dict(OBSERVED_RUNS)
+    visual_runs: list[str] = []
     for result_file in sorted(results_dir.glob(f"*/{RESULT_NAME}")):
         bundle = result_file.parent
+        links = [f"[{task}]({_link(bundle / 'workspace' / (task + '.tar.gz'), link_base)})"
+                 for task in VISUAL_WORKSPACES if (bundle / 'workspace' / (task + '.tar.gz')).is_file()]
+        if links:
+            visual_runs.append(f"- [{bundle.name}]({_link(bundle / SUMMARY_NAME, link_base)}): " + ", ".join(links))
         result = json.loads(result_file.read_text(encoding="utf-8"))
         reason = unranked_reason(result)
         older = _history_version(result)
@@ -436,5 +444,10 @@ def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
         sections.append(f"## Bench {version} (history)\n\n" + _table(sorted(history[version], key=_by_score)))
     if unranked:
         sections.append("## Not ranked\n\n" + "\n".join(f"- `{name}`: {reason}" for name, reason in unranked) + "\n")
+    if visual_runs:
+        sections.append("<details><summary>Download visual task workspaces</summary>\n\n"
+                        "Each archive contains the final task workspace, including its inputs. "
+                        "Older runs without a saved workspace have no download.\n\n"
+                        + "\n".join(visual_runs) + "\n\n</details>\n")
     return Leaderboard(markdown="\n".join(sections), ranked=len(ranked), history=sum(map(len, history.values())),
                        unranked=unranked)
