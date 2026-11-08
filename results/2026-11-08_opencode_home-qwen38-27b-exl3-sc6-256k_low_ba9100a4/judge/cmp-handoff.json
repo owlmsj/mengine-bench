@@ -1,0 +1,79 @@
+{
+ "task_id": "cmp-handoff",
+ "prompts": [
+  "You are handing this debugging work to a colleague who will never see {WS}/session/transcript.md. Write {WS}/HANDOFF.md, at most 1000 characters, so they can carry on from where it really stands.",
+  "You just took over this work, and {WS}/HANDOFF.md is all you have. Where was the recipe applied, what are the final decode speed and VRAM, which quantization was discarded, what is still pending, and which command measures it again? Record it in {WS}/result.json: file_line, final_decode, final_vram_mib, discarded_quant, pending, measure_command."
+ ],
+ "answers": [
+  "\n\nDone. No browser tabs, windows, or apps were opened, so nothing to close.\n\n**Goal**\nWrite `./HANDOFF.md` (<=1000 chars) so a colleague who never sees `session/transcript.md` can carry on from where the debugging really stands.\n\n**Action**\nRead the full transcript, extracted the actual state (not the filler steps), wrote the handoff, then verified length with a script and re-checked every number against the transcript lines.\n\n**Result**\n`HANDOFF.md` written at **998 chars** (verified via `count.ps1`). Contents, each traced to a transcript line:\n- Task = measure local-9b Q5 at 128k (line 4).\n- Baseline 37.8 t/s / 7881 MiB (line 30); 7881 is the WDDM ceiling with 1494 MiB spilled to Shared Usage, so it doesn't count (line 44).\n- Fix `--no-mmproj-offload` + `-ub 512` removes the spill -> 7697 MiB / 38.0 t/s, median of 3 (line 124).\n- Q6_K doesn't fit at 128k; Q4_K_M (7305 MiB / 40.4 t/s) is fallback only (line 132).\n- Recipe applied in `scripts/start_server.ps1:165` (local9 block) and `profiles/local/local-9b.json` (line 185).\n- Left: update evals README (still cites deleted `check_vision.ps1`, line 222); review scratchpad temp-file names (recurring \"noted for later\", lines 55-216).\n- Assumptions stated: \"recipe\" = the two flags; final config is Q5 with Q4_K_M as fallback.\n\n**Found, and how I know it is right**\nThe 7881 MiB reading was a WDDM ceiling artifact (1494 MiB spilled); the real fix is the two flags, landing at 7697 MiB / 38.0 t/s. I know it because I cross-checked each figure in the handoff against the transcript (lines 30, 44, 124, 132, 185, 222, 55-216), and the measurement is `scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`, median of 3, cross-checked against the Shared Usage counter.\n\n**Next**\nColleague picks up the two pending items (evals README, scratchpad temp-file names). Scope was only the handoff; I did not do that pending work.",
+  "\n\n[goal]\nExtract the handoff facts into `./result.json`.\n\n[action]\nRead `HANDOFF.md` (the only source in the workspace; the referenced `scripts/` and `profiles/` files are not present here), wrote `result.json`, then parsed it back with `ConvertFrom-Json` to confirm validity and byte-exact values.\n\n[result]\n`result.json` contains:\n- `file_line`: `scripts/start_server.ps1:165` (local9 block; the recipe also lives in `profiles/local/local-9b.json`, which HANDOFF lists without a line number)\n- `final_decode`: `38.0 t/s` (median of 3)\n- `final_vram_mib`: `7697`\n- `discarded_quant`: `Q6_K` (7.03 GiB, does not fit at 128k; Q4_K_M kept only as fallback)\n- `pending`: the two items from \"Left\" — evals README still cites the deleted `check_vision.ps1`; scratchpad temp-file names review never done\n- `measure_command`: `scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`\n\nAssumption stated: since `file_line` is singular and only `start_server.ps1` carries a line number in the handoff, I recorded `scripts/start_server.ps1:165` as the primary location.\n\nWhat I found and how I know it is right: the recipe `--no-mmproj-offload + -ub 512` was applied at `scripts/start_server.ps1:165` and `profiles/local/local-9b.json`; final numbers are 7697 MiB VRAM / 38.0 t/s at 128k ctx, with Q6_K discarded. I know it is right because every value is copied verbatim from `HANDOFF.md` lines 7–9 and 20, and I verified the JSON parses and each field round-trips to the exact string in the handoff (check script output quoted above). No browser tabs, windows or apps were opened, so nothing to close.\n\n[next]\nNothing; the two pending items in the handoff remain open for whoever owns the repo."
+ ],
+ "diff": "A HANDOFF.md\nA result.json\nD session/transcript.md\n\n--- HANDOFF.md ---\n# HANDOFF\n\nTask: measure local-9b Q5 at 128k ctx (131072).\n\nDone\n- Baseline decode 37.8 t/s, VRAM 7881 MiB. 7881 is the WDDM ceiling; Shared Usage shows 1494 MiB spilled, so it does not count.\n- Fix: --no-mmproj-offload + -ub 512 removes the spill. Final VRAM 7697 MiB, decode 38.0 t/s (median of 3).\n- Q6_K (7.03 GiB) does not fit at 128k; discarded. Q4_K_M fits (7305 MiB, 40.4 t/s), fallback only.\n- Recipe applied: scripts/start_server.ps1:165 (local9 block), profiles/local/local-9b.json.\n\nLeft\n- Update evals README: still cites check_vision.ps1 (file no longer exists).\n- Review scratchpad temp-file names (noted for later, never done).\n\nAssumptions\n- \"Recipe\" = --no-mmproj-offload + -ub 512.\n- Final config is Q5 (task target); Q4_K_M is fallback.\n\nFound: 7881 MiB was a WDDM ceiling artifact; the two flags remove the 1494 MiB spill, landing at 7697 MiB / 38.0 t/s.\nHow I know: scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024, median of 3, cross-checked vs the Shared Usage counter.\n\n--- result.json ---\n{\n  \"file_line\": \"scripts/start_server.ps1:165\",\n  \"final_decode\": \"38.0 t/s\",\n  \"final_vram_mib\": 7697,\n  \"discarded_quant\": \"Q6_K\",\n  \"pending\": [\n    \"Update evals README: still cites check_vision.ps1 (file no longer exists)\",\n    \"Review scratchpad temp-file names (noted for later, never done)\"\n  ],\n  \"measure_command\": \"scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024\"\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\" ok -> \"Read directory <WORKSPACE>, entries 1-2\\nsession\\\\\\nAGENTS.md\"\n[step 1] search \"{\\\"pattern\\\": \\\"**/*\\\"}\" ok -> \"<WORKSPACE><WORKSPACE>\\\\session\\\\transcript.md\"\n[step 1] read \"<WORKSPACE>\\\\session\\\\transcript.md\" ok -> \"Read file <WORKSPACE>\\\\session\\\\transcript.md, lines 1-225\\n1: [agent] Opened the GPU panel; the graphs say nothing the counter does not already say. (step 0)\\n2: [tool] ok, 764 lines of output omitted\\n3: \\n4: [user] The local model needs 128k. Measure local-9b Q5 at that context.\\n5: \\n6: [agent] Checked the flag documentation in --help; [... 10693 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\HANDOFF.md\" ok -> \"Created file successfully: <WORKSPACE>/HANDOFF.md\"\n[step 1] shell \"pwsh -NoProfile -Command \\\"$t = Get-Content -Raw '<WORKSPACE>\\\\HANDOFF.md'; $s = $t -replace \\\\\\\"`r`n\\\\\\\",\\\\\\\"`n\\\\\\\"; Write-Output ('chars=' + $s.Length)\\\"\" failed -> \"\\u001b[31;1mParserError: \\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1mLine |\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1m\\u001b[36;1m   2 | \\u001b[0m \\\\\\u001b[36;1m,\\u001b[0m\\\\\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1m\\u001b[36;1m\\u001b[0m\\u001b[36;1m\\u001b[0m\\u001b[36;1m     | \\u001b[31;1m  ~\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1m\\u001b[36;1m\\u001b[0m\\u001b[36;1m\\u001b[0m\\u001b[36;1m\\u001b[31;1m\\u001b[31;1m\\u001b[36;1m     | \\u001b[31;1mMissing argument in parameter list.\\u001b[0m\"\n[step 1] write \"<HOME>\\\\AppData\\\\Local\\\\Temp\\\\opencode\\\\count.ps1\" ok -> \"Created file successfully: <HOME>/AppData/Local/Temp/opencode/count.ps1\"\n[step 1] shell \"pwsh -NoProfile -File \\\"<HOME>\\\\AppData\\\\Local\\\\Temp\\\\opencode\\\\count.ps1\\\"\" ok -> \"chars=1017\"\n[step 1] edit \"<WORKSPACE>\\\\HANDOFF.md\" ok -> \"Edited <WORKSPACE>/HANDOFF.md (1 replacement)\"\n[step 1] edit \"<WORKSPACE>\\\\HANDOFF.md\" ok -> \"Edited <WORKSPACE>/HANDOFF.md (1 replacement)\"\n[step 1] shell \"pwsh -NoProfile -File \\\"<HOME>\\\\AppData\\\\Local\\\\Temp\\\\opencode\\\\count.ps1\\\"\" ok -> \"chars=998\"\n[step 1] read \"<WORKSPACE>\\\\HANDOFF.md\" ok -> \"Read file <WORKSPACE>\\\\HANDOFF.md, lines 1-20\\n1: # HANDOFF\\n2: \\n3: Task: measure local-9b Q5 at 128k ctx (131072).\\n4: \\n5: Done\\n6: - Baseline decode 37.8 t/s, VRAM 7881 MiB. 7881 is the WDDM ceiling; Shared Usage shows 1494 MiB spilled, so it does not count.\\n7: - Fix: --no-mmproj-offload + -ub 512 removes the spill. Final VRAM 7697 MiB[... 780 chars cut by the benchmark]\"\n[step 2] read \"<WORKSPACE>\\\\HANDOFF.md\" ok -> \"Read file <WORKSPACE>\\\\HANDOFF.md, lines 1-20\\n1: # HANDOFF\\n2: \\n3: Task: measure local-9b Q5 at 128k ctx (131072).\\n4: \\n5: Done\\n6: - Baseline decode 37.8 t/s, VRAM 7881 MiB. 7881 is the WDDM ceiling; Shared Usage shows 1494 MiB spilled, so it does not count.\\n7: - Fix: --no-mmproj-offload + -ub 512 removes the spill. Final VRAM 7697 MiB[... 780 chars cut by the benchmark]\"\n[step 2] search \"{\\\"path\\\": \\\"<WORKSPACE>\\\", \\\"pattern\\\": \\\"**/*\\\"}\" ok -> \"<WORKSPACE><WORKSPACE>\\\\AGENTS.md\"\n[step 2] write \"<WORKSPACE>\\\\result.json\" ok -> \"Created file successfully: <WORKSPACE>/result.json\"\n[step 2] shell \"pwsh -NoProfile -Command \\\"$j = Get-Content '<WORKSPACE>\\\\result.json' -Raw | ConvertFrom-Json; $j | ConvertTo-Json -Depth 5\\\"\" failed -> \"\\u001b[31;1mParserError: \\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1mLine |\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1m\\u001b[36;1m   1 | \\u001b[0m . h-m17imo0k\\\\workspace\\\\result.json' -Raw | ConvertFrom-Json;  \\u001b[36;1m|\\u001b[0m Convert .\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1m\\u001b[36;1m\\u001b[0m\\u001b[36;1m\\u001b[0m\\u001b[36;1m     | \\u001b[31;1m                                                               ~\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1m\\u001b[36;1m\\u001b[0m\\u001b[36;1m\\u001b[0m\\u001b[36;1m\\u001b[31;1m\\u001b[31;1m\\u001b[36;1m     | \\u001b[31;1mAn empty pipe elemen[... 21 chars cut by the benchmark]\"\n[step 2] write \"<WORKSPACE>\\\\tmp\\\\check.ps1\" ok -> \"Created file successfully: <WORKSPACE>/tmp/check.ps1\"\n[step 2] shell \"pwsh -NoProfile -File \\\"<WORKSPACE>\\\\tmp\\\\check.ps1\\\"\" ok -> \"file_line=scripts/start_server.ps1:165\\r\\nfinal_decode=38.0 t/s\\r\\nfinal_vram_mib=7697\\r\\ndiscarded_quant=Q6_K\\r\\npending_count=2\\r\\npending: Update evals README: still cites check_vision.ps1 (file no longer exists)\\r\\npending: Review scratchpad temp-file names (noted for later, never done)\\r\\nmeasure_command=scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024\"\n[step 2] shell \"Remove-Item -Recurse -Force \\\"<WORKSPACE>\\\\tmp\\\"\" ok -> \"(no output)\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "summary exists and fits in 1000 characters",
+   true
+  ],
+  [
+   "summary keeps `--no-mmproj-offload`",
+   true
+  ],
+  [
+   "summary keeps `-ub 512`",
+   true
+  ],
+  [
+   "summary keeps `7697`",
+   true
+  ],
+  [
+   "answer file_line",
+   true
+  ],
+  [
+   "answer final_decode",
+   true
+  ],
+  [
+   "answer final_vram_mib",
+   true
+  ],
+  [
+   "answer discarded_quant",
+   true
+  ],
+  [
+   "answer pending",
+   true
+  ],
+  [
+   "answer measure_command",
+   true
+  ],
+  [
+   "does not repeat the spilled VRAM as final",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 18,
+  "tool_calls": 18,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 2,
+  "file_writes": 6,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 10060,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 2708
+ },
+ "deliverables": [],
+ "render": null
+}

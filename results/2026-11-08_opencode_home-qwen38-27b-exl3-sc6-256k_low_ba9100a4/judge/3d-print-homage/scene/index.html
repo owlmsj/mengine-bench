@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>The Great Wave off Kanagawa — low poly</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;background:#ece0c4;overflow:hidden;font-family:Inter,system-ui,sans-serif;}
+  #app{position:fixed;inset:0;}
+  canvas{display:block;}
+  .cap{position:fixed;left:24px;bottom:20px;color:#2b3a4a;pointer-events:none;text-shadow:0 1px 0 rgba(255,255,255,.4);}
+  .cap .jp{font-family:'Shippori Mincho',serif;font-size:22px;letter-spacing:.1em;color:#173a5e;}
+  .cap .en{font-size:11px;letter-spacing:.2em;text-transform:uppercase;opacity:.72;margin-top:5px;}
+  .badge{position:fixed;right:24px;top:20px;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:#173a5e;opacity:.5;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="cap">
+  <div class="jp">神奈川沖浪裏</div>
+  <div class="en">The Great Wave off Kanagawa · low poly after Hokusai</div>
+</div>
+<div class="badge">public domain · rebuilt in code</div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+// Palette sampled from the print (Prussian blue, white foam, cream paper, grey sky, tan boats)
+const P = {
+  paper:0xece0c4, blueDeep:0x173a5e, blueMid:0x2d5a85, blueLight:0x4f82ab,
+  foam:0xf3eee1, foamBlue:0xcfe0e8, skyGray:0x8b9096, boat:0xc79a6b,
+  boatDark:0x3a2f25, fuji:0xe9ecef, fujiBase:0xaebcc6, water:0xbcd6e2
+};
+
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth, innerHeight);
+app.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(P.paper);
+scene.fog = new THREE.Fog(P.paper, 24, 52);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 200);
+camera.position.set(0, 2, 18);
+camera.lookAt(0, 1, 0);
+
+scene.add(new THREE.HemisphereLight(0xfff4dd, 0x2a4a6a, 0.95));
+const sun = new THREE.DirectionalLight(0xfff0d0, 1.15);
+sun.position.set(7, 11, 9);
+scene.add(sun);
+scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+
+const flat = (c, o={}) => new THREE.MeshStandardMaterial(
+  Object.assign({color:c, flatShading:true, roughness:.9, metalness:.05}, o));
+const UP = new THREE.Vector3(0,1,0);
+
+// A curling wave: two concentric spiral tubes (back + front) with foam claws and foam dots.
+function spiral(scale, radius, color, z){
+  class C extends THREE.Curve{
+    getPoint(t){
+      const a = -Math.PI/2 - t*Math.PI*1.5;
+      const r = 4.5*(1-0.65*t)*scale;
+      return new THREE.Vector3(Math.cos(a)*r, Math.sin(a)*r + 1.5*scale, z);
+    }
+  }
+  return new THREE.Mesh(new THREE.TubeGeometry(new C(), 72, radius, 9, false), flat(color));
+}
+function makeWave(scale){
+  const g = new THREE.Group();
+  const C = new THREE.Vector3(0,1.5,0.3);
+  const radDir = t => { const a=-Math.PI/2 - t*Math.PI*1.5; return new THREE.Vector3(Math.cos(a), Math.sin(a), 0); };
+  const radR = t => 4.5*(1-0.65*t);
+  const crest = (t,off)=> C.clone().addScaledVector(radDir(t), radR(t)+off);
+  g.add(spiral(1.15, 1.5, P.blueDeep, -0.7));
+  g.add(spiral(1.0, 1.2, P.blueMid, 0.3));
+  for(let i=0;i<9;i++){
+    const t=0.66+i*0.045, dir=radDir(t);
+    const cone=new THREE.Mesh(new THREE.ConeGeometry(0.42,1.15,5), flat(P.foam));
+    cone.position.copy(crest(t,1.2)).addScaledVector(dir,0.45);
+    cone.quaternion.setFromUnitVectors(UP, dir);
+    g.add(cone);
+  }
+  for(let i=0;i<16;i++){
+    const t=0.12+Math.random()*0.8;
+    const dot=new THREE.Mesh(new THREE.IcosahedronGeometry(0.16+Math.random()*0.14,0),
+      flat(Math.random()<0.5?P.foam:P.foamBlue));
+    dot.position.copy(crest(t,1.05+Math.random()*0.4));
+    g.add(dot);
+  }
+  g.scale.setScalar(scale);
+  return g;
+}
+
+// Low poly fishing boat (okuri-bune): hull + pointed ends + a crew of rowers.
+function makeBoat(){
+  const g = new THREE.Group();
+  const hullMat = flat(P.boat, {roughness:.85});
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.5, 0.8), hullMat);
+  g.add(hull);
+  const bow = new THREE.Mesh(new THREE.ConeGeometry(0.4, 0.95, 4), hullMat);
+  bow.rotation.z = -Math.PI/2; bow.position.x = 1.55; g.add(bow);
+  const stern = bow.clone(); stern.rotation.z = Math.PI/2; stern.position.x = -1.55; g.add(stern);
+  const fMat = flat(P.boatDark);
+  for(let i=0;i<5;i++){
+    const f = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.42, 5), fMat);
+    f.position.set(-0.8 + i*0.4, 0.42, 0);
+    g.add(f);
+  }
+  return g;
+}
+
+// Snow-capped Mount Fuji.
+function makeFuji(){
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.ConeGeometry(2.4, 2.6, 6), flat(P.fujiBase, {roughness:.95}));
+  base.position.y = 1.3;
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(1.45, 1.7, 6), flat(P.fuji, {roughness:.95}));
+  cap.position.y = 2.25;
+  g.add(base, cap);
+  return g;
+}
+
+// ---- assemble the composition (mirrors the print) ----
+const wave = makeWave(1.15); wave.position.set(-5, 0, 0); scene.add(wave);
+const sw1 = makeWave(0.55); sw1.position.set(6.5,-1.6,1); sw1.rotation.y=-0.4; scene.add(sw1);
+const sw2 = makeWave(0.45); sw2.position.set(9.5,-2.2,3.5); sw2.rotation.y=-0.7; scene.add(sw2);
+const sw3 = makeWave(0.5);  sw3.position.set(2.5,-2.6,5); scene.add(sw3);
+
+const fuji = makeFuji(); fuji.position.set(1.5,-1.6,-9); fuji.scale.setScalar(1.15); scene.add(fuji);
+
+const boats = [];
+function addBoat(x,y,z,s,ry){
+  const b = makeBoat(); b.scale.setScalar(s); b.position.set(x,y,z); b.rotation.y=ry;
+  scene.add(b); boats.push({g:b, y});
+}
+addBoat(-3.5,-1.7,2.5, 1.0, 0.3);   // left, riding the trough under the great wave
+addBoat(1.0,-2.0,3.5, 1.1, -0.2);   // centre-right, at the wave's foot
+addBoat(4.5,-2.3,5.0, 1.2, 0.15);   // foreground
+
+// soft grey clouds on the cream sky
+function cloud(x,y,z,s){
+  const g = new THREE.Group();
+  for(let i=0;i<4;i++){
+    const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.8+Math.random()*0.6,0),
+      flat(P.skyGray, {transparent:true, opacity:.45}));
+    m.position.set((Math.random()-0.5)*2.6, (Math.random()-0.5)*0.5, (Math.random()-0.5));
+    m.scale.set(1.7,0.7,1);
+    g.add(m);
+  }
+  g.position.set(x,y,z); g.scale.setScalar(s); scene.add(g);
+}
+cloud(3,4.5,-13,1.2); cloud(-2,5.5,-14,1.0); cloud(7,4,-12,0.9);
+
+// animated water surface
+const wGeo = new THREE.PlaneGeometry(80,50,48,30);
+wGeo.rotateX(-Math.PI/2);
+const water = new THREE.Mesh(wGeo, flat(P.water, {transparent:true, opacity:.9, roughness:.5, metalness:.15}));
+water.position.y = -2.7;
+scene.add(water);
+const wBase = wGeo.attributes.position.array.slice();
+
+addEventListener('resize', ()=>{
+  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+const swBase = [sw1.position.y, sw2.position.y, sw3.position.y];
+function animate(t){
+  const time = t*0.001;
+  const pos = wGeo.attributes.position;
+  for(let i=0;i<pos.count;i++){
+    const x = wBase[i*3], z = wBase[i*3+2];
+    pos.setY(i, Math.sin(x*0.4 + time*1.2)*0.18 + Math.cos(z*0.5 + time)*0.14);
+  }
+  pos.needsUpdate = true;
+  wGeo.computeVertexNormals();
+
+  wave.position.y = 0 + Math.sin(time*0.8)*0.25;
+  wave.rotation.z = Math.sin(time*0.6)*0.03;
+  sw1.position.y = swBase[0] + Math.sin(time*0.9+1)*0.2;
+  sw2.position.y = swBase[1] + Math.sin(time*0.85+2)*0.2;
+  sw3.position.y = swBase[2] + Math.sin(time*0.75+3)*0.2;
+
+  boats.forEach((b,i)=>{
+    b.g.rotation.z = Math.sin(time*1.1 + i*1.7)*0.09;
+    b.g.rotation.x = Math.cos(time*0.9 + i)*0.05;
+    b.g.position.y = b.y + Math.sin(time*1.0 + i*1.3)*0.12;
+  });
+
+  camera.position.x = Math.sin(time*0.15)*0.4;
+  camera.lookAt(0,1,0);
+  renderer.render(scene,camera);
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

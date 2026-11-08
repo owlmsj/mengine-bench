@@ -1,0 +1,45 @@
+{
+ "task_id": "media-voice",
+ "prompts": [
+  "The ferry company's boarding screens play a short recorded announcement. The next one is this sentence:\n\n\"Welcome aboard the evening ferry, please keep your bags clear of the doors.\"\n\nDeliver it as spoken audio in `./announcement.wav`, a WAV file of 4 to 8 seconds that a passenger can understand."
+ ],
+ "answers": [
+  "\n\n[goal] Deliver the ferry announcement as a 4–8 s spoken WAV at `./announcement.wav`.\n\n[action] Generated it with Windows' built-in speech engine (System.Speech.Synthesis / SAPI) by running a PowerShell script that spoke the exact sentence from the brief and wrote a WAV, then verified the file by parsing its header and sampling its data.\n\n[result]\n- File: `<WORKSPACE>\\announcement.wav`, 246,034 bytes.\n- Header: `RIFF`/`WAVE` magic, format=1 (PCM), 1 channel, 22,050 Hz, 16-bit.\n- Duration: (246,034 − 44) / 44,100 = **5.58 s** — inside the 4–8 s requirement.\n- Not silent: peak sample amplitude 24,983 (≈ −12 dBFS).\n- Content: the synthesizer was given the brief's sentence verbatim, \"Welcome aboard the evening ferry, please keep your bags clear of the doors.\", at default rate (normal speaking speed), so the audio is that sentence spoken.\n\nAssumptions: \"spoken audio\" = TTS voice is acceptable (no human voice was required); default SAPI voice and normal rate are intelligible to a passenger; mono 16-bit PCM at 22.05 kHz is a standard, universally playable WAV.\n\nHow I know it's right: I measured the header fields and duration from the file's own bytes (not from the tool's claim), confirmed the RIFF/WAVE structure, and confirmed non-silence via peak amplitude. The one oddity in my check output (\"NOT PCM\") was a bug in my own verification script — it compared against 0 instead of 1; format code 1 is PCM, which the file has.\n\nNo browser tabs, windows, or apps were opened (only shell commands), so there is nothing to close.\n\n[next] None; deliverable is complete."
+ ],
+ "diff": "A tmp/check.ps1\nA tmp/gen.ps1\n\n--- tmp/check.ps1 ---\n$p = \"<WORKSPACE>\\announcement.wav\"\n$fs = [System.IO.File]::OpenRead($p)\n$br = New-Object System.IO.BinaryReader($fs)\n$fs.Seek(12,'Begin') | Out-Null\n$br.ReadBytes(4) | Out-Null\n$br.ReadUInt32() | Out-Null\n$fmt = $br.ReadUInt16()\n$ch = $br.ReadUInt16()\n$sr = $br.ReadUInt32()\n$brRate = $br.ReadUInt32()\n$fs.Close()\n$len = (Get-Item $p).Length\n$dur = ($len - 44) / $brRate\n# peak amplitude check (16-bit samples)\n$bytes = [System.IO.File]::ReadAllBytes($p)\n$peak = 0\nfor ($i = 44; $i + 1 -lt $bytes.Length; $i += 2) {\n  $s = [BitConverter]::ToInt16($bytes, $i)\n  $a = [math]::Abs($s)\n  if ($a -gt $peak) { $peak = $a }\n}\nWrite-Output \"peak=$peak\"\nWrite-Output \"format=$fmt channels=$ch sampleRate=$sr byteRate=$brRate bytes=$len duration=$([math]::Round($dur,2))s\"\nif ($fmt -ne 0) { Write-Output \"NOT PCM\" }\nif ($dur -lt 4 -or $dur -gt 8) { Write-Output \"DURATION OUT OF RANGE\" } else { Write-Output \"DURATION OK\" }\n\n--- tmp/gen.ps1 ---\nAdd-Type -AssemblyName System.Speech\n$dir = \"<WORKSPACE>\"\n$out = Join-Path $dir \"announcement.wav\"\nif (Test-Path $out) { Remove-Item $out }\n$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer\n$rate = [int]$args[0]\n$synth.Rate = $rate\n$synth.SetOutputToWaveFile($out)\n$synth.Speak(\"Welcome aboard the evening ferry, please keep your bags clear of the doors.\")\n$synth.Dispose()\n# read back duration from header\n$fs = [System.IO.File]::OpenRead($out)\n$br = New-Object System.IO.BinaryReader($fs)\n$br.ReadBytes(12) | Out-Null\n$br.ReadBytes(4) | Out-Null   # \"fmt \"\n$br.ReadUInt32() | Out-Null   # fmt chunk size\n$audioFormat = $br.ReadUInt16()\n$channels = $br.ReadUInt16()\n$sampleRate = $br.ReadUInt32()\n$byteRate = $br.ReadUInt32()\n$br.Close()\n$fs.Close()\n$len = (Get-Item $out).Length\n$duration = ($len - 44) / $byteRate\nWrite-Output \"audioFormat=$audioFormat channels=$channels sampleRate=$sampleRate byteRate=$byteRate bytes=$len duration=$([math]::Round($duration,2))s\"",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\gen.ps1\" ok -> \"Created file successfully: <WORKSPACE>/tmp/gen.ps1\"\n[step 1] shell \"pwsh -NoProfile -File \\\"<WORKSPACE>\\\\tmp\\\\gen.ps1\\\" 0\" ok -> \"audioFormat=0 channels=1 sampleRate=1445068801 byteRate=2890137600 bytes=246034 duration=0s\"\n[step 1] edit \"<WORKSPACE>\\\\tmp\\\\gen.ps1\" ok -> \"Edited <WORKSPACE>/tmp/gen.ps1 (1 replacement)\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\check.ps1\" ok -> \"Created file successfully: <WORKSPACE>/tmp/check.ps1\"\n[step 1] edit \"<WORKSPACE>\\\\tmp\\\\check.ps1\" ok -> \"Edited <WORKSPACE>/tmp/check.ps1 (1 replacement)\"\n[step 1] shell \"pwsh -NoProfile -File \\\"<WORKSPACE>\\\\tmp\\\\check.ps1\\\"\" ok -> \"peak=24983\\r\\nformat=1 channels=1 sampleRate=22050 byteRate=44100 bytes=246034 duration=5.58s\\r\\nNOT PCM\\r\\nDURATION OK\"\n[step 1] shell \"$b=[System.IO.File]::ReadAllBytes(\\\"<WORKSPACE>\\\\announcement.wav\\\"); ($b[0..3] -join ','), [System.Text.Encoding]::ASCII.GetString($b[0..3]), [System.Text.Encoding]::ASCII.GetString($b[8..11]), (Get-Item \\\"<WORKSPACE>\\\\announcement.wav\\\").Length\" ok -> \"82,73,70,70\\r\\nRIFF\\r\\nWAVE\\r\\n246034\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "announcement.wav is a valid WAV",
+   true
+  ],
+  [
+   "lasts 4 to 8 s",
+   true
+  ],
+  [
+   "whisper tiny hears the sentence",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 4,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 3777,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 991
+ },
+ "deliverables": [],
+ "render": null
+}
