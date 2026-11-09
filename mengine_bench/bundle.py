@@ -45,7 +45,7 @@ WORKSPACE_MEMBERS = 20_000
 WORKSPACE_EXCLUDED = frozenset({"target", "node_modules", ".venv", "__pycache__"})
 # #205: every Chromium user-data dir has this file at its root, whatever the agent named the dir.
 BROWSER_PROFILE_MARKER = "Local State"
-_STEP_FILE = re.compile(r"^step-(?P<label>.+)\.(?P<stream>stdout|stderr)\.txt$")
+_STEP_FILE = re.compile(r"^step-(?P<label>.+)\.(?P<stream>stdout|stderr|session)\.txt$")
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 

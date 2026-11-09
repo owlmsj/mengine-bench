@@ -543,6 +543,13 @@ class OpencodeAgent:
     model: str
     effort: str | None
     name: str = "opencode"
+    # #228: pool runs (--tasks-dir) keep the whole session: reasoning, tool calls with outputs, final text.
+    export_sessions: bool = False
+
+    def session_export_argv(self, session_id: str) -> list[str] | None:
+        if not self.export_sessions:
+            return None
+        return [_executable("opencode"), "session", "export", session_id, "--standalone"]
 
     def invocation(self, prompt: str, prompt_file: Path, workspace: Path,
                    attachments: Sequence[str]) -> Invocation:

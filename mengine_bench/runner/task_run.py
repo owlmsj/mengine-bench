@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import tempfile
 import time
 from collections.abc import Mapping
@@ -28,7 +29,7 @@ from pathlib import Path
 
 from mengine_bench.core import CheckResult, EvalTask, TraceCheck, saw
 from mengine_bench.runner import process
-from mengine_bench.runner.agents import Agent, AgentError, Usage, sum_usage, partial_answer
+from mengine_bench.runner.agents import Agent, AgentError, Usage, partial_answer, split_jsonl, sum_usage
 from mengine_bench.runner.infra_faults import task_infra_fault
 from mengine_bench.runner.leftovers import LeftProcess, TaskWindow, attribute
 from mengine_bench.runner.site import SITE_PLACEHOLDER, SiteFailed, end_pages, serve_site
@@ -36,6 +37,9 @@ from mengine_bench.runner.stats import RunStats, merge_stats, stream_stats
 from mengine_bench.runner.trace import shell_commands, tool_trace
 from mengine_bench.runner.workspace_gate import WORKSPACE_WRITE_GATE, outside_changes, outside_snapshot
 from mengine_bench.visual import COMPOSITION_PRINTS, add_page_checks
+
+# #228: `opencode session export` reads local storage; a minute is generous for one session.
+SESSION_EXPORT_TIMEOUT_S = 60
 
 # Browser user-data dirs an agent left in the workspace; their cache files can
 # stay locked by a live browser, and they are never part of the solution.
@@ -296,6 +300,27 @@ def _snapshot_note(error: OSError, workspace: Path) -> str:
     return f"filesystem snapshot unavailable: {type(error).__name__} at {location}"
 
 
+def _export_session(agent: Agent, stdout: str, target: Path, record: TaskRunRecord) -> None:
+    """#228: the harness export of the session this step ran, when the agent offers one (OpenCode pool runs).
+    Runs next to the transcripts, never in the workspace the check grades next."""
+    export_argv = getattr(agent, "session_export_argv", None)
+    session = next((event.get("sessionID") for event in split_jsonl(stdout)
+                    if isinstance(event.get("sessionID"), str)), None)
+    argv = export_argv(session) if export_argv is not None and session else None
+    if not argv:
+        return
+    try:
+        done = subprocess.run(argv, cwd=target.parent, capture_output=True, text=True, encoding="utf-8",
+                              errors="replace", stdin=subprocess.DEVNULL, timeout=SESSION_EXPORT_TIMEOUT_S)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        record.notes.append(f"session export of {session} failed: {error}")
+        return
+    if done.returncode != 0 or not done.stdout.strip():
+        record.notes.append(f"session export of {session} exited {done.returncode}: {done.stderr.strip()[-200:]}")
+        return
+    target.write_text(done.stdout, encoding="utf-8")
+
+
 def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: int, prompt: str,
             record: TaskRunRecord, attachments: tuple[str, ...]) -> str:
     label = str(index)
@@ -331,6 +356,7 @@ def _invoke(agent: Agent, task: EvalTask, workspace: Path, root: Path, index: in
         record.notes.append("stopped after its final event")
     (transcripts / f"step-{label}.stdout.txt").write_text(result.stdout, encoding="utf-8")
     (transcripts / f"step-{label}.stderr.txt").write_text(result.stderr, encoding="utf-8")
+    _export_session(agent, result.stdout, transcripts / f"step-{label}.session.txt", record)
     stats = stream_stats(result.stdout)
     record.streams.append(result.stdout)
     if result.timed_out:

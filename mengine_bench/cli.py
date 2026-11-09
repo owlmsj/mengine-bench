@@ -31,7 +31,7 @@ from mengine_bench.report import (
 from mengine_bench.environment import parse_config
 from mengine_bench.run_command import JudgeEvidence, RunSettings, run_tasks
 from mengine_bench.judge import OFFICIAL_JUDGE_EFFORT, OFFICIAL_JUDGE_MODEL, RubricJudge
-from mengine_bench.runner.agents import AGENT_NAMES, make_agent
+from mengine_bench.runner.agents import AGENT_NAMES, OpencodeAgent, make_agent
 from mengine_bench.runner.site import serve_site
 from mengine_bench.visual import COMPOSITION_PRINTS, add_page_checks
 from mengine_bench.scoring import CORRECT_SHARE, JUDGE_SHARE, SPEED_SHARE, parse_price
@@ -59,6 +59,8 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--config", action="append", default=[], metavar="KEY=VALUE",
                      help="declared setup, repeatable, recorded in result.json and never applied "
                           "(e.g. provider=local, quant=Q4_K_M, ctx=256k, mcp=none)")
+    run.add_argument("--tasks-dir", type=Path, help="run the task modules of this folder instead of the catalog "
+                     "(an external pool, #228); never ranked or submitted; OpenCode sessions are exported")
     run.add_argument("--out", type=Path, default=Path("results"), help="bundles go to <out>/<run>/")
     run.add_argument("--submitter", help="public credit in result.json (default with --submit: your GitHub login)")
     run.add_argument("--submit", action="store_true",
@@ -262,7 +264,7 @@ def _submit(bundle: Path) -> int:
 
 def _run(args: argparse.Namespace) -> int:
     # A candidate runs only by id, for its probe (CONTRIBUTING): a run with --tasks is never ranked.
-    tasks = _select(catalog.all_tasks() + (catalog.candidate_tasks() if args.tasks else []), args.tasks)
+    tasks = _select(catalog.all_tasks() + (catalog.candidate_tasks() if args.tasks else []), args.tasks)         if args.tasks_dir is None else _external_tasks(args.tasks_dir, args.tasks, args.submit)
     if args.agent == "cmd" and not args.cmd:
         raise SystemExit("error: received --agent cmd without --cmd; expected an argv template with {prompt_file}")
     try:
@@ -270,6 +272,8 @@ def _run(args: argparse.Namespace) -> int:
         config: dict[str, object] = dict(parse_config(args.config))
     except ValueError as error:
         raise SystemExit(f"error: {error}") from error
+    if args.tasks_dir is not None:
+        config["tasks_dir"] = args.tasks_dir.name
     declared = None if price is None else {"input": price.input, "cached": price.cached, "output": price.output}
     price_warning = missing_price_warning(args.model, config, declared)
     if price_warning and not args.dry_run:
@@ -325,6 +329,9 @@ def _run(args: argparse.Namespace) -> int:
                          f"agent could read their solutions: delete them (README, 'What the agent may use') and run again")
     _fetch_models(tasks)
     agent = make_agent(args.agent, args.model, args.effort, args.cmd)
+    if args.tasks_dir is not None and isinstance(agent, OpencodeAgent):
+        # #228: pool runs feed training data (mengine#952), which needs the whole session, not only stdout.
+        agent.export_sessions = True
     evidence = JudgeEvidence()
     settings = RunSettings(model=args.model, effort=args.effort, submitter=args.submitter, price=price,
                            config=config)
@@ -348,6 +355,15 @@ def _run(args: argparse.Namespace) -> int:
     if privacy or not args.submit:
         return privacy
     return _submit(bundle)
+
+
+def _external_tasks(folder: Path, ids: str, submit: bool) -> list[EvalTask]:
+    if submit:
+        raise SystemExit("error: received --tasks-dir with --submit; expected an external pool run to stay local")
+    try:
+        return _select(catalog.tasks_from_dir(folder), ids)
+    except ValueError as error:
+        raise SystemExit(f"error: {error}") from error
 
 
 def _privacy_check(bundle: Path, names: LocalNames) -> int:
