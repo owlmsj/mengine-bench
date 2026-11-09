@@ -7,8 +7,10 @@ A contributor adds a task by dropping a module that exposes
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import pkgutil
 from collections.abc import Iterable
+from pathlib import Path
 from types import ModuleType
 
 from mengine_bench import candidates as candidates_package
@@ -35,6 +37,24 @@ def collect(modules: Iterable[ModuleType]) -> list[EvalTask]:
             owner[task.id] = module.__name__
             found.append(task)
     return found
+
+
+def tasks_from_dir(folder: Path) -> list[EvalTask]:
+    """#228: an external pool (mengine#952) of task modules; loaded by path, never joins the catalog."""
+    modules: list[ModuleType] = []
+    for path in sorted(folder.glob("*.py")):
+        if path.name.startswith("_"):
+            continue
+        spec = importlib.util.spec_from_file_location(f"mengine_bench_external_{path.stem}", path)
+        if spec is None or spec.loader is None:
+            raise ValueError(f"received {path}; expected an importable Python module")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        modules.append(module)
+    tasks = collect(modules)
+    if not tasks:
+        raise ValueError(f"received {folder} with no TASKS; expected *.py modules exposing TASKS: list[EvalTask]")
+    return tasks
 
 
 def all_tasks() -> list[EvalTask]:
