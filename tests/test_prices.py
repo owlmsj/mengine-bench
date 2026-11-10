@@ -21,6 +21,12 @@ def test_the_claude_estimate_matches_what_the_harness_reported() -> None:
     assert abs(estimated_usd(sonnet) - 2.0348) < 0.01
 
 
+def test_fable_estimate_matches_the_published_fable_run() -> None:
+    # 2026-11-10 Fable 5.2 low (bench#230): Claude Code reported $14.9913 in total_cost_usd.
+    fable = _result("claude-fable-5-2", 4_681_457, 4_054_608, 103_381)
+    assert abs(estimated_usd(fable) - 14.9913) < 0.05
+
+
 def test_reasoning_reported_apart_from_output_is_billed_as_output() -> None:
     # opencode counts it apart; stats.generated_tokens holds both on every harness.
     run = _result("zai/glm-5.3-flash", 1_000_000, 0, 10_000, generated=1_000_000)
@@ -43,7 +49,8 @@ def test_the_fast_tier_costs_what_openai_lists_for_it() -> None:
 
 def test_every_model_on_the_board_has_a_price() -> None:
     assert set(LIST_PRICES) == {"claude-opus-5-5", "claude-sonnet-5-5", "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra",
-                                "zai/glm-5.3-flash", "deepseek/deepseek-flash", "gemini-4-argon"}
+                                "zai/glm-5.3-flash", "deepseek/deepseek-flash", "gemini-4-argon",
+                                "claude-fable-5-2", "gemini-4-carbon"}
 
 
 def test_the_cell_says_it_is_an_estimate() -> None:
@@ -156,7 +163,7 @@ def test_price_rows_have_provider_and_observation_date() -> None:
     from mengine_bench.prices import FAST_PRICES
     for price in (*LIST_PRICES.values(), *FAST_PRICES.values()):
         assert price.source_url.startswith("https://")
-        assert price.read_date == "2026-11-07"
+        assert price.read_date in {"2026-11-07", "2026-11-10"}
 
 
 def test_summary_warns_for_unpriced_tokens_but_not_for_missing_usage(tmp_path) -> None:

@@ -26,12 +26,14 @@ ZAI_PRICING = "https://docs.z.ai/guides/overview/pricing"
 DEEPSEEK_PRICING = "https://api-docs.deepseek.com/quick_start/pricing/"
 GOOGLE_PRICING = "https://ai.google.dev/gemini-api/docs/pricing"
 PRICE_READ_DATE = "2026-11-07"
+PRICE_READ_DATE_1110 = "2026-11-10"
 
 LIST_PRICES: Mapping[str, ListPrice] = {
     # Input at the 1 h cache write price: Claude Code caches nearly all its uncached input.
     # On the published Opus and Sonnet runs this lands within 0.1% of total_cost_usd.
     "claude-opus-5-5": ListPrice(8.0, 0.20, 20.0, ANTHROPIC_PRICING, PRICE_READ_DATE),
     "claude-sonnet-5-5": ListPrice(4.0, 0.10, 10.0, ANTHROPIC_PRICING, PRICE_READ_DATE),
+    "claude-fable-5-2": ListPrice(16.0, 0.20, 40.0, ANTHROPIC_PRICING, PRICE_READ_DATE_1110),
     "gpt-6-astra": ListPrice(10.0, 1.0, 50.0, OPENAI_PRICING, PRICE_READ_DATE),
     "gpt-6.1-sol": ListPrice(2.0, 0.10, 10.0, OPENAI_PRICING, PRICE_READ_DATE),
     "gpt-6.1-terra": ListPrice(1.0, 0.05, 5.0, OPENAI_PRICING, PRICE_READ_DATE),
@@ -39,6 +41,7 @@ LIST_PRICES: Mapping[str, ListPrice] = {
     # Off-peak; peak hours cost twice this. Gemini's rise on 2026-12-01 is not applied.
     "deepseek/deepseek-flash": ListPrice(0.15, 0.003, 0.60, DEEPSEEK_PRICING, PRICE_READ_DATE),
     "gemini-4-argon": ListPrice(2.0, 0.10, 10.0, GOOGLE_PRICING, PRICE_READ_DATE),
+    "gemini-4-carbon": ListPrice(2.0, 0.10, 10.0, GOOGLE_PRICING, PRICE_READ_DATE_1110),
 }
 FAST_PRICES: Mapping[str, ListPrice] = {
     "gpt-6-astra": ListPrice(20.0, 2.0, 100.0, OPENAI_PRICING, PRICE_READ_DATE),
