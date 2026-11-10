@@ -1,0 +1,1248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Under the Wave off Kanagawa — Low-Poly 3D Wallpaper</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@600;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --sky-ochre: #f6e6bf;
+      --sky-cream: #faf2dc;
+      --horizon-slate: #747572;
+      --prussian-deep: #152d4c;
+      --prussian-mid: #234975;
+      --aqua-stripe: #538aa6;
+      --seafoam-pale: #9cc0ba;
+      --foam-ivory: #f7f5e4;
+      --boat-cedar: #e7b590;
+      --cartouche-bg: #e5ded0;
+      --ink-blue: #182f4e;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: linear-gradient(
+        180deg,
+        #f4e2b8 0%,
+        #f8edd0 36%,
+        #dcd6c4 58%,
+        #787975 74%,
+        #1c385c 76%,
+        #152d4c 100%
+      );
+      font-family: "Shippori Mincho", "Yu Mincho", "Hiragino Mincho ProN", serif;
+      user-select: none;
+    }
+
+    #scene-canvas {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      display: block;
+    }
+
+    /* Woodblock cartouche & signature homage at top-left */
+    .ukiyo-header {
+      position: fixed;
+      top: 5.5vh;
+      left: 3.4vw;
+      display: flex;
+      flex-direction: row-reverse;
+      align-items: flex-start;
+      gap: 12px;
+      pointer-events: none;
+      z-index: 10;
+      opacity: 0.92;
+    }
+
+    .cartouche {
+      background: var(--cartouche-bg);
+      border: 2px solid var(--ink-blue);
+      outline: 1px solid var(--ink-blue);
+      outline-offset: 2px;
+      padding: 8px 6px;
+      writing-mode: vertical-rl;
+      text-orientation: upright;
+      color: var(--ink-blue);
+      box-shadow: 0 2px 8px rgba(21, 45, 76, 0.12);
+    }
+
+    .cartouche-series {
+      font-size: clamp(12px, 1.35vh, 16px);
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      line-height: 1.25;
+    }
+
+    .cartouche-sub {
+      font-size: clamp(10px, 1.1vh, 13px);
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      margin-right: 3px;
+      padding-top: 28px;
+    }
+
+    .signature {
+      margin-top: 72px;
+      writing-mode: vertical-rl;
+      text-orientation: upright;
+      color: var(--ink-blue);
+      font-size: clamp(10px, 1.15vh, 13px);
+      font-weight: 600;
+      letter-spacing: 0.14em;
+      opacity: 0.84;
+      text-shadow: 0 0 2px rgba(250, 242, 220, 0.8);
+    }
+
+    /* Subtle paper grain vignette */
+    .washi-overlay {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 8;
+      background:
+        radial-gradient(ellipse at 54% 38%, transparent 58%, rgba(196, 173, 130, 0.22) 100%);
+      mix-blend-mode: multiply;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="scene-canvas" aria-label="Low-poly 3D recreation of Hokusai's Under the Wave off Kanagawa"></canvas>
+
+  <div class="ukiyo-header" aria-hidden="true">
+    <div class="cartouche">
+      <span class="cartouche-series">富嶽三十六景</span>
+      <span class="cartouche-sub">神奈川沖浪裏</span>
+    </div>
+    <div class="signature">北斎改為一筆</div>
+  </div>
+  <div class="washi-overlay" aria-hidden="true"></div>
+
+  <script type="module">
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+    // Deterministic PRNG for reproducible low-poly faceting and spray placement
+    function makeRng(seed = 183101) {
+      let s = seed >>> 0;
+      return function rand() {
+        s = (s * 1664525 + 1013904223) >>> 0;
+        return s / 4294967296;
+      };
+    }
+    const rng = makeRng(183101);
+    const randRange = (a, b) => a + (b - a) * rng();
+
+    // Ukiyo-e woodblock palette (sampled from reference print)
+    const PALETTE = {
+      prussianDark: new THREE.Color('#132946'),
+      prussianDeep: new THREE.Color('#1c3c63'),
+      prussianMid: new THREE.Color('#285586'),
+      indigoBright: new THREE.Color('#397298'),
+      seafoamAqua: new THREE.Color('#8eb7b2'),
+      foamIvory: new THREE.Color('#f7f5e3'),
+      foamShadow: new THREE.Color('#dfdfd0'),
+      skyOchreTop: new THREE.Color('#f2deb2'),
+      skyWarmMid: new THREE.Color('#f8ecd0'),
+      skyCloud: new THREE.Color('#fcf6e4'),
+      horizonAsh: new THREE.Color('#6c6e6d'),
+      fujiDark: new THREE.Color('#293c58'),
+      fujiMid: new THREE.Color('#445873'),
+      fujiSnow: new THREE.Color('#fbf9ea'),
+      boatHull: new THREE.Color('#e8b48e'),
+      boatHullWarm: new THREE.Color('#efc99c'),
+      boatDeck: new THREE.Color('#cfa07a'),
+      boatTrim: new THREE.Color('#7a5942'),
+      rowerCoat: new THREE.Color('#224166'),
+      rowerSkin: new THREE.Color('#f2d9c2')
+    };
+
+    const canvas = document.getElementById('scene-canvas');
+    const renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      powerPreference: 'high-performance'
+    });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.NoToneMapping;
+
+    const scene = new THREE.Scene();
+
+    // Camera framed carefully to match Hokusai's composition across 16:9 / 3:2 viewports
+    const camera = new THREE.PerspectiveCamera(36, window.innerWidth / window.innerHeight, 0.5, 260);
+    const BASE_CAM_POS = new THREE.Vector3(0, 4.4, 38.5);
+    const BASE_CAM_TARGET = new THREE.Vector3(0.4, 2.3, 0);
+    camera.position.copy(BASE_CAM_POS);
+    camera.lookAt(BASE_CAM_TARGET);
+
+    // Crisp woodblock-friendly lighting: strong warm-cream key + cool indigo fill so flat facets pop
+    const hemiLight = new THREE.HemisphereLight(0xfff7e2, 0x243f61, 1.55);
+    scene.add(hemiLight);
+
+    const sunLight = new THREE.DirectionalLight(0xfff5dc, 1.15);
+    sunLight.position.set(-14, 26, 22);
+    scene.add(sunLight);
+
+    const rimLight = new THREE.DirectionalLight(0xd9e8f5, 0.55);
+    rimLight.position.set(22, 10, 14);
+    scene.add(rimLight);
+
+    // Shared flat-shaded vertex-color material for authentic crisp low-poly look & minimal draw calls
+    const worldMaterial = new THREE.MeshLambertMaterial({
+      vertexColors: true,
+      flatShading: true,
+      side: THREE.DoubleSide
+    });
+
+    const unlitSkyMaterial = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+
+    // Helper: convert geometry to non-indexed so flatShading + per-face / per-vertex colors stay razor sharp
+    function colorizeGeometry(geom, colorFn, jitter = 0) {
+      const nonIdx = geom.index ? geom.toNonIndexed() : geom;
+      const pos = nonIdx.attributes.position;
+      if (jitter > 0) {
+        // Group coincident vertices so meshes stay watertight while faceted
+        const map = new Map();
+        for (let i = 0; i < pos.count; i++) {
+          const key = `${pos.getX(i).toFixed(3)},${pos.getY(i).toFixed(3)},${pos.getZ(i).toFixed(3)}`;
+          if (!map.has(key)) {
+            map.set(key, [
+              (rng() - 0.5) * jitter,
+              (rng() - 0.5) * jitter,
+              (rng() - 0.5) * jitter
+            ]);
+          }
+          const off = map.get(key);
+          pos.setXYZ(i, pos.getX(i) + off[0], pos.getY(i) + off[1], pos.getZ(i) + off[2]);
+        }
+      }
+      nonIdx.computeVertexNormals();
+
+      const colors = new Float32Array(pos.count * 3);
+      const vA = new THREE.Vector3();
+      const vB = new THREE.Vector3();
+      const vC = new THREE.Vector3();
+      const centroid = new THREE.Vector3();
+      const normal = new THREE.Vector3();
+      const tmpColor = new THREE.Color();
+
+      for (let i = 0; i < pos.count; i += 3) {
+        vA.fromBufferAttribute(pos, i);
+        vB.fromBufferAttribute(pos, i + 1);
+        vC.fromBufferAttribute(pos, i + 2);
+        centroid.copy(vA).add(vB).add(vC).multiplyScalar(1 / 3);
+        normal.fromBufferAttribute(nonIdx.attributes.normal, i);
+
+        const c = colorFn(centroid, normal, i / 3, tmpColor);
+        for (let k = 0; k < 3; k++) {
+          colors[(i + k) * 3] = c.r;
+          colors[(i + k) * 3 + 1] = c.g;
+          colors[(i + k) * 3 + 2] = c.b;
+        }
+      }
+      nonIdx.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      return nonIdx;
+    }
+
+    function solidColorGeometry(geom, hexOrColor, jitter = 0, shadeJitter = 0.03) {
+      const base = new THREE.Color(hexOrColor);
+      return colorizeGeometry(geom, (_c, _n, _f, out) => {
+        out.copy(base);
+        const d = (rng() - 0.5) * shadeJitter;
+        out.offsetHSL(0, 0, d);
+        return out;
+      }, jitter);
+    }
+
+    // ------------------------------------------------------------
+    // 1. UKIYO-E BOKASHI SKY BACKDROP + CUMULUS CLOUDS
+    // ------------------------------------------------------------
+    function buildSkyAndClouds() {
+      const group = new THREE.Group();
+
+      // Bokashi gradient backdrop plane (warm ochre top -> cream middle -> dark slate grey near horizon)
+      const skyW = 140;
+      const skyH = 76;
+      const skyGeom = new THREE.PlaneGeometry(skyW, skyH, 28, 22);
+      const nonIdx = skyGeom.toNonIndexed();
+      const pos = nonIdx.attributes.position;
+      const colors = new Float32Array(pos.count * 3);
+      const c = new THREE.Color();
+
+      for (let i = 0; i < pos.count; i += 3) {
+        // Slight polygonization per triangle for subtle faceted paper texture
+        const mx = (pos.getX(i) + pos.getX(i + 1) + pos.getX(i + 2)) / 3;
+        const my = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3;
+        const ny = (my + skyH * 0.5) / skyH; // 0 bottom .. 1 top
+
+        if (ny > 0.62) {
+          const t = (ny - 0.62) / 0.38;
+          c.copy(PALETTE.skyWarmMid).lerp(PALETTE.skyOchreTop, Math.pow(t, 0.85));
+        } else if (ny > 0.35) {
+          const t = (ny - 0.35) / 0.27;
+          c.copy(PALETTE.horizonAsh).lerp(PALETTE.skyWarmMid, Math.pow(t, 0.72));
+        } else {
+          const t = ny / 0.35;
+          c.set('#4c5056').lerp(PALETTE.horizonAsh, t);
+        }
+
+        // Subtle warm glow upper-right, darker storm pocket near Fuji's horizon
+        const stormDist = Math.hypot((mx - 3.5) / 28, (my + 8.5) / 9.5);
+        if (stormDist < 1.0) {
+          c.lerp(new THREE.Color('#5a5d5e'), (1 - stormDist) * 0.42);
+        }
+        const paperGrain = (rng() - 0.5) * 0.014;
+        c.offsetHSL(0, 0, paperGrain);
+
+        for (let k = 0; k < 3; k++) {
+          colors[(i + k) * 3] = c.r;
+          colors[(i + k) * 3 + 1] = c.g;
+          colors[(i + k) * 3 + 2] = c.b;
+        }
+      }
+      nonIdx.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+      const skyMesh = new THREE.Mesh(nonIdx, unlitSkyMaterial);
+      skyMesh.position.set(0, 8, -55);
+      skyMesh.renderOrder = -10;
+      group.add(skyMesh);
+
+      // Soft low-poly pale-cream cumulus cloud mass in upper-center/right (matching print)
+      const cloudGroup = new THREE.Group();
+      const cloudPuffs = [
+        [6.5, 11.5, -44, 5.2, 3.6, 2.2],
+        [11.2, 10.2, -44.5, 6.0, 3.8, 2.0],
+        [15.8, 8.8, -45, 5.4, 3.3, 2.0],
+        [3.2, 9.4, -45, 4.4, 3.0, 1.8],
+        [8.8, 7.6, -45.5, 6.5, 3.4, 1.8],
+        [13.5, 6.4, -46, 5.8, 2.8, 1.8],
+        [18.5, 6.8, -46.2, 4.5, 2.5, 1.6]
+      ];
+      for (const [x, y, z, sx, sy, sz] of cloudPuffs) {
+        const g = new THREE.IcosahedronGeometry(1, 1);
+        g.scale(sx, sy, sz);
+        const cg = solidColorGeometry(g, PALETTE.skyCloud, 0.22, 0.018);
+        const m = new THREE.Mesh(cg, unlitSkyMaterial);
+        m.position.set(x, y, z);
+        cloudGroup.add(m);
+      }
+      group.add(cloudGroup);
+      return { group, cloudGroup };
+    }
+
+    // ------------------------------------------------------------
+    // 2. MOUNT FUJI (LOW-POLY CONE WITH SNOW CAP & RIDGES)
+    // ------------------------------------------------------------
+    function buildMountFuji() {
+      const fujiGroup = new THREE.Group();
+      const radialSegs = 28;
+      const heightSegs = 12;
+      const maxR = 11.5;
+      const height = 6.2;
+
+      const geom = new THREE.CylinderGeometry(0.58, maxR, height, radialSegs, heightSegs, false);
+      const pos = geom.attributes.position;
+
+      // Shape Fuji's signature concave hyperbolic volcanic profile + jagged snow-line ridges
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const y = pos.getY(i); // -height/2 .. +height/2
+        const z = pos.getZ(i);
+        const t = (y + height / 2) / height; // 0 at base, 1 at crater rim
+        const r = Math.hypot(x, z);
+        if (r > 0.001) {
+          const angle = Math.atan2(z, x);
+          // Concave volcanic curve: steep near summit, wide sweeping skirt at base
+          const targetR = 0.55 + (maxR - 0.55) * Math.pow(1 - t, 1.68);
+          const ridgeNoise = (Math.sin(angle * 7 + t * 5) * 0.14 + Math.cos(angle * 11 - t * 3) * 0.09) * (1 - t * 0.5);
+          const scale = (targetR + ridgeNoise) / r;
+          pos.setX(i, x * scale);
+          pos.setZ(i, z * scale * 0.65);
+        }
+        // Slight crater rim dip & left/right shoulder character
+        if (t > 0.96) {
+          const rimBump = Math.sin(Math.atan2(z, x) * 3 + 0.8) * 0.14;
+          pos.setY(i, y + rimBump);
+        }
+      }
+
+      const colored = colorizeGeometry(geom, (centroid, _normal, _fi, out) => {
+        const t = (centroid.y + height / 2) / height;
+        const angle = Math.atan2(centroid.z, centroid.x);
+        // Jagged snow tongues reaching down Fuji's dark Prussian-blue flanks (just like the print!)
+        const snowBoundary = 0.44 + 0.17 * Math.sin(angle * 9 + 0.6) + 0.09 * Math.cos(angle * 15 - 1.1);
+        if (t > snowBoundary) {
+          out.copy(PALETTE.fujiSnow);
+          if (centroid.x < -0.4 && t < 0.78) {
+            out.lerp(PALETTE.foamShadow, 0.18);
+          }
+        } else if (t > snowBoundary - 0.08) {
+          out.copy(PALETTE.fujiMid);
+        } else {
+          out.copy(centroid.x > 0.3 ? PALETTE.fujiDark : PALETTE.prussianDeep);
+        }
+        out.offsetHSL(0, 0, (rng() - 0.5) * 0.02);
+        return out;
+      }, 0.06);
+
+      const fujiMesh = new THREE.Mesh(colored, worldMaterial);
+      // Positioned right-of-center above the dark horizon trough, matching print (~63% X, ~68% Y)
+      fujiGroup.position.set(5.4, -3.55, -24.5);
+      fujiGroup.add(fujiMesh);
+      return fujiGroup;
+    }
+
+    // ------------------------------------------------------------
+    // 3. SCULPTED WAVE RIBBON BUILDER + FOAM CLAWS
+    // ------------------------------------------------------------
+    // Builds a thick 3D low-poly water wall along a spine with woodblock Prussian-blue & aqua stripes
+    function createRibbonSurface(samples, thickness = 2.2) {
+      // samples: array of { top: Vector3, bot: Vector3, stripePhase: number, foamTop: number }
+      const positions = [];
+      const colors = [];
+
+      function pushTri(a, b, c, col) {
+        positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+        const j = (rng() - 0.5) * 0.024;
+        const r = THREE.MathUtils.clamp(col.r + j, 0, 1);
+        const g = THREE.MathUtils.clamp(col.g + j, 0, 1);
+        const bl = THREE.MathUtils.clamp(col.b + j, 0, 1);
+        for (let k = 0; k < 3; k++) colors.push(r, g, bl);
+      }
+
+      const stepsV = 11;
+      const gridFront = [];
+      const gridBack = [];
+
+      for (let i = 0; i < samples.length; i++) {
+        const s = samples[i];
+        const colF = [];
+        const colB = [];
+        for (let j = 0; j <= stepsV; j++) {
+          const v = j / stepsV; // 0 = bottom trough, 1 = top crest
+          const p = new THREE.Vector3().lerpVectors(s.bot, s.top, v);
+          // Concave barrel belly curve on the front face
+          const barrel = Math.sin(v * Math.PI) * (s.concavity || 0);
+          p.x += (s.concaveDirX || 0) * barrel;
+          p.y += (s.concaveDirY || 0) * barrel * 0.32;
+          p.z += Math.sin(v * Math.PI) * 0.45;
+
+          // Subtle low-poly facet jitter (keep edges clean)
+          if (i > 0 && i < samples.length - 1 && j > 0 && j < stepsV) {
+            p.x += (rng() - 0.5) * 0.22;
+            p.y += (rng() - 0.5) * 0.20;
+            p.z += (rng() - 0.5) * 0.24;
+          }
+          colF.push(p);
+          const pb = p.clone();
+          pb.z -= thickness * (0.45 + 0.55 * (1 - v * 0.5));
+          pb.y -= 0.18;
+          colB.push(pb);
+        }
+        gridFront.push(colF);
+        gridBack.push(colB);
+      }
+
+      const tmpCol = new THREE.Color();
+      for (let i = 0; i < samples.length - 1; i++) {
+        const s0 = samples[i];
+        for (let j = 0; j < stepsV; j++) {
+          const vMid = (j + 0.5) / stepsV;
+          const uMid = (i + 0.5) / (samples.length - 1);
+
+          // Woodblock Prussian-blue banding + pale aqua ribbons + white crest lip
+          const foamCut = s0.foamStart !== undefined ? s0.foamStart : 0.82;
+          const stripeWave = Math.sin(vMid * 25.0 + uMid * 7.5 + (s0.stripeSeed || 0));
+
+          if (vMid >= foamCut) {
+            tmpCol.copy(vMid > foamCut + 0.07 ? PALETTE.foamIvory : PALETTE.foamShadow);
+          } else if (vMid > foamCut - 0.09 && stripeWave > -0.15) {
+            tmpCol.copy(PALETTE.seafoamAqua);
+          } else if (stripeWave > 0.48) {
+            tmpCol.copy(vMid > 0.48 ? PALETTE.indigoBright : PALETTE.prussianMid);
+          } else if (stripeWave < -0.35 || vMid < 0.28) {
+            tmpCol.copy(PALETTE.prussianDark);
+          } else {
+            tmpCol.copy(PALETTE.prussianDeep);
+          }
+
+          const f00 = gridFront[i][j];
+          const f10 = gridFront[i + 1][j];
+          const f01 = gridFront[i][j + 1];
+          const f11 = gridFront[i + 1][j + 1];
+          pushTri(f00, f10, f11, tmpCol);
+          pushTri(f00, f11, f01, tmpCol);
+
+          // Back side & top cap so thick wave crest reads solid in 3D
+          const backCol = vMid >= foamCut ? PALETTE.foamIvory : PALETTE.prussianDark;
+          const b00 = gridBack[i][j];
+          const b10 = gridBack[i + 1][j];
+          const b01 = gridBack[i][j + 1];
+          const b11 = gridBack[i + 1][j + 1];
+          pushTri(b00, b11, b10, backCol);
+          pushTri(b00, b01, b11, backCol);
+
+          if (j === stepsV - 1) {
+            pushTri(f01, f11, b11, PALETTE.foamIvory);
+            pushTri(f01, b11, b01, PALETTE.foamShadow);
+          }
+        }
+      }
+
+      const geom = new THREE.BufferGeometry();
+      geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+      geom.computeVertexNormals();
+      return geom;
+    }
+
+    // Builds an arched, hooked low-poly foam claw ("wave talon") characteristic of Hokusai
+    function createFoamClawMesh(length = 1.6, radius = 0.36, curlAngle = 1.65) {
+      const segs = 6;
+      const radial = 5;
+      const pts = [];
+      for (let i = 0; i <= segs; i++) {
+        const t = i / segs;
+        const ang = t * curlAngle;
+        const x = Math.sin(ang) * length * 0.78;
+        const y = (1 - Math.cos(ang)) * length * 0.52;
+        pts.push(new THREE.Vector3(x, -y, 0));
+      }
+
+      const positions = [];
+      const colors = [];
+      const rings = [];
+
+      for (let i = 0; i <= segs; i++) {
+        const t = i / segs;
+        const r = Math.max(0.03, radius * Math.pow(1 - t, 0.78));
+        const p = pts[i];
+        const tangent = (i < segs ? pts[i + 1].clone().sub(p) : p.clone().sub(pts[i - 1])).normalize();
+        const normal = new THREE.Vector3(-tangent.y, tangent.x, 0).normalize();
+        const binormal = new THREE.Vector3(0, 0, 1);
+
+        const ring = [];
+        for (let k = 0; k < radial; k++) {
+          const a = (k / radial) * Math.PI * 2;
+          const v = p.clone()
+            .addScaledVector(normal, Math.cos(a) * r)
+            .addScaledVector(binormal, Math.sin(a) * r * 0.72);
+          ring.push(v);
+        }
+        rings.push(ring);
+      }
+
+      const cMain = PALETTE.foamIvory;
+      const cUnder = PALETTE.seafoamAqua;
+      for (let i = 0; i < segs; i++) {
+        for (let k = 0; k < radial; k++) {
+          const k2 = (k + 1) % radial;
+          const a = rings[i][k];
+          const b = rings[i + 1][k];
+          const c = rings[i + 1][k2];
+          const d = rings[i][k2];
+          const col = (k === 2 || k === 3) ? cUnder : cMain;
+          positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+          positions.push(a.x, a.y, a.z, c.x, c.y, c.z, d.x, d.y, d.z);
+          for (let v = 0; v < 6; v++) {
+            colors.push(col.r, col.g, col.b);
+          }
+        }
+      }
+
+      const geom = new THREE.BufferGeometry();
+      geom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+      geom.computeVertexNormals();
+      return geom;
+    }
+
+    // Helper to populate clusters of low-poly foam puffs + hooked talons along a crest curve
+    function populateFoamCrest(parent, crestPoints, opts = {}) {
+      const {
+        puffScale = 1.0,
+        clawCount = 26,
+        clawScale = 1.0,
+        clawDirAngle = -0.35,
+        zSpread = 1.4
+      } = opts;
+
+      const puffGeoms = [];
+      const clawMeshList = [];
+
+      // Billowing foam puffs along spine
+      for (let i = 0; i < crestPoints.length; i++) {
+        const pt = crestPoints[i];
+        const t = i / Math.max(1, crestPoints.length - 1);
+        const density = opts.taperEnds ? Math.sin(Math.min(1, t * 1.15) * Math.PI * 0.85) + 0.25 : 1.0;
+        const countHere = Math.max(1, Math.round(2 * density));
+
+        for (let k = 0; k < countHere; k++) {
+          const r = (0.55 + rng() * 0.72) * puffScale * density;
+          const ico = new THREE.IcosahedronGeometry(r, 1);
+          ico.scale(1.15, 0.88 + rng() * 0.3, 0.85);
+          const col = rng() > 0.22 ? PALETTE.foamIvory : (rng() > 0.45 ? PALETTE.foamShadow : PALETTE.seafoamAqua);
+          const cg = solidColorGeometry(ico, col, r * 0.18, 0.02);
+          cg.translate(
+            pt.x + (rng() - 0.5) * 1.15 * puffScale,
+            pt.y + (rng() - 0.45) * 0.85 * puffScale,
+            pt.z + (rng() - 0.5) * zSpread
+          );
+          puffGeoms.push(cg);
+        }
+      }
+
+      // Merge puffs into single geometry for draw-call efficiency
+      const mergedPuffs = mergeBufferGeometriesSimple(puffGeoms);
+      if (mergedPuffs) {
+        parent.add(new THREE.Mesh(mergedPuffs, worldMaterial));
+      }
+
+      // Iconic hooked Hokusai foam claws reaching toward Mount Fuji
+      const baseClawGeom = createFoamClawMesh(1.85 * clawScale, 0.38 * clawScale, 1.9);
+      const clawInst = new THREE.InstancedMesh(baseClawGeom, worldMaterial, clawCount);
+      const dummy = new THREE.Object3D();
+
+      for (let c = 0; c < clawCount; c++) {
+        const u = (c + 0.5) / clawCount;
+        const idx = Math.min(crestPoints.length - 1, Math.floor(u * crestPoints.length));
+        const pt = crestPoints[idx];
+        dummy.position.set(
+          pt.x + (rng() - 0.3) * 1.4 * clawScale,
+          pt.y + (rng() - 0.45) * 1.2 * clawScale,
+          pt.z + (rng() - 0.5) * zSpread + 0.35
+        );
+        dummy.rotation.set(
+          (rng() - 0.5) * 0.35,
+          (rng() - 0.5) * 0.42,
+          clawDirAngle + (rng() - 0.5) * 0.75
+        );
+        const s = (0.65 + rng() * 0.75);
+        dummy.scale.set(s, s, s);
+        dummy.updateMatrix();
+        clawInst.setMatrixAt(c, dummy.matrix);
+        clawMeshList.push({ index: c, basePos: dummy.position.clone(), baseRotZ: dummy.rotation.z, scale: s, phase: rng() * Math.PI * 2 });
+      }
+      clawInst.instanceMatrix.needsUpdate = true;
+      parent.add(clawInst);
+      return { clawInst, clawMeshList };
+    }
+
+    function mergeBufferGeometriesSimple(geoms) {
+      if (!geoms.length) return null;
+      let totalVerts = 0;
+      for (const g of geoms) totalVerts += g.attributes.position.count;
+      const pos = new Float32Array(totalVerts * 3);
+      const norm = new Float32Array(totalVerts * 3);
+      const col = new Float32Array(totalVerts * 3);
+      let offset = 0;
+      for (const g of geoms) {
+        pos.set(g.attributes.position.array, offset);
+        norm.set(g.attributes.normal.array, offset);
+        col.set(g.attributes.color.array, offset);
+        offset += g.attributes.position.array.length;
+        g.dispose();
+      }
+      const out = new THREE.BufferGeometry();
+      out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      out.setAttribute('normal', new THREE.BufferAttribute(norm, 3));
+      out.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      return out;
+    }
+
+    // ------------------------------------------------------------
+    // 4. HERO GREAT WAVE, FOREGROUND FUJI-WAVE & SWELL RIDGES
+    // ------------------------------------------------------------
+    function buildAllWaves() {
+      const wavesRoot = new THREE.Group();
+
+      // A. HERO GREAT WAVE (Towering on the left, curling over the hollow toward Mount Fuji)
+      const greatWaveGroup = new THREE.Group();
+      const gwSamples = [];
+      const gwCrestPts = [];
+      const gwTipClawAnchors = [];
+
+      const topCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-25.5, 2.8, -4.5),
+        new THREE.Vector3(-19.5, 6.2, -3.5),
+        new THREE.Vector3(-13.8, 11.4, -2.5),
+        new THREE.Vector3(-8.4, 15.1, -1.8),
+        new THREE.Vector3(-4.0, 15.7, -1.4),
+        new THREE.Vector3(-0.6, 13.4, -1.0),
+        new THREE.Vector3(1.8, 9.8, -0.8)
+      ]);
+
+      const botCurve = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-25.5, -6.5, -2.2),
+        new THREE.Vector3(-19.0, -5.8, -1.8),
+        new THREE.Vector3(-13.5, -4.2, -1.5),
+        new THREE.Vector3(-8.2, -2.2, -1.4),
+        new THREE.Vector3(-4.8, 1.8, -1.2),
+        new THREE.Vector3(-3.8, 6.8, -1.0),
+        new THREE.Vector3(-1.2, 8.2, -0.8)
+      ]);
+
+      const gwSteps = 30;
+      for (let i = 0; i <= gwSteps; i++) {
+        const u = i / gwSteps;
+        const top = topCurve.getPoint(u);
+        const bot = botCurve.getPoint(u);
+        // Deep hollow C-cavity under the overhanging lip
+        const overhang = u > 0.35 ? Math.sin(((u - 0.35) / 0.65) * Math.PI) : 0;
+        gwSamples.push({
+          top,
+          bot,
+          concavity: 1.9 * overhang + 0.5,
+          concaveDirX: -1.0,
+          concaveDirY: 0.35,
+          foamStart: 0.73 - 0.12 * overhang,
+          stripeSeed: 0.6
+        });
+        if (u > 0.08) gwCrestPts.push(top);
+        if (u > 0.52) gwTipClawAnchors.push(top);
+      }
+
+      const gwGeom = createRibbonSurface(gwSamples, 3.4);
+      greatWaveGroup.add(new THREE.Mesh(gwGeom, worldMaterial));
+
+      // Thick snowy white back-slope blanket on the upper-left exterior of the Great Wave (iconic huge white arch in print!)
+      const whiteCapSamples = [];
+      for (let i = 2; i <= gwSteps - 2; i++) {
+        const u = i / gwSteps;
+        const top = topCurve.getPoint(u).clone().add(new THREE.Vector3(-0.4, 0.45, 0.35));
+        const span = u < 0.62 ? 4.8 * Math.sin(u * Math.PI * 0.95) + 1.8 : 3.2 * (1 - (u - 0.62) * 1.4);
+        const bot = top.clone().add(new THREE.Vector3(-span * 0.48, -span * 0.88, 0.25));
+        whiteCapSamples.push({
+          top,
+          bot,
+          concavity: -0.45,
+          concaveDirX: 1,
+          foamStart: 0.0, // Pure ivory foam cap
+          stripeSeed: 1.2
+        });
+      }
+      greatWaveGroup.add(new THREE.Mesh(createRibbonSurface(whiteCapSamples, 2.2), worldMaterial));
+
+      // Secondary cascading foam fingers hanging down the Great Wave's lip
+      const cascadeAnchors = [
+        new THREE.Vector3(-3.2, 13.8, -0.6),
+        new THREE.Vector3(-1.4, 12.6, -0.5),
+        new THREE.Vector3(0.4, 11.2, -0.4),
+        new THREE.Vector3(2.2, 9.6, -0.4),
+        new THREE.Vector3(3.3, 8.3, -0.5),
+        new THREE.Vector3(-5.8, 11.5, -0.5),
+        new THREE.Vector3(-8.5, 9.2, -0.5),
+        new THREE.Vector3(-12.2, 6.4, -0.5)
+      ];
+      for (const ca of cascadeAnchors) gwTipClawAnchors.push(ca);
+
+      populateFoamCrest(greatWaveGroup, gwCrestPts, {
+        puffScale: 1.32,
+        clawCount: 44,
+        clawScale: 1.25,
+        clawDirAngle: -0.55,
+        zSpread: 2.2,
+        taperEnds: true
+      });
+
+      const tipClaws = populateFoamCrest(greatWaveGroup, gwTipClawAnchors, {
+        puffScale: 1.15,
+        clawCount: 52,
+        clawScale: 1.48,
+        clawDirAngle: -0.95,
+        zSpread: 2.4
+      });
+
+      // Internal white foam speckles inside the dark blue hollow of the Great Wave (signature woodblock detail)
+      const innerDotsGeom = new THREE.OctahedronGeometry(0.14, 0);
+      solidColorGeometry(innerDotsGeom, PALETTE.foamIvory, 0.02, 0.01);
+      const innerDotCount = 95;
+      const innerDots = new THREE.InstancedMesh(innerDotsGeom, worldMaterial, innerDotCount);
+      const dObj = new THREE.Object3D();
+      for (let i = 0; i < innerDotCount; i++) {
+        const u = 0.16 + rng() * 0.68;
+        const s = gwSamples[Math.floor(u * gwSteps)];
+        const v = 0.15 + rng() * 0.56;
+        const p = new THREE.Vector3().lerpVectors(s.bot, s.top, v);
+        p.x -= Math.sin(v * Math.PI) * (s.concavity || 0) * 0.72;
+        p.z += 0.65 + rng() * 0.35;
+        dObj.position.copy(p);
+        const sc = 0.55 + rng() * 0.9;
+        dObj.scale.set(sc, sc, sc);
+        dObj.rotation.set(rng() * 3, rng() * 3, rng() * 3);
+        dObj.updateMatrix();
+        innerDots.setMatrixAt(i, dObj.matrix);
+      }
+      greatWaveGroup.add(innerDots);
+      wavesRoot.add(greatWaveGroup);
+
+      // B. FOREGROUND LEFT "FUJI-ECHO" WAVE (Triangular foam-capped wave peak in lower-left foreground)
+      const fgWaveGroup = new THREE.Group();
+      const fgTop = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-23.0, -7.8, 7.2),
+        new THREE.Vector3(-15.5, -4.6, 7.0),
+        new THREE.Vector3(-9.8, -1.6, 6.8),
+        new THREE.Vector3(-6.2, 0.85, 6.5), // Sharp Fuji-mirroring apex!
+        new THREE.Vector3(-3.0, -2.5, 6.7),
+        new THREE.Vector3(0.4, -6.2, 7.2),
+        new THREE.Vector3(4.2, -9.2, 7.6)
+      ]);
+      const fgBot = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-23.0, -12.5, 8.8),
+        new THREE.Vector3(-14.5, -12.2, 8.8),
+        new THREE.Vector3(-6.5, -11.8, 8.8),
+        new THREE.Vector3(0.5, -12.0, 9.0),
+        new THREE.Vector3(5.2, -12.4, 9.2)
+      ]);
+      const fgSamples = [];
+      const fgCrest = [];
+      for (let i = 0; i <= 24; i++) {
+        const u = i / 24;
+        const top = fgTop.getPoint(u);
+        const bot = fgBot.getPoint(u);
+        // Heavy snowy foam blanket over the apex, Prussian blue ridges emerging at bottom-left
+        const nearApex = Math.exp(-Math.pow((u - 0.52) / 0.34, 2));
+        fgSamples.push({
+          top,
+          bot,
+          concavity: 0.4,
+          concaveDirX: 0.2,
+          foamStart: 0.36 - 0.22 * nearApex,
+          stripeSeed: 2.4
+        });
+        fgCrest.push(top);
+      }
+      fgWaveGroup.add(new THREE.Mesh(createRibbonSurface(fgSamples, 2.8), worldMaterial));
+      populateFoamCrest(fgWaveGroup, fgCrest, {
+        puffScale: 1.05,
+        clawCount: 38,
+        clawScale: 0.95,
+        clawDirAngle: -0.25,
+        zSpread: 1.8
+      });
+      wavesRoot.add(fgWaveGroup);
+
+      // C. RIGHT-SIDE SWEEPING SWELL & TROUGH (Carrying the mid-ground & foreground boats up the right slope)
+      const rightSwellGroup = new THREE.Group();
+      const rsTop = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-2.5, -4.8, -5.5),
+        new THREE.Vector3(3.5, -5.6, -5.0),
+        new THREE.Vector3(9.8, -4.0, -4.2),
+        new THREE.Vector3(16.2, -0.2, -3.2),
+        new THREE.Vector3(23.5, 4.8, -2.5)
+      ]);
+      const rsBot = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-2.5, -10.8, -2.5),
+        new THREE.Vector3(5.5, -11.2, -2.0),
+        new THREE.Vector3(14.5, -10.5, -1.5),
+        new THREE.Vector3(23.5, -9.8, -1.0)
+      ]);
+      const rsSamples = [];
+      const rsCrest = [];
+      for (let i = 0; i <= 22; i++) {
+        const u = i / 22;
+        const top = rsTop.getPoint(u);
+        const bot = rsBot.getPoint(u);
+        rsSamples.push({
+          top,
+          bot,
+          concavity: 0.55,
+          concaveDirX: -0.6,
+          foamStart: u > 0.52 ? 0.68 : 0.88,
+          stripeSeed: 3.7
+        });
+        if (u > 0.55) rsCrest.push(top);
+      }
+      rightSwellGroup.add(new THREE.Mesh(createRibbonSurface(rsSamples, 3.2), worldMaterial));
+      populateFoamCrest(rightSwellGroup, rsCrest, {
+        puffScale: 0.92,
+        clawCount: 22,
+        clawScale: 0.88,
+        clawDirAngle: 2.35,
+        zSpread: 1.5
+      });
+
+      // Foreground lower-right striped trough (cradling Boat #1 in the foreground)
+      const fgRightTop = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-3.5, -7.2, 4.2),
+        new THREE.Vector3(3.5, -9.4, 4.6),
+        new THREE.Vector3(11.0, -8.2, 4.8),
+        new THREE.Vector3(17.8, -4.2, 4.6),
+        new THREE.Vector3(24.5, -0.6, 4.4)
+      ]);
+      const fgRightBot = new THREE.CatmullRomCurve3([
+        new THREE.Vector3(-3.5, -13.2, 7.8),
+        new THREE.Vector3(6.5, -13.5, 8.2),
+        new THREE.Vector3(15.5, -13.2, 8.2),
+        new THREE.Vector3(24.5, -12.8, 8.0)
+      ]);
+      const fgRSamples = [];
+      for (let i = 0; i <= 22; i++) {
+        const u = i / 22;
+        fgRSamples.push({
+          top: fgRightTop.getPoint(u),
+          bot: fgRightBot.getPoint(u),
+          concavity: 0.45,
+          concaveDirX: -0.5,
+          foamStart: 0.72,
+          stripeSeed: 5.1
+        });
+      }
+      rightSwellGroup.add(new THREE.Mesh(createRibbonSurface(fgRSamples, 3.0), worldMaterial));
+      wavesRoot.add(rightSwellGroup);
+
+      // D. DISTANT HORIZON SEA SWELL (Behind Fuji / connecting troughs so zero gaps appear)
+      const seaFloorGeom = new THREE.PlaneGeometry(90, 26, 36, 12);
+      seaFloorGeom.rotateX(-Math.PI * 0.42);
+      const seaColored = colorizeGeometry(seaFloorGeom, (c, _n, _f, out) => {
+        const stripe = Math.sin(c.x * 0.45 + c.z * 0.9);
+        out.copy(stripe > 0.35 ? PALETTE.prussianMid : PALETTE.prussianDark);
+        return out;
+      }, 0.25);
+      const seaFloor = new THREE.Mesh(seaColored, worldMaterial);
+      seaFloor.position.set(0, -8.8, -11);
+      wavesRoot.add(seaFloor);
+
+      return { wavesRoot, greatWaveGroup, fgWaveGroup, rightSwellGroup, tipClaws };
+    }
+
+    // ------------------------------------------------------------
+    // 5. THREE OSHIURIBUNE EXPRESS CARGO BOATS + HUDDLED ROWERS
+    // ------------------------------------------------------------
+    // Builds a sleek Japanese oshiuribune wooden boat (~13m stylized scale) with ribs, prow post & 8 crouched rowers
+    function createOshiuribuneBoat(variant = 0) {
+      const boatGroup = new THREE.Group();
+      const geoms = [];
+
+      // Sleek curved crescent hull along X axis (-4.8 stern to +5.6 sharp upturned bow)
+      const hullSegs = 16;
+      const hullVerts = [];
+      const hullCols = [];
+
+      function addQuad(a, b, c, d, col) {
+        hullVerts.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+        hullVerts.push(a.x, a.y, a.z, c.x, c.y, c.z, d.x, d.y, d.z);
+        for (let k = 0; k < 6; k++) hullCols.push(col.r, col.g, col.b);
+      }
+
+      const hullPrimary = variant === 1 ? PALETTE.boatHullWarm : PALETTE.boatHull;
+      const rings = [];
+      for (let i = 0; i <= hullSegs; i++) {
+        const t = i / hullSegs; // 0 stern .. 1 sharp bow
+        const x = -4.6 + t * 10.4;
+        // Sweeping crescent rocker: upturned stern, graceful sharp high bow
+        const rocker = Math.pow(Math.abs(t - 0.38) * 1.65, 2.15) * (t > 0.38 ? 1.55 : 0.95);
+        // Tapered beam: widest in mid-aft, razor sharp at bow
+        const halfW = Math.max(0.05, Math.sin(Math.pow(1 - t, 0.78) * Math.PI * 0.92) * 0.68);
+        const depth = Math.max(0.14, (0.48 - Math.abs(t - 0.45) * 0.42));
+
+        rings.push({
+          gunwaleL: new THREE.Vector3(x, rocker + depth, halfW),
+          gunwaleR: new THREE.Vector3(x, rocker + depth, -halfW),
+          chineL: new THREE.Vector3(x, rocker + depth * 0.25, halfW * 0.62),
+          chineR: new THREE.Vector3(x, rocker + depth * 0.25, -halfW * 0.62),
+          keel: new THREE.Vector3(x, rocker, 0)
+        });
+      }
+
+      for (let i = 0; i < hullSegs; i++) {
+        const r0 = rings[i];
+        const r1 = rings[i + 1];
+        // Upper sheer plank (warm cedar/peach wood of print)
+        addQuad(r0.chineL, r1.chineL, r1.gunwaleL, r0.gunwaleL, hullPrimary);
+        addQuad(r0.gunwaleR, r1.gunwaleR, r1.chineR, r0.chineR, hullPrimary);
+        // Lower keel plank (darker wet timber)
+        addQuad(r0.keel, r1.keel, r1.chineL, r0.chineL, PALETTE.boatTrim);
+        addQuad(r0.chineR, r1.chineR, r1.keel, r0.keel, PALETTE.boatTrim);
+        // Interior deck thwarts
+        addQuad(r0.gunwaleL, r1.gunwaleL, r1.gunwaleR, r0.gunwaleR, PALETTE.boatDeck);
+      }
+
+      const hullGeom = new THREE.BufferGeometry();
+      hullGeom.setAttribute('position', new THREE.Float32BufferAttribute(hullVerts, 3));
+      hullGeom.setAttribute('color', new THREE.Float32BufferAttribute(hullCols, 3));
+      hullGeom.computeVertexNormals();
+      geoms.push(hullGeom);
+
+      // Cross-beams / straw-mat cargo Lattice near bow & stern (distinctive detail on Hokusai's boats)
+      for (let b = 0; b < 7; b++) {
+        const u = 0.56 + b * 0.052;
+        const idx = Math.min(hullSegs - 1, Math.floor(u * hullSegs));
+        const rk = rings[idx];
+        const w = Math.max(0.28, rk.gunwaleL.z * 2.15);
+        const beam = new THREE.BoxGeometry(0.14, 0.09, w);
+        const cg = solidColorGeometry(beam, b % 2 === 0 ? PALETTE.foamShadow : PALETTE.boatTrim, 0.01, 0.02);
+        cg.translate(rk.gunwaleL.x, rk.gunwaleL.y + 0.05, 0);
+        geoms.push(cg);
+      }
+
+      // Stern upright post / rudder frame (seen on right end of mid-ground boat)
+      const sternPost = new THREE.BoxGeometry(0.14, 0.82, 0.14);
+      const spCol = solidColorGeometry(sternPost, PALETTE.boatDeck, 0.01, 0.02);
+      spCol.rotateZ(0.32);
+      spCol.translate(rings[1].gunwaleL.x - 0.15, rings[1].gunwaleL.y + 0.34, 0);
+      geoms.push(spCol);
+
+      // 8 huddled low-poly rowers in blue indigo tunics & pale shaved heads clinging low to the gunwales
+      for (let r = 0; r < 8; r++) {
+        const side = r % 2 === 0 ? 1 : -1;
+        const rowSlot = Math.floor(r / 2);
+        const u = 0.16 + rowSlot * 0.095;
+        const idx = Math.min(hullSegs - 1, Math.floor(u * hullSegs));
+        const rk = rings[idx];
+        const rx = rk.gunwaleL.x + (side > 0 ? 0.12 : -0.08);
+        const ry = rk.gunwaleL.y + 0.14;
+        const rz = side * (rk.gunwaleL.z * 0.52);
+
+        // Hunched indigo torso
+        const torso = new THREE.IcosahedronGeometry(0.26, 0);
+        torso.scale(1.25, 0.85, 0.92);
+        const tc = solidColorGeometry(torso, PALETTE.rowerCoat, 0.02, 0.02);
+        tc.translate(rx, ry, rz);
+        geoms.push(tc);
+
+        // Pale bald head tucked forward against the spray
+        const head = new THREE.IcosahedronGeometry(0.145, 0);
+        const hc = solidColorGeometry(head, PALETTE.rowerSkin, 0.01, 0.015);
+        hc.translate(rx + 0.19, ry + 0.11, rz + side * 0.04);
+        geoms.push(hc);
+      }
+
+      const mergedBoat = mergeBufferGeometriesSimple(geoms);
+      boatGroup.add(new THREE.Mesh(mergedBoat, worldMaterial));
+      return boatGroup;
+    }
+
+    function buildThreeBoats() {
+      const boatsGroup = new THREE.Group();
+
+      // Boat 1: Foreground right-center trough, bow pointing up-left into the Fuji-shaped wave
+      const boat1 = createOshiuribuneBoat(0);
+      boat1.scale.setScalar(1.22);
+      // Flip so sharp high bow points LEFT (-X) and +Y up, matching print!
+      boat1.rotation.set(0.14, Math.PI - 0.12, -0.18);
+      boat1.position.set(4.6, -8.35, 6.2);
+      boatsGroup.add(boat1);
+
+      // Boat 2: Mid-ground right slope, climbing the right swell with Fuji framed just behind its bow
+      const boat2 = createOshiuribuneBoat(1);
+      boat2.scale.setScalar(1.08);
+      // Bow on left, stern high up on the right swell slope
+      boat2.rotation.set(0.08, Math.PI + 0.08, 0.34);
+      boat2.position.set(8.6, -3.55, -3.8);
+      boatsGroup.add(boat2);
+
+      // Boat 3: Left-middle boat, plunging stern-down/bow-up through the foaming base of the Great Wave!
+      const boat3 = createOshiuribuneBoat(2);
+      boat3.scale.setScalar(1.06);
+      boat3.rotation.set(0.18, Math.PI - 0.28, -0.44);
+      boat3.position.set(-14.6, -0.45, 3.6);
+      boatsGroup.add(boat3);
+
+      return { boatsGroup, boats: [boat1, boat2, boat3] };
+    }
+
+    // ------------------------------------------------------------
+    // 6. FLYING SEA-SPRAY DROPLETS (INSTANCED LOW-POLY OCTAHEDRA)
+    // ------------------------------------------------------------
+    function buildSeaSpray() {
+      const sprayCount = 190;
+      const dropGeom = new THREE.OctahedronGeometry(0.13, 0);
+      solidColorGeometry(dropGeom, PALETTE.foamIvory, 0.02, 0.02);
+      const sprayMesh = new THREE.InstancedMesh(dropGeom, worldMaterial, sprayCount);
+
+      const particles = [];
+      const dummy = new THREE.Object3D();
+
+      for (let i = 0; i < sprayCount; i++) {
+        // Concentrated beneath the Great Wave's clawing crest & falling toward Fuji, just like Hokusai's white spatter
+        const cluster = rng();
+        let bx, by, bz;
+        if (cluster < 0.68) {
+          bx = randRange(-4.5, 7.5);
+          by = randRange(-2.5, 11.2);
+          bz = randRange(-6.0, 2.5);
+        } else if (cluster < 0.88) {
+          bx = randRange(-17.5, -5.0);
+          by = randRange(-1.5, 9.5);
+          bz = randRange(1.5, 7.5);
+        } else {
+          bx = randRange(5.0, 17.0);
+          by = randRange(-6.5, 2.5);
+          bz = randRange(-3.0, 6.0);
+        }
+
+        const scale = randRange(0.45, 1.35);
+        const speed = randRange(0.35, 0.85);
+        const phase = rng() * Math.PI * 2;
+
+        particles.push({ bx, by, bz, scale, speed, phase });
+        dummy.position.set(bx, by, bz);
+        dummy.scale.setScalar(scale);
+        dummy.updateMatrix();
+        sprayMesh.setMatrixAt(i, dummy.matrix);
+      }
+      sprayMesh.instanceMatrix.needsUpdate = true;
+      scene.add(sprayMesh);
+      return { sprayMesh, particles };
+    }
+
+    // Assemble the complete scene
+    const { group: skyRoot, cloudGroup } = buildSkyAndClouds();
+    scene.add(skyRoot);
+
+    const fujiGroup = buildMountFuji();
+    scene.add(fujiGroup);
+
+    const { wavesRoot, greatWaveGroup, fgWaveGroup, rightSwellGroup, tipClaws } = buildAllWaves();
+    scene.add(wavesRoot);
+
+    const { boatsGroup, boats } = buildThreeBoats();
+    scene.add(boatsGroup);
+
+    const { sprayMesh, particles: sprayParticles } = buildSeaSpray();
+
+    // Store base transforms for gentle wallpaper motion
+    const boatBases = boats.map((b, idx) => ({
+      pos: b.position.clone(),
+      rot: b.rotation.clone(),
+      phase: idx * 2.1 + 0.4
+    }));
+
+    // Subtle mouse parallax for live-wallpaper depth feel (graceful, bounded)
+    let pointerX = 0;
+    let pointerY = 0;
+    window.addEventListener('pointermove', (e) => {
+      pointerX = (e.clientX / Math.max(1, window.innerWidth) - 0.5) * 2;
+      pointerY = (e.clientY / Math.max(1, window.innerHeight) - 0.5) * 2;
+    }, { passive: true });
+
+    function updateCameraFraming() {
+      const w = Math.max(1, window.innerWidth);
+      const h = Math.max(1, window.innerHeight);
+      const aspect = w / h;
+      camera.aspect = aspect;
+      // Keep the entire horizontal composition (Great Wave left + Fuji + right swell) framed on narrower screens
+      const refAspect = 1280 / 860; // ~1.488 print aspect ratio
+      const baseFovRad = THREE.MathUtils.degToRad(35.5);
+      if (aspect < refAspect) {
+        const hFov = 2 * Math.atan(Math.tan(baseFovRad / 2) * refAspect);
+        const newVFov = 2 * Math.atan(Math.tan(hFov / 2) / aspect);
+        camera.fov = THREE.MathUtils.radToDeg(newVFov);
+      } else {
+        camera.fov = 35.5;
+      }
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+    }
+    updateCameraFraming();
+    window.addEventListener('resize', updateCameraFraming);
+
+    // Gentle living woodblock animation loop (respects reduced motion while still rendering)
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const animDummy = new THREE.Object3D();
+    const clock = new THREE.Clock();
+
+    function renderFrame() {
+      const t = reducedMotion ? 0 : clock.getElapsedTime();
+
+      // 1. Gentle rhythmic breathing & crest curl of the Great Wave
+      greatWaveGroup.position.y = Math.sin(t * 0.72) * 0.28;
+      greatWaveGroup.position.x = Math.cos(t * 0.54) * 0.18;
+      greatWaveGroup.rotation.z = Math.sin(t * 0.65) * 0.014;
+
+      // 2. Counter-swell of the foreground Fuji-echo wave & right swell
+      fgWaveGroup.position.y = Math.sin(t * 0.85 + 1.4) * 0.22;
+      fgWaveGroup.position.x = Math.sin(t * 0.6 + 0.7) * 0.14;
+      rightSwellGroup.position.y = Math.sin(t * 0.76 + 2.5) * 0.24;
+
+      // 3. Subtle flexing of the Great Wave's hooked foam claws
+      const { clawInst, clawMeshList } = tipClaws;
+      for (let i = 0; i < clawMeshList.length; i++) {
+        const item = clawMeshList[i];
+        animDummy.position.set(
+          item.basePos.x + Math.cos(t * 1.15 + item.phase) * 0.08,
+          item.basePos.y + Math.sin(t * 1.25 + item.phase) * 0.11,
+          item.basePos.z
+        );
+        animDummy.rotation.set(0, 0, item.baseRotZ + Math.sin(t * 1.35 + item.phase) * 0.075);
+        animDummy.scale.setScalar(item.scale);
+        animDummy.updateMatrix();
+        clawInst.setMatrixAt(item.index, animDummy.matrix);
+      }
+      clawInst.instanceMatrix.needsUpdate = true;
+
+      // 4. Three oshiuribune boats pitching and rolling gently on their respective wave slopes
+      for (let i = 0; i < boats.length; i++) {
+        const b = boats[i];
+        const base = boatBases[i];
+        const heave = Math.sin(t * 0.92 + base.phase) * 0.26;
+        const pitch = Math.cos(t * 0.92 + base.phase) * 0.048;
+        const roll = Math.sin(t * 1.25 + base.phase * 1.3) * 0.045;
+        b.position.set(
+          base.pos.x + Math.sin(t * 0.58 + base.phase) * 0.14,
+          base.pos.y + heave,
+          base.pos.z
+        );
+        b.rotation.set(
+          base.rot.x + roll,
+          base.rot.y,
+          base.rot.z + pitch
+        );
+      }
+
+      // 5. Sea-spray droplets drifting arc-wise in the wind
+      for (let i = 0; i < sprayParticles.length; i++) {
+        const p = sprayParticles[i];
+        const cycle = (t * p.speed + p.phase) % (Math.PI * 2);
+        const driftX = Math.sin(cycle) * 0.55 + Math.cos(cycle * 0.5) * 0.25;
+        const driftY = Math.cos(cycle) * 0.48 - 0.15;
+        const pulse = p.scale * (0.78 + 0.28 * Math.sin(cycle * 2));
+        animDummy.position.set(p.bx + driftX, p.by + driftY, p.bz);
+        animDummy.rotation.set(cycle, cycle * 0.7, 0);
+        animDummy.scale.setScalar(pulse);
+        animDummy.updateMatrix();
+        sprayMesh.setMatrixAt(i, animDummy.matrix);
+      }
+      sprayMesh.instanceMatrix.needsUpdate = true;
+
+      // 6. Slow serene cloud drift & subtle camera parallax
+      cloudGroup.position.x = Math.sin(t * 0.14) * 0.85;
+
+      const camDriftX = Math.sin(t * 0.28) * 0.42 + pointerX * 0.75;
+      const camDriftY = Math.cos(t * 0.23) * 0.22 - pointerY * 0.45;
+      camera.position.x += (BASE_CAM_POS.x + camDriftX - camera.position.x) * 0.06;
+      camera.position.y += (BASE_CAM_POS.y + camDriftY - camera.position.y) * 0.06;
+      camera.lookAt(BASE_CAM_TARGET);
+
+      renderer.render(scene, camera);
+      requestAnimationFrame(renderFrame);
+    }
+
+    // Expose telemetry for automated inspection
+    window.__SCENE_STATS__ = () => ({
+      calls: renderer.info.render.calls,
+      triangles: renderer.info.render.triangles,
+      boats: boats.length
+    });
+
+    renderFrame();
+  </script>
+</body>
+</html>
