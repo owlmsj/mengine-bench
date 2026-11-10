@@ -1,0 +1,60 @@
+{
+ "task_id": "ts-plugin-bug",
+ "prompts": [
+  "Users of our harness plugins report that tool.after hooks run out of order, that sometimes a hook never runs, and that a failing hook is silently ignored. The hook bus and the plugin are in {WS}; the README there says how the bus must behave. Fix the bus. Its public API stays as it is, the tests in {WS}/test stay as they are, and package.json takes no dependencies."
+ ],
+ "answers": [
+  "[goal] Make the hook bus in `src/bus.ts` behave as the README says: ordered handlers, none skipped, errors surfaced.\n\n[action] Replaced the body of `emit` in `src/bus.ts`; nothing else changed (API, `./test`, `package.json` and `src/plugin.ts` untouched).\n\nThe old `emit` used `list.forEach(async ...)` over the live handler list, which caused all three reports:\n- **Out of order:** handlers were started without being awaited, so `emit` resolved before async handlers finished and the audit log was written before redaction completed.\n- **Hook never runs:** a handler that unsubscribed itself spliced the list mid-iteration, so the next handler was skipped (the plugin's one-time notice skipped redaction on the first emit).\n- **Failing hook ignored:** a rejection inside the `forEach` callback never reached `emit`'s promise.\n\nThe new `emit` takes a snapshot of the handlers subscribed at start and awaits each one in a `for...of` loop, so the first error rejects `emit` and stops the rest.\n\n[result] The existing tests pass, but they do not cover these three behaviours:\n```\n✔ emit calls a subscribed handler with the payload (0.8533ms)\n✔ unsubscribe removes the handler (0.1352ms)\nℹ tests 2\nℹ pass 2\nℹ fail 0\n```\nAn ad-hoc script covered them, running the real audit plugin for two emits plus a throwing handler followed by a second handler:\n```\n[\"notice: tool output is audited\",\"sh: password=[redacted]\",\"sh: password=[redacted]\"]\nrejected: boom later ran: false\n```\nThis shows the notice appearing once, redaction finishing before the audit entry on both emits, and the error rejecting `emit` without running the later handler.\n\nAssumptions:\n- \"Tests stay as they are\" was read as no edits to `./test` at all, so I added no regression test file; the script above is the only proof of the new behaviour and was not saved.\n- A handler subscribed during an emit first runs on the next emit, following the README's \"handlers that were subscribed when it started\".\n- Concurrent `emit` calls are not queued against each other; the README does not ask for it.\n\n[next] Add regression tests for ordering, unsubscribe-during-emit and error propagation if adding files under `./test` is acceptable. No browser tabs or apps were opened."
+ ],
+ "diff": "M src/bus.ts\n\n--- src/bus.ts ---\n/**\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\n * handlers run one after another in subscription order, emit resolves after all of them,\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\n */\n\nexport type Handler<T> = (payload: T) => void | Promise<void>;\n\nexport class HookBus {\n  private handlers: Map<string, Handler<unknown>[]> = new Map();\n\n  /** Subscribes a handler to an event; returns the function that unsubscribes it. */\n  on<T>(event: string, handler: Handler<T>): () => void {\n    const list = this.handlers.get(event) ?? [];\n    list.push(handler as Handler<unknown>);\n    this.handlers.set(event, list);\n    return () => {\n      const index = list.indexOf(handler as Handler<unknown>);\n      if (index >= 0) {\n        list.splice(index, 1);\n      }\n    };\n  }\n\n  /** Runs the handlers of an event with the payload. */\n  async emit<T>(event: string, payload: T): Promise<void> {\n    // Snapshot: unsubscribing during an emit must not skip the handlers of this emit (README).\n    const subscribedAtStart = [...(this.handlers.get(event) ?? [])];\n    for (const handler of subscribedAtStart) {\n      await handler(payload);\n    }\n  }\n\n  /** How many handlers an event has. */\n  count(event: string): number {\n    return (this.handlers.get(event) ?? []).length;\n  }\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && find . -type f -not -path './node_modules/*' | head -50 && cat README* package.json && find . -type f \\\\( -name '*.js' -o -name '*.mjs' -o -name '*.ts' \\\\) -not -path './node_modules/*' -not -path './test/*' -exec sh -c 'echo \\\"== $1\\\"; cat \\\"$1\\\"' _ {} \\\\;\" ok -> \"./AGENTS.md\\n./package.json\\n./README.md\\n./src/bus.ts\\n./src/plugin.ts\\n./test/bus.test.ts\\n# harness-hooks\\n\\nThe hook bus our harness plugins use (OpenCode-style hooks such as `tool.before` and `tool.after`).\\nPlain TypeScript run by Node 24 directly (`npm test` runs `node --test`); no dependencies.\\n\\n## How the bus behaves\\n\\n- `bus.on(event, handler)` subscribes a handler and returns a function that unsu[... 3131 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && python - <<'E'\\np='src/bus.ts';s=open(p,encoding='utf8').read()\\nold=s[s.index('    const list = this.handlers.get(event) ?? [];\\\\n    list.forEach'):s.index('  /** How many')]\\nnew='''    // Snapshot: unsubscribing during an emit must not skip the handlers of this emit (README).\\n    const subscribedAtStart = [...(this.handlers.get(event) ?? [])];\\n    for (const handler of subscribedAtStart) {\\n      await handler(payload);\\n    }\\n  }\\n\\n'''\\nopen(p,'w',encoding='utf8',newline='').write(s.replace(old,new))\\nE\\nnpm test 2>&1 | tail -25\" ok -> \"> harness-hooks@0.3.0 test\\n> node --test\\n\\n✔ emit calls a subscribed handler with the payload (0.8533ms)\\n✔ unsubscribe removes the handler (0.1352ms)\\nℹ tests 2\\nℹ suites 0\\nℹ pass 2\\nℹ fail 0\\nℹ cancelled 0\\nℹ skipped 0\\nℹ todo 0\\nℹ duration_ms 106.6033\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && node --input-type=module -e '\\nimport {HookBus} from \\\"./src/bus.ts\\\";import {registerAuditPlugin} from \\\"./src/plugin.ts\\\";\\nconst b=new HookBus(),a=[];registerAuditPlugin(b,a);\\nawait b.emit(\\\"tool.after\\\",{tool:\\\"sh\\\",output:\\\"password=x1\\\"});await b.emit(\\\"tool.after\\\",{tool:\\\"sh\\\",output:\\\"password=x2\\\"});\\nconsole.log(JSON.stringify(a));\\nconst c=new HookBus();let ran=false;c.on(\\\"e\\\",async()=>{throw new Error(\\\"boom\\\")});c.on(\\\"e\\\",()=>{ran=true});\\ntry{await c.emit(\\\"e\\\",1);console.log(\\\"no reject\\\")}catch(e){console.log(\\\"rejected:\\\",e.message,\\\"later ran:\\\",ran)}'\" ok -> \"[\\\"notice: tool output is audited\\\",\\\"sh: password=[redacted]\\\",\\\"sh: password=[redacted]\\\"]\\nrejected: boom later ran: false\"",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "package.json takes no dependencies",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hidden handlers run in subscription order",
+   true
+  ],
+  [
+   "hidden emit resolves after every handler",
+   true
+  ],
+  [
+   "hidden a failing handler rejects emit",
+   true
+  ],
+  [
+   "hidden a handler that unsubscribes itself does not stop the others",
+   true
+  ],
+  [
+   "hidden the audit plugin redacts before it logs",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 4,
+  "tool_calls": 3,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1823,
+  "reasoning_tokens": 118
+ },
+ "deliverables": [],
+ "render": null
+}
