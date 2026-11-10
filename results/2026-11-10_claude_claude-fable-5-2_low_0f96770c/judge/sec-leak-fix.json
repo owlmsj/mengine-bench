@@ -1,0 +1,68 @@
+{
+ "task_id": "sec-leak-fix",
+ "prompts": [
+  "We want to publish the backup service in {WS} as open source, and the security review blocks it. The API token must not be in the code or in any log, and nothing typed in the web form may ever run as a command. The service must keep working as the README describes, and the tests in {WS}/tests stay as they are."
+ ],
+ "answers": [
+  "[goal]\nUnblock open-sourcing: no API token in code or logs, form input never executed, README behavior kept, tests untouched.\n\n[action]\n- `config.py`: removed the hardcoded `API_TOKEN`; added `read_backup_token()`, which reads `BACKUP_TOKEN` from the environment at call time and raises if it is unset or empty.\n- `backup_agent.py`: `archive_folder` now packs with Python's `tarfile` instead of `tar` through a shell, and rejects anything that is not an existing directory. `upload` no longer logs the token.\n- `tests/`, `README.md` and the `send_archive` signature are unchanged.\n\n[result]\nFound three blockers:\n1. A live-looking token (`bk_live_...`) was hardcoded in `config.py`.\n2. `upload` wrote the token to the log at INFO level.\n3. The form's folder text was interpolated into a `shell=True` command, so typed text could run as a command or as a `tar` option.\n\nEvidence:\n- `python -m unittest`: `Ran 1 test in 0.020s` / `OK`.\n- Injection probe with five hostile inputs (`docs; echo pwned > PWNED`, `docs & ...`, `$(...)`, `--checkpoint-action=exec=echo`, backticks): all `rejected`, and `PWNED exists: False`.\n- Log probe with a sentinel token: `status 200 token passed: True`, `token in log: False`. The only log lines were `archived archives\\docs.tar.gz` and `uploading archives\\docs.tar.gz`.\n- Grep of the folder for `bk_live`, `shell=` and `subprocess`: no matches.\n\nThe probe was a one-off script, not added as a regression test, because I read \"tests stay as they are\" as freezing `./tests`. The real upload to the API was not exercised (the URL is a placeholder; `send_archive` was mocked).\n\nAssumptions:\n- Any existing directory the user types is a legitimate backup target; I added no allow-list of permitted roots, so someone with form access can still back up any folder the service can read.\n- Entries inside the archive are now stored under the folder's own name (`docs/report.txt`) rather than the full typed path.\n- A missing `BACKUP_TOKEN` should fail loudly at upload time rather than send an empty bearer token.\n\n[next]\n- Revoke and rotate the old token before publishing: it must be treated as leaked, and it may also sit in existing log files.\n- This folder is not a git repository; if the real repo has history, the token must be purged from it or the project published from a fresh history.\n- Decide whether to restrict the form to an allowed base directory.\n- No browser tabs, windows or apps were opened, so nothing to close."
+ ],
+ "diff": "M backup_agent.py\nM config.py\n\n--- backup_agent.py ---\n\"\"\"Backup agent: packs a folder chosen in the intranet web form and uploads it to the backup API.\"\"\"\n\nfrom __future__ import annotations\n\nimport logging\nimport tarfile\nimport urllib.request\nfrom pathlib import Path\n\nimport config\n\nlog = logging.getLogger(\"backup_agent\")\n\n\ndef archive_folder(folder: str, out_dir: str = config.ARCHIVE_DIR) -> Path:\n    \"\"\"Packs `folder` into `out_dir/<folder name>.tar.gz` and returns the archive path.\"\"\"\n    # tarfile, not a shell: the form text is only ever a path, never a command or a tar option.\n    source = Path(folder)\n    if \"\\x00\" in folder or not source.is_dir():\n        raise ValueError(f\"folder {folder!r} is not an existing directory; expected a folder path\")\n    folder_name = source.resolve().name\n    if not folder_name:\n        raise ValueError(f\"folder {folder!r} has no name; expected a folder below a drive or root\")\n    out = Path(out_dir)\n    out.mkdir(parents=True, exist_ok=True)\n    target = out / (folder_name + \".tar.gz\")\n    with tarfile.open(target, \"w:gz\") as packed:\n        packed.add(source, arcname=folder_name)\n    return target\n\n\ndef send_archive(path: Path, url: str, token: str) -> int:\n    \"\"\"Uploads one archive to the backup API and returns the HTTP status.\"\"\"\n    request = urllib.request.Request(url, data=path.read_bytes(), method=\"POST\",\n                                     headers={\"Authorization\": f\"Bearer {token}\"})\n    with urllib.request.urlopen(request, timeout=30) as response:\n        return response.status\n\n\ndef upload(path: Path) -> int:\n    log.info(\"uploading %s\", path)\n    return send_archive(path, config.API_URL, config.read_backup_token())\n\n\ndef handle_form(form: dict[str, str]) -> int:\n    \"\"\"Web form handler: backs up the folder the user typed.\"\"\"\n    archive = archive_folder(form[\"folder\"])\n    log.info(\"archived %s\", archive)\n    return upload(archive)\n\n\n--- config.py ---\n\"\"\"Settings for the backup agent.\"\"\"\n\nimport os\n\nAPI_URL = \"https://backup.example.invalid/v1/upload\"\nARCHIVE_DIR = \"archives\"\nBACKUP_TOKEN_ENV_NAME = \"BACKUP_TOKEN\"\n\n\ndef read_backup_token() -> str:\n    \"\"\"Reads the API token from the environment at call time; it is never stored in code.\"\"\"\n    token = os.environ.get(BACKUP_TOKEN_ENV_NAME, \"\")\n    if not token:\n        raise RuntimeError(\n            f\"environment variable {BACKUP_TOKEN_ENV_NAME} is unset or empty; expected a non-empty API token\")\n    return token\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && ls -la && find . -type f -not -path './.git/*' | head -50 && for f in $(find . -type f -not -path './.git/*' -size -20k | head -20); do echo \\\"=== $f\\\"; cat \\\"$f\\\"; done\" ok -> \"total 11\\ndrwxr-xr-x 1 <USER> 197121    0 Nov 10 16:51 .\\ndrwxr-xr-x 1 <USER> 197121    0 Nov 10 16:51 ..\\n-rw-r--r-- 1 <USER> 197121  394 Nov 10 16:51 AGENTS.md\\n-rw-r--r-- 1 <USER> 197121  720 Nov 10 16:51 README.md\\n-rw-r--r-- 1 <USER> 197121 1437 Nov 10 16:51 backup_agent.py\\n-rw-r--r-- 1 <USER> 197121  171 Nov 10 16:51 config.py\\ndrwxr-xr-x 1 <USER> 197121    0 Nov 10 16:[... 3983 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && cat > config.py <<'EOF'\\n\\\"\\\"\\\"Settings for the backup agent.\\\"\\\"\\\"\\n\\nimport os\\n\\nAPI_URL = \\\"https://backup.example.invalid/v1/upload\\\"\\nARCHIVE_DIR = \\\"archives\\\"\\nBACKUP_TOKEN_ENV_NAME = \\\"BACKUP_TOKEN\\\"\\n\\n\\ndef read_backup_token() -> str:\\n    \\\"\\\"\\\"Reads the API token from the environment at call time; it is never stored in code.\\\"\\\"\\\"\\n    token = os.environ.get(BACKUP_TOKEN_ENV_NAME, \\\"\\\")\\n    if not token:\\n        raise RuntimeError(\\n            f\\\"environment variable {BACKUP_TOKEN_ENV_NAME} is unset or empty; expected a non-empty API token\\\")\\n    return token\\nEOF\\ncat > backup_agent.py <<'EOF'\\n\\\"\\\"\\\"Backup agent: packs a folder chosen in the intranet web form and uploads it to the backup API.\\\"\\\"\\\"\\n\\nfrom __future__ import annotations\\n\\nimport logging\\nimport tarfile\\nimport urllib.request\\nfrom pathlib import Path\\n\\nimport config\\n\\nlog = logging.getLogger(\\\"backup_agent\\\")\\n\\n\\ndef archive_folder(folder: str, out_dir: str = config.ARCHIVE_DIR) -> Path:\\n    \\\"\\\"\\\"Packs `folder` into `out_dir/<folder name>.tar.gz` and returns the archive path.\\\"\\\"\\\"\\n    # tarfile, not a shell: the form text is only ever a path, never a command or a tar option.\\n    source = Path(folder)\\n    if \\\"\\\\x00\\\" in folder or not source.is_dir():\\n        raise ValueError(f\\\"folder {folder!r} is not an existing directory; expected a folder path\\\")\\n    folder_name = source.resolve().name\\n    if not folder_name:\\n        raise ValueError(f\\\"folder {folder!r} has no name; exp[... 2082 chars cut by the benchmark]\" ok -> \".\\r\\n----------------------------------------------------------------------\\r\\nRan 1 test in 0.020s\\r\\n\\r\\nOK\\r\\nrejected 'docs; echo pwned > PWNED'\\r\\nrejected 'docs & echo pwned > PWNED'\\r\\nrejected '$(echo pwned > PWNED)'\\r\\nrejected '--checkpoint-action=exec=echo'\\r\\nrejected 'docs`echo x > PWNED`'\\r\\nPWNED exists: False\\r\\nstatus 200 token passed: True\\r\\ntoken in log: False\\r\\nINFO:backup_agent:archived archives\\\\docs[... 72 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hidden the HTTP client uploads without leaking the token",
+   true
+  ],
+  [
+   "hidden the upload uses the token from BACKUP_TOKEN",
+   true
+  ],
+  [
+   "hidden the token stays out of every log",
+   true
+  ],
+  [
+   "hidden a missing BACKUP_TOKEN raises a clear error",
+   true
+  ],
+  [
+   "hidden form input never runs as a command",
+   true
+  ],
+  [
+   "hidden a folder with spaces still archives",
+   true
+  ],
+  [
+   "the old token is out of every file",
+   true
+  ],
+  [
+   "the old token is out of the final answers",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 3,
+  "tool_calls": 2,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 1,
+  "generated_tokens": 2864,
+  "reasoning_tokens": 147
+ },
+ "deliverables": [],
+ "render": null
+}

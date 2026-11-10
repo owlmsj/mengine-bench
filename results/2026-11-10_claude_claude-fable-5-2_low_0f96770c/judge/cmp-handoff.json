@@ -1,0 +1,78 @@
+{
+ "task_id": "cmp-handoff",
+ "prompts": [
+  "You are handing this debugging work to a colleague who will never see {WS}/session/transcript.md. Write {WS}/HANDOFF.md, at most 1000 characters, so they can carry on from where it really stands.",
+  "You just took over this work, and {WS}/HANDOFF.md is all you have. Where was the recipe applied, what are the final decode speed and VRAM, which quantization was discarded, what is still pending, and which command measures it again? Record it in {WS}/result.json: file_line, final_decode, final_vram_mib, discarded_quant, pending, measure_command."
+ ],
+ "answers": [
+  "[goal] Hand off the local-9b Q5 128k-context debugging in `./HANDOFF.md`, at most 1000 characters.\n\n[action] Read `session/transcript.md` (226 lines, mostly noise) and wrote `HANDOFF.md` from the few lines that carry state. No browser, tabs or apps were opened.\n\n[result] `HANDOFF.md` is written; length check output: `958`.\n\nWhat I found, each traced to a transcript line:\n- **Valid result:** with `--no-mmproj-offload` and `-ub 512` the spill is gone, VRAM 7697 MiB, decode 38.0 t/s, median of 3 (line 124).\n- **Superseded number:** the earlier 37.8 t/s at 7881 MiB does not count; 7881 MiB is the WDDM ceiling and 1494 MiB had spilled to Shared Usage (lines 30, 44).\n- **Other quants:** Q6_K (7.03 GiB) does not fit at 128k and was discarded; Q4_K_M fits at 7305 MiB and 40.4 t/s, kept only as fallback (line 132).\n- **Where it is applied:** `scripts/start_server.ps1:165` (local9 block) and `profiles/local/local-9b.json` (line 185).\n- **Still open:** the evals README cites `check_vision.ps1`, which no longer exists (line 222).\n\nThe only evidence is the transcript; I ran nothing myself, and the workspace is not a git repo.\n\nAssumptions and gaps, flagged in the file:\n- The transcript shows no re-measure after the recipe was written into the script and profile.\n- Commit state is unknown.\n- I treated the repeated \"noted for later: scratchpad temp file names\" lines as noise and left them out.\n\n[next] The colleague updates the evals README, then re-measures with `pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`, checking the Shared Usage counter.",
+  "[goal] Answer the takeover questions from `HANDOFF.md` and record them in `result.json`.\n\n[action] Read `HANDOFF.md` (the only source) and wrote `./result.json`. Nothing was run or measured, and no browser or app was opened.\n\n[result]\n- **file_line:** `scripts/start_server.ps1:165` (local9 block). The recipe `--no-mmproj-offload -ub 512` is also in `profiles/local/local-9b.json`.\n- **final_decode:** 38.0 t/s (median of 3, no spill).\n- **final_vram_mib:** 7697.\n- **discarded_quant:** Q6_K (7.03 GiB, does not fit at 128k). Q4_K_M is kept as a fallback only, so it is not the discarded one.\n- **pending:** update the Evals README, which still cites `check_vision.ps1` (file no longer exists).\n- **measure_command:** `pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`\n\nHow I know: each value is copied from these handoff lines:\n- `Recipe: `--no-mmproj-offload -ub 512`. Result: VRAM 7697 MiB, decode 38.0 t/s (median of 3), no spill.`\n- `Applied in `scripts/start_server.ps1:165` (local9 block) and `profiles/local/local-9b.json`.`\n- `Q6_K (7.03 GiB) does not fit at 128k: discarded.`\n\nAssumptions:\n- I rejected the earlier 37.8 t/s / 7881 MiB figures, because the handoff says 1494 MiB had spilled to Shared Usage.\n- `file_line` holds only the script location, since the profile has no line number.\n- `final_decode` is a string with its unit; `final_vram_mib` is a number.\n\nNot verified, per the handoff itself: nobody re-measured after the recipe was written to the script and profile, and the commit state is unknown. The 38.0 t/s and 7697 MiB are the previous owner's numbers, not mine.\n\n[next] Re-run the measure command to confirm the applied recipe, after any downloads finish, with a long prompt, checking the Shared Usage counter. Then fix the Evals README."
+ ],
+ "diff": "A HANDOFF.md\nA result.json\nD session/transcript.md\n\n--- HANDOFF.md ---\n# HANDOFF: local-9b Q5 at 128k context\n\nGoal (user): local model needs 128k ctx; measure local-9b Q5 there.\n\n## Done\n- Recipe: `--no-mmproj-offload -ub 512`. Result: VRAM 7697 MiB, decode 38.0 t/s (median of 3), no spill.\n- Applied in `scripts/start_server.ps1:165` (local9 block) and `profiles/local/local-9b.json`.\n- Measure: `pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`\n\n## Traps\n- IGNORE the earlier 37.8 t/s / 7881 MiB: 7881 is the WDDM ceiling, 1494 MiB had spilled to Shared Usage. Always check the Shared Usage counter.\n- Q6_K (7.03 GiB) does not fit at 128k: discarded.\n- Q4_K_M fits (7305 MiB, 40.4 t/s): fallback only.\n- Short prompt does not reproduce; wait for downloads before measuring.\n\n## Left\n1. Evals README still cites `check_vision.ps1` (file no longer exists): update it.\n\n## Not verified\n- No re-measure after the recipe was written to the script/profile.\n- Commit state unknown; diffs seen were formatting only.\n\n\n--- result.json ---\n{\n  \"file_line\": \"scripts/start_server.ps1:165\",\n  \"final_decode\": \"38.0 t/s\",\n  \"final_vram_mib\": 7697,\n  \"discarded_quant\": \"Q6_K\",\n  \"pending\": \"Update the Evals README: it still cites check_vision.ps1, which no longer exists\",\n  \"measure_command\": \"pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024\"\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\session\\\\transcript.md\" ok -> \"1\\t[agent] Opened the GPU panel; the graphs say nothing the counter does not already say. (step 0)\\n2\\t[tool] ok, 764 lines of output omitted\\n3\\t\\n4\\t[user] The local model needs 128k. Measure local-9b Q5 at that context.\\n5\\t\\n6\\t[agent] Checked the flag documentation in --help; the text did not help much. (step 2)\\n7\\t[tool] ok, 872 lines of output omitted\\n8\\t\\n9\\t[agent] Reviewed the diff: formatting only, no[... 10349 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\HANDOFF.md\" ok -> \"File created successfully at: <WORKSPACE>\\\\HANDOFF.md (file state is current in your context — no need to Read it back)\"\n[step 1] shell \"(Get-Content -Raw HANDOFF.md).Length\" ok -> \"958\"\n[step 2] read \"<WORKSPACE>\\\\HANDOFF.md\" ok -> \"1\\t# HANDOFF: local-9b Q5 at 128k context\\n2\\t\\n3\\tGoal (user): local model needs 128k ctx; measure local-9b Q5 there.\\n4\\t\\n5\\t## Done\\n6\\t- Recipe: `--no-mmproj-offload -ub 512`. Result: VRAM 7697 MiB, decode 38.0 t/s (median of 3), no spill.\\n7\\t- Applied in `scripts/start_server.ps1:165` (local9 block) and `profiles/local/local-9b.json`.\\n8\\t- Measure: `pwsh -File scripts/measure_decode.ps1 -Ctx 131072 -NPre[... 614 chars cut by the benchmark]\"\n[step 2] write \"<WORKSPACE>\\\\result.json\" ok -> \"File created successfully at: <WORKSPACE>\\\\result.json (file state is current in your context — no need to Read it back)\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "summary exists and fits in 1000 characters",
+   true
+  ],
+  [
+   "summary keeps `--no-mmproj-offload`",
+   true
+  ],
+  [
+   "summary keeps `-ub 512`",
+   true
+  ],
+  [
+   "summary keeps `7697`",
+   true
+  ],
+  [
+   "answer file_line",
+   true
+  ],
+  [
+   "answer final_decode",
+   true
+  ],
+  [
+   "answer final_vram_mib",
+   true
+  ],
+  [
+   "answer discarded_quant",
+   true
+  ],
+  [
+   "answer pending",
+   true
+  ],
+  [
+   "answer measure_command",
+   true
+  ],
+  [
+   "does not repeat the spilled VRAM as final",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 5,
+  "tool_errors": 0,
+  "shell_commands": 0,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2813,
+  "reasoning_tokens": 268
+ },
+ "deliverables": [],
+ "render": null
+}

@@ -1,0 +1,48 @@
+{
+ "task_id": "ds-sql-funnel",
+ "prompts": [
+  "Product wants to know where players drop off on each platform. The data is in {WS}/analytics.db and our reporting rules are in {WS}/METRICS.md. Where do we lose the most players? Record it in {WS}/result.json: funnel (per platform, players at each step) and biggest_drop (per platform, the step)."
+ ],
+ "answers": [
+  "[goal]\nFind where players drop off per platform under the `METRICS.md` rules and record it in `result.json`.\n\n[action]\nOne script over `analytics.db` computed the ordered funnel per platform and wrote `result.json` (`funnel` and `biggest_drop`). No browser, tabs or apps were opened.\n\n[result]\n\n| Platform | install | tutorial_complete | first_match | purchase | Biggest drop |\n|---|---|---|---|---|---|\n| pc | 470 | 389 (82.8%) | 326 (83.8%) | 269 (82.5%) | purchase |\n| steamdeck | 192 | 128 (66.7%) | 87 (68.0%) | 61 (70.1%) | tutorial_complete |\n\n- **Steam Deck** loses the most players: a third of installers never finish the tutorial, and every step there converts worse than on PC.\n- **PC** is close to a tie: purchase (82.5%) is lowest only by about 0.3 points over tutorial_complete (82.8%), so treat that label as fragile.\n\nHow I know: the counts come from this script output, which applies each rule in `METRICS.md`:\n```\npc {'install': 470, 'tutorial_complete': 389, 'first_match': 326, 'purchase': 269}\nsteamdeck {'install': 192, 'tutorial_complete': 128, 'first_match': 87, 'purchase': 61}\n{'pc': 'purchase', 'steamdeck': 'tutorial_complete'}\n```\n- **Exclusions:** 34 test accounts (21 pc, 13 steamdeck) are out, and the 15 events from unknown players never match a user.\n- **Ordering:** a step counts only at or after the same player's previous step, taking the first valid occurrence, with no time limit.\n- **Data checks:** there are only two platform values and four event names, and all timestamps are 19-character text, so string comparison orders them correctly.\n- **Not done:** no independent second implementation or regression test; this is a single pass.\n\nAssumptions:\n- A player missing an earlier step does not count at later steps.\n- An event at the same timestamp as the previous step counts (\"at or after\").\n- `biggest_drop` names the destination step of the weakest transition, e.g. `purchase` means first_match to purchase.\n\n[next]\nNothing owed. For Product, the Steam Deck tutorial is the place to look first."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\r\n \"funnel\": {\r\n  \"pc\": {\r\n   \"install\": 470,\r\n   \"tutorial_complete\": 389,\r\n   \"first_match\": 326,\r\n   \"purchase\": 269\r\n  },\r\n  \"steamdeck\": {\r\n   \"install\": 192,\r\n   \"tutorial_complete\": 128,\r\n   \"first_match\": 87,\r\n   \"purchase\": 61\r\n  }\r\n },\r\n \"biggest_drop\": {\r\n  \"pc\": \"purchase\",\r\n  \"steamdeck\": \"tutorial_complete\"\r\n }\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cat METRICS.md; ls; python -c \\\"\\nimport sqlite3\\nc=sqlite3.connect('analytics.db')\\nfor r in c.execute('select name,sql from sqlite_master'):print(r[0],r[1])\\nfor t in [r[0] for r in c.execute(\\\\\\\"select name from sqlite_master where type='table'\\\\\\\")]:\\n    print(t,c.execute(f'select count(*) from {t}').fetchone());[print(r) for r in c.execute(f'select * from {t} limit 6')]\\n\\\"\" ok -> \"# How we report the funnel\\n\\nSteps, in order: install, tutorial_complete, first_match, purchase.\\nA step counts only at or after the same player's previous step, with no time limit; its time is the first valid occurrence.\\nTest accounts and events from unknown players do not count.\\nA step's conversion is its players over the previous step's players. The biggest drop is the step with the lowest conver[... 679 chars cut by the benchmark]\"\n[step 1] shell \"cat AGENTS.md; python -c \\\"\\nimport sqlite3,json\\nc=sqlite3.connect('analytics.db')\\nprint(c.execute('select platform,is_test,count(*) from users group by 1,2').fetchall())\\nprint(c.execute('select name,count(*),min(ts),max(ts),min(length(ts)),max(length(ts)) from events group by 1').fetchall())\\nprint('unknown',c.execute('select count(*) from events where user_id not in (select user_id from users)').fetchone())\\nprint(c.execute('select typeof(ts),count(*) from events group by 1').fetchall())\\nS=['install','tutorial_complete','first_match','purchase']\\nev={}\\nfor u,n,t in c.execute('select user_id,name,ts from events where ts is not null'):ev.setdefault(u,{}).setdefault(n,[]).append(t)\\nf={}\\nfor u,p,it in c.execute('select user_id,platform,is_test from users'):\\n    if it or p is None: continue\\n    p=p.strip().lower();d=f.setdefault(p,dict.fromkeys(S,0));prev=''\\n    for s in S:\\n        v=[t for t in ev.get(u,{}).get(s,[]) if t>=prev]\\n        if not v:break\\n        prev=min(v);d[s]+=1\\nbd={}\\nfor p,d in f.items():\\n    conv={S[i]:d[S[i]]/d[S[i-1]] for i in range(1,4) if d[S[i-1]]}\\n    bd[p]=min(conv,key=conv.get);print(p,d,conv)\\njson.dump({'funnel':f,'biggest_drop':bd},open('result.json','w'),indent=1)\\nprint(bd)\\n\\\"\" ok -> \"Use any skill, tool or MCP server you have. Write local files only inside this directory.\\nYou may read installed tools and skills outside it, but not other task workspaces, runs or benchmark answers.\\nOther programs run on this machine: stop only the processes you started, by their id, never by name.\\nDo not print credentials, environment variables or personal data: this session is published.\\n[('pc'[... 844 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "players per step on pc",
+   true
+  ],
+  [
+   "players per step on steamdeck",
+   true
+  ],
+  [
+   "biggest drop on each platform",
+   true
+  ],
+  [
+   "final answer does not contradict biggest drops",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 3,
+  "tool_calls": 2,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1826,
+  "reasoning_tokens": 130
+ },
+ "deliverables": [],
+ "render": null
+}

@@ -1,0 +1,62 @@
+{
+ "task_id": "web-archery-game",
+ "prompts": [
+  "Remember the little archery games of the Windows 95 days? We want the first level of one, our own, in {WS}/game/index.html, a single file. An archer you aim with the mouse, pulling the bow back for power, balloons to pop, a score on screen, a way to start and a way to lose. How it looks, plays and sounds is your call, and that is what we care about most: a minute of play should be fun, and every shot and hit should feel and sound good. It is reviewed by opening the file, with no build step, in a browser that reaches only Google Fonts, and by playing it."
+ ],
+ "answers": [
+  "[goal]\nFirst level of an original Win95-style archery game, single file `game/index.html`, no build step.\n\n[action]\n- Wrote Balloon Bowman: canvas game, all art drawn in code, all sound synthesized with WebAudio, only external request is the Google Font Silkscreen (falls back to Courier New).\n- Assumptions I made:\n  - Aiming is slingshot style: press anywhere, drag back, release. Drag direction sets the angle, drag length sets the power, with a dotted trajectory preview and a power bar.\n  - Arrows are unlimited. You lose when 5 normal balloons escape off the top; you clear the level at 400 points.\n  - Balloons are worth 10, small fast gold ones 50 (gold escaping costs no life). One arrow through several balloons multiplies x2, x3 and so on.\n  - Click, Space or Enter starts and restarts; best score is kept in localStorage.\n- Feel: string creak ticks rising in pitch as you draw, twang and whoosh scaled to power, layered pop that rises in pitch on chains, gold chime, ground thud, escape, win and lose jingles; screen shake, hit-stop, flash, confetti, score popups, arrow trails, bow recoil.\n\n[result]\n- Script parses: `syntax ok 15257`\n- Render hook on the written file: `render check: 0 console errors`\n- The title screen screenshot shows the scene, archer and instructions panel drawn correctly with the font loaded.\n- Not checked: I did not play it. Shooting, popping, sound, the win and lose paths and the difficulty balance (400 goal, 5 lives, spawn ramp) are untested in a live browser; the 5 min limit left no time for a play session.\n- I opened no browser tabs, windows or apps, so there was nothing to close.\n\n[next]\nPlay one minute and adjust `GOAL`, `MAX_LIVES` and the spawn interval at the top of the script if it runs too easy or too hard."
+ ],
+ "diff": "A game/index.html\n\n--- game/index.html ---\n<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n<title>Balloon Bowman - Level 1</title>\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link href=\"https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap\" rel=\"stylesheet\">\n<style>\nhtml,body{margin:0;height:100%;background:#12202e;overflow:hidden}\nbody{display:flex;align-items:center;justify-content:center}\ncanvas{width:min(100vw,177.78vh);height:min(56.25vw,100vh);image-rendering:pixelated;cursor:crosshair;touch-action:none;display:block}\n</style>\n</head>\n<body>\n<canvas id=\"bowCanvas\" width=\"960\" height=\"540\"></canvas>\n<script>\n'use strict';\nconst cv=document.getElementById('bowCanvas'),g=cv.getContext('2d');\nconst W=960,H=540,GROUND=470,ARCHER_X=120,ARCHER_Y=392,GRAV=820,MAX_PULL=150,GOAL=400,MAX_LIVES=5;\nconst FONT='\"Silkscreen\",\"Courier New\",monospace';\nconst COLORS=['#e8433f','#f6a821','#3fa7e8','#58c463','#c05fd8'];\nlet state='menu',score=0,lives=MAX_LIVES,best=+(localStorage.getItem('balloonBowmanBest')||0);\nlet arrows=[],balloons=[],bits=[],popups=[],clouds=[];\nlet drag=null,mouse={x:500,y:300},shake=0,hitStop=0,spawnT=0,playT=0,flash=0,shots=0,hits=0,lastTick=0,recoil=0,stateT=0;\nfor(let i=0;i<6;i++)clouds.push({x:Math.random()*W,y:30+Math.random()*170,s:.6+Math.random()*.9,v:4+Math.random()*8});\n\n/* ---------- audio: all synthesized, no assets ---------- */\nlet ac=null,noiseBuf=null,master=null;\nfunction audioInit(){\n  if(ac){if(ac.state==='suspended')ac.resume();return;}\n  try{\n    ac=new (window.AudioContext||window.webkitAudioContext)();\n    master=ac.createGain();master.gain.value=.55;\n    const comp=ac.createDynamicsCompressor();master.connect(comp);comp.connect(ac.destination);\n    noiseBuf=ac.createBuffer(1,ac.sampleRate,ac.sampleRate);\n    const d=noiseBuf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;\n  }catch(e){ac=null;}\n}\nfunction tone(type,f0,f1,dur,vol,delay){\n  if(!ac)return;const t=ac.currentTime+(delay||0),o=ac.createOscillator(),v=ac.createGain();\n  o.type=type;o.frequency.setValueAtTime(f0,t);o.frequency.exponentialRampToValueAtTime(Math.max(20,f1),t+dur);\n  v.gain.setValueAtTime(0,t);v.gain.linearRampToValueAtTime(vol,t+.005);v.gain.exponentialRampToValueAtTime(.0001,t+dur);\n  o.connect(v);v.connect(master);o.start(t);o.stop(t+dur+.02);\n}\nfunction noise(f0,f1,q,dur,vol,delay,type){\n  if(!ac)return;const t=ac.currentTime+(delay||0),s=ac.createBufferSource(),f=ac.createBiquadFilter(),v=ac.createGain();\n  s.buffer=noiseBuf;s.loop=true;f.type=type||'bandpass';f.Q.value=q;\n  f.frequency.setValueAtTime(f0,t);f.frequency.exponentialRampToValueAtTime(f1,t+dur);\n  v.gain.setValueAtTime(vol,t);v.gain.exponentialRampToValueAtTime(.0001,t+dur);\n  s.connect(f);f.connect(v);v.connect(master);s.start(t,Math.random()*.5);s.stop(t+dur+.02);\n}\nconst sfx={\n  creak(p){tone('triangle',90+p*260,80+p*240,.05,.10);noise(900+p*1500,700,6,.04,.06);},\n  twang(p){tone('sawtooth',150+p*130,60,.28,.20+p*.12);tone('triangle',300+p*260,120,.18,.14);noise(500,3200,1.2,.22+p*.12,.14+p*.2);},\n  pop(n){const k=Math.pow(1.122,Math.min(n,12));noise(2600,500,.7,.11,.75,0,'highpass');noise(1400,300,1.5,.09,.5);\n    tone('square',240*k,90,.09,.22);tone('sine',700*k,1400*k,.12,.16,.03);},\n  gold(){[880,1175,1568,2093].forEach((f,i)=>tone('triangle',f,f,.2,.16,i*.055));},\n  thud(){tone('sine',130,50,.12,.3);noise(400,150,1,.07,.2,0,'lowpass');},\n  escape(){tone('sawtooth',420,140,.38,.16);tone('square',210,70,.38,.10,.02);},\n  start(){[392,523,659,784].forEach((f,i)=>tone('square',f,f,.14,.12,i*.08));},\n  win(){[523,659,784,1047,784,1047,1319].forEach((f,i)=>tone('square',f,f,.2,.13,i*.11));},\n  lose(){[392,330,262,196].forEach((f,i)=>tone('sawtooth',f,f*.94,.3,.13,i*.18));}\n};\n\n/* ---------- input ---------- */\nfunction toCanvas(e){const r=cv.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height};}\ncv.addEventListe\n[... 11984 chars cut by the benchmark]",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"<WORKSPACE>\\\\game\\\\index.html\" ok -> \"File created successfully at: <WORKSPACE>\\\\game\\\\index.html (file state is current in your context — no need to Read it back)\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && node -e \\\"const s=require('fs').readFileSync('game/index.html','utf8');const m=s.match(/<script>([\\\\s\\\\S]*)<\\\\/script>/)[1];new Function(m);console.log('syntax ok',m.length)\\\"\" ok -> \"syntax ok 15257\"\n[step 1] read \"<HOME>\\\\AppData\\\\Local\\\\MEngine\\\\state\\\\render-check\\\\a2b13b4739f7851a47f2aa87.jpg\" ok -> \"\"",
+ "checks": [
+  [
+   "index.html exists with content",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "takes the mouse: press and release",
+   true
+  ],
+  [
+   "makes its own sound",
+   true
+  ],
+  [
+   "needs nothing beside the page",
+   true
+  ],
+  [
+   "a scripted basic play raises the score",
+   true
+  ],
+  [
+   "page runs without script errors",
+   true
+  ],
+  [
+   "page draws something (screenshot not blank)",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 3,
+  "tool_calls": 3,
+  "tool_errors": 0,
+  "shell_commands": 1,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 11626,
+  "reasoning_tokens": 892
+ },
+ "deliverables": [
+  "game/index.html"
+ ],
+ "render": "game/index.html"
+}

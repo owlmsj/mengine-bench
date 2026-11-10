@@ -1,0 +1,52 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [
+  "[goal] Recover the price rows from the truncated `prices.db` into `recovered.json`.\n\n[action] `prices.db` is a single 4096-byte table leaf page with no SQLite file header or schema, so `sqlite3` cannot open it. I parsed the page's cells directly with `tmp/rec.py` and wrote the decoded rows to `recovered.json`.\n\n[result] All 10 rows the page declares were recovered, rowids 1 to 10 with no gaps:\n\n| item | price |\n|---|---|\n| trail map | 0 |\n| matchbox | 1 |\n| tent stake | 2.75 |\n| lantern | 24 |\n| rope coil | 18 |\n| water filter | 39.9 |\n| sleeping bag | 129 |\n| camp stove | 310 |\n| compass | 15.5 |\n| first aid kit | 0.99 |\n\nHow I know it is right: the page header says 10 cells, and the parser decoded exactly 10 with no errors and none flagged as truncated or overflowing. Parser output: `page 1 leaf cells 10 4096`. Each record has the same shape (NULL id alias, text, number), and every value is decoded from the file's bytes; nothing is inferred or filled in.\n\nAssumptions:\n- With the schema gone, I took the text column as `item` and the numeric column as `price`.\n- Prices are kept exactly as stored. The `0` for trail map and `1` for matchbox are the real stored values (SQLite's constant 0 and 1 encodings), not defaults I added.\n- Whether the original table had more rows on other pages cannot be told from this file; only this one page survives.\n\n[next] Nothing further needed; no browser tabs or apps were opened."
+ ],
+ "diff": "A recovered.json\nA tmp/raw.json\nA tmp/rec.py\n\n--- recovered.json ---\n[\r\n {\r\n  \"item\": \"trail map\",\r\n  \"price\": 0\r\n },\r\n {\r\n  \"item\": \"matchbox\",\r\n  \"price\": 1\r\n },\r\n {\r\n  \"item\": \"tent stake\",\r\n  \"price\": 2.75\r\n },\r\n {\r\n  \"item\": \"lantern\",\r\n  \"price\": 24\r\n },\r\n {\r\n  \"item\": \"rope coil\",\r\n  \"price\": 18\r\n },\r\n {\r\n  \"item\": \"water filter\",\r\n  \"price\": 39.9\r\n },\r\n {\r\n  \"item\": \"sleeping bag\",\r\n  \"price\": 129\r\n },\r\n {\r\n  \"item\": \"camp stove\",\r\n  \"price\": 310\r\n },\r\n {\r\n  \"item\": \"compass\",\r\n  \"price\": 15.5\r\n },\r\n {\r\n  \"item\": \"first aid kit\",\r\n  \"price\": 0.99\r\n }\r\n]\n\n--- tmp/raw.json ---\n[[1, 1, [null, \"trail map\", 0]], [1, 2, [null, \"matchbox\", 1]], [1, 3, [null, \"tent stake\", 2.75]], [1, 4, [null, \"lantern\", 24]], [1, 5, [null, \"rope coil\", 18]], [1, 6, [null, \"water filter\", 39.9]], [1, 7, [null, \"sleeping bag\", 129]], [1, 8, [null, \"camp stove\", 310]], [1, 9, [null, \"compass\", 15.5]], [1, 10, [null, \"first aid kit\", 0.99]]]\n\n--- tmp/rec.py ---\nimport sys,json,struct\nd=open(sys.argv[1],'rb').read()\nprint(len(d),d[:16],d[:110].hex())\nps=struct.unpack('>H',d[16:18])[0]\nif ps==1:ps=65536\nif ps<512 or ps&(ps-1):ps=4096\ndef vi(b,o):\n    v=0\n    for i in range(9):\n        c=b[o+i]\n        if i==8:return (v<<8)|c,o+9\n        v=(v<<7)|(c&127)\n        if c<128:return v,o+i+1\nout=[];raw=[]\nfor pn in range((len(d)+ps-1)//ps):\n    p=d[pn*ps:(pn+1)*ps];h=0\n    if len(p)<h+8 or p[h]!=13:print('page',pn+1,'type',p[h] if len(p)>h else None,len(p));continue\n    n=struct.unpack('>H',p[h+3:h+5])[0];print('page',pn+1,'leaf cells',n,len(p))\n    for i in range(n):\n        try:\n            o=struct.unpack('>H',p[h+8+2*i:h+10+2*i])[0]\n            pl,o2=vi(p,o);rid,o2=vi(p,o2)\n            if o2+pl>len(p):print(' cell',i,'truncated/overflow');continue\n            hs,o3=vi(p,o2);he=o2+hs;ts=[]\n            while o3<he:\n                t,o3=vi(p,o3);ts.append(t)\n            vals=[];o4=he\n            for t in ts:\n                if t==0:v=None;l=0\n                elif t<=6:l=[0,1,2,3,4,6,8][t];v=int.from_bytes(p[o4:o4+l],'big',signed=True)\n                elif t==7:l=8;v=struct.unpack('>d',p[o4:o4+8])[0]\n                elif t in(8,9):l=0;v=t-8\n                elif t>=13 and t%2:l=(t-13)//2;v=p[o4:o4+l].decode('utf-8')\n                else:l=(t-12)//2;v=p[o4:o4+l].hex()\n                vals.append(v);o4+=l\n            raw.append((pn+1,rid,vals))\n        except Exception as e:print(' cell',i,'err',e)\nfor r in raw:print(r)\njson.dump(raw,open(sys.argv[2],'w'),ensure_ascii=False)\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"mkdir -p tmp && cat > tmp/rec.py <<'E'\\nimport sys,json,struct\\nd=open(sys.argv[1],'rb').read()\\nprint(len(d),d[:16],d[:110].hex())\\nps=struct.unpack('>H',d[16:18])[0]\\nif ps==1:ps=65536\\nif ps<512 or ps&(ps-1):ps=4096\\ndef vi(b,o):\\n    v=0\\n    for i in range(9):\\n        c=b[o+i]\\n        if i==8:return (v<<8)|c,o+9\\n        v=(v<<7)|(c&127)\\n        if c<128:return v,o+i+1\\nout=[];raw=[]\\nfor pn in range((len(d)+ps-1)//ps):\\n    p=d[pn*ps:(pn+1)*ps];h=100 if pn==0 else 0\\n    if len(p)<h+8 or p[h]!=13:print('page',pn+1,'type',p[h] if len(p)>h else None,len(p));continue\\n    n=struct.unpack('>H',p[h+3:h+5])[0];print('page',pn+1,'leaf cells',n,len(p))\\n    for i in range(n):\\n        try:\\n            o=struct.unpack('>H',p[h+8+2*i:h+10+2*i])[0]\\n            pl,o2=vi(p,o);rid,o2=vi(p,o2)\\n            if o2+pl>len(p):print(' cell',i,'truncated/overflow');continue\\n            hs,o3=vi(p,o2);he=o2+hs;ts=[]\\n            while o3<he:\\n                t,o3=vi(p,o3);ts.append(t)\\n            vals=[];o4=he\\n            for t in ts:\\n                if t==0:v=None;l=0\\n                elif t<=6:l=[0,1,2,3,4,6,8][t];v=int.from_bytes(p[o4:o4+l],'big',signed=True)\\n                elif t==7:l=8;v=struct.unpack('>d',p[o4:o4+8])[0]\\n                elif t in(8,9):l=0;v=t-8\\n                elif t>=13 and t%2:l=(t-13)//2;v=p[o4:o4+l].decode('utf-8')\\n                else:l=(t-12)//2;v=p[o4:o4+l].hex()\\n                vals.append(v);o4+=l\\n            raw.append((pn+1,rid,vals))\\n        except Exception as e:print(' cell',[... 134 chars cut by the benchmark]\" ok -> \"4096 b'\\\\r\\\\x00\\\\x00\\\\x00\\\\n\\\\x0f=\\\\x00\\\\x0f\\\\xf1\\\\x0f\\\\xe3\\\\x0f\\\\xcb\\\\x0f\\\\xbd' 0d0000000a0f3d000ff10fe30fcb0fbd0fad0f930f7f0f6d0f580f3d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\\r\\npage 1 type 0 4096\"\n[step 1] shell \"sed -i 's/h=100 if pn==0 else 0/h=0/' tmp/rec.py && python -I tmp/rec.py prices.db tmp/raw.json && python -I -c \\\"\\nimport json;r=json.load(open('tmp/raw.json'));print(len(r))\\no=[{'item':next(v for v in x[2] if isinstance(v,str)),'price':next(v for v in x[2] if isinstance(v,(int,float)))} for x in r]\\njson.dump(o,open('recovered.json','w',encoding='utf-8'),ensure_ascii=False,indent=1);print(o)\\\"\" ok -> \"4096 b'\\\\r\\\\x00\\\\x00\\\\x00\\\\n\\\\x0f=\\\\x00\\\\x0f\\\\xf1\\\\x0f\\\\xe3\\\\x0f\\\\xcb\\\\x0f\\\\xbd' 0d0000000a0f3d000ff10fe30fcb0fbd0fad0f930f7f0f6d0f580f3d00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\\r\\npage 1 leaf cells 10 4096\\r\\n(1, 1, [None, 'trail map', 0])\\r\\n(1, 2, [None, 'matchbox', 1])\\r\\n(1, 3, [None, 'tent st[... 640 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   true
+  ],
+  [
+   "rows with fractional prices recovered",
+   true
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   true
+  ],
+  [
+   "no row that is not in the table",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 3,
+  "tool_calls": 2,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2272,
+  "reasoning_tokens": 438
+ },
+ "deliverables": [],
+ "render": null
+}

@@ -1,0 +1,56 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "[goal]\nFind the cause of the hitches on rig arena-01 and the setting change that fixes them within the owner's constraints; record it in `./result.json`.\n\n[action]\n- Computed both metrics from `capture/presentmon.csv` (8238 frames, 60.006 s) using the formulas in `NOTES.md`.\n- Bucketed every frame over 15 ms by second and compared against `capture/sensors.csv` on the shared clock.\n- Wrote `result.json`. Nothing was applied to this host; no browser or app was opened.\n\n[result]\n- **avg_fps:** 137.29\n- **low_1pct_fps:** 45.35 (p99 frame time 22.049 ms, against about 7 ms normal)\n- **Cause:** PCIe ASPM L1 on the GPU root port (`pcie_aspm_rp1_gpu = L1` in BIOS). The GPU link drops into L1 every 4 s and the exit stalls presents.\n- **Change:** `pcie_aspm_rp1_gpu` from `L1` to `disabled`. Link speed stays Gen5 x4 and XMP, PBO and core ratio are untouched, so both constraints hold.\n\nHow I know: slow frames occur in exactly 15 seconds of the capture (2, 6, 10, ... 58), 12 frames each, and those are exactly the 15 seconds where the sensor log shows `gpu_pcie_link_state = L1`. Sample lines (second, slow frames, sensor row):\n```\n2 12 ['5270', '31', '2754', 'L1', 'Gen5 x4', '40', '3', 'Arena.exe']\n6 12 ['5380', '35', '2744', 'L1', 'Gen5 x4', '77', '4', 'Arena.exe']\n58 12 ['5151', '36', '2739', 'L1', 'Gen5 x4', '74', '5', 'Arena.exe']\n```\nThe other suspects in the log produce zero slow frames:\n```\n13 0 ['5422', '37', '2731', 'L0', 'Gen5 x4', '44', '92', 'Arena.exe']\n43 0 ['5356', '59', '2716', 'L0', 'Gen5 x4', '420', '94', 'MsMpEng.exe']\n44 0 ['5254', '57', '2716', 'L0', 'Gen5 x4', '455', '83', 'MsMpEng.exe']\n45 0 ['5151', '55', '2744', 'L0', 'Gen5 x4', '396', '80', 'MsMpEng.exe']\n```\nSo the Defender burst (seconds 43 to 45, DPC latency around 400 us) and the disk spikes (seconds 13, 27, 52) are not the cause. CPU clock never fell below 5150 MHz in the flagged rows, so the Balanced power plan is not implicated either.\n\nAssumptions:\n- \"disabled\" is the target value name, matching how `pcie_aspm_rp2_chipset` is already recorded in the dump.\n- Only the one change is listed. Defender exclusions, power plan and NVMe ASPM were left alone because the capture shows no hitch tied to them.\n- Values are rounded to 2 decimals.\n\nNot verified: the fix itself is untested, since the rig is not this machine. The evidence is the exact one-to-one match between L1 seconds and hitch seconds.\n\n[next]\nOwner sets GPU root port ASPM to disabled in BIOS and re-runs the same one-minute capture; the 1% low should rise toward the roughly 7 ms frame-time level if the diagnosis holds."
+ ],
+ "diff": "A result.json\nA tmp/analyze_hitches.py\nA tmp/correlate_l1.py\n\n--- result.json ---\n{\n  \"avg_fps\": 137.29,\n  \"low_1pct_fps\": 45.35,\n  \"cause\": \"PCIe ASPM L1 on the GPU root port (BIOS pcie_aspm_rp1_gpu = L1): the GPU link periodically drops into the L1 low-power state and the exit latency stalls presents, producing bursts of ~22 ms frames (vs ~7 ms normal) every few seconds. Spike seconds coincide with gpu_pcie_link_state = L1 in the sensor log.\",\n  \"changes\": [\n    {\"setting\": \"pcie_aspm_rp1_gpu\", \"from\": \"L1\", \"to\": \"disabled\"}\n  ]\n}\n\n\n--- tmp/analyze_hitches.py ---\nimport csv,sys,glob,statistics as st\nfor f in glob.glob(sys.argv[1]+'/*'):\n    rows=list(csv.DictReader(open(f,encoding='utf-8-sig')))\n    print(f,len(rows),list(rows[0].keys()))\n    if 'MsBetweenPresents' in rows[0]:\n        v=[float(r['MsBetweenPresents']) for r in rows]\n        s=sorted(v);n=len(s)\n        import math\n        print('avg',1000/st.mean(v),'sum_s',sum(v)/1000)\n        for name,p in(('nearest',s[math.ceil(.99*n)-1]),('linear',st.quantiles(v,n=100,method='inclusive')[98])):print(name,p,1000/p)\n        t=0\n        for r,x in zip(rows,v):\n            t+=x\n            if x>3*st.median(v):print('spike',round(t/1000,2),x,{k:r[k] for k in r if k!='MsBetweenPresents'})\n    else:\n        for r in rows:print(list(r.values()))\n\n\n--- tmp/correlate_l1.py ---\nimport csv,sys,collections\nd=sys.argv[1]\nsp=collections.Counter()\nfor r in csv.DictReader(open(d+'/presentmon.csv',encoding='utf-8-sig')):\n    if float(r['MsBetweenPresents'])>15: sp[int(float(r['TimeInSeconds']))]+=1\nfor r in csv.DictReader(open(d+'/sensors.csv',encoding='utf-8-sig')):\n    t=int(r['time_s'])\n    if sp[t] or r['gpu_pcie_link_state']!='L0' or int(r['dpc_latency_us'])>300 or int(r['disk_active_pct'])>30 or r['top_cpu_process']!='Arena.exe' or int(r['cpu_clock_mhz'])<4800:\n        print(t,sp[t],list(r.values())[1:])\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem | ForEach-Object { \\\"== $($_.Name) $($_.Length)\\\"; Get-Content $_.FullName -TotalCount 40 }\" ok -> \"== capture 1\\r\\nGet-Content: Unable to get content because it is a directory: '<WORKSPACE>\\\\capture'. Please use 'Get-ChildItem' instead.\\r\\n== AGENTS.md 394\\r\\nUse any skill, tool or MCP server you have. Write local files only inside this directory.\\r\\nYou may read installed tools and skills outside it, but not other task workspaces, runs o[... 1903 chars cut by the benchmark]\"\n[step 1] shell \"cat settings.json | tr -d '\\\\n ' ; echo; ls -la capture; for f in capture/*; do echo \\\"== $f\\\"; head -5 \\\"$f\\\"; wc -l \\\"$f\\\"; done\" ok -> \"{\\\"rig\\\":\\\"arena-01\\\",\\\"settings\\\":[{\\\"setting\\\":\\\"power_plan\\\",\\\"value\\\":\\\"Balanced\\\",\\\"where\\\":\\\"Windows\\\"},{\\\"setting\\\":\\\"hardware_accelerated_gpu_scheduling\\\",\\\"value\\\":\\\"on\\\",\\\"where\\\":\\\"Windows\\\"},{\\\"setting\\\":\\\"game_mode\\\",\\\"value\\\":\\\"on\\\",\\\"where\\\":\\\"Windows\\\"},{\\\"setting\\\":\\\"defender_realtime_protection\\\",\\\"value\\\":\\\"on\\\",\\\"where\\\":\\\"Windows\\\"},{\\\"setting\\\":\\\"defender_exclusions\\\",\\\"value\\\":[],\\\"where\\\":\\\"Windows\\\"},{\\\"setting\\\":\\\"defender_scheduled_scan[... 2375 chars cut by the benchmark]\"\n[step 1] shell \"mkdir -p tmp; cat > tmp/analyze_hitches.py <<'E'\\nimport csv,sys,glob,statistics as st\\nfor f in glob.glob(sys.argv[1]+'/*'):\\n    rows=list(csv.DictReader(open(f,encoding='utf-8-sig')))\\n    print(f,len(rows),list(rows[0].keys()))\\n    if 'MsBetweenPresents' in rows[0]:\\n        v=[float(r['MsBetweenPresents']) for r in rows]\\n        s=sorted(v);n=len(s)\\n        import math\\n        print('avg',1000/st.mean(v),'sum_s',sum(v)/1000)\\n        for name,p in(('nearest',s[math.ceil(.99*n)-1]),('linear',st.quantiles(v,n=100,method='inclusive')[98])):print(name,p,1000/p)\\n        t=0\\n        for r,x in zip(rows,v):\\n            t+=x\\n            if x>3*st.median(v):print('spike',round(t/1000,2),x,{k:r[k] for k in r if k!='MsBetweenPresents'})\\n    else:\\n        for r in rows:print(list(r.values()))\\nE\\npython -I tmp/analyze_hitches.py capture 2>&1 | head -230\" ok -> \"<persisted-output>\\nOutput too large (63.8KB). Full output saved to: <HOME>\\\\.claude\\\\projects\\\\C--Users-<USER>-1-AppData-Local-Temp-mengine-bench-fresh-086h6luf-workspace\\\\1d708551-2957-4977-9db1-189b1a1ef3dd\\\\tool-results\\\\b83sc12fk.txt\\n\\nPreview (first 2KB):\\ncapture\\\\presentmon.csv 8238 ['Application', 'ProcessID', 'SwapChainAddress', 'Runtime', 'SyncInterval', 'PresentFlags', 'Dropped', 'T[... 1639 chars cut by the benchmark]\"\n[step 1] shell \"cat > result.json <<'E'\\n{\\n  \\\"avg_fps\\\": 137.29,\\n  \\\"low_1pct_fps\\\": 45.35,\\n  \\\"cause\\\": \\\"PCIe ASPM L1 on the GPU root port (BIOS pcie_aspm_rp1_gpu = L1): the GPU link periodically drops into the L1 low-power state and the exit latency stalls presents, producing bursts of ~22 ms frames (vs ~7 ms normal) every few seconds. Spike seconds coincide with gpu_pcie_link_state = L1 in the sensor log.\\\",\\n  \\\"changes\\\": [\\n    {\\\"setting\\\": \\\"pcie_aspm_rp1_gpu\\\", \\\"from\\\": \\\"L1\\\", \\\"to\\\": \\\"disabled\\\"}\\n  ]\\n}\\nE\\ncat > tmp/correlate_l1.py <<'E'\\nimport csv,sys,collections\\nd=sys.argv[1]\\nsp=collections.Counter()\\nfor r in csv.DictReader(open(d+'/presentmon.csv',encoding='utf-8-sig')):\\n    if float(r['MsBetweenPresents'])>15: sp[int(float(r['TimeInSeconds']))]+=1\\nfor r in csv.DictReader(open(d+'/sensors.csv',encoding='utf-8-sig')):\\n    t=int(r['time_s'])\\n    if sp[t] or r['gpu_pcie_link_state']!='L0' or int(r['dpc_latency_us'])>300 or int(r['disk_active_pct'])>30 or r['top_cpu_process']!='Arena.exe' or int(r['cpu_clock_mhz'])<4800:\\n        print(t,sp[t],list(r.values())[1:])\\nE\\npython -I tmp/correlate_l1.py capture\" ok -> \"2 12 ['5270', '31', '2754', 'L1', 'Gen5 x4', '40', '3', 'Arena.exe']\\r\\n6 12 ['5380', '35', '2744', 'L1', 'Gen5 x4', '77', '4', 'Arena.exe']\\r\\n10 12 ['5450', '36', '2743', 'L1', 'Gen5 x4', '84', '5', 'Arena.exe']\\r\\n13 0 ['5422', '37', '2731', 'L0', 'Gen5 x4', '44', '92', 'Arena.exe']\\r\\n14 12 ['5242', '38', '2729', 'L1', 'Gen5 x4', '68', '2', 'Arena.exe']\\r\\n18 12 ['5319', '42', '2733', 'L1', 'Gen5 x4', '[... 1096 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 4,
+  "tool_calls": 4,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2780,
+  "reasoning_tokens": 124
+ },
+ "deliverables": [],
+ "render": null
+}

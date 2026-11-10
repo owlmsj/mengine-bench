@@ -1,0 +1,68 @@
+{
+ "task_id": "gd-integration-repo",
+ "prompts": [
+  "An integration test of the Pixel Arena backend in {WS} fails while the unit tests pass. Make the backend behave as {WS}/docs says: fix every cause, not just the symptom this test shows. Existing tests stay as they are, and the project takes no new dependencies."
+ ],
+ "answers": [
+  "[goal]\nMake the Pixel Arena backend match `./docs`, fixing every cause behind the failing integration test.\n\n[action]\nThree defects fixed, no test files touched, no new dependencies (stdlib `decimal` only):\n- `arena_server/config/loader.py`: the JSON file was applied after the environment, so the file won. Order is now DEFAULTS < JSON file < `ARENA_<KEY>` env, as `docs/CONFIG.md` says.\n- `arena_server/persistence/codec.py`: `decode` dropped `credits`, so every loaded profile came back with 0 credits. It now restores them, as `docs/ECONOMY.md` requires.\n- `arena_server/economy/payout.py`: rounding ran on binary floats, so an exact half could land just below the tie and round down. It now uses `Decimal` with `ROUND_HALF_UP` to the nearest ten. This one was not reproduced as a failure; it is a hardening of the documented \"halves always round up\" rule.\n\n[result]\nFull suite, `python -m unittest discover -s tests -t .`:\n```\n.............\n----------------------------------------------------------------------\nRan 13 tests in 0.015s\n\nOK\n```\nThe integration test (expects 100 + 1590) is among the 13 and needed both the loader and codec fixes to pass. Spot check of the documented rounding examples printed `1430 1590 1160` (1425 -> 1430, 1585 -> 1590, and 1155 at multiplier 1.1 -> 1160).\n\nNot done:\n- No new regression tests were added; I read \"existing tests stay as they are\" conservatively and ran out the time budget on the fixes.\n- The integration test was not run before the fixes, so its original failure is inferred from the code, not observed.\n- The other packages (matchmaking, chat, store and the rest) were not audited; the docs only cover config and economy.\n\nAssumptions: missing `credits` in an old save decodes as 0; `legacy_payout.py` is left alone because it is marked deprecated and unused by the live economy. No browser tabs or apps were opened.\n\n[next]\nAdd unit tests for env-over-file precedence, the credits save/load round trip, and half-up rounding with a fractional multiplier."
+ ],
+ "diff": "M arena_server/config/loader.py\nM arena_server/economy/payout.py\nM arena_server/persistence/codec.py\n\n--- arena_server/config/loader.py ---\n\"\"\"Runtime config. Precedence, lowest to highest: DEFAULTS < JSON file < env (docs/CONFIG.md).\"\"\"\r\n\r\nimport json\r\nimport os\r\n\r\nfrom arena_server.config.defaults import DEFAULTS\r\n\r\n\r\ndef _coerce(raw, like):\r\n    return type(like)(raw)\r\n\r\n\r\ndef load_config(file_path=None, env=None):\r\n    cfg = dict(DEFAULTS)\r\n    env = os.environ if env is None else env\r\n    if file_path:\r\n        with open(file_path, encoding=\"utf-8\") as fh:\r\n            cfg.update(json.load(fh))\r\n    for key, default in DEFAULTS.items():\r\n        value = env.get(f\"ARENA_{key.upper()}\")\r\n        if value is not None:\r\n            cfg[key] = _coerce(value, default)\r\n    return cfg\r\n\n\n--- arena_server/economy/payout.py ---\n\"\"\"Match payout. Rules live in docs/ECONOMY.md.\"\"\"\r\n\r\nfrom decimal import ROUND_HALF_UP, Decimal\r\n\r\n\r\ndef match_payout(won, kills, cfg):\r\n    base = cfg[\"win_base\"] if won else cfg[\"loss_base\"]\r\n    # Decimal via str: binary floats (e.g. 1.1) must not push an exact half below the tie.\r\n    raw = (Decimal(str(base)) + kills * Decimal(str(cfg[\"kill_bonus\"]))) * Decimal(str(cfg[\"event_multiplier\"]))\r\n    return int((raw / 10).quantize(Decimal(1), rounding=ROUND_HALF_UP) * 10)\r\n\n\n--- arena_server/persistence/codec.py ---\nimport json\r\n\r\nfrom arena_server.models.profile import Profile\r\n\r\n\r\ndef encode(profile):\r\n    return json.dumps({\"name\": profile.name, \"level\": profile.level,\r\n                       \"credits\": profile.credits, \"cosmetics\": profile.cosmetics})\r\n\r\n\r\ndef decode(blob):\r\n    data = json.loads(blob)\r\n    return Profile(name=data[\"name\"], level=data.get(\"level\", 1),\r\n                   credits=data.get(\"credits\", 0), cosmetics=data.get(\"cosmetics\", []))\r\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && find . -type f -not -path './node_modules/*' -not -path './.git/*' | head -80 && cat package.json 2>/dev/null; cat docs/* | head -300\" ok -> \"./AGENTS.md\\n./arena_server/anticheat/adapters.py\\n./arena_server/anticheat/cache.py\\n./arena_server/anticheat/events.py\\n./arena_server/anticheat/formatters.py\\n./arena_server/anticheat/metrics.py\\n./arena_server/anticheat/registry.py\\n./arena_server/anticheat/rules.py\\n./arena_server/anticheat/schema.py\\n./arena_server/anticheat/validators.py\\n./arena_server/anticheat/__init__.py\\n./arena_server/chat/adapt[... 2896 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && find . -type f -not -path './arena_server/*/adapters.py' | grep -v -E '/(anticheat|chat|cosmetics|leaderboard|locales|matchmaking|notifications)/' | grep -v pyc; cat AGENTS.md arena_server/config/*.py arena_server/economy/*.py arena_server/models/profile.py arena_server/persistence/*.py; ls docs tests; cat tests/*integ*\" failed -> \"Exit code 1\\n./AGENTS.md\\n./arena_server/config/defaults.py\\n./arena_server/config/loader.py\\n./arena_server/config/__init__.py\\n./arena_server/economy/legacy_payout.py\\n./arena_server/economy/payout.py\\n./arena_server/economy/__init__.py\\n./arena_server/models/profile.py\\n./arena_server/models/__init__.py\\n./arena_server/persistence/codec.py\\n./arena_server/persistence/store.py\\n./arena_server/persistence/__[... 4017 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && cat arena_server/services/match_service.py tests/integration/test_match_flow.py tests/unit/test_core_units.py README.md; grep -rn \\\"payout\\\\|load_config\\\\|persistence\\\\|round(\\\" arena_server --include=*.py -l | head -30\" ok -> \"from arena_server.economy.payout import match_payout\\n\\n\\ndef finish_match(profile, won, kills, cfg):\\n    profile.credits += match_payout(won, kills, cfg)\\n    return profile\\nimport json\\nimport tempfile\\nimport unittest\\nfrom pathlib import Path\\n\\nfrom arena_server.config.loader import load_config\\nfrom arena_server.models.profile import Profile\\nfrom arena_server.persistence.store import load, save\\nfrom a[... 1525 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && python - <<'EOF'\\nimport re,pathlib\\np=pathlib.Path('arena_server/config/loader.py'); s=p.read_text()\\na=s.index('    for key, default'); b=s.index('    if file_path:'); c=s.index('    return cfg')\\ns=s[:a]+s[b:c]+s[a:b]+s[c:]\\np.write_text(s)\\np=pathlib.Path('arena_server/persistence/codec.py'); s=p.read_text()\\ns=s.replace('level=data.get(\\\"level\\\", 1), cosmetics','level=data.get(\\\"level\\\", 1),\\\\n                   credits=data.get(\\\"credits\\\", 0), cosmetics')\\np.write_text(s)\\np=pathlib.Path('arena_server/economy/payout.py')\\np.write_text('''\\\"\\\"\\\"Match payout. Rules live in docs/ECONOMY.md.\\\"\\\"\\\"\\n\\nfrom decimal import ROUND_HALF_UP, Decimal\\n\\n\\ndef match_payout(won, kills, cfg):\\n    base = cfg[\\\"win_base\\\"] if won else cfg[\\\"loss_base\\\"]\\n    # Decimal via str: binary floats (e.g. 1.1) must not push an exact half below the tie.\\n    raw = (Decimal(str(base)) + kills * Decimal(str(cfg[\\\"kill_bonus\\\"]))) * Decimal(str(cfg[\\\"event_multiplier\\\"]))\\n    return int((raw / 10).quantize(Decimal(1), rounding=ROUND_HALF_UP) * 10)\\n''')\\nEOF\\ncat arena_server/config/loader.py; python -m unittest discover -s tests -t . 2>&1 | tail -5\\npython -c \\\"\\nfrom arena_server.economy.payout import match_payout as m\\nfrom arena_server.config.defaults import DEFAULTS as D\\nprint(m(True,10,dict(D,kill_bonus=52.5)), m(True,10,dict(D,kill_bonus=68.5)), m(True,3,dict(D,event_multiplier=1.1)))\\\"\" ok -> \"\\\"\\\"\\\"Runtime config. Precedence, lowest to highest: DEFAULTS < JSON file < env (docs/CONFIG.md).\\\"\\\"\\\"\\r\\n\\r\\nimport json\\r\\nimport os\\r\\n\\r\\nfrom arena_server.config.defaults import DEFAULTS\\r\\n\\r\\n\\r\\ndef _coerce(raw, like):\\r\\n    return type(like)(raw)\\r\\n\\r\\n\\r\\ndef load_config(file_path=None, env=None):\\r\\n    cfg = dict(DEFAULTS)\\r\\n    env = os.environ if env is None else env\\r\\n    if file_path:\\r\\n        with open(file_pat[... 386 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "existing tests untouched",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hidden config override and persistence",
+   true
+  ],
+  [
+   "hidden env float wins over file",
+   true
+  ],
+  [
+   "hidden round trip keeps everything",
+   true
+  ],
+  [
+   "hidden half up tie rounds up",
+   true
+  ],
+  [
+   "hidden half up fractional multiplier",
+   true
+  ],
+  [
+   "hidden persisted name survives",
+   true
+  ],
+  [
+   "hidden real environment when env is none",
+   true
+  ],
+  [
+   "existing test suite passes",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 4,
+  "tool_errors": 1,
+  "shell_commands": 4,
+  "shell_failures": 1,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2447,
+  "reasoning_tokens": 250
+ },
+ "deliverables": [],
+ "render": null
+}
