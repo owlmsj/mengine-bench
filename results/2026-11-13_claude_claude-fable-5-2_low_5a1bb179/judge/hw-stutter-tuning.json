@@ -1,0 +1,56 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "[goal]\nFind the hitch cause on rig arena-01 and the setting fix within the owner's constraints; record it in `./result.json`.\n\n[action]\n- Computed the frame stats from `capture/presentmon.csv` (8238 Arena.exe frames, 0 dropped) using the formulas in `NOTES.md`.\n- Counted frames slower than 20 ms per second and lined them up against `capture/sensors.csv`.\n- Wrote `result.json`; nothing was applied to this host and no browser or app was opened.\n\n[result]\n- **Frame rate:** avg_fps is 137.29 (mean frame time 7.284 ms); low_1pct_fps is 45.35 (p99 frame time 22.049 ms).\n- **Cause:** PCIe ASPM L1 on the GPU root port (`pcie_aspm_rp1_gpu = L1`). The GPU link drops to L1 every 4 s, and each wake-up stalls presents.\n- **Evidence:** all 180 frames over 20 ms fall in the 15 seconds where the sensor log shows the link in L1 (seconds 2, 6, ..., 58), 12 per second. The other 45 seconds have none.\n- **Ruled out:**\n  - Defender: the MsMpEng.exe burst at 43-45 s (DPC latency 396-455 us) has 0 slow frames.\n  - Disk: the activity spikes at 13, 27 and 52 s have 0 slow frames.\n  - CPU clock: steady at 5150-5450 MHz.\n  - Link speed: constant at Gen5 x4.\n- **Change:** `pcie_aspm_rp1_gpu` from `L1` to `disabled`. This is the only change; the fix itself has not been tested on the rig.\n- **Constraints:** link speed stays Gen5 x4, and XMP, PBO and core ratio are untouched.\n- **Assumptions:**\n  - A BIOS ASPM toggle does not count as an \"overclock change\".\n  - `disabled` is the valid off value, as already used by `pcie_aspm_rp2_chipset`.\n  - p99 uses linear interpolation; nearest-rank gives the same 45.35.\n  - The NVMe port's ASPM L1 is left alone because nothing in the capture ties it to a hitch.\n\n[next]\nOwner sets the GPU root port's ASPM to disabled in BIOS and re-runs the same one-minute capture; the 4 s hitch pattern should be gone and the 1% low should rise toward the average."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"avg_fps\": 137.29,\n  \"low_1pct_fps\": 45.35,\n  \"cause\": \"PCIe ASPM L1 on the GPU root port (BIOS pcie_aspm_rp1_gpu = L1). Every 4 s (seconds 2, 6, ..., 58) the GPU link drops to L1 and the L1 exit latency stalls presents: all 180 frames over 20 ms (12 per event, 15 events) fall in exactly those seconds, none elsewhere. Not the cause: Defender (MsMpEng.exe burst at 43-45 s, DPC ~400 us, 0 slow frames), disk spikes (13, 27, 52 s, 0 slow frames), CPU clock (steady 5.15-5.45 GHz), link speed (constant Gen5 x4).\",\n  \"changes\": [\n    {\"setting\": \"pcie_aspm_rp1_gpu\", \"from\": \"L1\", \"to\": \"disabled\"}\n  ]\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem | ForEach-Object { \\\"== $($_.Name) $($_.Length)\\\"; Get-Content $_.FullName -TotalCount 40 }\" ok -> \"== capture 1\\r\\nGet-Content: Unable to get content because it is a directory: '<WORKSPACE>\\\\capture'. Please use 'Get-ChildItem' instead.\\r\\n== AGENTS.md 394\\r\\nUse any skill, tool or MCP server you have. Write local files only inside this directory.\\r\\nYou may read installed tools and skills outside it, but not other task workspaces, runs o[... 1903 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\"; ls -la capture; python -I -c \\\"\\nimport json;[print(s) for s in json.load(open('settings.json'))['settings']]\\\"; for f in capture/*; do echo \\\"== $f\\\"; head -5 \\\"$f\\\"; wc -l \\\"$f\\\"; done\" ok -> \"total 704\\ndrwxr-xr-x 1 <USER> 197121      0 Nov 13 23:43 .\\ndrwxr-xr-x 1 <USER> 197121      0 Nov 13 23:43 ..\\n-rw-r--r-- 1 <USER> 197121 715870 Nov 13 23:43 presentmon.csv\\n-rw-r--r-- 1 <USER> 197121   2660 Nov 13 23:43 sensors.csv\\n{'setting': 'power_plan', 'value': 'Balanced', 'where': 'Windows'}\\r\\n{'setting': 'hardware_accelerated_gpu_scheduling', 'value': 'on', 'where': 'Windows'}\\r[... 2491 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\"; python -I -c \\\"\\nimport csv,collections,statistics as st\\nr=list(csv.DictReader(open('capture/presentmon.csv')))\\nprint(collections.Counter((x['Application'],x['Dropped']) for x in r))\\na=[x for x in r if x['Application']=='Arena.exe']\\nm=sorted(float(x['MsBetweenPresents']) for x in a)\\nimport math\\nn=len(m);mean=sum(m)/n\\nprint(n,mean,1000/mean, float(a[-1]['TimeInSeconds']))\\nk=0.99*(n-1);lo=int(k);p=m[lo]+(m[min(lo+1,n-1)]-m[lo])*(k-lo)\\nprint('p99 interp',p,1000/p,'nearest',m[math.ceil(.99*n)-1],1000/m[math.ceil(.99*n)-1])\\ns=list(csv.DictReader(open('capture/sensors.csv')))\\nh=collections.Counter(int(float(x['TimeInSeconds'])) for x in a if float(x['MsBetweenPresents'])>20)\\nfor x in s: print(x['time_s'],x['gpu_pcie_link_state'],x['cpu_clock_mhz'],x['cpu_util_pct'],x['dpc_latency_us'],x['disk_active_pct'],x['top_cpu_process'],h.get(int(x['time_s']),0))\\n\\\"\" ok -> \"Counter({('Arena.exe', '0'): 8238})\\r\\n8238 7.284078781257587 137.28571999702498 59.999207\\r\\np99 interp 22.04863 45.354291853960994 nearest 22.049 45.35353077237063\\r\\n0 L0 5354 35 52 1 Arena.exe 0\\r\\n1 L0 5350 40 88 4 Arena.exe 0\\r\\n2 L1 5270 31 40 3 Arena.exe 12\\r\\n3 L0 5373 31 81 2 Arena.exe 0\\r\\n4 L0 5290 33 41 1 Arena.exe 0\\r\\n5 L0 5344 32 49 2 Arena.exe 0\\r\\n6 L1 5380 35 77 4 Arena.exe 12\\r\\n7 L0 5381 35 57 3 [... 1701 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\"; cat > result.json <<'E'\\n{\\n  \\\"avg_fps\\\": 137.29,\\n  \\\"low_1pct_fps\\\": 45.35,\\n  \\\"cause\\\": \\\"PCIe ASPM L1 on the GPU root port (BIOS pcie_aspm_rp1_gpu = L1). Every 4 s (seconds 2, 6, ..., 58) the GPU link drops to L1 and the L1 exit latency stalls presents: all 180 frames over 20 ms (12 per event, 15 events) fall in exactly those seconds, none elsewhere. Not the cause: Defender (MsMpEng.exe burst at 43-45 s, DPC ~400 us, 0 slow frames), disk spikes (13, 27, 52 s, 0 slow frames), CPU clock (steady 5.15-5.45 GHz), link speed (constant Gen5 x4).\\\",\\n  \\\"changes\\\": [\\n    {\\\"setting\\\": \\\"pcie_aspm_rp1_gpu\\\", \\\"from\\\": \\\"L1\\\", \\\"to\\\": \\\"disabled\\\"}\\n  ]\\n}\\nE\\npython -I -c \\\"import json;print(json.load(open('result.json'))['changes'])\\\"\" ok -> \"[{'setting': 'pcie_aspm_rp1_gpu', 'from': 'L1', 'to': 'disabled'}]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 4,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2454,
+  "reasoning_tokens": 158
+ },
+ "deliverables": [],
+ "render": null
+}

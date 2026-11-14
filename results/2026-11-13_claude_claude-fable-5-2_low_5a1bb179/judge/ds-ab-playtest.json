@@ -1,0 +1,48 @@
+{
+ "task_id": "ds-ab-playtest",
+ "prompts": [
+  "We playtested two versions of the Pixel Arena tutorial and have to pick one for the next release. The export and its notes are in {WS}/telemetry. Should we ship B instead of A? Give a recommendation a skeptical lead would accept. Record it in {WS}/result.json with ship_b, sessions_a, sessions_b, completion_rate_a, completion_rate_b and p_value."
+ ],
+ "answers": [
+  "[goal]\nDecide whether tutorial B ships instead of A under the README release rule (gain in tutorial completion significant at 5%).\n\n[action]\n- Normalized `variant` (trim, uppercase) and deduplicated on `session_id`, as the README says: 1870 raw rows became 1800 unique sessions, with no conflicting duplicates.\n- Ran a two-sided pooled two-proportion z-test on completion, B vs A.\n- Re-ran the test with standard errors clustered by player, because 763 players produced the 1800 sessions and 366 of them played both variants.\n- Wrote `./result.json`.\n\n[result]\nRecommendation: ship B. Its completion gain is significant at the 5% level, so the release rule is met.\n\n| | A | B |\n|---|---|---|\n| Sessions | 900 | 900 |\n| Completed | 342 | 420 |\n| Completion rate | 38.00% | 46.67% |\n\n- **Gain:** +8.67 points for B, 95% CI +4.1 to +13.2 points, z = 3.72, p = 0.000198.\n- **Repeat players:** the player-clustered test gives z = 3.64, p = 0.00027, so the conclusion holds when sessions from the same player are not treated as independent.\n- **Without dedup:** the raw rows give 37.85% vs 46.67%, p = 0.00011, so the cleaning does not drive the result.\n- **Weaker cut:** restricting to the 397 players who saw only one variant (any completion per player) gives 51.1% vs 56.7%, p = 0.26. Same direction, but that subset is small and not a randomized comparison; I did not treat it as the release test.\n\n`result.json` as written:\n```\n{\n  \"ship_b\": true,\n  \"sessions_a\": 900,\n  \"sessions_b\": 900,\n  \"completion_rate_a\": 0.38,\n  \"completion_rate_b\": 0.4667,\n  \"p_value\": 0.0002\n}\n```\n\nAssumptions:\n- The unit of analysis is the session, since `session_id` is the stated unique key.\n- Rates and p-value in the file are rounded to 4 decimals.\n- `match_minutes` is not part of the release rule and was not analyzed.\n- The export does not say how players were assigned to variants; I assumed assignment was random per session.\n\nNo scipy on this host, so there is no Fisher exact cross-check; the z-test was computed by hand with `math.erfc`. No browser tabs or apps were opened.\n\n[next]\nIf the lead wants more assurance, confirm how variants were assigned, since 366 players seeing both could carry an order effect (second exposure completes more often) that this export cannot rule out."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\r\n  \"ship_b\": true,\r\n  \"sessions_a\": 900,\r\n  \"sessions_b\": 900,\r\n  \"completion_rate_a\": 0.38,\r\n  \"completion_rate_b\": 0.4667,\r\n  \"p_value\": 0.0002\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem telemetry -Recurse | Select-Object FullName,Length; Get-ChildItem telemetry -File -Recurse | ForEach-Object { \\\"=== $($_.Name)\\\"; Get-Content $_.FullName -TotalCount 40 }\" ok -> \"FullName                                                                                                Length\\r\\n--------                                                                                                <WORKSPACE>\\\\telemetry\\\\playtest_ab.csv  41587\\r\\nC:\\\\Users\\\\<USER>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-7q06d[... 1418 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && python -I - <<'EOF'\\nimport csv,json,math,collections\\nrows=list(csv.DictReader(open('telemetry/playtest_ab.csv',encoding='utf-8-sig')))\\nprint('raw',len(rows))\\nprint(collections.Counter(r['variant'] for r in rows))\\nprint(collections.Counter(r['completed_tutorial'] for r in rows))\\nby={}\\nconf=0\\nfor r in rows:\\n    k=r['session_id'].strip()\\n    v=(r['variant'].strip().upper(),r['completed_tutorial'].strip())\\n    if k in by and by[k][:2]!=v: conf+=1\\n    by.setdefault(k,v+(r['player_id'].strip(),))\\nprint('uniq',len(by),'conflicts',conf)\\nn=collections.Counter();c=collections.Counter()\\npv=collections.defaultdict(set)\\nfor k,(v,d,p) in by.items():\\n    n[v]+=1;c[v]+=int(d);pv[p].add(v)\\nprint(n,c,'players',len(pv),'cross',sum(len(s)>1 for s in pv.values()))\\n# raw (naive) for comparison\\nrn=collections.Counter();rc=collections.Counter()\\nfor r in rows:\\n    v=r['variant'].strip().upper();rn[v]+=1;rc[v]+=int(r['completed_tutorial'])\\ndef z(ca,na,cb,nb):\\n    pa,pb=ca/na,cb/nb;p=(ca+cb)/(na+nb)\\n    zz=(pb-pa)/math.sqrt(p*(1-p)*(1/na+1/nb))\\n    return pa,pb,zz,math.erfc(abs(zz)/math.sqrt(2))\\nprint('naive',rn,rc,z(rc['A'],rn['A'],rc['B'],rn['B']))\\npa,pb,zz,p=z(c['A'],n['A'],c['B'],n['B'])\\nprint('dedup',pa,pb,zz,p)\\nse=math.sqrt(pa*(1-pa)/n['A']+pb*(1-pb)/n['B'])\\nprint('CI',pb-pa-1.96*se,pb-pa+1.96*se)\\n# player-level: first... per-player any-complete, players in one variant only\\npn=collections.Counter();pc=collection[... 753 chars cut by the benchmark]\" ok -> \"raw 1870\\r\\nCounter({'b': 323, 'B': 322, 'A': 318, ' A': 316, 'a': 304, ' B': 287})\\r\\nCounter({'0': 1080, '1': 790})\\r\\nuniq 1800 conflicts 0\\r\\nCounter({'B': 900, 'A': 900}) Counter({'B': 420, 'A': 342}) players 763 cross 366\\r\\nnaive Counter({'A': 938, 'B': 932}) Counter({'B': 435, 'A': 355}) (0.3784648187633262, 0.4667381974248927, 3.8639767518893575, 0.00011155584360802778)\\r\\ndedup 0.38 0.46666666666666[... 418 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && python -I - <<'EOF'\\nimport csv,math,collections\\nby={}\\nfor r in csv.DictReader(open('telemetry/playtest_ab.csv',encoding='utf-8-sig')):\\n    by.setdefault(r['session_id'].strip(),(r['variant'].strip().upper(),int(r['completed_tutorial']),r['player_id'].strip()))\\nS=list(by.values())\\nn={v:sum(1 for s in S if s[0]==v) for v in 'AB'}\\np={v:sum(s[1] for s in S if s[0]==v)/n[v] for v in 'AB'}\\n# player-clustered linearization of pB-pA\\ng=collections.defaultdict(float)\\nfor v,d,pid in S:\\n    g[pid]+=(d-p[v])/n[v]*(1 if v=='B' else -1)\\nG=len(g);se=math.sqrt(G/(G-1)*sum(x*x for x in g.values()))\\nz=(p['B']-p['A'])/se\\nprint('cluster se',se,'z',z,'p',math.erfc(abs(z)/math.sqrt(2)))\\nEOF\" ok -> \"cluster se 0.023809570133441336 z 3.6399929180132675 p 0.0002726455396037795\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "deduplicated session counts",
+   true
+  ],
+  [
+   "completion rates",
+   true
+  ],
+  [
+   "the gain is significant",
+   true
+  ],
+  [
+   "ship decision",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 4,
+  "tool_calls": 3,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 3154,
+  "reasoning_tokens": 267
+ },
+ "deliverables": [],
+ "render": null
+}

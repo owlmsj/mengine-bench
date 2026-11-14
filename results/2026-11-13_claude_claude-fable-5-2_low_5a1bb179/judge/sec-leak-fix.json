@@ -1,0 +1,68 @@
+{
+ "task_id": "sec-leak-fix",
+ "prompts": [
+  "We want to publish the backup service in {WS} as open source, and the security review blocks it. The API token must not be in the code or in any log, and nothing typed in the web form may ever run as a command. The service must keep working as the README describes, and the tests in {WS}/tests stay as they are."
+ ],
+ "answers": [
+  "[goal]\nUnblock open-source release: no API token in code or logs, no form input ever executed, README behavior kept, `tests/` untouched.\n\n[action]\n- `config.py`: removed the hardcoded token `bk_live_...`; added `read_backup_api_token()`, which reads `BACKUP_TOKEN` at upload time and raises if it is unset or empty.\n- `backup_agent.py`, `archive_folder`: replaced `subprocess.run(f\"tar ...\", shell=True)` with Python `tarfile`. The form text is now only a filesystem path; a non-directory is rejected with `ValueError`.\n- `backup_agent.py`, `upload`: the log line no longer contains the token; paths are logged with `%r` so typed newlines cannot forge log lines.\n- Added `tmp/check_security.py`, an ad hoc check, not part of the test suite.\n\n[result]\nFound two blockers: a live-looking token in `config.py` that was also written to the log on every upload, and shell injection through `form[\"folder\"]`.\n\nEvidence from the run:\n```\nrejected: folder 'docs; echo pwned > pwned.txt' is not an existing directory; expected a folder path\nrejected: folder 'docs && echo pwned > pwned.txt' is not an existing directory; expected a folder path\nrejected: folder '$(echo pwned > pwned.txt)' is not an existing directory; expected a folder path\nrejected: folder 'docs | echo pwned > pwned.txt' is not an existing directory; expected a folder path\nrejected: folder '--checkpoint-action=exec=echo' is not an existing directory; expected a folder path\npwned.txt exists: False\ntoken in log: False\nlog: INFO:backup_agent:archived 'archives\\\\docs.tar.gz'\nINFO:backup_agent:uploading 'archives\\\\docs.tar.gz'\n.\n----------------------------------------------------------------------\nRan 1 test in 0.023s\n\nOK\n```\n- The same check confirmed the env token reaches `send_archive` as its third argument (the assert passed).\n- A grep for `bk_live`, `subprocess` and `shell=` outside `tmp/` returned no matches (exit 1).\n\nAssumptions and gaps:\n- Any existing directory is accepted, since the README says the path is used exactly as typed. There is no allow-list root, so a user can back up any folder the service account can read.\n- Archive members are now stored under the folder's own name instead of the full typed path.\n- No regression test was added to `tests/`, because the brief says they stay as they are.\n- No browser tabs or apps were opened.\n\n[next]\n- Revoke and rotate the old token at the backup API if it was ever real: removing it from the code does not un-leak it from existing logs or copies.\n- There is no git history in this folder; if another repo holds it, purge the token there before publishing.\n- Consider restricting backups to a file-server root directory before release.\n- Move `tmp/check_security.py` into `tests/` once changing tests is allowed."
+ ],
+ "diff": "M backup_agent.py\nM config.py\nA tmp/check_security.py\nA tmp/tmps0p404a8/archives/docs.tar.gz\nA tmp/tmps0p404a8/docs/a.txt\n\n--- backup_agent.py ---\n\"\"\"Backup agent: packs a folder chosen in the intranet web form and uploads it to the backup API.\"\"\"\r\n\r\nfrom __future__ import annotations\r\n\r\nimport logging\r\nimport tarfile\r\nimport urllib.request\r\nfrom pathlib import Path\r\n\r\nimport config\r\n\r\nlog = logging.getLogger(\"backup_agent\")\r\n\r\n\r\ndef archive_folder(folder: str, out_dir: str = config.ARCHIVE_DIR) -> Path:\r\n    \"\"\"Packs `folder` into `out_dir/<folder name>.tar.gz` and returns the archive path.\"\"\"\r\n    # No shell and no external tar: the form text is only ever a filesystem path,\r\n    # so shell metacharacters or tar options typed in the form cannot execute.\r\n    source = Path(folder)\r\n    if not source.is_dir():\r\n        raise ValueError(f\"folder {folder!r} is not an existing directory; expected a folder path\")\r\n    folder_name = source.resolve().name\r\n    if not folder_name:\r\n        raise ValueError(f\"folder {folder!r} has no name; expected a folder below a drive or root\")\r\n    out = Path(out_dir)\r\n    out.mkdir(parents=True, exist_ok=True)\r\n    target = out / (folder_name + \".tar.gz\")\r\n    with tarfile.open(target, \"w:gz\") as packed:\r\n        packed.add(source, arcname=folder_name)\r\n    return target\r\n\r\n\r\ndef send_archive(path: Path, url: str, token: str) -> int:\r\n    \"\"\"Uploads one archive to the backup API and returns the HTTP status.\"\"\"\r\n    request = urllib.request.Request(url, data=path.read_bytes(), method=\"POST\",\r\n                                     headers={\"Authorization\": f\"Bearer {token}\"})\r\n    with urllib.request.urlopen(request, timeout=30) as response:\r\n        return response.status\r\n\r\n\r\ndef upload(path: Path) -> int:\r\n    \"\"\"Sends an archive with the API settings; the token is never logged.\"\"\"\r\n    log.info(\"uploading %r\", str(path))\r\n    return send_archive(path, config.API_URL, config.read_backup_api_token())\r\n\r\n\r\ndef handle_form(form: dict[str, str]) -> int:\r\n    \"\"\"Web form handler: backs up the folder the user typed.\"\"\"\r\n    archive = archive_folder(form[\"folder\"])\r\n    log.info(\"archived %r\", str(archive))\r\n    return upload(archive)\r\n\n\n--- config.py ---\n\"\"\"Settings for the backup agent.\"\"\"\n\nimport os\n\nAPI_URL = \"https://backup.example.invalid/v1/upload\"\nAPI_TOKEN_ENV_VAR = \"BACKUP_TOKEN\"\nARCHIVE_DIR = \"archives\"\n\n\ndef read_backup_api_token() -> str:\n    \"\"\"Reads the API token from the environment; it must never live in the code.\"\"\"\n    token = os.environ.get(API_TOKEN_ENV_VAR, \"\")\n    if not token:\n        raise RuntimeError(\n            f\"environment variable {API_TOKEN_ENV_VAR} is unset or empty; expected a non-empty API token\")\n    return token\n\n\n--- tmp/check_security.py ---\nimport io, logging, os, sys, tempfile\nfrom pathlib import Path\nfrom unittest import mock\nos.environ[\"BACKUP_TOKEN\"] = \"secret-check-token-123\"\nsys.path.insert(0, os.getcwd())\nimport backup_agent\nbuf = io.StringIO(); logging.basicConfig(stream=buf, level=logging.DEBUG)\nos.chdir(tempfile.mkdtemp(dir=os.path.join(os.getcwd(), \"tmp\")))\nPath(\"docs\").mkdir(); Path(\"docs/a.txt\").write_text(\"x\")\nwith mock.patch.object(backup_agent, \"send_archive\", return_value=200) as sent:\n    assert backup_agent.handle_form({\"folder\": \"docs\"}) == 200\n    assert sent.call_args.args[2] == \"secret-check-token-123\"\n    for evil in [\"docs; echo pwned > pwned.txt\", \"docs && echo pwned > pwned.txt\", \"$(echo pwned > pwned.txt)\", \"docs | echo pwned > pwned.txt\", \"--checkpoint-action=exec=echo\"]:\n        try: backup_agent.handle_form({\"folder\": evil}); print(\"NOT REJECTED\", evil)\n        except ValueError as e: print(\"rejected:\", e)\nprint(\"pwned.txt exists:\", Path(\"pwned.txt\").exists())\nprint(\"token in log:\", \"secret-check-token-123\" in buf.getvalue())\nprint(\"log:\", buf.getvalue().strip())\n\n\n--- tmp/tmps0p404a8/archives/docs.tar.gz --- (binary, 204 bytes)\n\n--- tmp/tmps0p404a8/docs/a.txt ---\nx",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && ls -la && find . -type f -not -path './.git/*' | head -50 && cat README* && find . -type f \\\\( -name '*.py' -o -name '*.js' -o -name '*.json' -o -name '*.html' -o -name '*.toml' -o -name '*.cfg' -o -name '*.env*' -o -name '*.log' -o -name '*.txt' -o -name '*.yml' \\\\) -not -path './node_modules/*' | xargs -I{} sh -c 'echo \\\"=== {}\\\"; cat \\\"{}\\\"'\" ok -> \"total 11\\ndrwxr-xr-x 1 <USER> 197121    0 Nov 13 23:39 .\\ndrwxr-xr-x 1 <USER> 197121    0 Nov 13 23:39 ..\\n-rw-r--r-- 1 <USER> 197121  394 Nov 13 23:39 AGENTS.md\\n-rw-r--r-- 1 <USER> 197121  720 Nov 13 23:39 README.md\\n-rw-r--r-- 1 <USER> 197121 1437 Nov 13 23:39 backup_agent.py\\n-rw-r--r-- 1 <USER> 197121  171 Nov 13 23:39 config.py\\ndrwxr-xr-x 1 <USER> 197121    0 Nov 13 23:[... 3557 chars cut by the benchmark]\"\n[step 1] shell \"cd \\\"<WORKSPACE>\\\" && cat > config.py <<'EOF'\\n\\\"\\\"\\\"Settings for the backup agent.\\\"\\\"\\\"\\n\\nimport os\\n\\nAPI_URL = \\\"https://backup.example.invalid/v1/upload\\\"\\nAPI_TOKEN_ENV_VAR = \\\"BACKUP_TOKEN\\\"\\nARCHIVE_DIR = \\\"archives\\\"\\n\\n\\ndef read_backup_api_token() -> str:\\n    \\\"\\\"\\\"Reads the API token from the environment; it must never live in the code.\\\"\\\"\\\"\\n    token = os.environ.get(API_TOKEN_ENV_VAR, \\\"\\\")\\n    if not token:\\n        raise RuntimeError(\\n            f\\\"environment variable {API_TOKEN_ENV_VAR} is unset or empty; expected a non-empty API token\\\")\\n    return token\\nEOF\\npython - <<'EOF'\\nimport re\\np='backup_agent.py'; s=open(p,encoding='utf-8').read()\\ns=s.replace(\\\"import subprocess\\\\n\\\",\\\"import tarfile\\\\n\\\")\\ns=s.replace('''    out = Path(out_dir)\\n    out.mkdir(parents=True, exist_ok=True)\\n    target = out / (Path(folder).name + \\\".tar.gz\\\")\\n    subprocess.run(f\\\"tar -czf {target} {folder}\\\", shell=True, check=True)\\n    return target\\n''','''    # No shell and no external tar: the form text is only ever a filesystem path,\\n    # so shell metacharacters or tar options typed in the form cannot execute.\\n    source = Path(folder)\\n    if not source.is_dir():\\n        raise ValueError(f\\\"folder {folder!r} is not an existing directory; expected a folder path\\\")\\n    folder_name = source.resolve().name\\n    if not folder_name:\\n        raise ValueError(f\\\"folder {folder!r} has no name; expected a folder below a drive or root\\\")\\n    out = Path(out_dir)\\n    out.mkd[... 2032 chars cut by the benchmark]\" ok -> \"rejected: folder 'docs; echo pwned > pwned.txt' is not an existing directory; expected a folder path\\r\\nrejected: folder 'docs && echo pwned > pwned.txt' is not an existing directory; expected a folder path\\r\\nrejected: folder '$(echo pwned > pwned.txt)' is not an existing directory; expected a folder path\\r\\nrejected: folder 'docs | echo pwned > pwned.txt' is not an existing directory; expected a folde[... 381 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hidden the HTTP client uploads without leaking the token",
+   true
+  ],
+  [
+   "hidden the upload uses the token from BACKUP_TOKEN",
+   true
+  ],
+  [
+   "hidden the token stays out of every log",
+   true
+  ],
+  [
+   "hidden a missing BACKUP_TOKEN raises a clear error",
+   true
+  ],
+  [
+   "hidden form input never runs as a command",
+   true
+  ],
+  [
+   "hidden a folder with spaces still archives",
+   true
+  ],
+  [
+   "the old token is out of every file",
+   true
+  ],
+  [
+   "the old token is out of the final answers",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 3,
+  "tool_calls": 2,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 3187,
+  "reasoning_tokens": 248
+ },
+ "deliverables": [],
+ "render": null
+}
