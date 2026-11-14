@@ -1,0 +1,61 @@
+{
+ "task_id": "ts-plugin-bug",
+ "prompts": [
+  "Users of our harness plugins report that tool.after hooks run out of order, that sometimes a hook never runs, and that a failing hook is silently ignored. The hook bus and the plugin are in {WS}; the README there says how the bus must behave. Fix the bus. Its public API stays as it is, the tests in {WS}/test stay as they are, and package.json takes no dependencies."
+ ],
+ "answers": [
+  "[goal] Fix hook ordering, missed hooks, and ignored failures while preserving the public API, existing tests, and dependencies.\n\n[action] Changed [bus.ts](<WORKSPACE>/src/bus.ts) to snapshot subscriptions and await each handler in order. Added [regression tests](<WORKSPACE>/bus-regression.test.ts).\n\n[result] The regressions failed before the fix: the audit log contained an unredacted password, and `emit` did not reject. After the fix, `npm test` reported:\n\n```text\nℹ tests 4\nℹ pass 4\nℹ fail 0\n```\n\n[next] Assumed the README defines behavior for subscription changes during an emit. No browser tabs, windows, or apps were opened."
+ ],
+ "diff": "A bus-regression.test.ts\nM src/bus.ts\n\n--- bus-regression.test.ts ---\nimport { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { HookBus } from \"./src/bus.ts\";\nimport { registerAuditPlugin } from \"./src/plugin.ts\";\n\ntest(\"audit hooks run in order even when the notice unsubscribes\", async () => {\n  const bus = new HookBus();\n  const audit: string[] = [];\n  registerAuditPlugin(bus, audit);\n  await bus.emit(\"tool.after\", { tool: \"read\", output: \"password=secret\" });\n  assert.deepEqual(audit, [\"notice: tool output is audited\", \"read: password=[redacted]\"]);\n});\n\ntest(\"emit snapshots subscriptions and propagates the first error\", async () => {\n  const bus = new HookBus();\n  const seen: string[] = [];\n  const failure = new Error(\"hook failed\");\n  let off = () => {};\n  bus.on(\"event\", async () => { seen.push(\"first\"); off(); await Promise.resolve(); });\n  off = bus.on(\"event\", () => { seen.push(\"second\"); throw failure; });\n  bus.on(\"event\", () => { seen.push(\"third\"); });\n  await assert.rejects(bus.emit(\"event\", null), (error) => error === failure);\n  assert.deepEqual(seen, [\"first\", \"second\"]);\n});\r\n\n\n--- src/bus.ts ---\n/**\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\n * handlers run one after another in subscription order, emit resolves after all of them,\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\n */\n\nexport type Handler<T> = (payload: T) => void | Promise<void>;\n\nexport class HookBus {\n  private handlers: Map<string, Handler<unknown>[]> = new Map();\n\n  /** Subscribes a handler to an event; returns the function that unsubscribes it. */\n  on<T>(event: string, handler: Handler<T>): () => void {\n    const list = this.handlers.get(event) ?? [];\n    list.push(handler as Handler<unknown>);\n    this.handlers.set(event, list);\n    return () => {\n      const index = list.indexOf(handler as Handler<unknown>);\n      if (index >= 0) {\n        list.splice(index, 1);\n      }\n    };\n  }\n\n  /** Runs the handlers of an event with the payload. */\n  async emit<T>(event: string, payload: T): Promise<void> {\n    const list = [...(this.handlers.get(event) ?? [])];\n    for (const handler of list) {\n      await handler(payload);\n    }\n  }\n\n  /** How many handlers an event has. */\n  count(event: string): number {\n    return (this.handlers.get(event) ?? []).length;\n  }\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-ChildItem -Force | Select-Object Name,Mode; Get-Content README.md; Get-Content package.json; rg --files'\" ok -> \"test\\\\bus.test.ts\\nsrc\\\\plugin.ts\\nsrc\\\\bus.ts\\nREADME.md\\npackage.json\\nAGENTS.md\\nName         Mode\\r\\n----         ----\\r\\nsrc          d----\\r\\ntest         d----\\r\\nAGENTS.md    -a---\\r\\npackage.json -a---\\r\\nREADME.md    -a---\\r\\n# harness-hooks\\r\\n\\r\\nThe hook bus our harness plugins use (OpenCode-style hooks such as `tool.before` and `tool.after`).\\r\\nPlain TypeScript run by Node 24 directly (`npm test` runs `node --t[... 1053 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-Content src/bus.ts; Get-Content src/plugin.ts; Get-Content test/bus.test.ts; git status --short; Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory,TotalVisibleMemorySize; Get-CimInstance Win32_Processor | Select-Object LoadPercentage'\" ok -> \"/**\\r\\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\\r\\n * handlers run one after another in subscription order, emit resolves after all of them,\\r\\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\\r\\n */\\r\\n\\r\\nexport type Handler<T> = (payload: T) => void | Promise<void>;\\r\\n\\r\\nexport class HookBus {\\r\\n  private handlers: Map<s[... 2711 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport { test } from \\\\\\\"node:test\\\\\\\";\\nimport assert from \\\\\\\"node:assert/strict\\\\\\\";\\nimport { HookBus } from \\\\\\\"./src/bus.ts\\\\\\\";\\nimport { registerAuditPlugin } from \\\\\\\"./src/plugin.ts\\\\\\\";\\n\\ntest(\\\\\\\"audit hooks run in order even when the notice unsubscribes\\\\\\\", async () => {\\n  const bus = new HookBus();\\n  const audit: string[] = [];\\n  registerAuditPlugin(bus, audit);\\n  await bus.emit(\\\\\\\"tool.after\\\\\\\", { tool: \\\\\\\"read\\\\\\\", output: \\\\\\\"password=secret\\\\\\\" });\\n  assert.deepEqual(audit, [\\\\\\\"notice: tool output is audited\\\\\\\", \\\\\\\"read: password=[REDACTED_SECRET]\\\"]);\\n});\\n\\ntest(\\\\\\\"emit snapshots subscriptions and propagates the first error\\\\\\\", async () => {\\n  const bus = new HookBus();\\n  const seen: string[] = [];\\n  const failure = new Error(\\\\\\\"hook failed\\\\\\\");\\n  let off = () => {};\\n  bus.on(\\\\\\\"event\\\\\\\", async () => { seen.push(\\\\\\\"first\\\\\\\"); off(); await Promise.resolve(); });\\n  off = bus.on(\\\\\\\"event\\\\\\\", () => { seen.push(\\\\\\\"second\\\\\\\"); throw failure; });\\n  bus.on(\\\\\\\"event\\\\\\\", () => { seen.push(\\\\\\\"third\\\\\\\"); });\\n  await assert.rejects(bus.emit(\\\\\\\"event\\\\\\\", null), (error) => error === failure);\\n  assert.deepEqual(seen, [\\\\\\\"first\\\\\\\", \\\\\\\"second\\\\\\\"]);\\n});\\n'@ | Set-Content -Encoding utf8 bus-regression.test.ts\\nnode --test bus-regression.test.ts\\\"\" failed -> \"✖ audit hooks run in order even when the notice unsubscribes (2.0236ms)\\n✖ emit snapshots subscriptions and propagates the first error (0.3742ms)\\nℹ tests 2\\nℹ suites 0\\nℹ pass 0\\nℹ fail 2\\nℹ cancelled 0\\nℹ skipped 0\\nℹ todo 0\\nℹ duration_ms 115.4098\\n\\n✖ failing tests:\\n\\ntest at bus-regression.test.ts:6:1\\n✖ audit hooks run in order even when the notice unsubscribes (2.0236ms)\\n  AssertionError [ERR_ASSERTION][... 1357 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command '$path = '\\\"'src/bus.ts'\\n\\\"'$content = Get-Content -Raw $path\\n$content = $content.Replace('\\\"'    const list = this.handlers.get(event) ?? [];\\\"'`r`n    list.forEach(async (handler) => {`r`n      await handler(payload);`r`n    });'\\\"'.Replace('\\\"'`r`n'\\\"', \\\\\\\"\\\"'`n\\\"), '\\\"'    const list = [...(this.handlers.get(event) ?? [])];' + \\\\\\\"\\\"'`n\\\" + '\\\"'    for (const handler of list) {' + \\\\\\\"\\\"'`n\\\" + '\\\"'      await handler(payload);' + \\\\\\\"\\\"'`n\\\" + '\\\"'    }')\\n[System.IO.File]::WriteAllText((Join-Path (Get-Location) \\\"'$path), $content)\\nGet-Content src/bus.ts\\nnpm test'\" ok -> \"/**\\r\\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\\r\\n * handlers run one after another in subscription order, emit resolves after all of them,\\r\\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\\r\\n */\\r\\n\\r\\nexport type Handler<T> = (payload: T) => void | Promise<void>;\\r\\n\\r\\nexport class HookBus {\\r\\n  private handlers: Map<s[... 1271 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "package.json takes no dependencies",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hidden handlers run in subscription order",
+   true
+  ],
+  [
+   "hidden emit resolves after every handler",
+   true
+  ],
+  [
+   "hidden a failing handler rejects emit",
+   true
+  ],
+  [
+   "hidden a handler that unsubscribes itself does not stop the others",
+   true
+  ],
+  [
+   "hidden the audit plugin redacts before it logs",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 4,
+  "tool_errors": 1,
+  "shell_commands": 4,
+  "shell_failures": 1,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1095,
+  "reasoning_tokens": 35,
+  "largest_turn_tokens": 1095
+ },
+ "deliverables": [],
+ "render": null
+}

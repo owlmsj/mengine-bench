@@ -1,0 +1,53 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [
+  "[goal] Recover the camping shop’s price list.\n\n[action] Decoded the surviving SQLite table leaf page, assuming its text and numeric fields are the item and price.\n\n[result] Saved 10 rows to [recovered.json](<WORKSPACE>/recovered.json). The database header is missing, so the original total row count is unknown. Every one of the page’s ten declared cells decoded within its stated payload length, and the JSON passed a round-trip check:\n\n```text\nValidated 10 of 10 declared cells; JSON round trip passed.\n```\n\n[next] No browser tabs, windows, or apps were opened."
+ ],
+ "diff": "A recovered.json\n\n--- recovered.json ---\n[\r\n  {\r\n    \"item\": \"trail map\",\r\n    \"price\": 0\r\n  },\r\n  {\r\n    \"item\": \"matchbox\",\r\n    \"price\": 1\r\n  },\r\n  {\r\n    \"item\": \"tent stake\",\r\n    \"price\": 2.75\r\n  },\r\n  {\r\n    \"item\": \"lantern\",\r\n    \"price\": 24\r\n  },\r\n  {\r\n    \"item\": \"rope coil\",\r\n    \"price\": 18\r\n  },\r\n  {\r\n    \"item\": \"water filter\",\r\n    \"price\": 39.9\r\n  },\r\n  {\r\n    \"item\": \"sleeping bag\",\r\n    \"price\": 129\r\n  },\r\n  {\r\n    \"item\": \"camp stove\",\r\n    \"price\": 310\r\n  },\r\n  {\r\n    \"item\": \"compass\",\r\n    \"price\": 15.5\r\n  },\r\n  {\r\n    \"item\": \"first aid kit\",\r\n    \"price\": 0.99\r\n  }\r\n]\r\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"Get-ChildItem -Force | Select-Object Name,Length; python -c \\\\\\\"import sqlite3; c=sqlite3.connect('file:prices.db?mode=ro',uri=True); print(c.execute('pragma integrity_check').fetchall()); print(c.execute('select sql from sqlite_master').fetchall())\\\\\\\"\\\"\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<string>\\\", line 1, in <module>\\r\\n    import sqlite3; c=sqlite3.connect('file:prices.db?mode=ro',uri=True); print(c.execute('pragma integrity_check').fetchall()); print(c.execute('select sql from sqlite_master').fetchall())\\r\\n                                                                                ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^\\r\\nsqlite3.Database[... 101 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"Format-Hex -Path prices.db | Select-Object -First 35; python -c \\\\\\\"from pathlib import Path; b=Path('prices.db').read_bytes(); print(repr(b[:256])); print('sqlite header',b.find(b'SQLite format 3'))\\\\\\\"\\\"\" ok -> \"Label: <WORKSPACE>\\\\prices.db\\r\\n\\r\\n          Offset Bytes                                           Ascii\\r\\n                 00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F\\r\\n          ------ ----------------------------------------------- -----\\r\\n0000000000000000 0D 00 00 00 0A 0F 3D 00 0F F1 0F E3 0F CB 0F BD �   ��= �ñ�ã�Ë�½\\r\\n000000000[... 3842 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"python -c \\\\\\\"from pathlib import Path; b=Path('prices.db').read_bytes(); print(b[3900:].hex(' ')); print(repr(b[3900:]))\\\\\\\"\\\"\" ok -> \"00 19 0a 04 00 27 07 66 69 72 73 74 20 61 69 64 20 6b 69 74 3f ef ae 14 7a e1 47 ae 13 09 04 00 1b 07 63 6f 6d 70 61 73 73 40 2f 00 00 00 00 00 00 10 08 04 00 21 02 63 61 6d 70 20 73 74 6f 76 65 01 36 12 07 04 00 25 02 73 6c 65 65 70 69 6e 67 20 62 61 67 00 81 18 06 04 00 25 07 77 61 74 65 72 20 66 69 6c 74 65 72 40 43 f3 33 33 33 33 33 0e 05 04 00 1f 01 72 6f 70 65 20 63 6f 69 6c 12 0c 04 04 00 1[... 620 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nfrom pathlib import Path\\nimport json, struct\\nb=Path('prices.db').read_bytes()\\nassert len(b)==4096 and b[0]==13\\nn=int.from_bytes(b[3:5],'big')\\ndef varint(p):\\n    v=0\\n    for i in range 9:\\n        x=b[p+i]\\n        if i==8: return (v<<8)|x,p+i+1\\n        v=(v<<7)|(x&127)\\n        if x<128: return v,p+i+1\\n    raise ValueError('bad varint')\\nrows=[]\\nfor i in range(n):\\n    p=int.from_bytes(b[8+2*i:10+2*i],'big')\\n    length,q=varint(p); rowid,q=varint(q); start=q\\n    header,q=varint(q); types=[]\\n    while q<start+header:\\n        t,q=varint(q); types.append(t)\\n    assert len(types)==3 and types[0]==0 and types[1]>=13 and types[1]%2==1\\n    q=start+header; size=(types[1]-13)//2\\n    item=b[q:q+size].decode('utf-8'); q+=size\\n    t=types[2]\\n    sizes={1:1,2:2,3:3,4:4,5:6,6:8,7:8,8:0,9:0}\\n    assert t in sizes\\n    size=sizes[t]; raw=b[q:q+size]; q+=size\\n    price=struct.unpack('>d',raw)[0] if t==7 else (t-8 if t in (8,9) else int.from_bytes(raw,'big',signed=True))\\n    assert q==start+length and q<=len(b)\\n    rows.append({'item':item,'price':price})\\n    print(f'rowid={rowid} offset={p} payload={length} item={item\\\"'!r} price={price}'\\\"')\\nPath('recovered.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2)+'\\\\\\\\n',encoding='utf-8')\\nassert json.loads(Path('recovered.json').read_text(encoding='utf-8'))==rows\\nprint(f'Validated {len(rows)} of {n} declared cells; JSON roun[... 31 chars cut by the benchmark]\" failed -> \"File \\\"<stdin>\\\", line 8\\r\\n    for i in range 9:\\r\\n                   ^\\r\\nSyntaxError: invalid syntax\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nfrom pathlib import Path\\nimport json, struct\\nb=Path('prices.db').read_bytes()\\nassert len(b)==4096 and b[0]==13\\nn=int.from_bytes(b[3:5],'big')\\ndef varint(p):\\n    v=0\\n    for i in range(9):\\n        x=b[p+i]\\n        if i==8: return (v<<8)|x,p+i+1\\n        v=(v<<7)|(x&127)\\n        if x<128: return v,p+i+1\\n    raise ValueError('bad varint')\\nrows=[]\\nfor i in range(n):\\n    p=int.from_bytes(b[8+2*i:10+2*i],'big')\\n    length,q=varint(p); rowid,q=varint(q); start=q\\n    header,q=varint(q); types=[]\\n    while q<start+header:\\n        t,q=varint(q); types.append(t)\\n    assert len(types)==3 and types[0]==0 and types[1]>=13 and types[1]%2==1\\n    q=start+header; size=(types[1]-13)//2\\n    item=b[q:q+size].decode('utf-8'); q+=size\\n    t=types[2]; sizes={1:1,2:2,3:3,4:4,5:6,6:8,7:8,8:0,9:0}\\n    assert t in sizes\\n    size=sizes[t]; raw=b[q:q+size]; q+=size\\n    price=struct.unpack('>d',raw)[0] if t==7 else (t-8 if t in (8,9) else int.from_bytes(raw,'big',signed=True))\\n    assert q==start+length and q<=len(b)\\n    rows.append({'item':item,'price':price})\\n    print(f'rowid={rowid} offset={p} payload={length} item={item\\\"'!r} price={price}'\\\"')\\nPath('recovered.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2)+'\\\\\\\\n',encoding='utf-8')\\nassert json.loads(Path('recovered.json').read_text(encoding='utf-8'))==rows\\nprint(f'Validated {len(rows)} of {n} declared cells; JSON round [... 29 chars cut by the benchmark]\" ok -> \"rowid=1 offset=4081 payload=13 item='trail map' price=0\\r\\nrowid=2 offset=4067 payload=12 item='matchbox' price=1\\r\\nrowid=3 offset=4043 payload=22 item='tent stake' price=2.75\\r\\nrowid=4 offset=4029 payload=12 item='lantern' price=24\\r\\nrowid=5 offset=4013 payload=14 item='rope coil' price=18\\r\\nrowid=6 offset=3987 payload=24 item='water filter' price=39.9\\r\\nrowid=7 offset=3967 payload=18 item='sleeping bag[... 254 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   true
+  ],
+  [
+   "rows with fractional prices recovered",
+   true
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   true
+  ],
+  [
+   "no row that is not in the table",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 5,
+  "tool_errors": 2,
+  "shell_commands": 5,
+  "shell_failures": 2,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1856,
+  "reasoning_tokens": 44,
+  "largest_turn_tokens": 1856
+ },
+ "deliverables": [],
+ "render": null
+}

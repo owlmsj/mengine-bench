@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-sql-funnel",
+ "prompts": [
+  "Product wants to know where players drop off on each platform. The data is in {WS}/analytics.db and our reporting rules are in {WS}/METRICS.md. Where do we lose the most players? Record it in {WS}/result.json: funnel (per platform, players at each step) and biggest_drop (per platform, the step)."
+ ],
+ "answers": [
+  "[goal] Identify the largest funnel drop on each platform.\n\n[action] Wrote [result.json](./result.json). I treated the named drop as the step players failed to reach, and allowed events at the same timestamp, as the rules say “at or after.”\n\n[result] PC loses the most at **purchase**: 269 of 326 players convert (82.52%). Steam Deck loses the most at **tutorial_complete**: 128 of 192 convert (66.67%).\n\nAn independent SQL calculation returned the same funnel counts:\n\n```text\n('pc', 470, 389, 326, 269)\n('steamdeck', 192, 128, 87, 61)\nJSON valid: True\n```\n\nThe calculation excludes test accounts and unknown players, and uses each player’s first valid event at each step.\n\n[next] The result is ready for reporting."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\r\n  \"funnel\": {\r\n    \"pc\": {\r\n      \"install\": 470,\r\n      \"tutorial_complete\": 389,\r\n      \"first_match\": 326,\r\n      \"purchase\": 269\r\n    },\r\n    \"steamdeck\": {\r\n      \"install\": 192,\r\n      \"tutorial_complete\": 128,\r\n      \"first_match\": 87,\r\n      \"purchase\": 61\r\n    }\r\n  },\r\n  \"biggest_drop\": {\r\n    \"pc\": \"purchase\",\r\n    \"steamdeck\": \"tutorial_complete\"\r\n  }\r\n}\r\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"Get-Content METRICS.md; Get-ChildItem -Force | Select-Object Name,Length; python -c \\\\\\\"import sqlite3; c=sqlite3.connect('analytics.db'); print(c.execute(\\\\\\\\\\\\\\\"select name, sql from sqlite_master where type in ('table','view')\\\\\\\\\\\\\\\").fetchall())\\\\\\\"\\\"\" failed -> \"# How we report the funnel\\r\\n\\r\\nSteps, in order: install, tutorial_complete, first_match, purchase.\\r\\nA step counts only at or after the same player's previous step, with no time limit; its time is the first valid occurrence.\\r\\nTest accounts and events from unknown players do not count.\\r\\nA step's conversion is its players over the previous step's players. The biggest drop is the step with the lowest c[... 326 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport sqlite3\\nc=sqlite3.connect('analytics.db')\\nfor row in c.execute(\\\\\\\"select name, sql from sqlite_master where type in ('table','view')\\\\\\\"):\\n print(row)\\n'@ | python -\\\"\" ok -> \"('users', 'CREATE TABLE users (user_id text primary key, platform text, is_test integer)')\\r\\n('events', 'CREATE TABLE events (user_id text, name text, ts text)')\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport sqlite3\\nc=sqlite3.connect('analytics.db')\\nfor q in ['select platform,is_test,count(*) from users group by 1,2','select name,count(*),min(ts),max(ts) from events group by 1','select * from events limit 10','select count(*) from events e left join users u on e.user_id=u.user_id where u.user_id is null']:\\n print(q, list(c.execute(q)))\\n'@ | python -\\\"\" ok -> \"select platform,is_test,count(*) from users group by 1,2 [('pc', 0, 593), ('pc', 1, 21), ('steamdeck', 0, 273), ('steamdeck', 1, 13)]\\r\\nselect name,count(*),min(ts),max(ts) from events group by 1 [('first_match', 479, '2026-06-05 04:00:00', '2026-07-04 21:00:00'), ('install', 759, '2026-06-01 12:00:00', '2026-06-21 11:00:00'), ('purchase', 441, '2026-05-30 12:00:00', '2026-07-12 08:00:00'), ('tutor[... 702 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport sqlite3,json\\nc=sqlite3.connect('analytics.db')\\nsteps=['install','tutorial_complete','first_match','purchase']\\nfunnel={}\\nfor user,platform in c.execute('select user_id,platform from users where is_test=0'):\\n times=[]\\n for step in steps:\\n  if times and times[-1] is None:\\n   times.append(None); continue\\n  row=c.execute('select min(ts) from events where user_id=? and name=? and (? is null or ts>=?)',(user,step,times[-1] if times else None,times[-1] if times else None)).fetchone()\\n  times.append(row[0])\\n counts=funnel.setdefault(platform,{s:0 for s in steps})\\n for step,t in zip(steps,times): counts[step]+=t is not None\\nbiggest={p:min(steps[1:],key=lambda s: counts[s]/counts[steps[steps.index(s)-1]] if counts[steps[steps.index(s)-1]] else float('inf')) for p,counts in funnel.items()}\\nresult={'funnel':funnel,'biggest_drop':biggest}\\nwith open('result.json','w',encoding='utf-8') as f: json.dump(result,f,indent=2); f.write('\\\\\\\\n')\\nprint(json.dumps(result,indent=2))\\nfor p,counts in funnel.items():\\n print(p,[(steps[i],counts[steps[i]],counts[steps[i-1]],counts[steps[i]]/counts[steps[i-1]]) for i in range(1,len(steps))])\\n'@ | python -\\\"\" ok -> \"{\\r\\n  \\\"funnel\\\": {\\r\\n    \\\"pc\\\": {\\r\\n      \\\"install\\\": 470,\\r\\n      \\\"tutorial_complete\\\": 389,\\r\\n      \\\"first_match\\\": 326,\\r\\n      \\\"purchase\\\": 269\\r\\n    },\\r\\n    \\\"steamdeck\\\": {\\r\\n      \\\"install\\\": 192,\\r\\n      \\\"tutorial_complete\\\": 128,\\r\\n      \\\"first_match\\\": 87,\\r\\n      \\\"purchase\\\": 61\\r\\n    }\\r\\n  },\\r\\n  \\\"biggest_drop\\\": {\\r\\n    \\\"pc\\\": \\\"purchase\\\",\\r\\n    \\\"steamdeck\\\": \\\"tutorial_complete\\\"\\r\\n  }\\r\\n}\\r\\npc [('tutorial_complete', 38[... 263 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport sqlite3,json\\nc=sqlite3.connect('analytics.db')\\nq='''WITH i AS (SELECT u.user_id,u.platform,min(e.ts) t FROM users u JOIN events e ON e.user_id=u.user_id AND e.name='install' WHERE u.is_test=0 GROUP BY u.user_id), t AS (SELECT i.user_id,min(e.ts) t FROM i JOIN events e ON e.user_id=i.user_id AND e.name='tutorial_complete' AND e.ts>=i.t GROUP BY i.user_id), m AS (SELECT t.user_id,min(e.ts) t FROM t JOIN events e ON e.user_id=t.user_id AND e.name='first_match' AND e.ts>=t.t GROUP BY t.user_id), p AS (SELECT m.user_id,min(e.ts) t FROM m JOIN events e ON e.user_id=m.user_id AND e.name='purchase' AND e.ts>=m.t GROUP BY m.user_id) SELECT i.platform,count(*),count(t.user_id),count(m.user_id),count(p.user_id) FROM i LEFT JOIN t ON t.user_id=i.user_id LEFT JOIN m ON m.user_id=i.user_id LEFT JOIN p ON p.user_id=i.user_id GROUP BY i.platform ORDER BY i.platform'''\\nfor row in c.execute(q): print(row)\\nwith open('result.json',encoding='utf-8') as f: print('JSON valid:',bool(json.load(f)))\\n'@ | python -\\\"\" ok -> \"('pc', 470, 389, 326, 269)\\r\\n('steamdeck', 192, 128, 87, 61)\\r\\nJSON valid: True\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "players per step on pc",
+   true
+  ],
+  [
+   "players per step on steamdeck",
+   true
+  ],
+  [
+   "biggest drop on each platform",
+   true
+  ],
+  [
+   "final answer does not contradict biggest drops",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 5,
+  "tool_errors": 1,
+  "shell_commands": 5,
+  "shell_failures": 1,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1509,
+  "reasoning_tokens": 34,
+  "largest_turn_tokens": 1509
+ },
+ "deliverables": [],
+ "render": null
+}
