@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "[goal] Identify the hitch cause and a change within the owner’s constraints.\n\n[action] Wrote [result.json](./result.json). I assumed the GPU’s L1 state in each one-second sensor sample represents the corresponding capture interval.\n\n[result] The capture has **137.29 average FPS** and **45.35 FPS 1% low**, using the owner’s definitions. All 15 seconds with frames above 15 ms coincide with GPU PCIe L1 samples; each contains 12 such frames. Disk spikes and the Defender activity at seconds 43–45 do not coincide with those hitch intervals. The evidence points to GPU PCIe ASPM transitions, so the proposed change disables `pcie_aspm_rp1_gpu` while retaining Gen5 x4.\n\n[next] Confirm the fix with another capture of the same replay after that setting change. The existing capture establishes correlation, but cannot prove the change fixes the hitches."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"avg_fps\": 137.29,\n  \"low_1pct_fps\": 45.35,\n  \"cause\": \"Periodic frame-time spikes coincide with the GPU PCIe link entering L1, consistent with ASPM link power-state transition latency. This is a strong correlation, not a confirmed causal test.\",\n  \"changes\": [\n    {\"setting\": \"pcie_aspm_rp1_gpu\", \"from\": \"L1\", \"to\": \"disabled\"}\n  ]\n}\r\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-ChildItem -Force | Select-Object Name,Length,LastWriteTime'\" ok -> \"Name          Length LastWriteTime\\r\\n----          ------ -------------\\r\\ncapture              13/11/2026 22:59:34\\r\\nAGENTS.md     394    13/11/2026 22:59:34\\r\\nNOTES.md      774    13/11/2026 22:59:34\\r\\nsettings.json 2429   13/11/2026 22:59:34\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-Content NOTES.md; Get-Content settings.json; Get-ChildItem capture -Recurse | Select-Object FullName,Length'\" ok -> \"# Owner notes - rig \\\"arena-01\\\"\\r\\n\\r\\nThe game hitches every few seconds even though the average frame rate looks fine.\\r\\nCapture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\r\\ntaken at the same time (same clock: second 0 of both files is the same instant).\\r\\nsettings.json is a dump of the rig's current settings.\\r\\n\\r\\nHow we measure:\\r\\n- Average FPS = frames presented di[... 3379 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-Content capture/sensors.csv; Get-Content capture/presentmon.csv -TotalCount 6'\" ok -> \"time_s,cpu_clock_mhz,cpu_util_pct,gpu_clock_mhz,gpu_pcie_link_state,gpu_pcie_link_speed,dpc_latency_us,disk_active_pct,top_cpu_process\\r\\n0,5354,35,2724,L0,Gen5 x4,52,1,Arena.exe\\r\\n1,5350,40,2754,L0,Gen5 x4,88,4,Arena.exe\\r\\n2,5270,31,2754,L1,Gen5 x4,40,3,Arena.exe\\r\\n3,5373,31,2720,L0,Gen5 x4,81,2,Arena.exe\\r\\n4,5290,33,2759,L0,Gen5 x4,41,1,Arena.exe\\r\\n5,5344,32,2735,L0,Gen5 x4,49,2,Arena.exe\\r\\n6,5380,35,27[... 2945 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport csv, numpy as np\\nfrom collections import defaultdict\\np=list(csv.DictReader(open('capture/presentmon.csv')))\\na=np.array([float(x['MsBetweenPresents']) for x in p]); print('frames',len(a),'mean',a.mean(),'p99',np.percentile(a,99),'avg',1000/a.mean(),'low',1000/np.percentile(a,99),'max',max(a))\\ng=defaultdict(list)\\nfor x in p:g[int(float(x['TimeInSeconds']))].append(float(x['MsBetweenPresents']))\\nfor s,v in g.items():\\n print(s,len(v),round(np.percentile(v,99),2),round(max(v),2),sum(x>15 for x in v))\\n'@ | python -\\\"\" ok -> \"frames 8238 mean 7.284078781257587 p99 22.04863 avg 137.28571999702498 low 45.354291853960994 max 23.675\\r\\n0 144 7.7 7.84 0\\r\\n1 144 7.56 7.67 0\\r\\n2 118 22.64 22.85 12\\r\\n3 144 7.5 7.55 0\\r\\n4 144 7.59 7.67 0\\r\\n5 143 7.65 7.98 0\\r\\n6 118 22.79 22.99 12\\r\\n7 144 7.53 7.68 0\\r\\n8 143 7.61 7.7 0\\r\\n9 144 7.6 7.63 0\\r\\n10 118 22.42 22.49 12\\r\\n11 143 7.63 7.67 0\\r\\n12 144 7.64 7.67 0\\r\\n13 145 7.53 7.73 0\\r\\n14 119 22.11 23.68 [... 924 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\n{\\n  \\\\\\\"avg_fps\\\\\\\": 137.29,\\n  \\\\\\\"low_1pct_fps\\\\\\\": 45.35,\\n  \\\\\\\"cause\\\\\\\": \\\\\\\"Periodic frame-time spikes coincide with the GPU PCIe link entering L1, consistent with ASPM link power-state transition latency. This is a strong correlation, not a confirmed causal test.\\\\\\\",\\n  \\\\\\\"changes\\\\\\\": [\\n    {\\\\\\\"setting\\\\\\\": \\\\\\\"pcie_aspm_rp1_gpu\\\\\\\", \\\\\\\"from\\\\\\\": \\\\\\\"L1\\\\\\\", \\\\\\\"to\\\\\\\": \\\\\\\"disabled\\\\\\\"}\\n  ]\\n}\\n'@ | Set-Content -Encoding utf8 result.json; Get-Content result.json\\\"\" ok -> \"{\\r\\n  \\\"avg_fps\\\": 137.29,\\r\\n  \\\"low_1pct_fps\\\": 45.35,\\r\\n  \\\"cause\\\": \\\"Periodic frame-time spikes coincide with the GPU PCIe link entering L1, consistent with ASPM link power-state transition latency. This is a strong correlation, not a confirmed causal test.\\\",\\r\\n  \\\"changes\\\": [\\r\\n    {\\\"setting\\\": \\\"pcie_aspm_rp1_gpu\\\", \\\"from\\\": \\\"L1\\\", \\\"to\\\": \\\"disabled\\\"}\\r\\n  ]\\r\\n}\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 5,
+  "tool_errors": 0,
+  "shell_commands": 5,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 956,
+  "reasoning_tokens": 27,
+  "largest_turn_tokens": 956
+ },
+ "deliverables": [],
+ "render": null
+}
