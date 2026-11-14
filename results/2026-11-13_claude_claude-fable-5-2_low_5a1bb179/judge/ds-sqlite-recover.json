@@ -1,0 +1,52 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [
+  "[goal]\nRecover the price rows from the truncated `prices.db` into `recovered.json`.\n\n[action]\n- Found that the file is a single 4096-byte page with no SQLite header: the first page, which held the schema, is gone, and what remains is one table leaf page.\n- Wrote `tmp/recover_prices.py`, which reads that page's cells directly and decodes each record by the SQLite record format.\n- No browser tabs, windows or apps were opened, so there was nothing to close.\n\n[result]\n10 rows recovered, all read from the file:\n\n| item | price |\n|---|---|\n| trail map | 0 |\n| matchbox | 1 |\n| tent stake | 2.75 |\n| lantern | 24 |\n| rope coil | 18 |\n| water filter | 39.9 |\n| sleeping bag | 129 |\n| camp stove | 310 |\n| compass | 15.5 |\n| first aid kit | 0.99 |\n\nHow I know it is right:\n- The page's own cell count is 10, and all 10 cells decoded. Script output: `page 1 leaf cells 10 len 4096` and `recovered 10 unreadable cells 0`.\n- Each record's decoded length matched the payload length stored in its cell, so no value was cut off or guessed.\n\nAssumptions:\n- With the schema lost, column names are inferred: `item` is the first text column and `price` is the first numeric column after it.\n- Prices are kept exactly as stored (integers stay integers, e.g. 24, not 24.0).\n- Rows are in the page's cell order, which is rowid order.\n- Any rows on other pages of the original database are not in this file and cannot be recovered.\n\n[next]\nNothing pending. Not checked: the output was not compared against any original list, since none exists."
+ ],
+ "diff": "A recovered.json\nA tmp/recover_prices.py\n\n--- recovered.json ---\n[\r\n {\r\n  \"item\": \"trail map\",\r\n  \"price\": 0\r\n },\r\n {\r\n  \"item\": \"matchbox\",\r\n  \"price\": 1\r\n },\r\n {\r\n  \"item\": \"tent stake\",\r\n  \"price\": 2.75\r\n },\r\n {\r\n  \"item\": \"lantern\",\r\n  \"price\": 24\r\n },\r\n {\r\n  \"item\": \"rope coil\",\r\n  \"price\": 18\r\n },\r\n {\r\n  \"item\": \"water filter\",\r\n  \"price\": 39.9\r\n },\r\n {\r\n  \"item\": \"sleeping bag\",\r\n  \"price\": 129\r\n },\r\n {\r\n  \"item\": \"camp stove\",\r\n  \"price\": 310\r\n },\r\n {\r\n  \"item\": \"compass\",\r\n  \"price\": 15.5\r\n },\r\n {\r\n  \"item\": \"first aid kit\",\r\n  \"price\": 0.99\r\n }\r\n]\n\n--- tmp/recover_prices.py ---\nimport json, struct, sys\nd = open(sys.argv[1], 'rb').read()\nps = struct.unpack('>H', d[16:18])[0] if d[:6] == b'SQLite' else 0\nif ps == 1: ps = 65536\nif ps < 512 or ps & (ps - 1): ps = 4096\nprint('size', len(d), 'pagesize', ps, 'hdr', d[:16])\ndef varint(b, i):\n    v = 0\n    for k in range(9):\n        c = b[i + k]\n        if k == 8: return (v << 8) | c, i + 9\n        v = (v << 7) | (c & 0x7f)\n        if not c & 0x80: return v, i + k + 1\ndef record(b, i, plen):\n    hl, j = varint(b, i); end = i + hl; types = []\n    while j < end:\n        t, j = varint(b, j); types.append(t)\n    vals = []; p = end\n    for t in types:\n        if t == 0: vals.append(None)\n        elif t in (1, 2, 3, 4, 5, 6):\n            n = (1, 2, 3, 4, 6, 8)[t - 1]; vals.append(int.from_bytes(b[p:p+n], 'big', signed=True)); assert p + n <= len(b); p += n\n        elif t == 7: vals.append(struct.unpack('>d', b[p:p+8])[0]); p += 8\n        elif t == 8: vals.append(0)\n        elif t == 9: vals.append(1)\n        elif t >= 12:\n            n = (t - 12) // 2; assert p + n <= len(b)\n            raw = b[p:p+n]; p += n\n            vals.append(raw.decode('utf-8') if t % 2 else raw)\n        else: raise ValueError(t)\n    assert p - i == plen, (p - i, plen)\n    return vals\nrows = []; bad = 0\nfor pg in range(0, len(d), ps):\n    page = d[pg:pg+ps]; h = 100 if (pg == 0 and d[:6] == b'SQLite') else 0\n    if len(page) <= h + 8 or page[h] != 0x0d: \n        print('page', pg // ps + 1, 'type', page[h] if len(page) > h else None, 'len', len(page)); continue\n    n = struct.unpack('>H', page[h+3:h+5])[0]\n    print('page', pg // ps + 1, 'leaf cells', n, 'len', len(page))\n    for k in range(n):\n        try:\n            off = struct.unpack('>H', page[h+8+2*k:h+10+2*k])[0]\n            plen, i = varint(page, off); rid, i = varint(page, i)\n            vals = record(page, i, plen)\n        except Exception as e:\n            bad += 1; print(' bad cell', k, repr(e)); continue\n        if pg == 0 and d[:6] == b'SQLite': print(' schema', vals); continue\n        ti = next((x for x, v in enumerate(vals) if isinstance(v, str)), None)\n        if ti is None: bad += 1; print(' skip', vals); continue\n        pr = next((v for v in vals[ti+1:] if isinstance(v, (int, float))), None)\n        if pr is None: bad += 1; print(' skip', vals); continue\n        rows.append({'item': vals[ti], 'price': pr})\nprint('recovered', len(rows), 'unreadable cells', bad); print(rows[:5], rows[-3:])\njson.dump(rows, open(sys.argv[2], 'w', encoding='utf-8'), ensure_ascii=False, indent=1)\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"mkdir -p tmp && cat > tmp/recover_prices.py <<'EOF'\\nimport json, struct, sys\\nd = open(sys.argv[1], 'rb').read()\\nps = struct.unpack('>H', d[16:18])[0] if d[:6] == b'SQLite' else 0\\nif ps == 1: ps = 65536\\nif ps < 512 or ps & (ps - 1): ps = 4096\\nprint('size', len(d), 'pagesize', ps, 'hdr', d[:16])\\ndef varint(b, i):\\n    v = 0\\n    for k in range(9):\\n        c = b[i + k]\\n        if k == 8: return (v << 8) | c, i + 9\\n        v = (v << 7) | (c & 0x7f)\\n        if not c & 0x80: return v, i + k + 1\\ndef record(b, i, plen):\\n    hl, j = varint(b, i); end = i + hl; types = []\\n    while j < end:\\n        t, j = varint(b, j); types.append(t)\\n    vals = []; p = end\\n    for t in types:\\n        if t == 0: vals.append(None)\\n        elif t in (1, 2, 3, 4, 5, 6):\\n            n = (1, 2, 3, 4, 6, 8)[t - 1]; vals.append(int.from_bytes(b[p:p+n], 'big', signed=True)); assert p + n <= len(b); p += n\\n        elif t == 7: vals.append(struct.unpack('>d', b[p:p+8])[0]); p += 8\\n        elif t == 8: vals.append(0)\\n        elif t == 9: vals.append(1)\\n        elif t >= 12:\\n            n = (t - 12) // 2; assert p + n <= len(b)\\n            raw = b[p:p+n]; p += n\\n            vals.append(raw.decode('utf-8') if t % 2 else raw)\\n        else: raise ValueError(t)\\n    assert p - i == plen, (p - i, plen)\\n    return vals\\nrows = []; bad = 0\\nfor pg in range(0, len(d), ps):\\n    page = d[pg:pg+ps]; h = 100 if pg == 0 else 0\\n    if len(page) <= h + 8 or page[h] != 0x0d: \\n        print('page', pg // ps + 1, 'type', page[h] if len([... 1057 chars cut by the benchmark]\" ok -> \"size 4096 pagesize 4096 hdr b'\\\\r\\\\x00\\\\x00\\\\x00\\\\n\\\\x0f=\\\\x00\\\\x0f\\\\xf1\\\\x0f\\\\xe3\\\\x0f\\\\xcb\\\\x0f\\\\xbd'\\r\\npage 1 type 0 len 4096\\r\\nrecovered 0 unreadable cells 0\\r\\n[] []\"\n[step 1] shell \"sed -i \\\"s/h = 100 if pg == 0 else 0/h = 100 if (pg == 0 and d[:6] == b'SQLite') else 0/; s/if pg == 0: print(' schema', vals); continue/if pg == 0 and d[:6] == b'SQLite': print(' schema', vals); continue/; s/bad += 1; continue/bad += 1; print(' bad cell', k, repr(e)); continue/\\\" tmp/recover_prices.py && python -I tmp/recover_prices.py prices.db recovered.json && cat recovered.json\" ok -> \"size 4096 pagesize 4096 hdr b'\\\\r\\\\x00\\\\x00\\\\x00\\\\n\\\\x0f=\\\\x00\\\\x0f\\\\xf1\\\\x0f\\\\xe3\\\\x0f\\\\xcb\\\\x0f\\\\xbd'\\r\\npage 1 leaf cells 10 len 4096\\r\\nrecovered 10 unreadable cells 0\\r\\n[{'item': 'trail map', 'price': 0}, {'item': 'matchbox', 'price': 1}, {'item': 'tent stake', 'price': 2.75}, {'item': 'lantern', 'price': 24}, {'item': 'rope coil', 'price': 18}] [{'item': 'camp stove', 'price': 310}, {'item': 'compass', 'price':[... 549 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   true
+  ],
+  [
+   "rows with fractional prices recovered",
+   true
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   true
+  ],
+  [
+   "no row that is not in the table",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 3,
+  "tool_calls": 2,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2579,
+  "reasoning_tokens": 499
+ },
+ "deliverables": [],
+ "render": null
+}

@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The Great Wave, low poly wallpaper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@600&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#e6d6b0}
+  canvas{display:block;width:100vw;height:100vh}
+  /* title cartouche and signature, as in the print's upper left */
+  #cartouche{position:fixed;left:5.4vw;top:7vh;display:flex;gap:1.1vh;align-items:flex-start;
+    font-family:"Shippori Mincho","Yu Mincho","MS Mincho",serif;color:#1c2a44;pointer-events:none;
+    font-size:2.15vh;line-height:1.25;writing-mode:vertical-rl;letter-spacing:.06em}
+  #cartouche .box{border:.28vh solid #1c2a44;outline:.12vh solid #1c2a44;outline-offset:.3vh;
+    padding:.9vh .5vh;background:rgba(240,228,198,.55)}
+  #cartouche .sig{font-size:1.7vh;margin-top:11vh;opacity:.85}
+  #paper{position:fixed;inset:0;pointer-events:none;
+    background:radial-gradient(ellipse at 50% 45%,rgba(0,0,0,0) 55%,rgba(90,60,20,.22) 100%)}
+</style>
+</head>
+<body>
+<div id="cartouche"><div class="box">冨嶽三十六景<br>神奈川沖浪裏</div><div class="sig">北斎改為一筆</div></div>
+<div id="paper"></div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+// Palette sampled by eye from the print
+const PAL = { cream:0xe6d6b0, creamLight:0xf0e5c8, gray:0x5f6266, prussian:0x1b3a6b, deep:0x122a52,
+  mid:0x3f6f9f, pale:0xa9c4cf, foam:0xf4efe1, boat:0xe6bd98, boatDark:0xcc9c78, skin:0xe9d3b4 };
+// Print frame: 15 x 10 scene units (1280 x 860 px), origin at the centre
+const FRAME_W = 15, FRAME_H = 10, FOV = 25;
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(PAL.cream);
+const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 200);
+scene.add(new THREE.HemisphereLight(0xffffff, 0xd8cfb8, 2.5));
+const sun = new THREE.DirectionalLight(0xfff4dc, 1.1); sun.position.set(-4, 8, 10); scene.add(sun);
+
+const lambert = c => new THREE.MeshLambertMaterial({ color:c, flatShading:true });
+const MAT = Object.fromEntries(Object.entries(PAL).map(([k, v]) => [k, lambert(v)]));
+
+function slab(points, mat, z, depth = 0.4) {
+  const shape = new THREE.Shape(points.map(p => new THREE.Vector2(p[0], p[1])));
+  const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled:true, bevelSize:0.1, bevelThickness:0.14, bevelSegments:1 });
+  const mesh = new THREE.Mesh(geo, mat); mesh.position.z = z; return mesh;
+}
+function ribbon(line, width, mat, z) {
+  const up = [], down = [];
+  line.forEach((p, i) => {
+    const a = line[Math.max(i - 1, 0)], b = line[Math.min(i + 1, line.length - 1)];
+    const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1;
+    const w = width * Math.sin(Math.PI * (i + 0.6) / (line.length + 0.2)) / 2;
+    up.push([p[0] - dy / len * w, p[1] + dx / len * w]); down.unshift([p[0] + dy / len * w, p[1] - dx / len * w]);
+  });
+  return slab([...up, ...down], mat, z, 0.08);
+}
+let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const foamGeo = new THREE.IcosahedronGeometry(1, 0);
+function foamAlong(path, count, rMin, rMax, z, jitter) {
+  const inst = new THREE.InstancedMesh(foamGeo, MAT.foam, count), m = new THREE.Object3D();
+  for (let i = 0; i < count; i++) {
+    const t = rnd() * (path.length - 1), k = Math.floor(t), f = t - k, a = path[k], b = path[k + 1];
+    m.position.set(a[0] + (b[0] - a[0]) * f + (rnd() - .5) * jitter, a[1] + (b[1] - a[1]) * f + (rnd() - .5) * jitter, z + rnd() * 0.3);
+    m.rotation.set(rnd() * 6, rnd() * 6, rnd() * 6); m.scale.setScalar(rMin + rnd() * (rMax - rMin)); m.updateMatrix();
+    inst.setMatrixAt(i, m.matrix);
+  }
+  return inst;
+}
+const movers = [];
+function mover(group, ampY, ampRot, speed, phase) { movers.push({ group, ampY, ampRot, speed, phase, y:group.position.y, r:group.rotation.z }); scene.add(group); return group; }
+
+// ---- sky: cream paper darkening to grey at the horizon ----
+{
+  const geo = new THREE.PlaneGeometry(80, 40, 1, 40), pos = geo.attributes.position, col = [];
+  const top = new THREE.Color(PAL.cream), dark = new THREE.Color(PAL.gray), c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i), t = THREE.MathUtils.smoothstep(y, -3.2, 1.6);
+    c.copy(dark).lerp(top, t); col.push(c.r, c.g, c.b);
+  }
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  const sky = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors:true })); sky.position.z = -8; scene.add(sky);
+}
+// ---- cloud bank, upper right ----
+const cloud = new THREE.Group();
+[[3.2,3.6,2.2,.9],[5.2,3.2,2.6,1.1],[1.6,3.0,1.5,.6],[6.8,2.4,2.0,.8],[4.2,2.3,2.4,.7],[-4.6,3.3,1.6,.45]].forEach(([x, y, sx, sy]) => {
+  const m = new THREE.Mesh(foamGeo, new THREE.MeshBasicMaterial({ color:PAL.creamLight })); m.position.set(x, y, -6); m.scale.set(sx, sy, .3); m.rotation.z = rnd(); cloud.add(m);
+});
+scene.add(cloud);
+
+// ---- Mount Fuji, small and still at the horizon ----
+{
+  const fuji = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.ConeGeometry(1.25, 1.05, 7), MAT.prussian); body.position.y = -2.0;
+  const snow = new THREE.Mesh(new THREE.ConeGeometry(0.78, 0.66, 7), MAT.foam); snow.position.y = -1.79;
+  fuji.add(body, snow); fuji.position.set(2.35, -0.05, -3); scene.add(fuji);
+}
+// ---- distant dark sea behind the waves ----
+scene.add(slab([[-9,-6],[-9,-2.2],[-1,-2.5],[1,-2.75],[2.5,-2.7],[4,-2.6],[9,-2.3],[9,-6]], MAT.deep, -1.5, 0.3));
+
+// ---- the great wave ----
+const great = new THREE.Group();
+great.add(slab([[-9,-6],[-9,0.4],[-6.5,1.2],[-5,2.5],[-3.5,3.7],[-2,4.1],[-0.8,3.6],[0.3,2.8],[1.25,1.85],[0.2,2.15],[-0.8,2.2],[-1.5,1.5],[-1.75,0.3],[-1.45,-0.8],[-0.7,-1.8],[0.4,-2.7],[-1,-6]], MAT.prussian, 0));
+great.add(slab([[-9,0.4],[-6.5,1.2],[-5,2.5],[-3.5,3.7],[-2,4.1],[-0.8,3.6],[0.3,2.8],[1.25,1.85],[0.1,2.5],[-1.2,3.1],[-2.2,3.3],[-3.4,2.9],[-4.6,1.8],[-6,0.6],[-9,-0.4]], MAT.foam, 0.35));
+[[[-6.6,-3],[-5.6,-0.6],[-4.2,1.2],[-2.8,2.4],[-1.3,2.7]], [[-4.6,-3.5],[-3.9,-1],[-2.9,0.8],[-1.9,1.7]], [[-2.9,-3.6],[-2.5,-1.4],[-2.0,0.1],[-1.6,1.0]], [[-7.6,-2],[-6.6,-0.4],[-5.4,0.8]]]
+  .forEach(l => great.add(ribbon(l, 0.55, MAT.mid, 0.56)));
+great.add(foamAlong([[1.2,1.9],[0.1,2.5],[-1.2,3.1],[-2.2,3.3],[-3.4,2.9],[-4.6,1.8],[-6,0.6],[-8.5,-0.3]], 110, 0.1, 0.3, 0.8, 0.5));
+great.add(foamAlong([[-7.5,-0.6],[-6,-1.4],[-4.5,-0.4],[-3,0.6],[-2,0.2]], 40, 0.06, 0.16, 0.75, 1.6)); // flecks on the blue face
+// foam claws under the curling lip
+for (let i = 0; i < 13; i++) {
+  const t = i / 12, claw = new THREE.Mesh(new THREE.ConeGeometry(0.13 + rnd() * 0.07, 0.55 + rnd() * 0.5, 4), MAT.foam);
+  claw.position.set(-1.3 + t * 2.6, 2.5 - t * 0.75 - Math.sin(t * Math.PI) * 0.05, 0.85);
+  claw.rotation.z = Math.PI + 0.35 + t * 0.7 + (rnd() - .5) * 0.5; great.add(claw);
+}
+mover(great, 0.12, 0.012, 0.5, 0);
+
+// ---- wave rising on the right, behind the far boat's stern ----
+const right = new THREE.Group();
+right.add(slab([[0.2,-2.95],[1.6,-3.0],[3,-2.75],[4.4,-2.2],[5.6,-1.2],[6.6,-0.1],[9,1.9],[9,-6],[0,-6]], MAT.prussian, 0.6));
+right.add(slab([[3,-2.75],[4.4,-2.2],[5.6,-1.2],[6.6,-0.1],[9,1.9],[9,0.6],[7.2,-0.9],[6,-1.9],[4.6,-2.6]], MAT.foam, 0.9));
+right.add(foamAlong([[4.6,-2.6],[6,-1.9],[7.2,-0.9],[8.8,0.5]], 45, 0.08, 0.22, 1.3, 0.4));
+[[[4.5,-3.0],[6.2,-2.5],[8.6,-1.2]], [[5,-3.5],[6.8,-3.0],[8.8,-2.0]]].forEach(l => right.add(ribbon(l, 0.4, MAT.mid, 1.1)));
+mover(right, 0.1, 0.01, 0.42, 2.1);
+
+// ---- white mound in the foreground that echoes Fuji ----
+const mound = new THREE.Group();
+mound.add(slab([[-7,-6],[-4.6,-2.7],[-3.2,-1.2],[-2.3,-0.45],[-1.5,-1.3],[-0.3,-2.3],[1.2,-3.0],[3,-3.6],[5.5,-6]], MAT.foam, 1.6));
+mound.add(ribbon([[-4.6,-3.6],[-3.4,-2.4],[-2.5,-1.5]], 0.5, MAT.pale, 2.1));
+mound.add(ribbon([[-1.6,-2.0],[-0.4,-3.0],[1.2,-3.7]], 0.45, MAT.pale, 2.1));
+mound.add(foamAlong([[-5,-3.2],[-3.2,-1.5],[-2.3,-0.7],[-1.2,-1.7],[0.5,-2.8]], 50, 0.07, 0.2, 2.1, 0.5));
+mover(mound, 0.14, 0.014, 0.6, 1.2);
+
+// ---- striped swells, lower right ----
+const swell = new THREE.Group();
+swell.add(slab([[0.5,-6],[1.5,-4.9],[3.2,-4.3],[5,-3.6],[6.6,-2.6],[9,-1.0],[9,-6]], MAT.foam, 2.3));
+[[[2.5,-4.9],[4.6,-4.1],[6.6,-3.0],[8.8,-1.6]], [[4,-5.2],[6,-4.4],[8.8,-2.8]], [[5.6,-5.4],[7.4,-4.8],[8.9,-4.0]]]
+  .forEach((l, i) => swell.add(ribbon(l, 0.5, i === 1 ? MAT.mid : MAT.prussian, 2.8)));
+swell.add(ribbon([[3.4,-5.4],[5.4,-4.9],[7.2,-4.0]], 0.35, MAT.pale, 2.8));
+mover(swell, 0.1, 0.01, 0.55, 3.3);
+
+// ---- dark foaming water, lower left ----
+const front = new THREE.Group();
+front.add(slab([[-9,-6],[-9,-3.1],[-7.4,-3.5],[-5.8,-4.3],[-4,-4.0],[-2.4,-4.5],[-0.8,-4.2],[0.6,-4.9],[1.6,-6]], MAT.prussian, 2.6));
+front.add(foamAlong([[-8.8,-3.2],[-7.4,-3.5],[-5.8,-4.3],[-4,-4.0],[-2.4,-4.5],[-0.8,-4.2],[0.6,-4.9]], 70, 0.08, 0.24, 3.1, 0.45));
+mover(front, 0.12, 0.008, 0.7, 4.4);
+
+// ---- the three boats, rowers huddled low ----
+const headGeo = new THREE.IcosahedronGeometry(0.085, 0), bodyGeo = new THREE.IcosahedronGeometry(0.16, 0);
+function boat(x, y, z, rot, len, rowers, phase) {
+  const g = new THREE.Group(), h = len / 2;
+  g.add(slab([[-h,0.42],[-h+0.8,-0.12],[h-0.5,-0.2],[h,0.12],[h-0.6,0.1],[-h+0.9,0.12]], MAT.boat, 0, 0.3));
+  g.add(slab([[-h+1.2,0.12],[-h+1.6,0.26],[-h+3.0,0.24],[-h+3.1,0.1]], MAT.boatDark, 0.1, 0.2)); // cargo deck
+  for (let i = 0; i < rowers; i++) {
+    const px = h - 0.9 - (i % (rowers / 2)) * 0.26, row = i < rowers / 2 ? 0 : 1;
+    const b = new THREE.Mesh(bodyGeo, MAT.prussian); b.position.set(px - row * 0.1, 0.2 + row * 0.1, 0.36 - row * 0.2); b.scale.set(1, 0.8, 1);
+    const hd = new THREE.Mesh(headGeo, MAT.skin); hd.position.set(px - 0.12 - row * 0.1, 0.33 + row * 0.1, 0.42 - row * 0.2);
+    g.add(b, hd);
+  }
+  g.position.set(x, y, z); g.rotation.z = rot; return mover(g, 0.13, 0.035, 0.75, phase);
+}
+const BOATS = [
+  boat(-5.5, -1.75, 1.0, -0.42, 3.6, 8, 0.4),  // left, under the great wave
+  boat( 3.9, -2.2, 0.25, 0.30, 5.0, 10, 1.9), // far boat climbing the right wave, in front of Fuji
+  boat( 1.5, -3.95, 1.9, -0.10, 5.6, 10, 3.1), // near boat in the trough
+];
+
+// ---- spray flying off the crest ----
+const SPRAY = 80, spray = new THREE.InstancedMesh(new THREE.OctahedronGeometry(1, 0), new THREE.MeshBasicMaterial({ color:PAL.foam }), SPRAY);
+const drops = Array.from({ length:SPRAY }, () => ({ x:-1.5 + rnd() * 5.5, y:rnd() * 5, s:0.025 + rnd() * 0.05, v:0.12 + rnd() * 0.25, p:rnd() * 6 }));
+scene.add(spray);
+
+function fit() {
+  const w = innerWidth, h = innerHeight, aspect = w / h;
+  renderer.setSize(w, h, false); camera.aspect = aspect;
+  // cover: the visible window always stays inside the print's 15 x 10 frame
+  const half = Math.min(FRAME_H / 2, FRAME_W / 2 / aspect) * 0.97;
+  camera.userData.dist = half / Math.tan(THREE.MathUtils.degToRad(FOV / 2));
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', fit); fit();
+const pointer = { x:0, y:0 };
+addEventListener('pointermove', e => { pointer.x = e.clientX / innerWidth - .5; pointer.y = e.clientY / innerHeight - .5; });
+const calm = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0.25 : 1;
+const tmp = new THREE.Object3D(); let camX = 0, camY = 0;
+
+renderer.setAnimationLoop(ms => {
+  const t = ms / 1000 * calm;
+  for (const m of movers) {
+    m.group.position.y = m.y + Math.sin(t * m.speed + m.phase) * m.ampY;
+    m.group.rotation.z = m.r + Math.sin(t * m.speed * 0.8 + m.phase + 1) * m.ampRot;
+  }
+  cloud.position.x = Math.sin(t * 0.05) * 0.6;
+  drops.forEach((d, i) => {
+    const fall = (d.y - t * d.v) % 5, y = (fall < 0 ? fall + 5 : fall) - 2.6;
+    tmp.position.set(d.x + Math.sin(t * 0.6 + d.p) * 0.12, y, 0.9); tmp.rotation.set(t + d.p, d.p, 0); tmp.scale.setScalar(d.s); tmp.updateMatrix();
+    spray.setMatrixAt(i, tmp.matrix);
+  });
+  spray.instanceMatrix.needsUpdate = true;
+  camX += (pointer.x * 1.6 + Math.sin(t * 0.17) * 0.5 - camX) * 0.04;
+  camY += (-pointer.y * 1.0 + Math.cos(t * 0.13) * 0.25 - camY) * 0.04;
+  camera.position.set(camX, camY, camera.userData.dist); camera.lookAt(0, 0, 0);
+  renderer.render(scene, camera);
+});
+window.__wave = { boats:BOATS.length, mountain:'Mount Fuji' };
+</script>
+</body>
+</html>
