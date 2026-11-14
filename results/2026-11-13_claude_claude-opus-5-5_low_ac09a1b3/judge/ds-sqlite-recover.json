@@ -1,0 +1,52 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [
+  "**[goal]** Recover the price-list rows from the damaged `prices.db` into `recovered.json`.\n\n**[action]**\n- Looked at the raw bytes. The file is 4096 bytes and has no SQLite file header: byte 0 is `0d`, which marks a table leaf page. The first 100 bytes (the header and schema) were cut off, so no SQLite tool can open the file.\n- Wrote a small parser (`tmp/r.py`) that reads that page directly. It treats offset 0 as the start of the page, follows its 10 cell pointers and decodes each record by its type codes.\n\n**[result]** `recovered.json` has 10 rows, rowids 1 to 10, every one decoded from bytes in the file:\n\n| item | price |\n|---|---|\n| trail map | 0 |\n| matchbox | 1 |\n| tent stake | 2.75 |\n| lantern | 24 |\n| rope coil | 18 |\n| water filter | 39.9 |\n| sleeping bag | 129 |\n| camp stove | 310 |\n| compass | 15.5 |\n| first aid kit | 0.99 |\n\n**How I know it is right:**\n- The page header says it holds `0a` = 10 cells, and all 10 decoded completely.\n- You can check the hex directly. For example, `...6669727374 20616964 206b6974 3fefae147ae147ae` is \"first aid kit\" followed by the 8-byte float 0.99.\n- Some prices are stored as SQLite's built-in integer values rather than as stored numbers: trail map's 0 (type 8) and matchbox's 1 (type 9). That is why they look unusual, but they are what the file says.\n- I added nothing that is not in the file.\n\n**Assumptions:**\n- Each record has 3 columns: the first is empty (the usual id alias for the row number), then item, then price.\n- Any rows on other pages are gone for good, because the file holds only this one 4096-byte page.\n\n**[next]** Nothing more to recover. I opened no browser tabs or apps. The scratch parser is at `tmp/r.py`."
+ ],
+ "diff": "A recovered.json\nA tmp/r.py\n\n--- recovered.json ---\n[\r\n {\r\n  \"item\": \"trail map\",\r\n  \"price\": 0\r\n },\r\n {\r\n  \"item\": \"matchbox\",\r\n  \"price\": 1\r\n },\r\n {\r\n  \"item\": \"tent stake\",\r\n  \"price\": 2.75\r\n },\r\n {\r\n  \"item\": \"lantern\",\r\n  \"price\": 24\r\n },\r\n {\r\n  \"item\": \"rope coil\",\r\n  \"price\": 18\r\n },\r\n {\r\n  \"item\": \"water filter\",\r\n  \"price\": 39.9\r\n },\r\n {\r\n  \"item\": \"sleeping bag\",\r\n  \"price\": 129\r\n },\r\n {\r\n  \"item\": \"camp stove\",\r\n  \"price\": 310\r\n },\r\n {\r\n  \"item\": \"compass\",\r\n  \"price\": 15.5\r\n },\r\n {\r\n  \"item\": \"first aid kit\",\r\n  \"price\": 0.99\r\n }\r\n]\n\n--- tmp/r.py ---\nimport sys,json,struct\nd=open(sys.argv[1],'rb').read()\nps=4096\ndef varint(b,i):\n    v=0\n    for k in range(9):\n        c=b[i+k]\n        if k==8: return (v<<8)|c,i+9\n        v=(v<<7)|(c&0x7f)\n        if c<0x80: return v,i+k+1\ndef rec(b,i):\n    h,j=varint(b,i); end=i+h; ts=[]\n    while j<end: t,j=varint(b,j); ts.append(t)\n    p=end; out=[]\n    for t in ts:\n        if t==0: out.append(None)\n        elif t in(1,2,3,4,6):\n            n={1:1,2:2,3:3,4:4,6:8}[t]; out.append(int.from_bytes(b[p:p+n],'big',signed=True)); p+=n\n        elif t==5: out.append(int.from_bytes(b[p:p+6],'big',signed=True)); p+=6\n        elif t==7: out.append(struct.unpack('>d',b[p:p+8])[0]); p+=8\n        elif t==8: out.append(0)\n        elif t==9: out.append(1)\n        elif t>=13 and t%2: n=(t-13)//2; out.append(b[p:p+n].decode()); p+=n\n        else: n=(t-12)//2; out.append(b[p:p+n]); p+=n\n    if p>len(b): raise ValueError\n    return out\nrows={}\nfor pg in range(0,len(d)//ps+1):\n    base=pg*ps; o=base\n    if o>=len(d) or d[o]!=13: continue\n    n=struct.unpack('>H',d[o+3:o+5])[0]\n    for c in range(n):\n        try:\n            cp=base+struct.unpack('>H',d[o+8+2*c:o+10+2*c])[0]\n            ln,j=varint(d,cp); rid,j=varint(d,j)\n            pass\n            r=rec(d[j:j+ln],0); print(pg,rid,r,file=sys.stderr)\n            if len(r)>=2 and isinstance(r[-2],str) and isinstance(r[-1],(int,float)): rows[(pg,rid)]={\"item\":r[-2],\"price\":r[-1]}\n        except Exception as e: pass\njson.dump(list(rows.values()),open(sys.argv[2],'w'),indent=1,ensure_ascii=False)\nprint(len(rows),len(d),ps)\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"mkdir -p tmp; cat > tmp/r.py <<'EOF'\\nimport sys,json,struct\\nd=open(sys.argv[1],'rb').read()\\nps=struct.unpack('>H',d[16:18])[0]; ps=65536 if ps==1 else ps\\ndef varint(b,i):\\n    v=0\\n    for k in range(9):\\n        c=b[i+k]\\n        if k==8: return (v<<8)|c,i+9\\n        v=(v<<7)|(c&0x7f)\\n        if c<0x80: return v,i+k+1\\ndef rec(b,i):\\n    h,j=varint(b,i); end=i+h; ts=[]\\n    while j<end: t,j=varint(b,j); ts.append(t)\\n    p=end; out=[]\\n    for t in ts:\\n        if t==0: out.append(None)\\n        elif t in(1,2,3,4,6):\\n            n={1:1,2:2,3:3,4:4,6:8}[t]; out.append(int.from_bytes(b[p:p+n],'big',signed=True)); p+=n\\n        elif t==5: out.append(int.from_bytes(b[p:p+6],'big',signed=True)); p+=6\\n        elif t==7: out.append(struct.unpack('>d',b[p:p+8])[0]); p+=8\\n        elif t==8: out.append(0)\\n        elif t==9: out.append(1)\\n        elif t>=13 and t%2: n=(t-13)//2; out.append(b[p:p+n].decode()); p+=n\\n        else: n=(t-12)//2; out.append(b[p:p+n]); p+=n\\n    if p>len(b): raise ValueError\\n    return out\\nrows={}\\nfor pg in range(0,len(d)//ps+1):\\n    base=pg*ps; o=base+(100 if pg==0 else 0)\\n    if o>=len(d) or d[o]!=13: continue\\n    n=struct.unpack('>H',d[o+3:o+5])[0]\\n    for c in range(n):\\n        try:\\n            cp=base+struct.unpack('>H',d[o+8+2*c:o+10+2*c])[0]\\n            ln,j=varint(d,cp); rid,j=varint(d,j)\\n            if j+ln>len(d): continue\\n            r=rec(d[j:j+ln],0); print(pg,rid,r,file=sys.stderr)\\n            if len(r)>=2 and isinstance(r[-2],str) and isinstance(r[-1],(int,f[... 259 chars cut by the benchmark]\" ok -> \"0 4096 4013\"\n[step 1] shell \"python -I tmp/r.py prices.db recovered.json 2>&1 | head; xxd prices.db | grep -v \\\"0000 0000 0000 0000 0000 0000 0000 0000\\\" | tail -20\" ok -> \"0 4096 4013\\r\\n00000000: 0d00 0000 0a0f 3d00 0ff1 0fe3 0fcb 0fbd  ......=.........\\n00000010: 0fad 0f93 0f7f 0f6d 0f58 0f3d 0000 0000  .......m.X.=....\\n00000f30: 0000 0000 0000 0000 0000 0000 0019 0a04  ................\\n00000f40: 0027 0766 6972 7374 2061 6964 206b 6974  .'.first aid kit\\n00000f50: 3fef ae14 7ae1 47ae 1309 0400 1b07 636f  ?...z.G.......co\\n00000f60: 6d70 6173 7340 2f00 0000 0000 0010 08[... 632 chars cut by the benchmark]\"\n[step 1] shell \"cd tmp && sed -i 's/o=base+(100 if pg==0 else 0)/o=base/; s/if j+ln>len(d): continue/pass/' r.py && sed -i 's/ps=struct.unpack.*/ps=4096/;/ps=65536/d' r.py && python -I r.py ../prices.db ../recovered.json 2>&1; cat ../recovered.json\" ok -> \"0 1 [None, 'trail map', 0]\\r\\n0 2 [None, 'matchbox', 1]\\r\\n0 3 [None, 'tent stake', 2.75]\\r\\n0 4 [None, 'lantern', 24]\\r\\n0 5 [None, 'rope coil', 18]\\r\\n0 6 [None, 'water filter', 39.9]\\r\\n0 7 [None, 'sleeping bag', 129]\\r\\n0 8 [None, 'camp stove', 310]\\r\\n0 9 [None, 'compass', 15.5]\\r\\n0 10 [None, 'first aid kit', 0.99]\\r\\n10 4096 4096\\r\\n[\\r\\n {\\r\\n  \\\"item\\\": \\\"trail map\\\",\\r\\n  \\\"price\\\": 0\\r\\n },\\r\\n {\\r\\n  \\\"item\\\": \\\"matchbox\\\",\\r\\n  \\\"[... 418 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   true
+  ],
+  [
+   "rows with fractional prices recovered",
+   true
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   true
+  ],
+  [
+   "no row that is not in the table",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 4,
+  "tool_calls": 3,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 1,
+  "generated_tokens": 2397,
+  "reasoning_tokens": 418
+ },
+ "deliverables": [],
+ "render": null
+}
