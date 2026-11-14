@@ -50,7 +50,13 @@ def test_the_fast_tier_costs_what_openai_lists_for_it() -> None:
 def test_every_model_on_the_board_has_a_price() -> None:
     assert set(LIST_PRICES) == {"claude-opus-5-5", "claude-sonnet-5-5", "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra",
                                 "zai/glm-5.3-flash", "deepseek/deepseek-flash", "gemini-4-argon",
-                                "claude-fable-5-2", "gemini-4-carbon"}
+                                "claude-fable-5-2", "gemini-4-carbon", "gemini-4-hydrogen"}
+
+
+def test_hydrogen_costs_what_ai_studio_lists() -> None:
+    # AI Studio pricing read 2026-11-13: input 1.50, implicit cache 0.075, output 7.50 USD/MTok.
+    run = _result("gemini-4-hydrogen", 2_000_000, 1_000_000, 1_000_000)
+    assert abs(estimated_usd(run) - (1.50 + 0.075 + 7.50)) < 1e-9
 
 
 def test_the_cell_says_it_is_an_estimate() -> None:
@@ -163,7 +169,7 @@ def test_price_rows_have_provider_and_observation_date() -> None:
     from mengine_bench.prices import FAST_PRICES
     for price in (*LIST_PRICES.values(), *FAST_PRICES.values()):
         assert price.source_url.startswith("https://")
-        assert price.read_date in {"2026-11-07", "2026-11-10"}
+        assert price.read_date in {"2026-11-07", "2026-11-10", "2026-11-13"}
 
 
 def test_summary_warns_for_unpriced_tokens_but_not_for_missing_usage(tmp_path) -> None:
