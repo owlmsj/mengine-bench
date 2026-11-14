@@ -2,10 +2,9 @@
 
 | Score | Correct % | Solved | Judge | Speed | Time | Cost | Tokens |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **57.8** | 74.8 | 5/29 | 58.4 | 0.0 | 64 min 46 s | n/a | 0.64M |
+| **57.8** | 74.8 | 5/29 | 58.4 | 0.0 | 64 min 46 s | >= ~$1.86 | 0.64M |
 
 - Judge: claude-opus-5-5@xhigh, rubric 2.6
-- Cost warning: no list price for gemini-4-carbon; add it to prices.py
 - Config: personal_instructions=~/.gemini/GEMINI.md
 - Machine: Windows 11, AMD Ryzen 9 8945HS w/ Radeon 780M Graphics (16 threads), 31.3 GB RAM, GPU NVIDIA GeForce RTX 4070 Laptop GPU (8 GB)
 - Run: 2026-11-10, started 2026-11-10T20:21:29Z; bench at eadb58f7001c; submitter owlmsj

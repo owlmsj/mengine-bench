@@ -2,10 +2,9 @@
 
 | Score | Correct % | Solved | Judge | Speed | Time | Cost | Tokens |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| **85.3** | 96.8 | 26/29 | 78.2 | 65.7 | 20 min 17 s | n/a | 3.30M |
+| **85.3** | 96.8 | 26/29 | 78.2 | 65.7 | 20 min 17 s | ~$2.34 | 3.30M |
 
 - Judge: claude-opus-5-5@xhigh, rubric 2.6
-- Cost warning: no list price for gemini-4-hydrogen; add it to prices.py
 - Config: personal_instructions=~/.gemini/GEMINI.md
 - Machine: Windows 11, AMD Ryzen 9 8945HS w/ Radeon 780M Graphics (16 threads), 31.3 GB RAM, GPU NVIDIA GeForce RTX 4070 Laptop GPU (8 GB)
 - Run: 2026-11-13, started 2026-11-14T02:06:08Z; bench at 435581dfc7d7; submitter owlmsj

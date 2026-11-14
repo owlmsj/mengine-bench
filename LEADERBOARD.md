@@ -26,7 +26,7 @@ The bench 2.0 to 2.2 runs (20 and 23 tasks) moved to history on 2026-11-04 (#187
 | 8 | **87.0** | claude-opus-5-5 low<br>claude 2.1.318 (Claude Code) | 2026-11-04 | 97.3 | 25/28 | 77.9 | 75.7 | 17 min 17 s | $6.40 | [run](results/2026-11-04_claude_claude-opus-5-5_low_3d05f618/summary.md) (bench 2.6) |
 | 9 | **86.8** | home/qwen38-flash-next-exl3-605-256k low<br>opencode opencode v2.2.5 | 2026-11-07 | 99.1 | 26/29 | 84.3 | 52.3 | 24 min 19 s | $0.00 (local) | [run](results/2026-11-07_opencode_home-qwen38-flash-next-exl3-605-256k_low_74b3cbb8/summary.md) |
 | 10 | **86.6** | claude-fable-5-2 low<br>claude 2.1.325 (Claude Code) | 2026-11-13 | 98.7 | 27/29 | 83.9 | 53.0 | 24 min 05 s | $15.62 | [run](results/2026-11-13_claude_claude-fable-5-2_low_5a1bb179/summary.md) |
-| 11 | **85.3** | gemini-4-hydrogen low<br>agy 1.5.8 | 2026-11-13 | 96.8 | 26/29 | 78.2 | 65.7 | 20 min 17 s | n/a | [run](results/2026-11-13_agy_gemini-4-hydrogen_low_1d1adfcd/summary.md) |
+| 11 | **85.3** | gemini-4-hydrogen low<br>agy 1.5.8 | 2026-11-13 | 96.8 | 26/29 | 78.2 | 65.7 | 20 min 17 s | ~$2.34 | [run](results/2026-11-13_agy_gemini-4-hydrogen_low_1d1adfcd/summary.md) |
 | 12 | **84.2** | gpt-6.1-sol low<br>codex codex-cli 0.165.0 | 2026-11-03 | 96.6 | 25/28 | 81.7 | 50.5 | 24 min 50 s | ~$4.69 | [run](results/2026-11-03_codex_gpt-6.1-sol_low_35d7a1b8/summary.md) (bench 2.5, rubric 2.5) |
 | 13 | **83.1** | home/qwen38-flash-next-exl3-605-256k low<br>opencode opencode v2.2.5 | 2026-11-06 | 96.2 | 23/28 | 80.6 | 46.8 | 25 min 58 s | $0.00 (local) | [run](results/2026-11-06_opencode_home-qwen38-flash-next-exl3-605-256k_low_6271bb4f/summary.md) (bench 2.6) |
 | 14 | **82.0** | home/qwen38-flash-next-exl3-605-256k low<br>opencode opencode v2.2.5 | 2026-11-05 | 94.8 | 22/28 | 79.0 | 48.9 | 25 min 21 s | $0.00 (local) | [run](results/2026-11-05_opencode_home-qwen38-flash-next-exl3-605-256k_low_0511702e/summary.md) (bench 2.6) |
@@ -36,7 +36,7 @@ The bench 2.0 to 2.2 runs (20 and 23 tasks) moved to history on 2026-11-04 (#187
 | 18 | **71.8** | deepseek/deepseek-flash max<br>opencode opencode v2.2.5 | 2026-11-06 | 88.8 | 17/28 | 78.3 | 0.0 | 45 min 57 s | >= $0.14 | [run](results/2026-11-06_opencode_deepseek-deepseek-flash_max_460f7936/summary.md) (bench 2.7) |
 | 19 | **63.3** | maritaca/S5 low<br>opencode opencode v2.2.5 | 2026-11-06 | 80.9 | 15/28 | 61.7 | 10.0 | 36 min 59 s | >= ~$0.15 | [run](results/2026-11-06_opencode_maritaca-S5_low_f64abf0d/summary.md) (bench 2.6) |
 | 20 | **61.2** | home/qwen38-27b-exl3-sc6-256k low<br>opencode opencode v2.2.5 | 2026-11-08 | 75.6 | 18/29 | 66.9 | 0.0 | 41 min 34 s | $0.00 (local) | [run](results/2026-11-08_opencode_home-qwen38-27b-exl3-sc6-256k_low_ba9100a4/summary.md) |
-| 21 | **57.8** | gemini-4-carbon low<br>agy 1.5.5 | 2026-11-10 | 74.8 | 5/29 | 58.4 | 0.0 | 64 min 46 s | n/a | [run](results/2026-11-10_agy_gemini-4-carbon_low_8c355349/summary.md) |
+| 21 | **57.8** | gemini-4-carbon low<br>agy 1.5.5 | 2026-11-10 | 74.8 | 5/29 | 58.4 | 0.0 | 64 min 46 s | >= ~$1.86 | [run](results/2026-11-10_agy_gemini-4-carbon_low_8c355349/summary.md) |
 
 <details><summary>Run details: tokens, turns, tools, hardware, config</summary>
 
