@@ -1,0 +1,53 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [
+  "[goal]\nRecover as many rows as possible from the truncated SQLite file [prices.db](<WORKSPACE>/prices.db) into [recovered.json](<WORKSPACE>/recovered.json).\n\n[action]\n- Inspected [prices.db](<WORKSPACE>/prices.db) (4096 bytes); `sqlite3` rejected it (`file is not a database`) because page 1 (the SQLite header and `sqlite_master`) was truncated away, leaving a single SQLite leaf table B-tree page (`0x0d` at offset `0`, 10 cells).\n- Parsed the leaf table B-tree page header, cell pointer array, varint payload lengths/rowids, and record serial types using [recover.py](<WORKSPACE>/tmp/recover.py), assuming the 3-column record `[None, item, price]` corresponds to `(INTEGER PRIMARY KEY, item, price)`.\n\n[result]\n- Recovered all 10 rows (rowids 1 to 10) into [recovered.json](<WORKSPACE>/recovered.json):\n  - `trail map`: `0`, `matchbox`: `1`, `tent stake`: `2.75`, `lantern`: `24`, `rope coil`: `18`, `water filter`: `39.9`, `sleeping bag`: `129`, `camp stove`: `310`, `compass`: `15.5`, `first aid kit`: `0.99`.\n- Verified by matching the page header cell count (`0x000a` = 10) and decoding every cell without error.\n\n[next]\nNone.\n"
+ ],
+ "diff": "A recovered.json\nA tmp/inspect_db.py\nA tmp/recover.py\n\n--- recovered.json ---\n[\r\n  {\r\n    \"item\": \"trail map\",\r\n    \"price\": 0\r\n  },\r\n  {\r\n    \"item\": \"matchbox\",\r\n    \"price\": 1\r\n  },\r\n  {\r\n    \"item\": \"tent stake\",\r\n    \"price\": 2.75\r\n  },\r\n  {\r\n    \"item\": \"lantern\",\r\n    \"price\": 24\r\n  },\r\n  {\r\n    \"item\": \"rope coil\",\r\n    \"price\": 18\r\n  },\r\n  {\r\n    \"item\": \"water filter\",\r\n    \"price\": 39.9\r\n  },\r\n  {\r\n    \"item\": \"sleeping bag\",\r\n    \"price\": 129\r\n  },\r\n  {\r\n    \"item\": \"camp stove\",\r\n    \"price\": 310\r\n  },\r\n  {\r\n    \"item\": \"compass\",\r\n    \"price\": 15.5\r\n  },\r\n  {\r\n    \"item\": \"first aid kit\",\r\n    \"price\": 0.99\r\n  }\r\n]\n\n--- tmp/inspect_db.py ---\nimport sqlite3, struct\n\ndata = open(\"prices.db\", \"rb\").read()\nprint(\"len:\", len(data), \"magic:\", data[:16])\npage_size = struct.unpack(\">H\", data[16:18])[0]\nprint(\"page_size:\", page_size)\ndb_pages = struct.unpack(\">I\", data[28:32])[0]\nprint(\"db_pages:\", db_pages)\n\n# Page 1 btree header starts at offset 100\npage_type = data[100]\nnum_cells = struct.unpack(\">H\", data[103:105])[0]\ncell_start = struct.unpack(\">H\", data[105:107])[0]\nprint(f\"page1: type={hex(page_type)}, num_cells={num_cells}, cell_start={cell_start}\")\n\ntry:\n    con = sqlite3.connect(\"prices.db\")\n    print(\"tables:\", con.execute(\"SELECT name, sql FROM sqlite_master\").fetchall())\nexcept Exception as e:\n    print(\"sqlite3 err:\", e)\n\n\n--- tmp/recover.py ---\nimport json\nimport struct\n\n\ndef read_varint(buf: bytes, pos: int) -> tuple[int, int]:\n    val = 0\n    for i in range(8):\n        b = buf[pos + i]\n        val = (val << 7) | (b & 0x7F)\n        if not (b & 0x80):\n            return val, pos + i + 1\n    b = buf[pos + 8]\n    val = (val << 8) | b\n    return val, pos + 9\n\n\ndef decode_serial_type(st: int, buf: bytes, pos: int) -> tuple[object, int]:\n    if st == 0:\n        return None, pos\n    if st == 1:\n        return struct.unpack(\">b\", buf[pos : pos + 1])[0], pos + 1\n    if st == 2:\n        return struct.unpack(\">h\", buf[pos : pos + 2])[0], pos + 2\n    if st == 3:\n        raw = buf[pos : pos + 3]\n        val = int.from_bytes(raw, \"big\", signed=True)\n        return val, pos + 3\n    if st == 4:\n        return struct.unpack(\">i\", buf[pos : pos + 4])[0], pos + 4\n    if st == 5:\n        val = int.from_bytes(buf[pos : pos + 6], \"big\", signed=True)\n        return val, pos + 6\n    if st == 6:\n        return struct.unpack(\">q\", buf[pos : pos + 8])[0], pos + 8\n    if st == 7:\n        return struct.unpack(\">d\", buf[pos : pos + 8])[0], pos + 8\n    if st == 8:\n        return 0, pos\n    if st == 9:\n        return 1, pos\n    if st >= 12 and st % 2 == 0:\n        n = (st - 12) // 2\n        return buf[pos : pos + n], pos + n\n    if st >= 13 and st % 2 == 1:\n        n = (st - 13) // 2\n        return buf[pos : pos + n].decode(\"utf-8\"), pos + n\n    raise ValueError(f\"Unsupported serial type {st}\")\n\n\ndef main() -> None:\n    data = open(\"prices.db\", \"rb\").read()\n    assert data[0] == 0x0D, f\"Expected leaf table page (0x0d), got {hex(data[0])}\"\n    num_cells = struct.unpack(\">H\", data[3:5])[0]\n    ptrs = [struct.unpack(\">H\", data[8 + 2 * i : 10 + 2 * i])[0] for i in range(num_cells)]\n\n    rows = []\n    for ptr in ptrs:\n        payload_len, pos = read_varint(data, ptr)\n        rowid, pos = read_varint(data, pos)\n        hdr_len, hdr_pos = read_varint(data, pos)\n        hdr_end = pos + hdr_len\n        serial_types = []\n        while hdr_pos < hdr_end:\n            st, hdr_pos = read_varint(data, hdr_pos)\n            serial_types.append(st)\n        val_pos = hdr_end\n        cols = []\n        for st in serial_types:\n            val, val_pos = decode_serial_type(st, data, val_pos)\n            cols.append(val)\n        print(f\"rowid={rowid} cols={cols}\")\n        if len(cols) == 2:\n            rows.append({\"item\": cols[0], \"price\": cols[1]})\n        elif len(cols) >= 3:\n            # In case id is stored as NULL or int in col 0\n            rows.append({\"item\": cols[1], \"price\": cols[2]})\n\n    with open(\"recovered.json\", \"w\", encoding=\"utf-8\") as f:\n        json.dump(rows, f, indent=2, ensure_ascii=False)\n    print(f\"Wrote {len(rows)} rows to recovered.json\")\n\n\nif __name__ == \"__main__\":\n    main()\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-Item prices.db | Select-Object Name, Length; python --version; sqlite3 --version\" ok -> \"Created At: 2026-11-13T23:18:34-03:00\\nCompleted At: 2026-11-13T23:18:35-03:00\\nCommand exited with code 1.\\n\\nCommand output:\\n\\r\\nPython 3.13.14\\r\\nName      Length\\r\\n----      ------\\r\\nprices.db   4096\\r\\nsqlite3 : The term 'sqlite3' is not recognized as the name of a cmdlet, function, script file, or operable program. \\r\\nCheck the spelling of the name, or if a path was included, verify that the path is corr[... 337 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport sqlite3\\ntry:\\n    con = sqlite3.connect('prices.db')\\n    print('tables:', con.execute(\\\\\\\"SELECT name, sql FROM sqlite_master\\\\\\\").fetchall())\\nexcept Exception as e:\\n    print('sqlite3 err:', e)\\n\\\"\" ok -> \"Created At: 2026-11-13T23:18:40-03:00\\nCompleted At: 2026-11-13T23:18:41-03:00\\nCommand exited with code 1.\\n\\nCommand output:\\n  File \\\"<string>\\\", line 5\\r\\n    print('tables:', con.execute(\\\" SELECT name sql FROM sqlite_master\\\\).fetchall())\\r\\n                                 ^\\r\\nSyntaxError: unterminated string literal (detected at line 5)\"\n[step 1] shell \"python -c '\\nimport sqlite3, struct\\ndata = open(\\\"prices.db\\\", \\\"rb\\\").read()\\nprint(\\\"len:\\\", len(data), \\\"magic:\\\", data[:16])\\npage_size = struct.unpack(\\\">H\\\", data[16:18])[0]\\nprint(\\\"page_size:\\\", page_size)\\ntry:\\n    con = sqlite3.connect(\\\"prices.db\\\")\\n    print(\\\"tables:\\\", con.execute(\\\"SELECT name, sql FROM sqlite_master\\\").fetchall())\\nexcept Exception as e:\\n    print(\\\"sqlite3 err:\\\", e)\\n'\" ok -> \"Created At: 2026-11-13T23:18:43-03:00\\nCompleted At: 2026-11-13T23:18:45-03:00\\nCommand exited with code 1.\\n\\nCommand output:\\n  File \\\"<string>\\\", line 4\\r\\n    print(len:, len(data), magic:, data[:16])\\r\\n             ^\\r\\nSyntaxError: invalid syntax\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\inspect_db.py\" ok -> \"\"\n[step 1] shell \"python tmp/inspect_db.py\" ok -> \"Created At: 2026-11-13T23:18:48-03:00\\nCompleted At: 2026-11-13T23:18:50-03:00\\nCommand exited with code 0.\\n\\nCommand output:\\nlen: 4096 magic: b'\\\\r\\\\x00\\\\x00\\\\x00\\\\n\\\\x0f=\\\\x00\\\\x0f\\\\xf1\\\\x0f\\\\xe3\\\\x0f\\\\xcb\\\\x0f\\\\xbd'\\r\\npage_size: 4013\\r\\ndb_pages: 0\\r\\npage1: type=0x0, num_cells=0, cell_start=0\\r\\nsqlite3 err: file is not a database\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\recover.py\" ok -> \"\"\n[step 1] shell \"python tmp/recover.py\" ok -> \"Created At: 2026-11-13T23:18:56-03:00\\nCompleted At: 2026-11-13T23:18:59-03:00\\nCommand exited with code 0.\\n\\nCommand output:\\nrowid=1 cols=[None, 'trail map', 0]\\r\\nrowid=2 cols=[None, 'matchbox', 1]\\r\\nrowid=3 cols=[None, 'tent stake', 2.75]\\r\\nrowid=4 cols=[None, 'lantern', 24]\\r\\nrowid=5 cols=[None, 'rope coil', 18]\\r\\nrowid=6 cols=[None, 'water filter', 39.9]\\r\\nrowid=7 cols=[None, 'sleeping bag', 129]\\r\\nrowi[... 150 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   true
+  ],
+  [
+   "rows with fractional prices recovered",
+   true
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   true
+  ],
+  [
+   "no row that is not in the table",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 5,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 3241,
+  "reasoning_tokens": 879,
+  "largest_turn_tokens": 1516
+ },
+ "deliverables": [],
+ "render": null
+}

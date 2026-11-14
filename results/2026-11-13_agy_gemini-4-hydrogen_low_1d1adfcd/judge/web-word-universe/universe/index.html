@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Universo das Palavras — Dicionário Criativo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #070913;
+      --panel: rgba(13, 17, 32, 0.82);
+      --border: rgba(255, 255, 255, 0.1);
+      --text: #eef1f8;
+      --muted: #9aa4bf;
+      --accent: #7dd3fc;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%; overflow: hidden;
+      background: radial-gradient(circle at 50% 45%, #111730 0%, #070913 75%);
+      color: var(--text);
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    }
+    canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+    canvas:active { cursor: grabbing; }
+
+    #labels-layer {
+      position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 2;
+    }
+    .node-label {
+      position: absolute;
+      transform: translate(-50%, -125%);
+      font-size: 11px;
+      font-weight: 500;
+      color: rgba(238, 241, 248, 0.85);
+      text-shadow: 0 1px 6px rgba(0,0,0,0.95), 0 0 12px rgba(0,0,0,0.8);
+      white-space: nowrap;
+      letter-spacing: 0.02em;
+      transition: opacity 0.2s ease;
+    }
+    .node-label.selected {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: 20px;
+      font-weight: 700;
+      color: #ffffff;
+      z-index: 5;
+    }
+    .node-label.neighbor {
+      font-size: 12px;
+      font-weight: 600;
+      color: #e0f2fe;
+    }
+
+    #hud-top {
+      position: fixed; top: 20px; left: 20px; z-index: 10;
+      width: min(360px, calc(100vw - 40px));
+      display: flex; flex-direction: column; gap: 12px;
+      pointer-events: none;
+    }
+    .card {
+      background: var(--panel);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px 18px;
+      pointer-events: auto;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+    }
+    h1 {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: 26px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      line-height: 1.1;
+      margin-bottom: 4px;
+    }
+    .stats {
+      font-size: 12px;
+      color: var(--muted);
+      display: flex; gap: 10px; flex-wrap: wrap;
+    }
+    .stats strong { color: var(--text); font-weight: 600; }
+
+    .search-wrap { position: relative; margin-top: 12px; }
+    #search-input {
+      width: 100%;
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(7, 9, 19, 0.7);
+      color: var(--text);
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #search-input:focus { border-color: var(--accent); }
+    #search-input::placeholder { color: #6b7694; }
+
+    #search-results {
+      position: absolute; top: calc(100% + 6px); left: 0; right: 0;
+      background: rgba(13, 17, 32, 0.96);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      max-height: 240px;
+      overflow-y: auto;
+      display: none;
+      z-index: 30;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+    }
+    .search-item {
+      padding: 9px 14px;
+      cursor: pointer;
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 13px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .search-item:last-child { border-bottom: none; }
+    .search-item:hover { background: rgba(125, 211, 252, 0.12); }
+    .search-item .theme-tag { font-size: 11px; color: var(--muted); }
+
+    #themes-bar {
+      display: flex; flex-wrap: wrap; gap: 6px;
+    }
+    .theme-pill {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .theme-pill:hover, .theme-pill.active {
+      color: var(--text);
+      border-color: rgba(255,255,255,0.3);
+      background: rgba(255,255,255,0.12);
+    }
+    .theme-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+    #inspector {
+      position: fixed; top: 20px; right: 20px; z-index: 10;
+      width: min(340px, calc(100vw - 40px));
+      max-height: calc(100vh - 40px);
+      display: none;
+      flex-direction: column;
+    }
+    #inspector.open { display: flex; }
+    .insp-header {
+      display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+      margin-bottom: 10px;
+    }
+    .insp-word {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: 32px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .close-btn {
+      background: rgba(255,255,255,0.08);
+      border: none; color: var(--muted);
+      width: 28px; height: 28px; border-radius: 8px;
+      cursor: pointer; font-size: 16px; line-height: 1;
+    }
+    .close-btn:hover { background: rgba(255,255,255,0.16); color: var(--text); }
+    .insp-meta {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      font-size: 12px; color: var(--muted); margin-bottom: 14px;
+    }
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 3px 10px; border-radius: 999px;
+      background: rgba(255,255,255,0.08); color: var(--text); font-weight: 500;
+    }
+    .neighbors-title {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--muted); margin-bottom: 8px;
+    }
+    .neighbors-list {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      overflow-y: auto; max-height: 45vh; padding-right: 4px;
+    }
+    .neighbor-chip {
+      padding: 6px 11px;
+      border-radius: 8px;
+      background: rgba(125, 211, 252, 0.1);
+      border: 1px solid rgba(125, 211, 252, 0.25);
+      color: #e0f2fe;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .neighbor-chip:hover {
+      background: rgba(125, 211, 252, 0.25);
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+
+    #controls-hint {
+      position: fixed; bottom: 16px; left: 20px; z-index: 10;
+      font-size: 11px; color: rgba(154, 164, 191, 0.7);
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="labels-layer"></div>
+
+  <div id="hud-top">
+    <div class="card">
+      <h1>Universo das Palavras</h1>
+      <div class="stats" id="stats-bar"></div>
+      <div class="search-wrap">
+        <input id="search-input" type="text" placeholder="Buscar palavra (ex: saudade, amor, tempo)..." autocomplete="off" />
+        <div id="search-results"></div>
+      </div>
+    </div>
+    <div class="card" id="themes-bar"></div>
+  </div>
+
+  <div class="card" id="inspector">
+    <div class="insp-header">
+      <div class="insp-word" id="insp-word"></div>
+      <button class="close-btn" id="insp-close" title="Fechar">&times;</button>
+    </div>
+    <div class="insp-meta" id="insp-meta"></div>
+    <div class="neighbors-title" id="insp-neighbors-title"></div>
+    <div class="neighbors-list" id="insp-neighbors"></div>
+  </div>
+
+  <div id="controls-hint">Arraste para girar · Scroll para zoom · Clique em uma palavra para explorar</div>
+
+  <script type="module">
+    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+    const GRAPH_DATA = {"nodes": [{"id": "acento", "theme": "linguagem", "deg": 7}, {"id": "advogado", "theme": "ofícios", "deg": 9}, {"id": "afeto", "theme": "sentimentos", "deg": 4}, {"id": "aflição", "theme": "sentimentos", "deg": 6}, {"id": "aldeia", "theme": "lugares", "deg": 4}, {"id": "alegria", "theme": "sentimentos", "deg": 4}, {"id": "alfaiate", "theme": "ofícios", "deg": 8}, {"id": "alma", "theme": "corpo", "deg": 9}, {"id": "almoço", "theme": "comida", "deg": 9}, {"id": "amanhã", "theme": "tempo", "deg": 6}, {"id": "amor", "theme": "sentimentos", "deg": 6}, {"id": "angústia", "theme": "sentimentos", "deg": 6}, {"id": "ano", "theme": "tempo", "deg": 5}, {"id": "ansiedade", "theme": "sentimentos", "deg": 6}, {"id": "apelido", "theme": "linguagem", "deg": 6}, {"id": "areia", "theme": "natureza", "deg": 5}, {"id": "arroz", "theme": "comida", "deg": 6}, {"id": "arte", "theme": "artes", "deg": 6}, {"id": "ator", "theme": "artes", "deg": 4}, {"id": "aurora", "theme": "tempo", "deg": 5}, {"id": "avenida", "theme": "lugares", "deg": 5}, {"id": "avó", "theme": "família", "deg": 6}, {"id": "avô", "theme": "família", "deg": 7}, {"id": "açougueiro", "theme": "ofícios", "deg": 6}, {"id": "açúcar", "theme": "comida", "deg": 5}, {"id": "bairro", "theme": "lugares", "deg": 5}, {"id": "boca", "theme": "corpo", "deg": 7}, {"id": "braço", "theme": "corpo", "deg": 5}, {"id": "cabeça", "theme": "corpo", "deg": 5}, {"id": "cachoeira", "theme": "natureza", "deg": 7}, {"id": "café", "theme": "comida", "deg": 5}, {"id": "campo", "theme": "natureza", "deg": 6}, {"id": "canção", "theme": "artes", "deg": 7}, {"id": "capital", "theme": "lugares", "deg": 9}, {"id": "carinho", "theme": "sentimentos", "deg": 7}, {"id": "carne", "theme": "comida", "deg": 8}, {"id": "carpinteiro", "theme": "ofícios", "deg": 5}, {"id": "casa", "theme": "lugares", "deg": 6}, {"id": "cena", "theme": "artes", "deg": 7}, {"id": "chá", "theme": "comida", "deg": 6}, {"id": "cidade", "theme": "lugares", "deg": 6}, {"id": "cinema", "theme": "artes", "deg": 4}, {"id": "comida", "theme": "comida", "deg": 5}, {"id": "compaixão", "theme": "sentimentos", "deg": 8}, {"id": "contentamento", "theme": "sentimentos", "deg": 4}, {"id": "conto", "theme": "artes", "deg": 8}, {"id": "conversa", "theme": "linguagem", "deg": 4}, {"id": "coração", "theme": "corpo", "deg": 7}, {"id": "corpo", "theme": "corpo", "deg": 4}, {"id": "cozinha", "theme": "lugares", "deg": 7}, {"id": "crepúsculo", "theme": "tempo", "deg": 8}, {"id": "cunhado", "theme": "família", "deg": 4}, {"id": "dança", "theme": "artes", "deg": 6}, {"id": "dedo", "theme": "corpo", "deg": 5}, {"id": "dente", "theme": "corpo", "deg": 7}, {"id": "desenho", "theme": "artes", "deg": 5}, {"id": "dia", "theme": "tempo", "deg": 5}, {"id": "dicionário", "theme": "linguagem", "deg": 4}, {"id": "dor", "theme": "sentimentos", "deg": 4}, {"id": "emprego", "theme": "ofícios", "deg": 7}, {"id": "enfermeira", "theme": "ofícios", "deg": 6}, {"id": "engenheiro", "theme": "ofícios", "deg": 6}, {"id": "era", "theme": "tempo", "deg": 5}, {"id": "escola", "theme": "lugares", "deg": 4}, {"id": "escultura", "theme": "artes", "deg": 7}, {"id": "espanto", "theme": "sentimentos", "deg": 4}, {"id": "esperança", "theme": "sentimentos", "deg": 7}, {"id": "esquina", "theme": "lugares", "deg": 5}, {"id": "estado", "theme": "lugares", "deg": 6}, {"id": "estação", "theme": "lugares", "deg": 6}, {"id": "estômago", "theme": "corpo", "deg": 4}, {"id": "eternidade", "theme": "tempo", "deg": 7}, {"id": "fala", "theme": "linguagem", "deg": 4}, {"id": "família", "theme": "família", "deg": 4}, {"id": "farinha", "theme": "comida", "deg": 6}, {"id": "feijão", "theme": "comida", "deg": 6}, {"id": "felicidade", "theme": "sentimentos", "deg": 6}, {"id": "ferreiro", "theme": "ofícios", "deg": 6}, {"id": "filha", "theme": "família", "deg": 7}, {"id": "filho", "theme": "família", "deg": 5}, {"id": "flor", "theme": "natureza", "deg": 5}, {"id": "floresta", "theme": "natureza", "deg": 5}, {"id": "folha", "theme": "natureza", "deg": 7}, {"id": "fotografia", "theme": "artes", "deg": 6}, {"id": "frase", "theme": "linguagem", "deg": 8}, {"id": "fruto", "theme": "natureza", "deg": 5}, {"id": "futuro", "theme": "tempo", "deg": 6}, {"id": "fígado", "theme": "corpo", "deg": 5}, {"id": "genro", "theme": "família", "deg": 5}, {"id": "grito", "theme": "linguagem", "deg": 6}, {"id": "gíria", "theme": "linguagem", "deg": 6}, {"id": "herança", "theme": "família", "deg": 9}, {"id": "história", "theme": "linguagem", "deg": 7}, {"id": "hoje", "theme": "tempo", "deg": 5}, {"id": "hora", "theme": "tempo", "deg": 5}, {"id": "idioma", "theme": "linguagem", "deg": 8}, {"id": "igreja", "theme": "lugares", "deg": 7}, {"id": "instante", "theme": "tempo", "deg": 6}, {"id": "irmã", "theme": "família", "deg": 6}, {"id": "irmão", "theme": "família", "deg": 7}, {"id": "janela", "theme": "lugares", "deg": 7}, {"id": "jantar", "theme": "comida", "deg": 5}, {"id": "jardim", "theme": "natureza", "deg": 7}, {"id": "joelho", "theme": "corpo", "deg": 5}, {"id": "juiz", "theme": "ofícios", "deg": 6}, {"id": "lago", "theme": "natureza", "deg": 4}, {"id": "lar", "theme": "lugares", "deg": 6}, {"id": "lavrador", "theme": "ofícios", "deg": 8}, {"id": "leite", "theme": "comida", "deg": 6}, {"id": "letra", "theme": "linguagem", "deg": 6}, {"id": "linguagem", "theme": "linguagem", "deg": 5}, {"id": "livro", "theme": "artes", "deg": 5}, {"id": "língua", "theme": "corpo", "deg": 6}, {"id": "madrinha", "theme": "família", "deg": 5}, {"id": "madrugada", "theme": "tempo", "deg": 9}, {"id": "mandioca", "theme": "comida", "deg": 7}, {"id": "manhã", "theme": "tempo", "deg": 5}, {"id": "manteiga", "theme": "comida", "deg": 7}, {"id": "mar", "theme": "natureza", "deg": 7}, {"id": "marinheiro", "theme": "ofícios", "deg": 6}, {"id": "mata", "theme": "natureza", "deg": 5}, {"id": "medo", "theme": "sentimentos", "deg": 6}, {"id": "mel", "theme": "comida", "deg": 6}, {"id": "melancolia", "theme": "sentimentos", "deg": 7}, {"id": "melodia", "theme": "artes", "deg": 5}, {"id": "memória", "theme": "linguagem", "deg": 4}, {"id": "mercado", "theme": "lugares", "deg": 6}, {"id": "milho", "theme": "comida", "deg": 7}, {"id": "minuto", "theme": "tempo", "deg": 6}, {"id": "momento", "theme": "tempo", "deg": 5}, {"id": "montanha", "theme": "natureza", "deg": 6}, {"id": "mágoa", "theme": "sentimentos", "deg": 5}, {"id": "mãe", "theme": "família", "deg": 5}, {"id": "mão", "theme": "corpo", "deg": 6}, {"id": "médico", "theme": "ofícios", "deg": 7}, {"id": "mês", "theme": "tempo", "deg": 6}, {"id": "música", "theme": "artes", "deg": 7}, {"id": "natureza", "theme": "natureza", "deg": 6}, {"id": "nação", "theme": "lugares", "deg": 7}, {"id": "neta", "theme": "família", "deg": 7}, {"id": "neto", "theme": "família", "deg": 6}, {"id": "noite", "theme": "tempo", "deg": 5}, {"id": "nome", "theme": "linguagem", "deg": 5}, {"id": "nora", "theme": "família", "deg": 8}, {"id": "nostalgia", "theme": "sentimentos", "deg": 5}, {"id": "ofício", "theme": "ofícios", "deg": 6}, {"id": "olho", "theme": "corpo", "deg": 5}, {"id": "ombro", "theme": "corpo", "deg": 4}, {"id": "onda", "theme": "natureza", "deg": 7}, {"id": "ontem", "theme": "tempo", "deg": 3}, {"id": "operário", "theme": "ofícios", "deg": 7}, {"id": "osso", "theme": "corpo", "deg": 6}, {"id": "ovo", "theme": "comida", "deg": 5}, {"id": "padeiro", "theme": "ofícios", "deg": 5}, {"id": "padrinho", "theme": "família", "deg": 4}, {"id": "pai", "theme": "família", "deg": 6}, {"id": "pais", "theme": "família", "deg": 9}, {"id": "paixão", "theme": "sentimentos", "deg": 5}, {"id": "palavra", "theme": "linguagem", "deg": 16}, {"id": "parentesco", "theme": "família", "deg": 4}, {"id": "passado", "theme": "tempo", "deg": 4}, {"id": "pastor", "theme": "ofícios", "deg": 5}, {"id": "patrão", "theme": "ofícios", "deg": 7}, {"id": "pavor", "theme": "sentimentos", "deg": 7}, {"id": "país", "theme": "lugares", "deg": 5}, {"id": "pedreiro", "theme": "ofícios", "deg": 7}, {"id": "peito", "theme": "corpo", "deg": 4}, {"id": "peixe", "theme": "comida", "deg": 6}, {"id": "pele", "theme": "corpo", "deg": 5}, {"id": "pergunta", "theme": "linguagem", "deg": 5}, {"id": "perna", "theme": "corpo", "deg": 3}, {"id": "pescador", "theme": "ofícios", "deg": 9}, {"id": "pescoço", "theme": "corpo", "deg": 7}, {"id": "piano", "theme": "artes", "deg": 7}, {"id": "pimenta", "theme": "comida", "deg": 7}, {"id": "pintura", "theme": "artes", "deg": 6}, {"id": "poesia", "theme": "artes", "deg": 6}, {"id": "ponte", "theme": "lugares", "deg": 7}, {"id": "porta", "theme": "lugares", "deg": 5}, {"id": "porto", "theme": "lugares", "deg": 5}, {"id": "prado", "theme": "natureza", "deg": 6}, {"id": "praia", "theme": "natureza", "deg": 5}, {"id": "prazer", "theme": "sentimentos", "deg": 5}, {"id": "praça", "theme": "lugares", "deg": 8}, {"id": "prima", "theme": "família", "deg": 5}, {"id": "primo", "theme": "família", "deg": 6}, {"id": "professor", "theme": "ofícios", "deg": 8}, {"id": "profissão", "theme": "ofícios", "deg": 8}, {"id": "pulmão", "theme": "corpo", "deg": 9}, {"id": "pátria", "theme": "lugares", "deg": 6}, {"id": "pão", "theme": "comida", "deg": 4}, {"id": "pé", "theme": "corpo", "deg": 5}, {"id": "pétala", "theme": "natureza", "deg": 6}, {"id": "quarto", "theme": "lugares", "deg": 4}, {"id": "queijo", "theme": "comida", "deg": 6}, {"id": "raiz", "theme": "natureza", "deg": 5}, {"id": "refeição", "theme": "comida", "deg": 6}, {"id": "resposta", "theme": "linguagem", "deg": 4}, {"id": "riacho", "theme": "natureza", "deg": 6}, {"id": "rima", "theme": "artes", "deg": 7}, {"id": "rio", "theme": "natureza", "deg": 4}, {"id": "ritmo", "theme": "artes", "deg": 5}, {"id": "romance", "theme": "artes", "deg": 8}, {"id": "rosto", "theme": "corpo", "deg": 6}, {"id": "rua", "theme": "lugares", "deg": 7}, {"id": "sal", "theme": "comida", "deg": 3}, {"id": "salário", "theme": "ofícios", "deg": 4}, {"id": "samba", "theme": "artes", "deg": 6}, {"id": "sangue", "theme": "corpo", "deg": 4}, {"id": "sapateiro", "theme": "ofícios", "deg": 4}, {"id": "saudade", "theme": "sentimentos", "deg": 5}, {"id": "segundo", "theme": "tempo", "deg": 4}, {"id": "selva", "theme": "natureza", "deg": 5}, {"id": "semana", "theme": "tempo", "deg": 5}, {"id": "semente", "theme": "natureza", "deg": 6}, {"id": "sentido", "theme": "linguagem", "deg": 6}, {"id": "serra", "theme": "natureza", "deg": 5}, {"id": "significado", "theme": "linguagem", "deg": 4}, {"id": "silêncio", "theme": "linguagem", "deg": 4}, {"id": "sinônimo", "theme": "linguagem", "deg": 5}, {"id": "sobrinho", "theme": "família", "deg": 7}, {"id": "sogra", "theme": "família", "deg": 5}, {"id": "soldado", "theme": "ofícios", "deg": 4}, {"id": "sotaque", "theme": "linguagem", "deg": 7}, {"id": "surpresa", "theme": "sentimentos", "deg": 4}, {"id": "sussurro", "theme": "linguagem", "deg": 5}, {"id": "susto", "theme": "sentimentos", "deg": 8}, {"id": "século", "theme": "tempo", "deg": 4}, {"id": "sílaba", "theme": "linguagem", "deg": 8}, {"id": "tambor", "theme": "artes", "deg": 5}, {"id": "tarde", "theme": "tempo", "deg": 5}, {"id": "teatro", "theme": "artes", "deg": 8}, {"id": "tela", "theme": "artes", "deg": 6}, {"id": "tempo", "theme": "tempo", "deg": 16}, {"id": "ternura", "theme": "sentimentos", "deg": 7}, {"id": "tia", "theme": "família", "deg": 9}, {"id": "tio", "theme": "família", "deg": 6}, {"id": "trabalho", "theme": "ofícios", "deg": 6}, {"id": "trigo", "theme": "comida", "deg": 5}, {"id": "tristeza", "theme": "sentimentos", "deg": 5}, {"id": "unha", "theme": "corpo", "deg": 6}, {"id": "vale", "theme": "natureza", "deg": 6}, {"id": "verso", "theme": "artes", "deg": 8}, {"id": "vila", "theme": "lugares", "deg": 6}, {"id": "vinho", "theme": "comida", "deg": 5}, {"id": "violão", "theme": "artes", "deg": 8}, {"id": "voz", "theme": "linguagem", "deg": 8}, {"id": "água", "theme": "comida", "deg": 7}, {"id": "árvore", "theme": "natureza", "deg": 6}, {"id": "época", "theme": "tempo", "deg": 6}], "links": [{"source": "acento", "target": "apelido"}, {"source": "acento", "target": "fala"}, {"source": "acento", "target": "lago"}, {"source": "acento", "target": "pergunta"}, {"source": "acento", "target": "prazer"}, {"source": "acento", "target": "sotaque"}, {"source": "acento", "target": "sílaba"}, {"source": "advogado", "target": "cachoeira"}, {"source": "advogado", "target": "coração"}, {"source": "advogado", "target": "eternidade"}, {"source": "advogado", "target": "fala"}, {"source": "advogado", "target": "hora"}, {"source": "advogado", "target": "juiz"}, {"source": "advogado", "target": "marinheiro"}, {"source": "advogado", "target": "palavra"}, {"source": "advogado", "target": "professor"}, {"source": "afeto", "target": "amor"}, {"source": "afeto", "target": "angústia"}, {"source": "afeto", "target": "carinho"}, {"source": "afeto", "target": "voz"}, {"source": "aflição", "target": "angústia"}, {"source": "aflição", "target": "ansiedade"}, {"source": "aflição", "target": "escultura"}, {"source": "aflição", "target": "felicidade"}, {"source": "aflição", "target": "pavor"}, {"source": "aflição", "target": "água"}, {"source": "aldeia", "target": "bairro"}, {"source": "aldeia", "target": "capital"}, {"source": "aldeia", "target": "trabalho"}, {"source": "aldeia", "target": "vila"}, {"source": "alegria", "target": "felicidade"}, {"source": "alegria", "target": "queijo"}, {"source": "alegria", "target": "surpresa"}, {"source": "alegria", "target": "ternura"}, {"source": "alfaiate", "target": "açougueiro"}, {"source": "alfaiate", "target": "boca"}, {"source": "alfaiate", "target": "emprego"}, {"source": "alfaiate", "target": "padeiro"}, {"source": "alfaiate", "target": "profissão"}, {"source": "alfaiate", "target": "rua"}, {"source": "alfaiate", "target": "sapateiro"}, {"source": "alfaiate", "target": "susto"}, {"source": "alma", "target": "amor"}, {"source": "alma", "target": "corpo"}, {"source": "alma", "target": "dente"}, {"source": "alma", "target": "fígado"}, {"source": "alma", "target": "gíria"}, {"source": "alma", "target": "memória"}, {"source": "alma", "target": "palavra"}, {"source": "alma", "target": "pátria"}, {"source": "alma", "target": "pé"}, {"source": "almoço", "target": "carne"}, {"source": "almoço", "target": "dor"}, {"source": "almoço", "target": "frase"}, {"source": "almoço", "target": "instante"}, {"source": "almoço", "target": "jantar"}, {"source": "almoço", "target": "manteiga"}, {"source": "almoço", "target": "patrão"}, {"source": "almoço", "target": "pimenta"}, {"source": "almoço", "target": "refeição"}, {"source": "amanhã", "target": "eternidade"}, {"source": "amanhã", "target": "hoje"}, {"source": "amanhã", "target": "hora"}, {"source": "amanhã", "target": "perna"}, {"source": "amanhã", "target": "pescador"}, {"source": "amanhã", "target": "porta"}, {"source": "amor", "target": "paixão"}, {"source": "amor", "target": "susto"}, {"source": "amor", "target": "tristeza"}, {"source": "amor", "target": "árvore"}, {"source": "angústia", "target": "compaixão"}, {"source": "angústia", "target": "dor"}, {"source": "angústia", "target": "medo"}, {"source": "angústia", "target": "riacho"}, {"source": "ano", "target": "crepúsculo"}, {"source": "ano", "target": "manhã"}, {"source": "ano", "target": "mês"}, {"source": "ano", "target": "música"}, {"source": "ano", "target": "século"}, {"source": "ansiedade", "target": "manteiga"}, {"source": "ansiedade", "target": "medo"}, {"source": "ansiedade", "target": "paixão"}, {"source": "ansiedade", "target": "rua"}, {"source": "ansiedade", "target": "saudade"}, {"source": "apelido", "target": "história"}, {"source": "apelido", "target": "idioma"}, {"source": "apelido", "target": "irmã"}, {"source": "apelido", "target": "letra"}, {"source": "apelido", "target": "nome"}, {"source": "areia", "target": "montanha"}, {"source": "areia", "target": "natureza"}, {"source": "areia", "target": "ofício"}, {"source": "areia", "target": "praia"}, {"source": "areia", "target": "rima"}, {"source": "arroz", "target": "carne"}, {"source": "arroz", "target": "chá"}, {"source": "arroz", "target": "feijão"}, {"source": "arroz", "target": "madrugada"}, {"source": "arroz", "target": "neta"}, {"source": "arroz", "target": "trigo"}, {"source": "arte", "target": "cachoeira"}, {"source": "arte", "target": "dicionário"}, {"source": "arte", "target": "fotografia"}, {"source": "arte", "target": "música"}, {"source": "arte", "target": "romance"}, {"source": "arte", "target": "samba"}, {"source": "ator", "target": "canção"}, {"source": "ator", "target": "cena"}, {"source": "ator", "target": "poesia"}, {"source": "ator", "target": "primo"}, {"source": "aurora", "target": "crepúsculo"}, {"source": "aurora", "target": "instante"}, {"source": "aurora", "target": "madrugada"}, {"source": "aurora", "target": "prazer"}, {"source": "aurora", "target": "professor"}, {"source": "avenida", "target": "casa"}, {"source": "avenida", "target": "feijão"}, {"source": "avenida", "target": "praça"}, {"source": "avenida", "target": "quarto"}, {"source": "avenida", "target": "rua"}, {"source": "avó", "target": "avô"}, {"source": "avó", "target": "genro"}, {"source": "avó", "target": "idioma"}, {"source": "avó", "target": "mãe"}, {"source": "avó", "target": "neto"}, {"source": "avó", "target": "pai"}, {"source": "avô", "target": "coração"}, {"source": "avô", "target": "irmã"}, {"source": "avô", "target": "pais"}, {"source": "avô", "target": "pescoço"}, {"source": "avô", "target": "pulmão"}, {"source": "avô", "target": "semana"}, {"source": "açougueiro", "target": "boca"}, {"source": "açougueiro", "target": "enfermeira"}, {"source": "açougueiro", "target": "padeiro"}, {"source": "açougueiro", "target": "pescador"}, {"source": "açougueiro", "target": "tarde"}, {"source": "açúcar", "target": "manteiga"}, {"source": "açúcar", "target": "mel"}, {"source": "açúcar", "target": "pimenta"}, {"source": "açúcar", "target": "tempo"}, {"source": "açúcar", "target": "unha"}, {"source": "bairro", "target": "igreja"}, {"source": "bairro", "target": "porta"}, {"source": "bairro", "target": "refeição"}, {"source": "bairro", "target": "rua"}, {"source": "boca", "target": "livro"}, {"source": "boca", "target": "língua"}, {"source": "boca", "target": "olho"}, {"source": "boca", "target": "ombro"}, {"source": "boca", "target": "rosto"}, {"source": "braço", "target": "janela"}, {"source": "braço", "target": "língua"}, {"source": "braço", "target": "mão"}, {"source": "braço", "target": "ombro"}, {"source": "braço", "target": "surpresa"}, {"source": "cabeça", "target": "corpo"}, {"source": "cabeça", "target": "enfermeira"}, {"source": "cabeça", "target": "mão"}, {"source": "cabeça", "target": "palavra"}, {"source": "cabeça", "target": "rosto"}, {"source": "cachoeira", "target": "lago"}, {"source": "cachoeira", "target": "linguagem"}, {"source": "cachoeira", "target": "pétala"}, {"source": "cachoeira", "target": "riacho"}, {"source": "cachoeira", "target": "semente"}, {"source": "café", "target": "chá"}, {"source": "café", "target": "momento"}, {"source": "café", "target": "pimenta"}, {"source": "café", "target": "trabalho"}, {"source": "café", "target": "água"}, {"source": "campo", "target": "jardim"}, {"source": "campo", "target": "milho"}, {"source": "campo", "target": "onda"}, {"source": "campo", "target": "ponte"}, {"source": "campo", "target": "prado"}, {"source": "campo", "target": "selva"}, {"source": "canção", "target": "cena"}, {"source": "canção", "target": "idioma"}, {"source": "canção", "target": "melodia"}, {"source": "canção", "target": "música"}, {"source": "canção", "target": "pai"}, {"source": "canção", "target": "tela"}, {"source": "capital", "target": "cidade"}, {"source": "capital", "target": "cozinha"}, {"source": "capital", "target": "estação"}, {"source": "capital", "target": "padeiro"}, {"source": "capital", "target": "riacho"}, {"source": "capital", "target": "tempo"}, {"source": "capital", "target": "vila"}, {"source": "capital", "target": "voz"}, {"source": "carinho", "target": "compaixão"}, {"source": "carinho", "target": "esperança"}, {"source": "carinho", "target": "melancolia"}, {"source": "carinho", "target": "prado"}, {"source": "carinho", "target": "saudade"}, {"source": "carinho", "target": "ternura"}, {"source": "carne", "target": "filho"}, {"source": "carne", "target": "mandioca"}, {"source": "carne", "target": "nação"}, {"source": "carne", "target": "ovo"}, {"source": "carne", "target": "peixe"}, {"source": "carne", "target": "salário"}, {"source": "carpinteiro", "target": "ferreiro"}, {"source": "carpinteiro", "target": "patrão"}, {"source": "carpinteiro", "target": "pedreiro"}, {"source": "carpinteiro", "target": "trabalho"}, {"source": "carpinteiro", "target": "vila"}, {"source": "casa", "target": "dia"}, {"source": "casa", "target": "escola"}, {"source": "casa", "target": "igreja"}, {"source": "casa", "target": "lar"}, {"source": "casa", "target": "poesia"}, {"source": "cena", "target": "livro"}, {"source": "cena", "target": "melodia"}, {"source": "cena", "target": "mãe"}, {"source": "cena", "target": "ponte"}, {"source": "cena", "target": "teatro"}, {"source": "chá", "target": "dente"}, {"source": "chá", "target": "peixe"}, {"source": "chá", "target": "queijo"}, {"source": "chá", "target": "vinho"}, {"source": "cidade", "target": "estado"}, {"source": "cidade", "target": "estação"}, {"source": "cidade", "target": "jardim"}, {"source": "cidade", "target": "país"}, {"source": "cidade", "target": "prima"}, {"source": "cinema", "target": "escultura"}, {"source": "cinema", "target": "fotografia"}, {"source": "cinema", "target": "pergunta"}, {"source": "cinema", "target": "tela"}, {"source": "comida", "target": "farinha"}, {"source": "comida", "target": "história"}, {"source": "comida", "target": "peito"}, {"source": "comida", "target": "refeição"}, {"source": "comida", "target": "água"}, {"source": "compaixão", "target": "contentamento"}, {"source": "compaixão", "target": "esperança"}, {"source": "compaixão", "target": "felicidade"}, {"source": "compaixão", "target": "ovo"}, {"source": "compaixão", "target": "sílaba"}, {"source": "compaixão", "target": "ternura"}, {"source": "contentamento", "target": "felicidade"}, {"source": "contentamento", "target": "pais"}, {"source": "contentamento", "target": "prazer"}, {"source": "conto", "target": "folha"}, {"source": "conto", "target": "herança"}, {"source": "conto", "target": "lar"}, {"source": "conto", "target": "livro"}, {"source": "conto", "target": "paixão"}, {"source": "conto", "target": "palavra"}, {"source": "conto", "target": "romance"}, {"source": "conto", "target": "verso"}, {"source": "conversa", "target": "fala"}, {"source": "conversa", "target": "felicidade"}, {"source": "conversa", "target": "grito"}, {"source": "conversa", "target": "silêncio"}, {"source": "coração", "target": "jantar"}, {"source": "coração", "target": "joelho"}, {"source": "coração", "target": "peito"}, {"source": "coração", "target": "pulmão"}, {"source": "coração", "target": "rosto"}, {"source": "corpo", "target": "peixe"}, {"source": "corpo", "target": "pescoço"}, {"source": "cozinha", "target": "esquina"}, {"source": "cozinha", "target": "fígado"}, {"source": "cozinha", "target": "janela"}, {"source": "cozinha", "target": "pai"}, {"source": "cozinha", "target": "quarto"}, {"source": "cozinha", "target": "voz"}, {"source": "crepúsculo", "target": "cunhado"}, {"source": "crepúsculo", "target": "gíria"}, {"source": "crepúsculo", "target": "hoje"}, {"source": "crepúsculo", "target": "ontem"}, {"source": "crepúsculo", "target": "segundo"}, {"source": "crepúsculo", "target": "época"}, {"source": "cunhado", "target": "pais"}, {"source": "cunhado", "target": "sobrinho"}, {"source": "cunhado", "target": "sogra"}, {"source": "dança", "target": "desenho"}, {"source": "dança", "target": "piano"}, {"source": "dança", "target": "rima"}, {"source": "dança", "target": "tambor"}, {"source": "dança", "target": "teatro"}, {"source": "dança", "target": "voz"}, {"source": "dedo", "target": "mão"}, {"source": "dedo", "target": "palavra"}, {"source": "dedo", "target": "pé"}, {"source": "dedo", "target": "sapateiro"}, {"source": "dedo", "target": "unha"}, {"source": "dente", "target": "hoje"}, {"source": "dente", "target": "língua"}, {"source": "dente", "target": "pescoço"}, {"source": "dente", "target": "pulmão"}, {"source": "dente", "target": "sogra"}, {"source": "desenho", "target": "escultura"}, {"source": "desenho", "target": "noite"}, {"source": "desenho", "target": "prima"}, {"source": "desenho", "target": "tela"}, {"source": "dia", "target": "letra"}, {"source": "dia", "target": "manhã"}, {"source": "dia", "target": "semana"}, {"source": "dia", "target": "tarde"}, {"source": "dicionário", "target": "significado"}, {"source": "dicionário", "target": "sinônimo"}, {"source": "dicionário", "target": "voz"}, {"source": "dor", "target": "mágoa"}, {"source": "dor", "target": "saudade"}, {"source": "emprego", "target": "esperança"}, {"source": "emprego", "target": "eternidade"}, {"source": "emprego", "target": "jantar"}, {"source": "emprego", "target": "mercado"}, {"source": "emprego", "target": "profissão"}, {"source": "emprego", "target": "salário"}, {"source": "enfermeira", "target": "médico"}, {"source": "enfermeira", "target": "professor"}, {"source": "enfermeira", "target": "violão"}, {"source": "enfermeira", "target": "época"}, {"source": "engenheiro", "target": "irmão"}, {"source": "engenheiro", "target": "juiz"}, {"source": "engenheiro", "target": "lavrador"}, {"source": "engenheiro", "target": "marinheiro"}, {"source": "engenheiro", "target": "ternura"}, {"source": "engenheiro", "target": "trabalho"}, {"source": "era", "target": "mês"}, {"source": "era", "target": "palavra"}, {"source": "era", "target": "século"}, {"source": "era", "target": "teatro"}, {"source": "era", "target": "época"}, {"source": "escola", "target": "esperança"}, {"source": "escola", "target": "esquina"}, {"source": "escola", "target": "igreja"}, {"source": "escultura", "target": "jardim"}, {"source": "escultura", "target": "olho"}, {"source": "escultura", "target": "sobrinho"}, {"source": "escultura", "target": "violão"}, {"source": "espanto", "target": "esperança"}, {"source": "espanto", "target": "país"}, {"source": "espanto", "target": "surpresa"}, {"source": "espanto", "target": "susto"}, {"source": "esperança", "target": "nostalgia"}, {"source": "esperança", "target": "saudade"}, {"source": "esquina", "target": "pescador"}, {"source": "esquina", "target": "ponte"}, {"source": "esquina", "target": "praça"}, {"source": "estado", "target": "mão"}, {"source": "estado", "target": "médico"}, {"source": "estado", "target": "poesia"}, {"source": "estado", "target": "praça"}, {"source": "estado", "target": "pátria"}, {"source": "estação", "target": "mercado"}, {"source": "estação", "target": "porto"}, {"source": "estação", "target": "susto"}, {"source": "estação", "target": "tia"}, {"source": "estômago", "target": "fígado"}, {"source": "estômago", "target": "irmão"}, {"source": "estômago", "target": "língua"}, {"source": "estômago", "target": "pulmão"}, {"source": "eternidade", "target": "instante"}, {"source": "eternidade", "target": "madrugada"}, {"source": "eternidade", "target": "passado"}, {"source": "eternidade", "target": "peixe"}, {"source": "fala", "target": "voz"}, {"source": "família", "target": "herança"}, {"source": "família", "target": "nora"}, {"source": "família", "target": "parentesco"}, {"source": "família", "target": "susto"}, {"source": "farinha", "target": "osso"}, {"source": "farinha", "target": "pescador"}, {"source": "farinha", "target": "pão"}, {"source": "farinha", "target": "trigo"}, {"source": "farinha", "target": "vinho"}, {"source": "feijão", "target": "mandioca"}, {"source": "feijão", "target": "milho"}, {"source": "feijão", "target": "palavra"}, {"source": "feijão", "target": "vinho"}, {"source": "felicidade", "target": "trigo"}, {"source": "ferreiro", "target": "mês"}, {"source": "ferreiro", "target": "onda"}, {"source": "ferreiro", "target": "pastor"}, {"source": "ferreiro", "target": "sapateiro"}, {"source": "ferreiro", "target": "segundo"}, {"source": "filha", "target": "filho"}, {"source": "filha", "target": "irmão"}, {"source": "filha", "target": "manteiga"}, {"source": "filha", "target": "nora"}, {"source": "filha", "target": "parentesco"}, {"source": "filha", "target": "primo"}, {"source": "filha", "target": "tia"}, {"source": "filho", "target": "genro"}, {"source": "filho", "target": "neto"}, {"source": "filho", "target": "pai"}, {"source": "flor", "target": "folha"}, {"source": "flor", "target": "mar"}, {"source": "flor", "target": "pétala"}, {"source": "flor", "target": "samba"}, {"source": "flor", "target": "semente"}, {"source": "floresta", "target": "mar"}, {"source": "floresta", "target": "mata"}, {"source": "floresta", "target": "medo"}, {"source": "floresta", "target": "natureza"}, {"source": "floresta", "target": "tempo"}, {"source": "folha", "target": "raiz"}, {"source": "folha", "target": "semente"}, {"source": "folha", "target": "silêncio"}, {"source": "folha", "target": "sussurro"}, {"source": "folha", "target": "tio"}, {"source": "fotografia", "target": "refeição"}, {"source": "fotografia", "target": "rima"}, {"source": "fotografia", "target": "soldado"}, {"source": "fotografia", "target": "teatro"}, {"source": "frase", "target": "gíria"}, {"source": "frase", "target": "letra"}, {"source": "frase", "target": "linguagem"}, {"source": "frase", "target": "sentido"}, {"source": "frase", "target": "sussurro"}, {"source": "frase", "target": "sílaba"}, {"source": "frase", "target": "tristeza"}, {"source": "fruto", "target": "jardim"}, {"source": "fruto", "target": "mata"}, {"source": "fruto", "target": "natureza"}, {"source": "fruto", "target": "piano"}, {"source": "fruto", "target": "semente"}, {"source": "futuro", "target": "fígado"}, {"source": "futuro", "target": "minuto"}, {"source": "futuro", "target": "passado"}, {"source": "futuro", "target": "semana"}, {"source": "futuro", "target": "século"}, {"source": "futuro", "target": "tempo"}, {"source": "fígado", "target": "pele"}, {"source": "genro", "target": "madrinha"}, {"source": "genro", "target": "nora"}, {"source": "genro", "target": "sogra"}, {"source": "grito", "target": "linguagem"}, {"source": "grito", "target": "pergunta"}, {"source": "grito", "target": "silêncio"}, {"source": "grito", "target": "sobrinho"}, {"source": "grito", "target": "sussurro"}, {"source": "gíria", "target": "idioma"}, {"source": "gíria", "target": "sinônimo"}, {"source": "gíria", "target": "sotaque"}, {"source": "herança", "target": "madrinha"}, {"source": "herança", "target": "marinheiro"}, {"source": "herança", "target": "neta"}, {"source": "herança", "target": "pimenta"}, {"source": "herança", "target": "prima"}, {"source": "herança", "target": "sinônimo"}, {"source": "herança", "target": "tio"}, {"source": "história", "target": "memória"}, {"source": "história", "target": "resposta"}, {"source": "história", "target": "sentido"}, {"source": "história", "target": "surpresa"}, {"source": "história", "target": "tempo"}, {"source": "hoje", "target": "ontem"}, {"source": "hoje", "target": "tristeza"}, {"source": "hora", "target": "minuto"}, {"source": "hora", "target": "tempo"}, {"source": "hora", "target": "época"}, {"source": "idioma", "target": "linguagem"}, {"source": "idioma", "target": "madrinha"}, {"source": "idioma", "target": "palavra"}, {"source": "idioma", "target": "tempo"}, {"source": "igreja", "target": "janela"}, {"source": "igreja", "target": "mercado"}, {"source": "igreja", "target": "operário"}, {"source": "igreja", "target": "selva"}, {"source": "instante", "target": "momento"}, {"source": "instante", "target": "nação"}, {"source": "instante", "target": "segundo"}, {"source": "irmã", "target": "irmão"}, {"source": "irmã", "target": "pintura"}, {"source": "irmã", "target": "sal"}, {"source": "irmã", "target": "tia"}, {"source": "irmão", "target": "pais"}, {"source": "irmão", "target": "ponte"}, {"source": "irmão", "target": "tia"}, {"source": "janela", "target": "nação"}, {"source": "janela", "target": "pintura"}, {"source": "janela", "target": "porta"}, {"source": "janela", "target": "profissão"}, {"source": "jantar", "target": "mel"}, {"source": "jantar", "target": "pão"}, {"source": "jardim", "target": "montanha"}, {"source": "jardim", "target": "praia"}, {"source": "jardim", "target": "pétala"}, {"source": "joelho", "target": "pedreiro"}, {"source": "joelho", "target": "perna"}, {"source": "joelho", "target": "pé"}, {"source": "joelho", "target": "tambor"}, {"source": "juiz", "target": "mão"}, {"source": "juiz", "target": "patrão"}, {"source": "juiz", "target": "porto"}, {"source": "juiz", "target": "soldado"}, {"source": "lago", "target": "mar"}, {"source": "lago", "target": "natureza"}, {"source": "lar", "target": "ponte"}, {"source": "lar", "target": "praça"}, {"source": "lar", "target": "quarto"}, {"source": "lar", "target": "rua"}, {"source": "lavrador", "target": "montanha"}, {"source": "lavrador", "target": "ofício"}, {"source": "lavrador", "target": "operário"}, {"source": "lavrador", "target": "padeiro"}, {"source": "lavrador", "target": "pastor"}, {"source": "lavrador", "target": "pescador"}, {"source": "lavrador", "target": "selva"}, {"source": "leite", "target": "mandioca"}, {"source": "leite", "target": "manteiga"}, {"source": "leite", "target": "pele"}, {"source": "leite", "target": "pão"}, {"source": "leite", "target": "queijo"}, {"source": "leite", "target": "época"}, {"source": "letra", "target": "resposta"}, {"source": "letra", "target": "significado"}, {"source": "letra", "target": "sílaba"}, {"source": "linguagem", "target": "riacho"}, {"source": "livro", "target": "ofício"}, {"source": "livro", "target": "pintura"}, {"source": "língua", "target": "osso"}, {"source": "língua", "target": "tarde"}, {"source": "madrinha", "target": "neta"}, {"source": "madrinha", "target": "padrinho"}, {"source": "madrugada", "target": "manhã"}, {"source": "madrugada", "target": "médico"}, {"source": "madrugada", "target": "noite"}, {"source": "madrugada", "target": "nome"}, {"source": "madrugada", "target": "passado"}, {"source": "madrugada", "target": "vila"}, {"source": "mandioca", "target": "milho"}, {"source": "mandioca", "target": "pimenta"}, {"source": "mandioca", "target": "sentido"}, {"source": "mandioca", "target": "árvore"}, {"source": "manhã", "target": "profissão"}, {"source": "manhã", "target": "tarde"}, {"source": "manteiga", "target": "milho"}, {"source": "manteiga", "target": "queijo"}, {"source": "mar", "target": "medo"}, {"source": "mar", "target": "onda"}, {"source": "mar", "target": "pétala"}, {"source": "mar", "target": "vale"}, {"source": "marinheiro", "target": "médico"}, {"source": "marinheiro", "target": "pedreiro"}, {"source": "marinheiro", "target": "soldado"}, {"source": "mata", "target": "mercado"}, {"source": "mata", "target": "selva"}, {"source": "mata", "target": "árvore"}, {"source": "medo", "target": "pavor"}, {"source": "medo", "target": "ternura"}, {"source": "mel", "target": "melancolia"}, {"source": "mel", "target": "pastor"}, {"source": "mel", "target": "pimenta"}, {"source": "mel", "target": "sal"}, {"source": "melancolia", "target": "mágoa"}, {"source": "melancolia", "target": "médico"}, {"source": "melancolia", "target": "nostalgia"}, {"source": "melancolia", "target": "pavor"}, {"source": "melancolia", "target": "tristeza"}, {"source": "melodia", "target": "piano"}, {"source": "melodia", "target": "ritmo"}, {"source": "melodia", "target": "verso"}, {"source": "memória", "target": "palavra"}, {"source": "memória", "target": "sílaba"}, {"source": "mercado", "target": "porta"}, {"source": "mercado", "target": "semente"}, {"source": "milho", "target": "refeição"}, {"source": "milho", "target": "tela"}, {"source": "milho", "target": "trigo"}, {"source": "minuto", "target": "noite"}, {"source": "minuto", "target": "segundo"}, {"source": "minuto", "target": "século"}, {"source": "minuto", "target": "tambor"}, {"source": "momento", "target": "mês"}, {"source": "momento", "target": "noite"}, {"source": "momento", "target": "época"}, {"source": "montanha", "target": "palavra"}, {"source": "montanha", "target": "prado"}, {"source": "montanha", "target": "serra"}, {"source": "mágoa", "target": "nostalgia"}, {"source": "mágoa", "target": "palavra"}, {"source": "mágoa", "target": "tristeza"}, {"source": "mãe", "target": "neto"}, {"source": "mãe", "target": "pai"}, {"source": "mãe", "target": "pais"}, {"source": "mão", "target": "pele"}, {"source": "médico", "target": "parentesco"}, {"source": "médico", "target": "pastor"}, {"source": "mês", "target": "semana"}, {"source": "mês", "target": "sinônimo"}, {"source": "música", "target": "nora"}, {"source": "música", "target": "pintura"}, {"source": "música", "target": "samba"}, {"source": "música", "target": "verso"}, {"source": "natureza", "target": "raiz"}, {"source": "natureza", "target": "romance"}, {"source": "nação", "target": "país"}, {"source": "nação", "target": "pátria"}, {"source": "nação", "target": "rua"}, {"source": "nação", "target": "vila"}, {"source": "neta", "target": "neto"}, {"source": "neta", "target": "pais"}, {"source": "neta", "target": "quarto"}, {"source": "neta", "target": "tio"}, {"source": "neto", "target": "romance"}, {"source": "neto", "target": "sílaba"}, {"source": "noite", "target": "tarde"}, {"source": "nome", "target": "ritmo"}, {"source": "nome", "target": "sussurro"}, {"source": "nome", "target": "voz"}, {"source": "nora", "target": "padrinho"}, {"source": "nora", "target": "patrão"}, {"source": "nora", "target": "peixe"}, {"source": "nora", "target": "rosto"}, {"source": "nostalgia", "target": "saudade"}, {"source": "nostalgia", "target": "sílaba"}, {"source": "ofício", "target": "padeiro"}, {"source": "ofício", "target": "profissão"}, {"source": "ofício", "target": "trabalho"}, {"source": "olho", "target": "pergunta"}, {"source": "olho", "target": "pulmão"}, {"source": "olho", "target": "rosto"}, {"source": "ombro", "target": "pescoço"}, {"source": "ombro", "target": "água"}, {"source": "onda", "target": "prado"}, {"source": "onda", "target": "praia"}, {"source": "onda", "target": "riacho"}, {"source": "onda", "target": "tempo"}, {"source": "ontem", "target": "pavor"}, {"source": "operário", "target": "passado"}, {"source": "operário", "target": "patrão"}, {"source": "operário", "target": "pedreiro"}, {"source": "operário", "target": "profissão"}, {"source": "operário", "target": "soldado"}, {"source": "osso", "target": "pedreiro"}, {"source": "osso", "target": "pele"}, {"source": "osso", "target": "pescoço"}, {"source": "osso", "target": "sangue"}, {"source": "ovo", "target": "palavra"}, {"source": "ovo", "target": "peixe"}, {"source": "ovo", "target": "queijo"}, {"source": "padrinho", "target": "sotaque"}, {"source": "padrinho", "target": "tio"}, {"source": "pai", "target": "teatro"}, {"source": "pais", "target": "parentesco"}, {"source": "pais", "target": "pavor"}, {"source": "pais", "target": "tia"}, {"source": "paixão", "target": "prazer"}, {"source": "paixão", "target": "unha"}, {"source": "palavra", "target": "patrão"}, {"source": "palavra", "target": "pintura"}, {"source": "palavra", "target": "professor"}, {"source": "palavra", "target": "tia"}, {"source": "pastor", "target": "profissão"}, {"source": "patrão", "target": "salário"}, {"source": "pavor", "target": "ritmo"}, {"source": "pavor", "target": "susto"}, {"source": "país", "target": "porta"}, {"source": "país", "target": "violão"}, {"source": "pedreiro", "target": "pescador"}, {"source": "pedreiro", "target": "rio"}, {"source": "peito", "target": "pulmão"}, {"source": "peito", "target": "unha"}, {"source": "pele", "target": "pulmão"}, {"source": "pergunta", "target": "resposta"}, {"source": "perna", "target": "sangue"}, {"source": "pescador", "target": "praia"}, {"source": "pescador", "target": "tempo"}, {"source": "pescador", "target": "verso"}, {"source": "pescoço", "target": "pulmão"}, {"source": "pescoço", "target": "sangue"}, {"source": "piano", "target": "prado"}, {"source": "piano", "target": "sobrinho"}, {"source": "piano", "target": "tambor"}, {"source": "piano", "target": "violão"}, {"source": "pimenta", "target": "sal"}, {"source": "pintura", "target": "tela"}, {"source": "poesia", "target": "queijo"}, {"source": "poesia", "target": "verso"}, {"source": "poesia", "target": "violão"}, {"source": "ponte", "target": "porto"}, {"source": "ponte", "target": "vale"}, {"source": "porto", "target": "pátria"}, {"source": "porto", "target": "vila"}, {"source": "prado", "target": "tempo"}, {"source": "praia", "target": "rio"}, {"source": "prazer", "target": "ternura"}, {"source": "praça", "target": "pátria"}, {"source": "praça", "target": "ternura"}, {"source": "praça", "target": "vale"}, {"source": "praça", "target": "violão"}, {"source": "prima", "target": "primo"}, {"source": "prima", "target": "sobrinho"}, {"source": "primo", "target": "professor"}, {"source": "primo", "target": "sobrinho"}, {"source": "primo", "target": "tia"}, {"source": "professor", "target": "salário"}, {"source": "professor", "target": "sapateiro"}, {"source": "professor", "target": "água"}, {"source": "profissão", "target": "serra"}, {"source": "pulmão", "target": "unha"}, {"source": "pátria", "target": "tempo"}, {"source": "pão", "target": "verso"}, {"source": "pé", "target": "rosto"}, {"source": "pé", "target": "tela"}, {"source": "pétala", "target": "semente"}, {"source": "pétala", "target": "susto"}, {"source": "raiz", "target": "serra"}, {"source": "raiz", "target": "vale"}, {"source": "raiz", "target": "árvore"}, {"source": "refeição", "target": "água"}, {"source": "resposta", "target": "semana"}, {"source": "riacho", "target": "rio"}, {"source": "rima", "target": "romance"}, {"source": "rima", "target": "significado"}, {"source": "rima", "target": "verso"}, {"source": "rima", "target": "violão"}, {"source": "rio", "target": "vale"}, {"source": "ritmo", "target": "samba"}, {"source": "ritmo", "target": "teatro"}, {"source": "romance", "target": "samba"}, {"source": "romance", "target": "sotaque"}, {"source": "romance", "target": "teatro"}, {"source": "rua", "target": "tempo"}, {"source": "samba", "target": "violão"}, {"source": "sangue", "target": "sentido"}, {"source": "selva", "target": "árvore"}, {"source": "sentido", "target": "significado"}, {"source": "sentido", "target": "trabalho"}, {"source": "serra", "target": "vale"}, {"source": "serra", "target": "árvore"}, {"source": "silêncio", "target": "sussurro"}, {"source": "sinônimo", "target": "sílaba"}, {"source": "sobrinho", "target": "sotaque"}, {"source": "sogra", "target": "tempo"}, {"source": "sogra", "target": "tia"}, {"source": "sotaque", "target": "vinho"}, {"source": "sotaque", "target": "voz"}, {"source": "susto", "target": "tempo"}, {"source": "tambor", "target": "verso"}, {"source": "teatro", "target": "tempo"}, {"source": "tempo", "target": "tio"}, {"source": "tia", "target": "tio"}, {"source": "trigo", "target": "unha"}, {"source": "vinho", "target": "água"}]};
+
+    const THEME_COLORS = {
+      'sentimentos': '#f472b6',
+      'tempo':       '#60a5fa',
+      'natureza':    '#34d399',
+      'artes':       '#c084fc',
+      'corpo':       '#fb7185',
+      'comida':      '#fbbf24',
+      'família':     '#f97316',
+      'linguagem':   '#38bdf8',
+      'lugares':     '#2dd4bf',
+      'ofícios':     '#a3e635'
+    };
+
+    const normalize = (s) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    // Build lookup maps
+    const nodes = GRAPH_DATA.nodes;
+    const links = GRAPH_DATA.links;
+    const nodeById = new Map();
+    const adj = new Map();
+    nodes.forEach((n, idx) => {
+      n.index = idx;
+      n.color = THEME_COLORS[n.theme] || '#94a3b8';
+      nodeById.set(n.id, n);
+      adj.set(n.id, new Set());
+    });
+    links.forEach(l => {
+      adj.get(l.source).add(l.target);
+      adj.get(l.target).add(l.source);
+    });
+
+    // Stats bar
+    document.getElementById('stats-bar').innerHTML =
+      `<span><strong>${nodes.length}</strong> palavras</span>` +
+      `<span><strong>${links.length}</strong> relações</span>` +
+      `<span><strong>${Object.keys(THEME_COLORS).length}</strong> temas</span>`;
+
+    // Deterministic 3D force-directed layout
+    const themes = Object.keys(THEME_COLORS);
+    nodes.forEach((n, i) => {
+      const tIdx = themes.indexOf(n.theme);
+      const angle = (tIdx / themes.length) * Math.PI * 2;
+      const r = 45 + (i % 7) * 4;
+      n.x = Math.cos(angle) * r + Math.sin(i * 1.7) * 18;
+      n.y = Math.sin(i * 2.3) * 26;
+      n.z = Math.sin(angle) * r + Math.cos(i * 1.3) * 18;
+      n.vx = 0; n.vy = 0; n.vz = 0;
+    });
+
+    for (let iter = 0; iter < 140; iter++) {
+      const alpha = 1 - iter / 140;
+      // Repulsion
+      for (let i = 0; i < nodes.length; i++) {
+        const a = nodes[i];
+        for (let j = i + 1; j < nodes.length; j++) {
+          const b = nodes[j];
+          let dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+          let d2 = dx * dx + dy * dy + dz * dz + 0.1;
+          if (d2 > 6400) continue;
+          let f = (160 / d2) * alpha;
+          a.vx += dx * f; a.vy += dy * f; a.vz += dz * f;
+          b.vx -= dx * f; b.vy -= dy * f; b.vz -= dz * f;
+        }
+      }
+      // Attraction along links
+      for (let i = 0; i < links.length; i++) {
+        const s = nodeById.get(links[i].source);
+        const t = nodeById.get(links[i].target);
+        let dx = t.x - s.x, dy = t.y - s.y, dz = t.z - s.z;
+        let f = 0.045 * alpha;
+        s.vx += dx * f; s.vy += dy * f; s.vz += dz * f;
+        t.vx -= dx * f; t.vy -= dy * f; t.vz -= dz * f;
+      }
+      // Center gravity
+      for (let i = 0; i < nodes.length; i++) {
+        const n = nodes[i];
+        n.vx -= n.x * 0.008 * alpha;
+        n.vy -= n.y * 0.008 * alpha;
+        n.vz -= n.z * 0.008 * alpha;
+        n.vx *= 0.82; n.vy *= 0.82; n.vz *= 0.82;
+        n.x += n.vx; n.y += n.vy; n.z += n.vz;
+      }
+    }
+
+    // Three.js Scene
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    document.body.appendChild(renderer.domElement);
+
+    // Subtle starfield
+    const starGeo = new THREE.BufferGeometry();
+    const starPos = new Float32Array(600 * 3);
+    for (let i = 0; i < 600 * 3; i++) starPos[i] = (Math.random() - 0.5) * 500;
+    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+    scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0x475569, size: 0.7, transparent: true, opacity: 0.5 })));
+
+    // Node meshes
+    const nodeGroup = new THREE.Group();
+    scene.add(nodeGroup);
+    const sphereGeo = new THREE.SphereGeometry(1, 18, 18);
+    const nodeMeshes = [];
+
+    nodes.forEach(n => {
+      const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(n.color), transparent: true, opacity: 0.92 });
+      const mesh = new THREE.Mesh(sphereGeo, mat);
+      const scale = 0.65 + Math.sqrt(n.deg) * 0.42;
+      mesh.scale.setScalar(scale);
+      mesh.position.set(n.x, n.y, n.z);
+      mesh.userData = { node: n, baseScale: scale };
+      nodeGroup.add(mesh);
+      nodeMeshes.push(mesh);
+    });
+
+    // All edges (background)
+    const edgePos = new Float32Array(links.length * 6);
+    links.forEach((l, i) => {
+      const s = nodeById.get(l.source);
+      const t = nodeById.get(l.target);
+      edgePos[i * 6] = s.x; edgePos[i * 6 + 1] = s.y; edgePos[i * 6 + 2] = s.z;
+      edgePos[i * 6 + 3] = t.x; edgePos[i * 6 + 4] = t.y; edgePos[i * 6 + 5] = t.z;
+    });
+    const edgeGeo = new THREE.BufferGeometry();
+    edgeGeo.setAttribute('position', new THREE.BufferAttribute(edgePos, 3));
+    const edgeMat = new THREE.LineBasicMaterial({ color: 0x64748b, transparent: true, opacity: 0.16 });
+    const edgeLines = new THREE.LineSegments(edgeGeo, edgeMat);
+    scene.add(edgeLines);
+
+    // Highlighted ego edges
+    const highlightGeo = new THREE.BufferGeometry();
+    const highlightMat = new THREE.LineBasicMaterial({ color: 0x7dd3fc, transparent: true, opacity: 0.9 });
+    const highlightLines = new THREE.LineSegments(highlightGeo, highlightMat);
+    scene.add(highlightLines);
+
+    // Custom smooth orbit camera
+    let target = new THREE.Vector3(0, 0, 0);
+    let desiredTarget = new THREE.Vector3(0, 0, 0);
+    let spherical = { radius: 135, theta: 0.4, phi: 1.25 };
+    let desiredSpherical = { radius: 135, theta: 0.4, phi: 1.25 };
+    let isDragging = false;
+    let dragDist = 0;
+    let prevMouse = { x: 0, y: 0 };
+
+    const canvas = renderer.domElement;
+    canvas.addEventListener('pointerdown', e => {
+      isDragging = true;
+      dragDist = 0;
+      prevMouse = { x: e.clientX, y: e.clientY };
+    });
+    window.addEventListener('pointermove', e => {
+      if (!isDragging) return;
+      const dx = e.clientX - prevMouse.x;
+      const dy = e.clientY - prevMouse.y;
+      dragDist += Math.hypot(dx, dy);
+      desiredSpherical.theta -= dx * 0.0055;
+      desiredSpherical.phi = Math.max(0.15, Math.min(Math.PI - 0.15, desiredSpherical.phi - dy * 0.0055));
+      prevMouse = { x: e.clientX, y: e.clientY };
+    });
+    window.addEventListener('pointerup', e => {
+      if (isDragging && dragDist < 5) handleCanvasClick(e);
+      isDragging = false;
+    });
+    canvas.addEventListener('wheel', e => {
+      e.preventDefault();
+      desiredSpherical.radius = Math.max(22, Math.min(260, desiredSpherical.radius + e.deltaY * 0.1));
+    }, { passive: false });
+
+    // Raycasting
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    let hoveredNode = null;
+    let selectedNode = null;
+    let activeTheme = null;
+
+    canvas.addEventListener('pointermove', e => {
+      if (isDragging) return;
+      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+      const hits = raycaster.intersectObjects(nodeMeshes);
+      hoveredNode = hits.length > 0 ? hits[0].object.userData.node : null;
+      canvas.style.cursor = hoveredNode ? 'pointer' : 'grab';
+    });
+
+    function handleCanvasClick(e) {
+      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+      const hits = raycaster.intersectObjects(nodeMeshes);
+      if (hits.length > 0) {
+        selectWord(hits[0].object.userData.node.id);
+      }
+    }
+
+    // Selection & Inspector
+    function selectWord(wordId, updateUrl = true) {
+      const n = nodeById.get(wordId);
+      if (!n) return;
+      selectedNode = n;
+      activeTheme = null;
+      updateThemePills();
+
+      if (updateUrl) {
+        const url = new URL(window.location.href);
+        url.searchParams.set('word', n.id);
+        window.history.replaceState({}, '', url);
+      }
+
+      // Fly camera to node
+      desiredTarget.set(n.x, n.y, n.z);
+      desiredSpherical.radius = 52;
+
+      // Update node opacities & highlight edges
+      const nbrs = adj.get(n.id);
+      nodeMeshes.forEach(m => {
+        const mn = m.userData.node;
+        const isSel = mn.id === n.id;
+        const isNbr = nbrs.has(mn.id);
+        m.material.opacity = isSel ? 1.0 : isNbr ? 0.95 : 0.15;
+        m.scale.setScalar(isSel ? m.userData.baseScale * 1.45 : m.userData.baseScale);
+      });
+      edgeMat.opacity = 0.05;
+
+      const hPos = new Float32Array(nbrs.size * 6);
+      let idx = 0;
+      nbrs.forEach(nid => {
+        const nb = nodeById.get(nid);
+        hPos[idx++] = n.x; hPos[idx++] = n.y; hPos[idx++] = n.z;
+        hPos[idx++] = nb.x; hPos[idx++] = nb.y; hPos[idx++] = nb.z;
+      });
+      highlightGeo.setAttribute('position', new THREE.BufferAttribute(hPos, 3));
+      highlightGeo.computeBoundingSphere();
+
+      // Update Inspector UI
+      document.getElementById('insp-word').textContent = n.id;
+      document.getElementById('insp-meta').innerHTML =
+        `<span class="badge"><span class="theme-dot" style="background:${n.color}"></span>${n.theme}</span>` +
+        `<span>${nbrs.size} ${nbrs.size === 1 ? 'relação' : 'relações'}</span>`;
+      document.getElementById('insp-neighbors-title').textContent = 'Palavras relacionadas';
+      const listEl = document.getElementById('insp-neighbors');
+      listEl.innerHTML = '';
+      Array.from(nbrs).sort((a, b) => a.localeCompare(b, 'pt-BR')).forEach(nid => {
+        const chip = document.createElement('button');
+        chip.className = 'neighbor-chip';
+        chip.textContent = nid;
+        chip.onclick = () => selectWord(nid);
+        listEl.appendChild(chip);
+      });
+      document.getElementById('inspector').classList.add('open');
+    }
+
+    function clearSelection() {
+      selectedNode = null;
+      const url = new URL(window.location.href);
+      url.searchParams.delete('word');
+      window.history.replaceState({}, '', url);
+
+      desiredTarget.set(0, 0, 0);
+      desiredSpherical.radius = 135;
+      highlightGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(0), 3));
+      edgeMat.opacity = 0.16;
+      applyThemeFilter();
+      document.getElementById('inspector').classList.remove('open');
+    }
+
+    document.getElementById('insp-close').onclick = clearSelection;
+
+    // Theme pills
+    const themesBar = document.getElementById('themes-bar');
+    function updateThemePills() {
+      themesBar.innerHTML = '';
+      themes.forEach(t => {
+        const pill = document.createElement('button');
+        pill.className = 'theme-pill' + (activeTheme === t ? ' active' : '');
+        pill.innerHTML = `<span class="theme-dot" style="background:${THEME_COLORS[t]}"></span>${t}`;
+        pill.onclick = () => {
+          activeTheme = activeTheme === t ? null : t;
+          if (selectedNode) clearSelection();
+          else applyThemeFilter();
+          updateThemePills();
+        };
+        themesBar.appendChild(pill);
+      });
+    }
+    function applyThemeFilter() {
+      nodeMeshes.forEach(m => {
+        const mn = m.userData.node;
+        m.material.opacity = (!activeTheme || mn.theme === activeTheme) ? 0.92 : 0.12;
+        m.scale.setScalar(m.userData.baseScale);
+      });
+    }
+    updateThemePills();
+
+    // Search
+    const searchInput = document.getElementById('search-input');
+    const searchResults = document.getElementById('search-results');
+    searchInput.addEventListener('input', () => {
+      const q = normalize(searchInput.value.trim());
+      if (!q) { searchResults.style.display = 'none'; return; }
+      const matches = nodes
+        .filter(n => normalize(n.id).includes(q))
+        .sort((a, b) => {
+          const as = normalize(a.id).startsWith(q) ? 0 : 1;
+          const bs = normalize(b.id).startsWith(q) ? 0 : 1;
+          return as - bs || b.deg - a.deg;
+        })
+        .slice(0, 12);
+      if (matches.length === 0) { searchResults.style.display = 'none'; return; }
+      searchResults.innerHTML = '';
+      matches.forEach(m => {
+        const item = document.createElement('div');
+        item.className = 'search-item';
+        item.innerHTML = `<span>${m.id}</span><span class="theme-tag">${m.theme} · ${m.deg}</span>`;
+        item.onclick = () => {
+          searchInput.value = '';
+          searchResults.style.display = 'none';
+          selectWord(m.id);
+        };
+        searchResults.appendChild(item);
+      });
+      searchResults.style.display = 'block';
+    });
+    document.addEventListener('click', e => {
+      if (!e.target.closest('.search-wrap')) searchResults.style.display = 'none';
+    });
+
+    // Labels projection
+    const labelsLayer = document.getElementById('labels-layer');
+    const labelPool = new Map();
+    function getLabel(id) {
+      if (!labelPool.has(id)) {
+        const el = document.createElement('div');
+        el.className = 'node-label';
+        el.textContent = id;
+        labelsLayer.appendChild(el);
+        labelPool.set(id, el);
+      }
+      return labelPool.get(id);
+    }
+
+    function updateLabels() {
+      const visibleIds = new Set();
+      if (selectedNode) {
+        visibleIds.add(selectedNode.id);
+        adj.get(selectedNode.id).forEach(nid => visibleIds.add(nid));
+      } else {
+        nodes.filter(n => n.deg >= 8).forEach(n => visibleIds.add(n.id));
+      }
+      if (hoveredNode) visibleIds.add(hoveredNode.id);
+
+      labelPool.forEach((el, id) => {
+        if (!visibleIds.has(id)) el.style.display = 'none';
+      });
+
+      const v = new THREE.Vector3();
+      visibleIds.forEach(id => {
+        const n = nodeById.get(id);
+        const el = getLabel(id);
+        v.set(n.x, n.y, n.z).project(camera);
+        if (v.z > 1) { el.style.display = 'none'; return; }
+        const x = (v.x * 0.5 + 0.5) * window.innerWidth;
+        const y = (-v.y * 0.5 + 0.5) * window.innerHeight;
+        el.style.display = 'block';
+        el.style.left = `${x}px`;
+        el.style.top = `${y}px`;
+        el.className = 'node-label' +
+          (selectedNode && selectedNode.id === id ? ' selected' :
+           selectedNode && adj.get(selectedNode.id).has(id) ? ' neighbor' : '');
+      });
+    }
+
+    // Resize
+    window.addEventListener('resize', () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // Initial ?word= param
+    const urlWord = new URLSearchParams(window.location.search).get('word');
+    if (urlWord) {
+      const q = normalize(urlWord.trim());
+      const match = nodeById.get(urlWord.trim().toLowerCase()) || nodes.find(n => normalize(n.id) === q);
+      if (match) selectWord(match.id, false);
+    }
+
+    // Animation loop
+    function animate() {
+      requestAnimationFrame(animate);
+      if (!isDragging && !selectedNode) desiredSpherical.theta += 0.0008;
+
+      target.lerp(desiredTarget, 0.08);
+      spherical.radius += (desiredSpherical.radius - spherical.radius) * 0.08;
+      spherical.theta += (desiredSpherical.theta - spherical.theta) * 0.1;
+      spherical.phi += (desiredSpherical.phi - spherical.phi) * 0.1;
+
+      camera.position.set(
+        target.x + spherical.radius * Math.sin(spherical.phi) * Math.sin(spherical.theta),
+        target.y + spherical.radius * Math.cos(spherical.phi),
+        target.z + spherical.radius * Math.sin(spherical.phi) * Math.cos(spherical.theta)
+      );
+      camera.lookAt(target);
+      updateLabels();
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [
+  "[goal]\nProvide `run_tasks(tasks, max_concurrent)` in [run.py](<WORKSPACE>/run.py) using Python 3.11+ standard library only, bounding concurrency and ensuring job cleanup runs on Ctrl+C.\n\n[action]\n- Implemented `run_tasks` in [run.py](<WORKSPACE>/run.py) using `asyncio.Semaphore(max_concurrent)` and `asyncio.TaskGroup`.\n- Assumptions made:\n  - `max_concurrent < 1` raises `ValueError`.\n  - `tasks` can be any iterable of zero-argument callables returning awaitables; `run_tasks` returns a `list` of results in input order.\n  - Each task factory is invoked only after acquiring the semaphore slot so cancelled queued tasks do not leave unawaited coroutines.\n  - Ctrl+C in `asyncio.run(...)` cancels the outer task with `asyncio.CancelledError`, and `asyncio.TaskGroup` cancels running jobs and awaits their `finally` cleanup blocks before propagating `CancelledError`.\n\n[result]\n- Verified with `python -c ...` on Python `3.13.14` (exit code `0`, output `OK 3.13.14`):\n  - `test_basic_and_limit`: confirmed `peak == 2` for `max_concurrent=2` across 6 tasks and ordered return `[0, 10, 20, 30, 40, 50]`.\n  - `test_cancel_cleanup`: confirmed cancelling `run_tasks` awaited `finally` cleanup for both active jobs (`len(cleaned) == 2`).\n\n[next]\nImport and use `from run import run_tasks` in your batch scripts.\n"
+ ],
+ "diff": "A run.py\n\n--- run.py ---\nfrom __future__ import annotations\n\nimport asyncio\nfrom collections.abc import Awaitable, Callable, Iterable\nfrom typing import TypeVar\n\nT = TypeVar(\"T\")\n\n\nasync def run_tasks(\n    tasks: Iterable[Callable[[], Awaitable[T]]],\n    max_concurrent: int,\n) -> list[T]:\n    \"\"\"Run zero-arg task factories concurrently up to ``max_concurrent``.\n\n    Each task factory is called only after a concurrency slot is acquired,\n    preventing unawaited-coroutine warnings if cancelled early. On\n    cancellation (e.g. Ctrl+C), ``asyncio.TaskGroup`` cancels all running\n    jobs and awaits their cleanup before propagating ``CancelledError``.\n    \"\"\"\n    if max_concurrent < 1:\n        raise ValueError(f\"max_concurrent must be >= 1, got {max_concurrent!r}\")\n\n    task_list = list(tasks)\n    if not task_list:\n        return []\n\n    semaphore = asyncio.Semaphore(max_concurrent)\n    results: list[T] = [None] * len(task_list)  # type: ignore[list-item]\n\n    async def _worker(index: int, factory: Callable[[], Awaitable[T]]) -> None:\n        async with semaphore:\n            results[index] = await factory()\n\n    async with asyncio.TaskGroup() as tg:\n        for idx, factory in enumerate(task_list):\n            tg.create_task(_worker(idx, factory))\n\n    return results\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"\"\n[step 1] shell \"python -c \\\"\\nimport asyncio, sys\\nfrom run import run_tasks\\n\\nasync def test_basic_and_limit():\\n    active = 0\\n    peak = 0\\n    async def job(i):\\n        nonlocal active, peak\\n        active += 1\\n        peak = max(peak, active)\\n        await asyncio.sleep(0.02)\\n        active -= 1\\n        return i * 10\\n    res = await run_tasks([lambda i=i: job(i) for i in range(6)], max_concurrent=2)\\n    assert res == [0, 10, 20, 30, 40, 50], res\\n    assert peak == 2, peak\\n\\nasync def test_cancel_cleanup():\\n    cleaned = []\\n …\" ok -> \"Created At: 2026-11-13T23:07:43-03:00\\nCompleted At: 2026-11-13T23:07:45-03:00\\nCommand exited with code 0.\\n\\nCommand output:\\nOK 3.13.14\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 3,
+  "tool_calls": 2,
+  "tool_errors": 0,
+  "shell_commands": 1,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2232,
+  "reasoning_tokens": 953,
+  "largest_turn_tokens": 1184
+ },
+ "deliverables": [],
+ "render": null
+}
