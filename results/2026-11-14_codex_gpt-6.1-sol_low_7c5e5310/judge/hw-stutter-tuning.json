@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "[goal]\nIdentify hitches within the owner’s constraints.\n\n[action]\nSaved [result.json](result.json). Recommended `pcie_aspm_rp1_gpu`: `L1` → `disabled`. Preserve Gen5 x4 and overclock settings.\n\n[result]\nAverage: 137.28572 FPS. 1% low: 45.35429 FPS.\n\n“Verified: 180/180 frames above 20 ms coincide with GPU L1; zero coincide with L0.”\n\nAssumed documented clock synchronization; used linear-interpolated p99. No host settings changed or apps opened.\n\n[next]\nGPU ASPM is the evidence-supported cause. A post-change replay must confirm the fix."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\r\n  \"avg_fps\": 137.28571999702498,\r\n  \"low_1pct_fps\": 45.354291853960994,\r\n  \"cause\": \"GPU PCIe ASPM L1 power-state transitions on RP1: all 180 frames above 20 ms coincide with the 15 L1 sensor seconds (2, 6, ..., 58), with 12 slow frames per L1 second. All L0 seconds stay below 8.2 ms, including Defender activity at seconds 43-45 and isolated disk activity spikes. CPU/GPU clocks remain stable. This implicates GPU link power management, not Gen5 x4 bandwidth, Defender, CPU parking, or NVMe ASPM.\",\r\n  \"changes\": [\r\n    {\r\n      \"setting\": \"pcie_aspm_rp1_gpu\",\r\n      \"from\": \"L1\",\r\n      \"to\": \"disabled\"\r\n    }\r\n  ]\r\n}\r\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-ChildItem -Force .; Get-ChildItem -Force ..'\" ok -> \"Directory: <WORKSPACE>\\r\\n\\r\\nMode                 LastWriteTime         Length Name\\r\\n----                 -------------         ------ ----\\r\\nd----          14/11/2026    05:30                capture\\r\\n-a---          14/11/2026    05:30            394 AGENTS.md\\r\\n-a---          14/11/2026    05:30            774 NOTES.md\\r\\n-a---          1[... 308 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-Content NOTES.md; Get-Content settings.json; Get-ChildItem capture; Get-Content AGENTS.md'\" ok -> \"# Owner notes - rig \\\"arena-01\\\"\\r\\n\\r\\nThe game hitches every few seconds even though the average frame rate looks fine.\\r\\nCapture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\r\\ntaken at the same time (same clock: second 0 of both files is the same instant).\\r\\nsettings.json is a dump of the rig's current settings.\\r\\n\\r\\nHow we measure:\\r\\n- Average FPS = frames presented di[... 3686 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-Content capture/sensors.csv; Get-Content capture/presentmon.csv -TotalCount 5'\" ok -> \"time_s,cpu_clock_mhz,cpu_util_pct,gpu_clock_mhz,gpu_pcie_link_state,gpu_pcie_link_speed,dpc_latency_us,disk_active_pct,top_cpu_process\\r\\n0,5354,35,2724,L0,Gen5 x4,52,1,Arena.exe\\r\\n1,5350,40,2754,L0,Gen5 x4,88,4,Arena.exe\\r\\n2,5270,31,2754,L1,Gen5 x4,40,3,Arena.exe\\r\\n3,5373,31,2720,L0,Gen5 x4,81,2,Arena.exe\\r\\n4,5290,33,2759,L0,Gen5 x4,41,1,Arena.exe\\r\\n5,5344,32,2735,L0,Gen5 x4,49,2,Arena.exe\\r\\n6,5380,35,27[... 2858 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport csv,json,math\\nfrom collections import defaultdict\\np=list(csv.DictReader(open('capture/presentmon.csv')))\\ns=list(csv.DictReader(open('capture/sensors.csv')))\\nf=sorted(float(r['MsBetweenPresents']) for r in p)\\nk=(len(f)-1)*.99\\nq=f[int(k)]+(f[math.ceil(k)]-f[int(k)])*(k-int(k))\\nprint('frames',len(f),'duration_s',sum(f)/1000,'avg_fps',1000/(sum(f)/len(f)),'p99_ms',q,'low_1pct_fps',1000/q)\\ng=defaultdict(list)\\nfor r in p:g[int(float(r['TimeInSeconds']))].append(float(r['MsBetweenPresents']))\\nfor r in s:\\n t=int(r['time_s']); a=g[t]\\n print(t,r['gpu_pcie_link_state'],r['top_cpu_process'],r['disk_active_pct'],'frames',len(a),'max_ms',max(a),'over20',sum(x>20 for x in a))\\n'@ | python -\\\"\" ok -> \"frames 8238 duration_s 60.006241 avg_fps 137.28571999702498 p99_ms 22.04863 low_1pct_fps 45.354291853960994\\r\\n0 L0 Arena.exe 1 frames 144 max_ms 7.841 over20 0\\r\\n1 L0 Arena.exe 4 frames 144 max_ms 7.667 over20 0\\r\\n2 L1 Arena.exe 3 frames 118 max_ms 22.853 over20 12\\r\\n3 L0 Arena.exe 2 frames 144 max_ms 7.549 over20 0\\r\\n4 L0 Arena.exe 1 frames 144 max_ms 7.671 over20 0\\r\\n5 L0 Arena.exe 2 frames 143 max_ms[... 2853 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport csv,json,math\\nfrom pathlib import Path\\nframes=list(csv.DictReader(open('capture/presentmon.csv',newline='')))\\nsensors={int(r['time_s']):r for r in csv.DictReader(open('capture/sensors.csv',newline=''))}\\nvalues=sorted(float(r['MsBetweenPresents']) for r in frames)\\nrank=(len(values)-1)*.99\\np99=values[int(rank)]+(values[math.ceil(rank)]-values[int(rank)])*(rank-int(rank))\\nresult={\\n 'avg_fps':1000*len(values)/sum(values),\\n 'low_1pct_fps':1000/p99,\\n 'cause':'GPU PCIe ASPM L1 power-state transitions on RP1: all 180 frames above 20 ms coincide with the 15 L1 sensor seconds (2, 6, ..., 58), with 12 slow frames per L1 second. All L0 seconds stay below 8.2 ms, including Defender activity at seconds 43-45 and isolated disk activity spikes. CPU/GPU clocks remain stable. This implicates GPU link power management, not Gen5 x4 bandwidth, Defender, CPU parking, or NVMe ASPM.',\\n 'changes':[{'setting':'pcie_aspm_rp1_gpu','from':'L1','to':'disabled'}]\\n}\\nPath('result.json').write_text(json.dumps(result,indent=2)+'\\\\\\\\n',encoding='utf-8')\\nslow=[r for r in frames if float(r['MsBetweenPresents'])>20]\\nassert len(slow)==180\\nassert all(sensors[int(float(r['TimeInSeconds']))]['gpu_pcie_link_state']=='L1' for r in slow)\\nassert max(float(r['MsBetweenPresents']) for r in frames if sensors[int(float(r['TimeInSeconds']))]['gpu_pcie_link_state']=='L0')<8.2\\nsaved=json.loads(Path('res[... 546 chars cut by the benchmark]\" ok -> \"Verified result.json: avg_fps=137.28572000; low_1pct_fps=45.35429185; p99_ms=22.04863\\r\\nVerified: 180/180 frames above 20 ms coincide with GPU L1; zero coincide with L0.\\r\\nAssumptions: synchronized timestamps as documented; p99 uses linear interpolation; supplied files describe the owner rig. Fix is inferred from capture, not confirmed by a post-change replay.\\r\\n{\\r\\n  \\\"avg_fps\\\": 137.28571999702498,\\r\\n [... 587 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 5,
+  "tool_errors": 0,
+  "shell_commands": 5,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1379,
+  "reasoning_tokens": 44,
+  "largest_turn_tokens": 1379
+ },
+ "deliverables": [],
+ "render": null
+}
