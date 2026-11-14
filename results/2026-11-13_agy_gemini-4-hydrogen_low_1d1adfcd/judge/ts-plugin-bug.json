@@ -1,0 +1,61 @@
+{
+ "task_id": "ts-plugin-bug",
+ "prompts": [
+  "Users of our harness plugins report that tool.after hooks run out of order, that sometimes a hook never runs, and that a failing hook is silently ignored. The hook bus and the plugin are in {WS}; the README there says how the bus must behave. Fix the bus. Its public API stays as it is, the tests in {WS}/test stay as they are, and package.json takes no dependencies."
+ ],
+ "answers": [
+  "[goal]\nFix `HookBus.emit` in [bus.ts](<WORKSPACE>/src/bus.ts) to match the [README.md](<WORKSPACE>/README.md) contract without changing the public API, [bus.test.ts](<WORKSPACE>/test/bus.test.ts), or `package.json`.\n\n[action]\n- **Root cause found**: `HookBus.emit` in [bus.ts](<WORKSPACE>/src/bus.ts#L26-L31) used `list.forEach(async (handler) => { await handler(payload); })`, which:\n  1. Did not `await` handlers sequentially, causing `emit` to resolve early and async handlers (such as `loadRules()` in [plugin.ts](<WORKSPACE>/src/plugin.ts)) to run out of order.\n  2. Swallowed handler errors as unhandled rejections instead of rejecting `emit` and stopping subsequent handlers.\n  3. Iterated over the live `list` array, so `splice` during `unsubscribe` (e.g. `stopNotice()` in [plugin.ts](<WORKSPACE>/src/plugin.ts#L15-L18)) shifted indices and caused `forEach` to skip the next handler.\n- **Fix**: Replaced `list.forEach(...)` with a shallow snapshot (`const snapshot = [...(this.handlers.get(event) ?? [])];`) iterated sequentially via `for (const handler of snapshot) { await handler(payload); }`.\n- **Assumptions**: Handlers subscribed *during* an `emit` are not part of the snapshot and take effect on the next `emit`, matching the README rule that `emit` runs the handlers subscribed when it started.\n\n[result]\n- `npm test` passed (`pass 2`, `fail 0`).\n- Direct Node 24 verification against [plugin.ts](<WORKSPACE>/src/plugin.ts) and [bus.ts](<WORKSPACE>/src/bus.ts) printed `ALL_VERIFICATIONS_PASSED`, confirming:\n  - One-time notice unsubscribes itself without skipping async redaction or audit logging.\n  - Subsequent `emit` omits the unsubscribed notice.\n  - A throwing/rejecting handler rejects `emit` with the same error and prevents later handlers from running.\n\n[next]\nNone.\n"
+ ],
+ "diff": "M src/bus.ts\n\n--- src/bus.ts ---\n/**\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\n * handlers run one after another in subscription order, emit resolves after all of them,\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\n */\n\nexport type Handler<T> = (payload: T) => void | Promise<void>;\n\nexport class HookBus {\n  private handlers: Map<string, Handler<unknown>[]> = new Map();\n\n  /** Subscribes a handler to an event; returns the function that unsubscribes it. */\n  on<T>(event: string, handler: Handler<T>): () => void {\n    const list = this.handlers.get(event) ?? [];\n    list.push(handler as Handler<unknown>);\n    this.handlers.set(event, list);\n    return () => {\n      const index = list.indexOf(handler as Handler<unknown>);\n      if (index >= 0) {\n        list.splice(index, 1);\n      }\n    };\n  }\n\n  /** Runs the handlers of an event with the payload. */\n  async emit<T>(event: string, payload: T): Promise<void> {\n    const snapshot = [...(this.handlers.get(event) ?? [])];\n    for (const handler of snapshot) {\n      await handler(payload);\n    }\n  }\n\n  /** How many handlers an event has. */\n  count(event: string): number {\n    return (this.handlers.get(event) ?? []).length;\n  }\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem -Force\" ok -> \"Created At: 2026-11-13T23:19:39-03:00\\nCompleted At: 2026-11-13T23:19:40-03:00\\nCommand exited with code 0.\\n\\nCommand output:\\n\\r\\n\\r\\n    Directory: <WORKSPACE>\\r\\n\\r\\n\\r\\nMode                 LastWriteTime         Length Name                                                                 \\r\\n----                 -------------         ------ ----[... 610 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\README.md\" ok -> \"19 lines, 1077 bytes\"\n[step 1] shell \"npm test\" ok -> \"Created At: 2026-11-13T23:19:39-03:00\\nCompleted At: 2026-11-13T23:19:43-03:00\\nCommand exited with code 0.\\n\\nCommand output:\\n\\n> harness-hooks@0.3.0 test\\n> node --test\\n\\n✔ emit calls a subscribed handler with the payload (1.0604ms)\\n✔ unsubscribe removes the handler (0.1596ms)\\nℹ tests 2\\nℹ suites 0\\nℹ pass 2\\nℹ fail 0\\nℹ cancelled 0\\nℹ skipped 0\\nℹ todo 0\\nℹ duration_ms 106.0143\"\n[step 1] shell \"Get-ChildItem src, test\" ok -> \"Created At: 2026-11-13T23:19:44-03:00\\nCompleted At: 2026-11-13T23:19:46-03:00\\nCommand exited with code 0.\\n\\nCommand output:\\n\\r\\n\\r\\n    Directory: <WORKSPACE>\\\\src\\r\\n\\r\\n\\r\\nMode                 LastWriteTime         Length Name                                                                 \\r\\n----                 -------------         ------ [... 723 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\src\\\\bus.ts\" ok -> \"37 lines, 1241 bytes\"\n[step 1] read \"<WORKSPACE>\\\\src\\\\plugin.ts\" ok -> \"26 lines, 955 bytes\"\n[step 1] read \"<WORKSPACE>\\\\test\\\\bus.test.ts\" ok -> \"21 lines, 633 bytes\"\n[step 1] edit \"<WORKSPACE>\\\\src\\\\bus.ts\" ok -> \"\"\n[step 1] shell \"npm test\" ok -> \"Created At: 2026-11-13T23:19:55-03:00\\nCompleted At: 2026-11-13T23:19:56-03:00\\nCommand exited with code 0.\\n\\nCommand output:\\n\\n> harness-hooks@0.3.0 test\\n> node --test\\n\\n✔ emit calls a subscribed handler with the payload (1.0339ms)\\n✔ unsubscribe removes the handler (0.1712ms)\\nℹ tests 2\\nℹ suites 0\\nℹ pass 2\\nℹ fail 0\\nℹ cancelled 0\\nℹ skipped 0\\nℹ todo 0\\nℹ duration_ms 108.5321\"\n[step 1] shell \"node --input-type=module -e '\\nimport assert from \\\"node:assert/strict\\\";\\nimport { HookBus } from \\\"./src/bus.ts\\\";\\nimport { registerAuditPlugin } from \\\"./src/plugin.ts\\\";\\n\\n// 1. Plugin: one-time notice, async redaction, then audit log\\nconst bus = new HookBus();\\nconst audit = [];\\nregisterAuditPlugin(bus, audit);\\nawait bus.emit(\\\"tool.after\\\", { tool: \\\"bash\\\", output: \\\"password=secret\\\" });\\nassert.deepEqual(audit, [\\\"notice: tool output is audited\\\", \\\"bash: password=[redacted]\\\"]);\\n\\n// 2. Second emit: notice is unsubscri…\" ok -> \"Created At: 2026-11-13T23:19:55-03:00\\nCompleted At: 2026-11-13T23:19:58-03:00\\nCommand exited with code 1.\\n\\nCommand <WORKSPACE>/[eval1]:2\\r\\nimport assert from node:assert/strict;\\r\\n                   ^^^^\\r\\n\\r\\nSyntaxError: Unexpected identifier 'node'\\r\\n    at compileSourceTextModule (node:internal/modules/esm/utils:318:16[... 490 chars cut by the benchmark]\"\n[step 1] shell \"@'\\nimport assert from \\\"node:assert/strict\\\";\\nimport { HookBus } from \\\"./src/bus.ts\\\";\\nimport { registerAuditPlugin } from \\\"./src/plugin.ts\\\";\\n\\nconst bus = new HookBus();\\nconst audit = [];\\nregisterAuditPlugin(bus, audit);\\nawait bus.emit(\\\"tool.after\\\", { tool: \\\"bash\\\", output: \\\"password=secret\\\" });\\nassert.deepEqual(audit, [\\\"notice: tool output is audited\\\", \\\"bash: password=[redacted]\\\"]);\\n\\nawait bus.emit(\\\"tool.after\\\", { tool: \\\"read\\\", output: \\\"password=123\\\" });\\nassert.deepEqual(audit, [\\n  \\\"notice: tool output is audi…\" ok -> \"Created At: 2026-11-13T23:20:00-03:00\\nCompleted At: 2026-11-13T23:20:02-03:00\\nCommand exited with code 0.\\n\\nCommand output:\\nALL_VERIFICATIONS_PASSED\"",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "package.json takes no dependencies",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hidden handlers run in subscription order",
+   true
+  ],
+  [
+   "hidden emit resolves after every handler",
+   true
+  ],
+  [
+   "hidden a failing handler rejects emit",
+   true
+  ],
+  [
+   "hidden a handler that unsubscribes itself does not stop the others",
+   true
+  ],
+  [
+   "hidden the audit plugin redacts before it logs",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 11,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 2902,
+  "reasoning_tokens": 790,
+  "largest_turn_tokens": 796
+ },
+ "deliverables": [],
+ "render": null
+}
