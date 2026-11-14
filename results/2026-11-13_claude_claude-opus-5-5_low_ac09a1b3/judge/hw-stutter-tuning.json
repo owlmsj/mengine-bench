@@ -1,0 +1,56 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "**[goal]** Find why arena-01 hitches, and which setting change fixes it without touching the GPU link speed or BIOS overclock settings.\n\n**[action]** I measured the PresentMon capture (8238 frames) using the formulas in the owner's notes. I lined up every frame over 20 ms against the 1 s sensor log, which uses the same clock, then wrote `result.json`.\n\n**[result]**\n- **Average FPS:** 137.29. **1% low:** 45.35 (the 99th-percentile frame time is 22.049 ms).\n- **When the hitches happen:** frames over 20 ms fall only in seconds 2, 6, 10 and so on up to 58, once every 4 s.\n- **What the sensors show at those seconds:** in each of those seconds, and only those, the GPU link state reads `L1`. In every other second it is `L0`. That is PCIe power saving (ASPM L1) on the GPU's root port, and the hitches are the link waking back up.\n- **Ruled out:** a Defender scan (MsMpEng) runs from 43 to 45 s with DPC latency around 400 µs and disk activity of 80-94%, but there are no frames over 20 ms in those seconds. It is not the cause.\n- **Change:** `pcie_aspm_rp1_gpu` from `L1` to `disabled`. It is a BIOS setting, but it is not one of the protected overclock settings (XMP, PBO, core ratio), and the link stays at Gen5 x4, so both constraints hold.\n- **Confidence:** the evidence is a timing match. Every hitch second is an L1 second, and no other second has a hitch. I could not test the fix on the rig itself, so the recovered 1% low is not measured. `result.json` parses as valid JSON.\n\n**[next]** The owner should change that one BIOS setting, then repeat the same replay capture and check that the 1% low comes up close to the average. I did not open any browser tabs or apps."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\"avg_fps\": 137.29, \"low_1pct_fps\": 45.35,\n \"cause\": \"PCIe ASPM L1 on the GPU root port (rp1): the GPU link drops to L1 every 4 s (sensor seconds 2,6,...,58) and each L1 exit coincides exactly with the >20 ms frame spikes; the Defender scan at 43-45 s causes no spikes.\",\n \"changes\": [{\"setting\": \"pcie_aspm_rp1_gpu\", \"from\": \"L1\", \"to\": \"disabled\"}]}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd ..; ls; for f in *; do [ -f \\\"$f\\\" ] && { echo \\\"== $f\\\"; head -c 1500 \\\"$f\\\"; echo; wc -l \\\"$f\\\"; }; done\" failed -> \"Exit code 1\\nworkspace\"\n[step 1] shell \"ls -la; for f in *; do [ -f \\\"$f\\\" ] && { echo \\\"== $f\\\"; wc -l \\\"$f\\\"; head -c 2500 \\\"$f\\\"; echo; }; done\" ok -> \"total 9\\ndrwxr-xr-x 1 <USER> 197121    0 Nov 13 22:44 .\\ndrwxr-xr-x 1 <USER> 197121    0 Nov 13 22:44 ..\\n-rw-r--r-- 1 <USER> 197121  394 Nov 13 22:44 AGENTS.md\\n-rw-r--r-- 1 <USER> 197121  774 Nov 13 22:44 NOTES.md\\ndrwxr-xr-x 1 <USER> 197121    0 Nov 13 22:44 capture\\n-rw-r--r-- 1 <USER> 197121 2429 Nov 13 22:44 settings.json\\n== AGENTS.md\\n4 AGENTS.md\\nUse any skill, tool or MCP [... 3630 chars cut by the benchmark]\"\n[step 1] shell \"cd capture; ls; for f in *; do echo \\\"== $f\\\"; head -3 \\\"$f\\\"; done; python -I - <<'E'\\nimport csv,glob\\nf=[x for x in glob.glob('*') if 'resent' in x or 'frame' in x.lower()]\\nprint(f)\\nE\" ok -> \"presentmon.csv\\nsensors.csv\\n== presentmon.csv\\nApplication,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.000000,6.861,6.847,0.294,4.901,5.568\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.006861,6.773,6.812,0.387,4.013[... 257 chars cut by the benchmark]\"\n[step 1] shell \"python -I - <<'E'\\nimport csv,math\\nr=list(csv.DictReader(open('presentmon.csv')))\\nms=sorted(float(x['MsBetweenPresents']) for x in r)\\nn=len(ms);m=sum(ms)/n\\np=ms[min(n-1,math.ceil(0.99*n)-1)]\\nprint(n,1000/m,p,1000/p)\\nsp=[(int(float(x['TimeInSeconds'])),float(x['MsBetweenPresents'])) for x in r if float(x['MsBetweenPresents'])>20]\\nprint(sorted(set(s for s,_ in sp)))\\nE\\ncat sensors.csv | awk -F, '$5!=\\\"L0\\\"||$9!=\\\"Arena.exe\\\"||$7>200'\" ok -> \"8238 137.28571999702498 22.049 45.35353077237063\\r\\n[2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58]\\r\\ntime_s,cpu_clock_mhz,cpu_util_pct,gpu_clock_mhz,gpu_pcie_link_state,gpu_pcie_link_speed,dpc_latency_us,disk_active_pct,top_cpu_process\\n2,5270,31,2754,L1,Gen5 x4,40,3,Arena.exe\\n6,5380,35,2744,L1,Gen5 x4,77,4,Arena.exe\\n10,5450,36,2743,L1,Gen5 x4,84,5,Arena.exe\\n14,5242,38,2729,L1,Gen5 x4,68,2[... 610 chars cut by the benchmark]\"\n[step 1] shell \"cd ..; cat > result.json <<'E'\\n{\\\"avg_fps\\\": 137.29, \\\"low_1pct_fps\\\": 45.35,\\n \\\"cause\\\": \\\"PCIe ASPM L1 on the GPU root port (rp1): the GPU link drops to L1 every 4 s (sensor seconds 2,6,...,58) and each L1 exit coincides exactly with the >20 ms frame spikes; the Defender scan at 43-45 s causes no spikes.\\\",\\n \\\"changes\\\": [{\\\"setting\\\": \\\"pcie_aspm_rp1_gpu\\\", \\\"from\\\": \\\"L1\\\", \\\"to\\\": \\\"disabled\\\"}]}\\nE\\npython -I -m json.tool result.json >/dev/null && echo ok\" ok -> \"ok\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 5,
+  "tool_errors": 1,
+  "shell_commands": 5,
+  "shell_failures": 1,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1708,
+  "reasoning_tokens": 124
+ },
+ "deliverables": [],
+ "render": null
+}

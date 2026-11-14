@@ -1,0 +1,52 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [
+  "**[goal]** Add `run_tasks(tasks, max_concurrent)` to `./run.py`, standard library only, Python 3.11 or later. Jobs' cleanup code must still run when a run is stopped with Ctrl+C.\n\n**[action]** Wrote `run.py` using `asyncio.TaskGroup` and a semaphore. A task's callable is only called once a slot is free, so no job is created early. Ran a quick script against it, then deleted the script.\n\nAssumptions I made:\n- **Ctrl+C:** under `asyncio.run`, Ctrl+C cancels the main task. TaskGroup then cancels every running job and waits for their `finally` / `except CancelledError` code to finish before the cancellation is raised.\n- **Job failure:** if one job raises, the rest are cancelled the same way (after their cleanup runs) and the error comes back as an `ExceptionGroup`. A failure does not let the other jobs keep running.\n- **Bad limit:** `max_concurrent` must be an int of at least 1; anything else raises `ValueError` with the value received.\n- **Callables that raise:** if a task's callable raises before it hands back a job, that counts as a failed job.\n\n**[result]** Output of the test script:\n```\npeak 3 done 10\ncancelled, cleaned [11, 10]\n```\n- **Limit and completion:** 10 jobs with a limit of 3 never had more than 3 running at once, and all 10 finished.\n- **Cancellation:** I cancelled a run of long jobs with a limit of 2. Both running jobs ran their `finally` blocks before the cancellation came back.\n\nThe test cancelled the task directly instead of sending a real Ctrl+C. That is the same path `asyncio.run` takes on Ctrl+C, but I did not press Ctrl+C on a live run.\n\n**[next]** Optional: before relying on it in a batch run, press Ctrl+C on a real long run once. No browser tabs or apps were opened."
+ ],
+ "diff": "A run.py\n\n--- run.py ---\n\"\"\"Bounded-concurrency async job runner (stdlib only, Python 3.11+).\"\"\"\nimport asyncio\nfrom collections.abc import Awaitable, Callable, Iterable\n\n\nasync def run_tasks(tasks: Iterable[Callable[[], Awaitable[object]]], max_concurrent: int) -> None:\n    \"\"\"Run each zero-arg job factory, at most max_concurrent at once.\n\n    Factories are called only when a slot is free, so no job starts early.\n    On Ctrl+C (cancellation) or a job error, TaskGroup cancels running jobs\n    and waits for their cleanup (finally/except CancelledError) before raising.\n    \"\"\"\n    if not isinstance(max_concurrent, int) or max_concurrent < 1:\n        raise ValueError(f\"max_concurrent must be int >= 1, got {max_concurrent!r}\")\n    slots = asyncio.Semaphore(max_concurrent)\n\n    async def run_one_job(factory: Callable[[], Awaitable[object]]) -> None:\n        try:\n            await factory()\n        finally:\n            slots.release()\n\n    async with asyncio.TaskGroup() as group:\n        for factory in tasks:\n            await slots.acquire()\n            group.create_task(run_one_job(factory))\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cat > run.py <<'EOF'\\n\\\"\\\"\\\"Bounded-concurrency async job runner (stdlib only, Python 3.11+).\\\"\\\"\\\"\\nimport asyncio\\nfrom collections.abc import Awaitable, Callable, Iterable\\n\\n\\nasync def run_tasks(tasks: Iterable[Callable[[], Awaitable[object]]], max_concurrent: int) -> None:\\n    \\\"\\\"\\\"Run each zero-arg job factory, at most max_concurrent at once.\\n\\n    Factories are called only when a slot is free, so no job starts early.\\n    On Ctrl+C (cancellation) or a job error, TaskGroup cancels running jobs\\n    and waits for their cleanup (finally/except CancelledError) before raising.\\n    \\\"\\\"\\\"\\n    if not isinstance(max_concurrent, int) or max_concurrent < 1:\\n        raise ValueError(f\\\"max_concurrent must be int >= 1, got {max_concurrent!r}\\\")\\n    slots = asyncio.Semaphore(max_concurrent)\\n\\n    async def run_one_job(factory: Callable[[], Awaitable[object]]) -> None:\\n        try:\\n            await factory()\\n        finally:\\n            slots.release()\\n\\n    async with asyncio.TaskGroup() as group:\\n        for factory in tasks:\\n            await slots.acquire()\\n            group.create_task(run_one_job(factory))\\nEOF\\ncat > tmp_test.py <<'EOF'\\nimport asyncio, sys\\nfrom run import run_tasks\\npeak=cur=0; cleaned=[]\\ndef mk(i):\\n    async def job():\\n        global peak,cur\\n        cur+=1; peak=max(peak,cur)\\n        try: await asyncio.sleep(0.05 if i<10 else 10)\\n        finally: cur-=1; cleaned.append(i)\\n    return job\\nasyncio.run(run_tasks([mk(i) for i in range(10)],3)); print(\\\"peak\\\",peak,\\\"done\\\",len(cleaned))\\ncle[... 284 chars cut by the benchmark]\" ok -> \"peak 3 done 10\\r\\ncancelled, cleaned [11, 10]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 2,
+  "tool_calls": 1,
+  "tool_errors": 0,
+  "shell_commands": 1,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1633,
+  "reasoning_tokens": 165
+ },
+ "deliverables": [],
+ "render": null
+}

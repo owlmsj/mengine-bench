@@ -1,0 +1,52 @@
+{
+ "task_id": "bo-pnl-runway",
+ "prompts": [
+  "The investors meet tomorrow and want the first half of 2026 closed. The books and the board's notes are in {WS}/finance. How did each month go, and how many months of cash do we have left at the current burn? Prepare what the CFO needs to present. Record the key figures in {WS}/result.json: revenue, gross_margin_pct and ebitda, each mapping 2026-01 to 2026-06 to its value, plus burn and runway_months."
+ ],
+ "answers": [
+  "**Goal:** Close H1 2026 (January to June): monthly P&L, burn and runway for the CFO, with the key figures in `./result.json`.\n\n**Action:** Parsed all 86 rows of `finance/ledger.csv`. Each account was mapped to a P&L line through `chart_of_accounts.csv`, and amounts were read in Brazilian format (`.` thousands, `,` decimals). I checked for duplicate rows and unmapped accounts and found neither. Burn and runway follow the board's rule in `README.md`: burn is the average negative EBITDA of the last three closed months (April to June), and runway is the 30/06 cash divided by burn.\n\n**Assumptions:**\n- Refunds (3.1.09) reduce revenue.\n- EBITDA is revenue minus COGS, S&M, R&D and G&A. It leaves out financial income and costs (6.x).\n- Gross margin is (revenue minus COGS) / revenue.\n\n**Result (R$):**\n\n| Month | Revenue | Gross margin | EBITDA |\n|---|---|---|---|\n| 2026-01 | 200,510.87 | 70.03% | -210,278.96 |\n| 2026-02 | 216,328.06 | 70.29% | -212,300.08 |\n| 2026-03 | 219,066.17 | 68.46% | -204,525.45 |\n| 2026-04 | 238,163.26 | 70.24% | -196,950.65 |\n| 2026-05 | 243,032.89 | 69.56% | -201,945.82 |\n| 2026-06 | 272,391.57 | 72.41% | -192,968.22 |\n\n- **Burn:** R$ 197,288.23 per month.\n- **Runway:** 1,847,350.40 / 197,288.23 = **9.36 months**, which is cash until about mid-March 2027.\n- **Story for the board:** Revenue grew 36% from January to June. Gross margin held at about 70% and reached 72.4% in June. EBITDA losses narrowed slightly.\n- **CFO flag:** Cash fell R$ 461,838 between 31/05 and 30/06, but June EBITDA was only -R$ 193k. About R$ 269k of outflow is not in the P&L (for example capex, debt, working capital or something unbooked). Reconcile this before the meeting. If that cash outflow is the real burn rate, runway is much shorter than 9.4 months.\n\n**How I know it's right:** All six months come from one scripted pass over every ledger row. There were no duplicates and no unmapped accounts. The burn and runway figures were recomputed from the printed EBITDA values and match the script output. `result.json` holds exactly these values (revenue, gross_margin_pct, ebitda for 2026-01 to 2026-06, burn, runway_months). No browser tabs or apps were opened.\n\n**Next:** Reconcile the June cash gap against bank statements before the board deck goes out."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\r\n  \"revenue\": {\r\n    \"2026-01\": 200510.87,\r\n    \"2026-02\": 216328.06,\r\n    \"2026-03\": 219066.17,\r\n    \"2026-04\": 238163.26,\r\n    \"2026-05\": 243032.89,\r\n    \"2026-06\": 272391.57\r\n  },\r\n  \"gross_margin_pct\": {\r\n    \"2026-01\": 70.03,\r\n    \"2026-02\": 70.29,\r\n    \"2026-03\": 68.46,\r\n    \"2026-04\": 70.24,\r\n    \"2026-05\": 69.56,\r\n    \"2026-06\": 72.41\r\n  },\r\n  \"ebitda\": {\r\n    \"2026-01\": -210278.96,\r\n    \"2026-02\": -212300.08,\r\n    \"2026-03\": -204525.45,\r\n    \"2026-04\": -196950.65,\r\n    \"2026-05\": -201945.82,\r\n    \"2026-06\": -192968.22\r\n  },\r\n  \"burn\": 197288.23,\r\n  \"runway_months\": 9.36\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd finance; ls -la; head -c 3000 * 2>/dev/null\" ok -> \"total 7\\ndrwxr-xr-x 1 <USER> 197121    0 Nov 13 22:35 .\\ndrwxr-xr-x 1 <USER> 197121    0 Nov 13 22:35 ..\\n-rw-r--r-- 1 <USER> 197121  174 Nov 13 22:35 README.md\\n-rw-r--r-- 1 <USER> 197121  104 Nov 13 22:35 cash_balance.txt\\n-rw-r--r-- 1 <USER> 197121  441 Nov 13 22:35 chart_of_accounts.csv\\n-rw-r--r-- 1 <USER> 197121 3805 Nov 13 22:35 ledger.csv\\n==> README.md <==\\n# Finance notes[... 3781 chars cut by the benchmark]\"\n[step 1] shell \"cd finance; python -I - <<'E'\\nimport csv,collections,json\\ncoa={r['account']:r['pnl_line'] for r in csv.DictReader(open('chart_of_accounts.csv'),delimiter=';')}\\nrows=list(csv.DictReader(open('ledger.csv'),delimiter=';'))\\nprint(len(rows)); seen=collections.Counter(tuple(r.values()) for r in rows); print([k for k,v in seen.items() if v>1])\\nP=collections.defaultdict(lambda:collections.defaultdict(float))\\nfor r in rows:\\n  d,m,y=r['date'].split('/'); k=f\\\"{y}-{m}\\\"\\n  if r['account'] not in coa: print('unk',r)\\n  P[k][coa.get(r['account'],'?')]+=float(r['amount'].replace('.','').replace(',','.'))\\nout={'revenue':{},'gross_margin_pct':{},'ebitda':{}}\\nfor k in sorted(P):\\n  p=P[k];rev=p['revenue'];gp=rev+p['cogs'];e=gp+p['sales_marketing']+p['rnd']+p['ga']\\n  print(k,{a:round(b,2) for a,b in p.items()},round(rev,2),round(gp/rev*100,2),round(e,2))\\n  if k.startswith('2026-0') and '01'<=k[5:]<='06':\\n    out['revenue'][k]=round(rev,2);out['gross_margin_pct'][k]=round(gp/rev*100,2);out['ebitda'][k]=round(e,2)\\nburn=round(-sum(out['ebitda'][m] for m in['2026-04','2026-05','2026-06'])/3,2)\\nout['burn']=burn;out['runway_months']=round(1847350.40/burn,2)\\nprint(out);json.dump(out,open('../result.json','w'),indent=2)\\nE\" ok -> \"/usr/bin/bash: line 1: cd: finance: No such file or directory\\n86\\r\\n[]\\r\\n2026-01 {'ga': -43826.35, 'cogs': -60091.92, 'financial': 6466.77, 'revenue': 200510.87, 'rnd': -163396.33, 'sales_marketing': -143475.23} 200510.87 70.03 -210278.96\\r\\n2026-02 {'cogs': -64278.71, 'rnd': -182271.02, 'ga': -43917.13, 'sales_marketing': -138161.28, 'revenue': 216328.06, 'financial': 7298.39} 216328.06 70.29 -212300.[... 1137 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "revenue per month",
+   true
+  ],
+  [
+   "gross_margin_pct per month",
+   true
+  ],
+  [
+   "ebitda per month",
+   true
+  ],
+  [
+   "3-month average burn",
+   true
+  ],
+  [
+   "runway in months",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 3,
+  "tool_calls": 2,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 1,
+  "generated_tokens": 1828,
+  "reasoning_tokens": 99
+ },
+ "deliverables": [],
+ "render": null
+}

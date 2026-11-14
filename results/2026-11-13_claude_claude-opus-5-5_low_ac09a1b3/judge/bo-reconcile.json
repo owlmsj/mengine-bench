@@ -1,0 +1,48 @@
+{
+ "task_id": "bo-reconcile",
+ "prompts": [
+  "Finance has to chase June's receivables. The invoices, the bank statement and our reconciliation notes are in {WS}/backoffice. What do we still have to collect or fix? Record it in {WS}/result.json: unpaid and duplicated (invoice ids) and mismatched (id, invoiced, paid)."
+ ],
+ "answers": [
+  "**[goal]** Find June receivables that still need collecting or fixing, and write them to `./result.json`.\n\n**[action]** I ran a Python script that reads all 40 invoices and all 41 bank lines. It finds the invoice number in each bank memo, which comes in three styles: `inv1007`, `INV-1015` and `invoice 1023`. Following `backoffice/README.md`, it skips 3 lines: the fee, the interest, and \"PIX received unidentified 1099\" (there is no invoice INV-1099). Each invoice then goes in exactly one group:\n- **Unpaid:** no payment at all.\n- **Duplicated:** more than one payment.\n- **Mismatched:** a single payment whose amount differs from the invoice.\n\n**[result]** Written to `result.json`:\n- **Unpaid:** INV-1008, INV-1030, INV-1033\n- **Duplicated:** INV-1015, paid 1904.29 twice (on 06-05 and again on 06-17, memo \"resend\"). We owe that customer a refund.\n- **Mismatched:**\n  - INV-1021: invoiced 21320.36, paid 21070.36 (250.00 short)\n  - INV-1036: invoiced 8619.16, paid 7757.24 (861.92 short)\n\n**How I know it's right:** the 3 lines I skipped plus 38 matched payments account for all 41 bank lines. The 38 matched payments cover 37 invoices, because INV-1015 appears twice. Those 37 plus the 3 unpaid invoices make all 40 invoices. Every matched memo pointed to an invoice that exists.\n\n**Assumptions:**\n- Amounts must match to the cent.\n- The 1500.00 unidentified PIX is not linked to any invoice. It isn't enough to cover any of the shortfalls exactly.\n\n**[next]** Chase the 3 unpaid invoices and the 2 short payments, and refund or credit the duplicate on INV-1015. I didn't open any browser tabs or apps, so there was nothing to close."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\r\n  \"unpaid\": [\r\n    \"INV-1008\",\r\n    \"INV-1030\",\r\n    \"INV-1033\"\r\n  ],\r\n  \"duplicated\": [\r\n    \"INV-1015\"\r\n  ],\r\n  \"mismatched\": [\r\n    {\r\n      \"id\": \"INV-1021\",\r\n      \"invoiced\": 21320.36,\r\n      \"paid\": 21070.36\r\n    },\r\n    {\r\n      \"id\": \"INV-1036\",\r\n      \"invoiced\": 8619.16,\r\n      \"paid\": 7757.24\r\n    }\r\n  ]\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"cd backoffice; ls -la; head -50 *\" ok -> \"total 9\\ndrwxr-xr-x 1 <USER> 197121    0 Nov 13 22:35 .\\ndrwxr-xr-x 1 <USER> 197121    0 Nov 13 22:35 ..\\n-rw-r--r-- 1 <USER> 197121  396 Nov 13 22:35 README.md\\n-rw-r--r-- 1 <USER> 197121 1772 Nov 13 22:35 bank_statement_june.csv\\n-rw-r--r-- 1 <USER> 197121 1667 Nov 13 22:35 invoices.csv\\n==> README.md <==\\n# How we reconcile receivables\\n\\n- The bank memo cites the invoice in differen[... 3803 chars cut by the benchmark]\"\n[step 1] shell \"cd ..; wc -l backoffice/*.csv; python -I - <<'E'\\nimport csv,re,json,collections\\ninv={r['id']:float(r['amount']) for r in csv.DictReader(open('backoffice/invoices.csv',encoding='utf-8'))}\\npay=collections.defaultdict(list)\\nfor r in csv.DictReader(open('backoffice/bank_statement_june.csv',encoding='utf-8')):\\n    m=re.search(r'inv(?:oice)?[\\\\s-]*(\\\\d{4})',r['memo'],re.I)\\n    if not m: print('skip',r);continue\\n    k='INV-'+m.group(1)\\n    if k not in inv: print('unknown',r);continue\\n    pay[k].append(float(r['amount']))\\nres={'unpaid':sorted(k for k in inv if k not in pay),'duplicated':sorted(k for k in pay if len(pay[k])>1),\\n 'mismatched':[{'id':k,'invoiced':inv[k],'paid':v[0]} for k,v in sorted(pay.items()) if len(v)==1 and abs(v[0]-inv[k])>0.005]}\\njson.dump(res,open('result.json','w'),indent=2);print(res)\\nE\" ok -> \"42 backoffice/bank_statement_june.csv\\n  41 backoffice/invoices.csv\\n  83 total\\nskip {'date': '2026-06-12', 'memo': 'PIX received unidentified 1099', 'amount': '1500.00'}\\r\\nskip {'date': '2026-06-30', 'memo': 'CDB INTEREST', 'amount': '1204.33'}\\r\\nskip {'date': '2026-06-05', 'memo': 'BANK SERVICE PACKAGE FEE', 'amount': '-89.90'}\\r\\n{'unpaid': ['INV-1008', 'INV-1030', 'INV-1033'], 'duplicated': ['INV-10[... 139 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "unpaid invoices",
+   true
+  ],
+  [
+   "duplicated payments",
+   true
+  ],
+  [
+   "mismatched amounts",
+   true
+  ],
+  [
+   "invoiced vs paid on mismatches",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 3,
+  "tool_calls": 2,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1227,
+  "reasoning_tokens": 25
+ },
+ "deliverables": [],
+ "render": null
+}
