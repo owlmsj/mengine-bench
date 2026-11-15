@@ -1,0 +1,57 @@
+{
+ "task_id": "ir-server-logs",
+ "prompts": [
+  "The game went down in June and we owe the team an incident report. The logs and their notes are in {WS}/logs. When did it start and end, how long was it, did we keep our monthly availability target, and why did it happen? Record it in {WS}/result.json: start, end, minutes_down, availability_june_pct, slo_999_ok, root_cause."
+ ],
+ "answers": [
+  "[goal] June incident report: window, duration, availability vs 99.9% SLO, root cause, saved to ./result.json.\n\n[action] Read ./logs (3 daily logs + README). Grepped all ERROR/WARN/crash/restart/ready lines across files; read the full incident region of gameserver-2026-06-02.log (lines 241-294). Computed downtime and availability with PowerShell from the exact timestamps; validated result.json parses.\n\n[result] Written to `./result.json` (verified valid JSON):\n- start: 2026-06-02T03:17:42 (first `SaveGame failed ... No space left on device`)\n- end: 2026-06-02T03:53:31 (`server ready, accepting players`)\n- minutes_down: 35.82 (exactly 2149 s = 35.8167 min)\n- availability_june_pct: 99.92 (exact 99.9171; (43200 − 35.8167)/43200)\n- slo_999_ok: true (99.9171 ≥ 99.9)\n- root_cause: /data disk filled (97% used at 03:10:02) from unrotated backups; saves failed with ENOSPC, watchdog crash-looped the server (exit 137) until backup rotation freed 38.2 GB at 03:52:10; ready at 03:53:31.\n\nWhy it is right: the README defines down = first save error to 'server ready' and states June has 30 days with exactly one incident. Those two lines exist only once in all logs (June 2 lines 251 and 294); the only other error in June is a single unrelated RCON bad-password attempt (June 1, 09:12:40). Math re-computed and quoted above from the shell output (`secs=2149 ... avail=99.9170910493827 slo_ok=True`).\n\nAssumptions I chose: the README is the team's notes; the 97% disk warning at 03:10:02 is a precursor, not the outage start (README says start at the first save error); availability is measured over calendar June (43200 min) with all non-incident time counted up; timestamps are server-local; minutes_down and availability rounded to 2 decimals.\n\n[next] None. No browser tabs, windows or apps were opened, so nothing to close."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"start\": \"2026-06-02T03:17:42\",\n  \"end\": \"2026-06-02T03:53:31\",\n  \"minutes_down\": 35.82,\n  \"availability_june_pct\": 99.92,\n  \"slo_999_ok\": true,\n  \"root_cause\": \"The /data volume filled up (97% used, 3.1 GB free at 03:10:02) because backups were not being rotated. SaveGame then failed with 'No space left on device' writing /data/game/Saved/Level.sav, the watchdog killed and restarted the server in a loop (exit code 137), and the server only came back after backup rotation freed 38.2 GB at 03:52:10, reaching 'server ready' at 03:53:31.\"\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"./logs\" ok -> \"Read directory ./logs, entries 1-4\\ngameserver-2026-06-01.log\\ngameserver-2026-06-02.log\\ngameserver-2026-06-03.log\\nREADME.md\"\n[step 1] read \"./logs/gameserver-2026-06-01.log\" ok -> \"Read file ./logs/gameserver-2026-06-01.log, lines 1-829\\n1: 2026-06-01 00:00:05 INFO player joined steam_7670397083158796 players=1\\n2: 2026-06-01 00:01:14 INFO heartbeat players=1 tick=64 mem_gb=23.9\\n3: 2026-06-01 00:01:41 INFO player joined steam_6731262393085476 players=2\\n4: 2026-06-01 00:02:21 INFO player joined steam_8939172821036409 players=3\\n5: 2026-06-01 00:02:49 INFO player left players=2\\n6[... 54928 chars cut by the benchmark]\"\n[step 1] read \"./logs/README.md\" ok -> \"Read file ./logs/README.md, lines 1-1\\n1: Dedicated game server. Monthly availability SLO: 99.9%. Down = from the first save error to the 'server ready' line. June has 30 days; there is only one incident.\"\n[step 1] search \"{\\\"limit\\\": 100, \\\"path\\\": \\\"./logs\\\", \\\"pattern\\\": \\\"ERROR|WARN|save error|server ready|crash|restart|notes\\\"}\" ok -> \"Found 46 <WORKSPACE>\\\\logs\\\\gameserver-2026-06-01.log:\\n  Line 685: 2026-06-01 09:12:40 ERROR RCON auth failed from 203.0.113.12 (bad password)<WORKSPACE>\\\\logs\\\\README.md:\\n  Line 1: Dedicated game server. Monthly availability SLO: 99.9%. Down = from the first save [... 4080 chars cut by the benchmark]\"\n[step 1] read \"./logs/gameserver-2026-06-02.log\" ok -> \"Read file ./logs/gameserver-2026-06-02.log, lines 225-309\\n225: 2026-06-02 02:58:04 INFO heartbeat players=12 tick=64 mem_gb=25.0\\n226: 2026-06-02 02:58:49 INFO heartbeat players=12 tick=64 mem_gb=26.3\\n227: 2026-06-02 02:59:24 INFO heartbeat players=12 tick=64 mem_gb=27.1\\n228: 2026-06-02 02:59:46 INFO player joined steam_7839140411246038 players=13\\n229: 2026-06-02 03:00:17 INFO heartbeat players=13 [... 6117 chars cut by the benchmark]\"\n[step 1] search \"{\\\"caseSensitive\\\": false, \\\"limit\\\": 50, \\\"path\\\": \\\"./logs\\\", \\\"pattern\\\": \\\"note|NOTE|cause|postmortem|fix|cleanup|rotation|disk\\\"}\" ok -> \"Found 2 <WORKSPACE>\\\\logs\\\\gameserver-2026-06-02.log:\\n  Line 241: 2026-06-02 03:10:02 WARN disk /data usage 97% (free 3.1 GB)\\n\\n  Line 292: 2026-06-02 03:52:10 INFO backup rotation freed 38.2 GB on /data\"\n[step 1] shell \"Get-Content .\\\\logs\\\\gameserver-2026-06-02.log -Tail 5; Get-Content .\\\\logs\\\\gameserver-2026-06-03.log -Tail 5\" ok -> \"2026-06-02 23:56:31 INFO player left players=25\\r\\n2026-06-02 23:57:06 INFO autosave ok 280 ms\\r\\n2026-06-02 23:57:48 INFO player joined steam_2685652470402986 players=26\\r\\n2026-06-02 23:58:50 INFO heartbeat players=26 tick=64 mem_gb=26.0\\r\\n2026-06-02 23:59:21 INFO player left players=25\\r\\n2026-06-03 23:55:27 INFO heartbeat players=20 tick=64 mem_gb=21.1\\r\\n2026-06-03 23:56:14 INFO heartbeat players=20 tic[... 231 chars cut by the benchmark]\"\n[step 1] shell \"$start = Get-Date '2026-06-02 03:17:42'; $end = Get-Date '2026-06-02 03:53:31'; $secs = ($end - $start).TotalSeconds; $mins = $secs/60; $juneMin = 30*24*60; $avail = ($juneMin - $mins)/$juneMin*100; \\\"secs=$secs mins=$mins avail=$avail slo_ok=$($avail -ge 99.9)\\\"\" ok -> \"secs=2149 mins=35.8166666666667 avail=99.9170910493827 slo_ok=True\"\n[step 1] write \"./result.json\" ok -> \"Created file successfully: result.json\"\n[step 1] shell \"Get-Content .\\\\result.json | ConvertFrom-Json | ConvertTo-Json -Compress\" ok -> \"{\\\"start\\\":\\\"2026-06-02T03:17:42\\\",\\\"end\\\":\\\"2026-06-02T03:53:31\\\",\\\"minutes_down\\\":35.82,\\\"availability_june_pct\\\":99.92,\\\"slo_999_ok\\\":true,\\\"root_cause\\\":\\\"The /data volume filled up (97% used, 3.1 GB free at 03:10:02) because backups were not being rotated. SaveGame then failed with 'No space left on device' writing /data/game/Saved/Level.sav, the watchdog killed and restarted the server in a loop (exit code 1[... 122 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "incident start",
+   true
+  ],
+  [
+   "incident end",
+   true
+  ],
+  [
+   "minutes down",
+   true
+  ],
+  [
+   "June availability",
+   true
+  ],
+  [
+   "SLO 99.9 met",
+   true
+  ],
+  [
+   "root cause = /data disk full",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 9,
+  "tool_calls": 10,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2698,
+  "reasoning_tokens": 1583,
+  "largest_turn_tokens": 831
+ },
+ "deliverables": [],
+ "render": null
+}
