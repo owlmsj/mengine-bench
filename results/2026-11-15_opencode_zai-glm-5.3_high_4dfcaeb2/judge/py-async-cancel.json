@@ -1,0 +1,51 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [],
+ "diff": "A run.py\nA tmp/test_run.py\n\n--- run.py ---\n\"\"\"Bounded-concurrency async job runner for batch scripts.\n\nPublic API::\n\n    from run import run_tasks\n\n    await run_tasks(tasks, max_concurrent)\n\n``tasks`` is an iterable of zero-argument callables; each returns an\nawaitable job when called. Standard library only, Python 3.11+.\n\"\"\"\n\nimport asyncio\nfrom typing import Any, Awaitable, Callable, Iterable\n\n__all__ = [\"run_tasks\"]\n\nTaskFactory = Callable[[], Awaitable[Any]]\n\n\nasync def run_tasks(tasks: Iterable[TaskFactory], max_concurrent: int) -> None:\n    \"\"\"Run every job with at most ``max_concurrent`` running at once.\n\n    Each element of ``tasks`` is called (lazily, only once a concurrency\n    slot is free) and the awaitable it returns is awaited. Returns when\n    every job has finished.\n\n    On cancellation - e.g. Ctrl+C while running under ``asyncio.run`` -\n    the in-flight jobs are cancelled and awaited before the\n    ``CancelledError`` is re-raised, so cleanup code inside the jobs\n    (``finally`` / ``except asyncio.CancelledError`` blocks) still runs.\n    The same happens if any job fails with an exception: the remaining\n    jobs get cancelled and cleaned up, then the original error propagates.\n    \"\"\"\n    if max_concurrent < 1:\n        raise ValueError(\n            f\"max_concurrent must be >= 1, got {max_concurrent!r}\"\n        )\n\n    gate = asyncio.Semaphore(max_concurrent)\n\n    async def run_one(make_job: TaskFactory) -> None:\n        async with gate:\n            # Call the factory only after acquiring a slot, so at most\n            # max_concurrent jobs are ever created/awaited at once.\n            await make_job()\n\n    wrappers = [asyncio.create_task(run_one(make_job)) for make_job in tasks]\n    try:\n        await asyncio.gather(*wrappers)\n    except BaseException:\n        # Cancel the rest, then wait so their finally blocks run before\n        # the error/cancellation continues outward.\n        for wrapper in wrappers:\n            if not wrapper.done():\n                wrapper.cancel()\n        await asyncio.gather(*wrappers, return_exceptions=True)\n        raise\n\n\n--- tmp/test_run.py ---\nimport asyncio\n\nfrom run import run_tasks\n\n\ndef test_bounded_concurrency_and_completion():\n    state = {\"running\": 0, \"peak\": 0}\n    finished = []\n\n    async def job(i):\n        state[\"running\"] += 1\n        state[\"peak\"] = max(state[\"peak\"], state[\"running\"])\n        try:\n            await asyncio.sleep(0.02)\n            finished.append(i)\n        finally:\n            state[\"running\"] -= 1\n\n    asyncio.run(\n        run_tasks([(lambda i=i: job(i)) for i in range(10)], 3)\n    )\n    assert state[\"peak\"] == 3, state\n    assert sorted(finished) == list(range(10)), finished\n    print(\"ok: bounded concurrency + all jobs done\")\n\n\ndef test_cancel_runs_cleanup():\n    cleaned = []\n\n    async def job(i):\n        try:\n            await asyncio.sleep(30)\n        finally:\n            cleaned.append(i)\n\n    async def main():\n        runner = asyncio.create_task(\n            run_tasks([(lambda i=i: job(i)) for i in range(6)], 2)\n        )\n        await asyncio.sleep(0.05)  # let two jobs start\n        runner.cancel()  # simulates what asyncio.run does on Ctrl+C\n        try:\n            await runner\n        except asyncio.CancelledError:\n            pass\n\n    asyncio.run(main())\n    assert len(cleaned) == 6, cleaned\n    print(\"ok: cancellation still runs job cleanup\")\n\n\ndef test_failure_cleans_up_rest():\n    cleaned = []\n\n    async def boom():\n        raise RuntimeError(\"job failed\")\n\n    async def slow(i):\n        try:\n            await asyncio.sleep(30)\n        finally:\n            cleaned.append(i)\n\n    try:\n        asyncio.run(\n            run_tasks([boom] + [(lambda i=i: slow(i)) for i in range(4)], 4)\n        )\n    except RuntimeError as exc:\n        assert \"job failed\" in str(exc)\n    assert len(cleaned) == 4, cleaned\n    print(\"ok: job failure cancels and cleans up the rest\")\n\n\nif __name__ == \"__main__\":\n    test_bounded_concurrency_and_completion()\n    test_cancel_runs_cleanup()\n    test_failure_cleans_up_rest()\n    print(\"all ok\")\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"tmp/test_run.py\" ok -> \"Created file successfully: tmp/test_run.py\"\n[step 1] write \"run.py\" ok -> \"Created file successfully: run.py\"\n[step 1] shell \"python tmp/test_run.py\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\tmp\\\\test_run.py\\\", line 3, in <module>\\r\\n    from run import run_tasks\\r\\nModuleNotFoundError: No module named 'run'\"\n[step 1] shell \"$env:PYTHONPATH='.'; python tmp/test_run.py\" failed -> \"ok: bounded concurrency + all jobs done\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\tmp\\\\test_run.py\\\", line 76, in <module>\\r\\n    test_cancel_runs_cleanup()\\r\\n    ~~~~~~~~~~~~~~~~~~~~~~~~^^\\r\\n  File \\\"<WORKSPACE>\\\\tmp\\\\test_run.py\\\", line 48, in test_cancel_runs_[... 100 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 4,
+  "tool_calls": 4,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 2,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2986,
+  "reasoning_tokens": 1848,
+  "largest_turn_tokens": 2830
+ },
+ "deliverables": [],
+ "render": null
+}

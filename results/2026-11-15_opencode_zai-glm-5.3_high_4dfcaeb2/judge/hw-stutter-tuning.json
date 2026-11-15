@@ -1,0 +1,55 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [],
+ "diff": "A tmp/analyze.py\n\n--- tmp/analyze.py ---\nimport csv, statistics\nfrom collections import Counter\n\nrows = []\nwith open(r\"capture\\presentmon.csv\", newline=\"\") as f:\n    for r in csv.DictReader(f):\n        rows.append((float(r[\"TimeInSeconds\"]), float(r[\"MsBetweenPresents\"])))\n\nfts = [b for _, b in rows]  # frame times ms\nn = len(fts)\nsecs = rows[-1][0] - rows[0][0]\nmean_ft = statistics.mean(fts)\navg_fps = n / secs\ns = sorted(fts)\np99 = s[int(round(0.99 * n)) - 1]\nlow1 = 1000 / p99\nprint(f\"frames={n} span={secs:.3f}s mean_ft={mean_ft:.3f}ms avg_fps={avg_fps:.2f} p99_ft={p99:.3f} 1%low={low1:.2f}\")\n\n# hitch = frame time > 2x median\nmed = statistics.median(fts)\nhitches = [(t, b) for t, b in rows if b > 2 * med]\nprint(f\"median_ft={med:.3f} hitches(>2x median)={len(hitches)}\")\n\n# bucket hitches by whole second\nbucket = Counter(int(t) for t, _ in hitches)\nprint(\"hitch count per second (only seconds with hitches):\")\nfor sec in sorted(bucket):\n    worst = max(b for t, b in hitches if int(t) == sec)\n    print(f\"  t={sec:3d}  count={bucket[sec]:3d}  worst_ms={worst:.1f}\")\n\n# interval between hitch seconds\nsecs_with = sorted(bucket)\nprint(\"seconds with hitches:\", secs_with)\ndiffs = [b - a for a, b in zip(secs_with, secs_with[1:])]\nprint(\"gaps:\", Counter(diffs).most_common())\n\n# L1 seconds from sensors: t=2,6,10,... i.e. t%4==2\nl1_secs = {2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58}\non_l1 = sum(c for s_, c in bucket.items() if s_ in l1_secs)\noff_l1 = sum(c for s_, c in bucket.items() if s_ not in l1_secs)\nprint(f\"hitches on L1 seconds: {on_l1}, elsewhere: {off_l1}\")\n\n# defender window 43-45\ndfnd = sum(c for s_, c in bucket.items() if 43 <= s_ <= 45)\nprint(f\"hitches in Defender window 43-45: {dfnd}\")\n\n# per-second mean frame time to see pattern\nprint(\"\\nper-second mean frame time (ms) and max:\")\nby_sec = {}\nfor t, b in rows:\n    by_sec.setdefault(int(t), []).append(b)\nfor sec in sorted(by_sec):\n    v = by_sec[sec]\n    tag = \"L1\" if sec in l1_secs else \"  \"\n    d = \"DEF\" if 43 <= sec <= 45 else \"   \"\n    print(f\"  t={sec:3d} {tag}{d} mean={statistics.mean(v):7.2f} max={max(v):7.1f}\")\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\" ok -> \"Read directory <WORKSPACE>, entries 1-4\\ncapture\\\\\\nAGENTS.md\\nNOTES.md\\nsettings.json\"\n[step 1] read \"<WORKSPACE>\\\\capture\" ok -> \"Read directory <WORKSPACE>\\\\capture, entries 1-2\\npresentmon.csv\\nsensors.csv\"\n[step 1] read \"<WORKSPACE>\\\\settings.json\" ok -> \"Read file <WORKSPACE>\\\\settings.json, lines 1-125\\n1: {\\n2:   \\\"rig\\\": \\\"arena-01\\\",\\n3:   \\\"settings\\\": [\\n4:     {\\n5:       \\\"setting\\\": \\\"power_plan\\\",\\n6:       \\\"value\\\": \\\"Balanced\\\",\\n7:       \\\"where\\\": \\\"Windows\\\"\\n8:     },\\n9:     {\\n10:       \\\"setting\\\": \\\"hardware_accelerated_gpu_scheduling\\\",\\n11:       \\\"value\\\": \\\"on\\\",\\n12:       \\\"where\\\": \\\"Windows\\\"\\n13:  [... 2658 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\NOTES.md\" ok -> \"Read file <WORKSPACE>\\\\NOTES.md, lines 1-15\\n1: # Owner notes - rig \\\"arena-01\\\"\\n2: \\n3: The game hitches every few seconds even though the average frame rate looks fine.\\n4: Capture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\n5: taken at the same time (same clock: second 0 of both files is the same ins[... 531 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\capture\\\\sensors.csv\" ok -> \"Read file <WORKSPACE>\\\\capture\\\\sensors.csv, lines 1-61\\n1: time_s,cpu_clock_mhz,cpu_util_pct,gpu_clock_mhz,gpu_pcie_link_state,gpu_pcie_link_speed,dpc_latency_us,disk_active_pct,top_cpu_process\\n2: 0,5354,35,2724,L0,Gen5 x4,52,1,Arena.exe\\n3: 1,5350,40,2754,L0,Gen5 x4,88,4,Arena.exe\\n4: 2,5270,31,2754,L1,Gen5 x4,40,3,Arena.exe\\n5: 3,5373,31[... 2612 chars cut by the benchmark]\"\n[step 1] shell \"Get-Item \\\"capture\\\\presentmon.csv\\\" | Select-Object Length; (Get-Content \\\"capture\\\\presentmon.csv\\\" | Measure-Object -Line).Lines\" ok -> \"Length\\r\\n------\\r\\n715870\\r\\n8239\"\n[step 1] shell \"Get-Content \\\"capture\\\\presentmon.csv\\\" -TotalCount 5\" ok -> \"Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.000000,6.861,6.847,0.294,4.901,5.568\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.006861,6.773,6.812,0.387,4.013,6.252\\r\\nArena.exe,7316,0x000001F2A8C40000,D[... 137 chars cut by the benchmark]\"\n[step 1] shell \"python --version\" ok -> \"Python 3.13.14\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\analyze.py\" ok -> \"Created file successfully: tmp/analyze.py\"\n[step 1] shell \"python tmp\\\\analyze.py\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\tmp\\\\analyze.py\\\", line 5, in <module>\\r\\n    with open(r\\\"..\\\\capture\\\\presentmon.csv\\\", newline=\\\"\\\") as f:\\r\\n         ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\r\\nFileNotFoundError: [Errno 2] No such file or directory: '..\\\\\\\\capture\\\\\\\\presentmon.csv'\"\n[step 1] edit \"<WORKSPACE>\\\\tmp\\\\analyze.py\" ok -> \"Edited tmp/analyze.py (1 replacement)\"\n[step 1] shell \"python tmp\\\\analyze.py\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\tmp\\\\analyze.py\\\", line 5, in <module>\\r\\n    with open(r\\\"..\\\\..\\\\capture\\\\presentmon.csv\\\", newline=\\\"\\\") as f:\\r\\n         ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\r\\nFileNotFoundError: [Errno 2] No such file or directory: '..\\\\\\\\..\\\\\\\\capture\\\\\\\\presentmon.csv'\"\n[step 1] edit \"<WORKSPACE>\\\\tmp\\\\analyze.py\" ok -> \"Edited tmp/analyze.py (1 replacement)\"\n[step 1] shell \"python tmp\\\\analyze.py\" ok -> \"frames=8238 span=59.999s mean_ft=7.284ms avg_fps=137.30 p99_ft=22.049 1%low=45.35\\r\\nmedian_ft=6.962 hitches(>2x median)=180\\r\\nhitch count per second (only seconds with hitches):\\r\\n  t=  2  count= 12  worst_ms=22.9\\r\\n  t=  6  count= 12  worst_ms=23.0\\r\\n  t= 10  count= 12  worst_ms=22.5\\r\\n  t= 14  count= 12  worst_ms=23.7\\r\\n  t= 18  count= 12  worst_ms=22.9\\r\\n  t= 22  count= 12  worst_ms=23.0\\r\\n  t= 26  coun[... 2922 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   false
+  ],
+  [
+   "1% low FPS",
+   false
+  ],
+  [
+   "cause named",
+   false
+  ],
+  [
+   "ASPM off on the GPU root port",
+   false
+  ],
+  [
+   "GPU link speed kept",
+   false
+  ],
+  [
+   "BIOS overclock kept",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 11,
+  "tool_calls": 14,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 2,
+  "file_writes": 3,
+  "repeated_tool_calls": 2,
+  "outside_path_uses": 0,
+  "generated_tokens": 2218,
+  "reasoning_tokens": 695,
+  "largest_turn_tokens": 875
+ },
+ "deliverables": [],
+ "render": null
+}
