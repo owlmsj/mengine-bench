@@ -57,15 +57,18 @@ def plan_redo(bundle: Path, ids: str) -> RedoPlan:
                          f"(installed {__version__})")
     present = [str(row["id"]) for row in result["tasks"]]
     wanted = [item.strip() for item in ids.split(",") if item.strip()]
-    unknown = [item for item in wanted if item not in present]
+    # #245: an installed catalog id the bundle lacks (a killed run's tasks) is appended, not refused.
+    unknown = [item for item in wanted if item not in present and catalog.task_by_id(item) is None]
     if unknown:
-        raise ValueError(f"received --tasks {unknown}; expected ids from the bundle: {', '.join(present)}")
+        raise ValueError(f"received --tasks {unknown}; expected ids from the bundle or the installed catalog: "
+                         f"{', '.join(present)}")
     reason = "named with --tasks" if wanted else "status crash"
     if not wanted:
         wanted = [str(row["id"]) for row in result["tasks"] if row.get("status") == "crash"]
     if not wanted:
         raise ValueError(f"received no task with status crash in {bundle.name}; expected one, or --tasks ids")
-    found = {task_id: catalog.task_by_id(task_id) for task_id in present if task_id in wanted}
+    ordered = [task_id for task_id in present if task_id in wanted] + [t for t in wanted if t not in present]
+    found = {task_id: catalog.task_by_id(task_id) for task_id in ordered}
     missing = [task_id for task_id, task in found.items() if task is None]
     if missing:
         raise ValueError(f"received task ids {missing} absent from the installed catalog; expected catalog ids")
@@ -98,8 +101,16 @@ def redo_bundle(plan: RedoPlan, agent: Agent, work: Path) -> LocalNames:
                                "flags": row.get("flags", [])}
         new_row["flags"].append(REDO_FLAG)
         result["tasks"][index] = new_row
+    present = {str(row["id"]) for row in result["tasks"]}
+    added = [task_id for task_id in new_rows if task_id not in present]
+    for task_id in added:
+        new_rows[task_id]["flags"].append(REDO_FLAG)
+        result["tasks"].append(new_rows[task_id])
+    if added:
+        order = {task.id: index for index, task in enumerate(catalog.all_tasks())}
+        result["tasks"].sort(key=lambda row: order.get(str(row["id"]), len(order)))
     _repack_workspaces(plan.bundle, result["tasks"])
-    entry: dict[str, object] = {"tasks": list(new_rows), "reason": plan.reason, "previous": previous,
+    entry: dict[str, object] = {"tasks": list(new_rows), "reason": plan.reason, "previous": previous, "added": added,
                                 "bench_version": __version__, "bench_commit": bench_commit(),
                                 "agent_version": agent.version(), "started_at": started_at,
                                 "finished_at": _utc_now()}

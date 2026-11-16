@@ -138,3 +138,28 @@ def test_redo_refuses_with_the_received_value(changes: dict[str, object], argv: 
     assert cli.main(["redo", str(bundle), *argv]) == 1
     assert expected in capsys.readouterr().out
     assert (bundle / "result.json").read_bytes() == before
+
+
+def test_redo_completes_a_partial_bundle_with_a_catalog_task_it_lacks(fake_agent: FakeAgent, tmp_path: Path,
+                                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    # #245: a killed run's tasks are missing from the bundle that continued it; redo appends them.
+    template = _template(fake_agent)
+    assert cli.main(["run", "--agent", "cmd", "--cmd", template, "--model", "fake/ref",
+                     "--tasks", KEPT, "--out", str(tmp_path / "results")]) == 0
+    [bundle] = [path.parent for path in (tmp_path / "results").glob("*/result.json")]
+    before = json.loads((bundle / "result.json").read_text(encoding="utf-8"))
+
+    assert cli.main(["redo", str(bundle), "--cmd", template, "--tasks", CRASHED]) == 0
+
+    result = json.loads((bundle / "result.json").read_text(encoding="utf-8"))
+    catalog_order = [task.id for task in __import__("mengine_bench").catalog.all_tasks()]
+    ids = [row["id"] for row in result["tasks"]]
+    assert sorted(ids, key=catalog_order.index) == ids and set(ids) == {KEPT, CRASHED}
+    rows = {row["id"]: row for row in result["tasks"]}
+    assert rows[CRASHED]["status"] == "ok" and rows[CRASHED]["c"] == 1.0, rows[CRASHED]
+    assert rows[KEPT]["checks"] == before["tasks"][0]["checks"]
+    assert (bundle / rows[CRASHED]["transcript"]).is_file()
+    assert (bundle / "workspace" / f"{CRASHED}.tar.gz").is_file()
+    assert result["totals"]["total"] == 2
+    [redo] = result["redo"]
+    assert redo["added"] == [CRASHED] and redo["previous"] == {}
