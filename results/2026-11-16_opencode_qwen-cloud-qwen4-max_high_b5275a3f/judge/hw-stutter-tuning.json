@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "[goal] Find the hitch cause on rig arena-01 from the capture files and record fixes in `result.json`.\n\n[action] Read NOTES.md, settings.json, sensors.csv; computed frame stats from all 8238 PresentMon rows and correlated hitch times against every sensor column. Wrote and validated `result.json`. No browser, apps or windows were opened; nothing was applied to this host.\n\n[result] `result.json` written: avg_fps **137.3**, low_1pct_fps **45.4**, one change: `pcie_aspm_rp1_gpu` L1 → disabled.\n\n**Cause:** PCIe ASPM L1 on the GPU root port. How I know it is right:\n- The only frame-time anomalies are ~0.25 s bursts of 21–23.7 ms frames at t = 2.4, 6.4, 10.4 … 58.4 s, exactly every 4 s. The sensor log shows `gpu_pcie_link_state = L1` at seconds 2, 6, 10 … 58: a 15-for-15 match, one burst per L1 entry.\n- Outside bursts, frame time is a flat ~6.95 ms (max 8.2 ms), so the average looks fine while p99 = 22.05 ms crushes the 1% low to 45.4 fps.\n- Red herrings eliminated by measurement: the Defender/MsMpEng spike (43–45 s, DPC ~450 µs) and disk spikes (13/27/52 s) show max 8.1 ms frame times in those windows, i.e. zero hitches; CPU clocks never dropped below 5.15 GHz, ruling out the Balanced plan / 5% min state.\n- The fix respects both constraints: disabling ASPM is power management only; Gen5 x4 link speed/width and XMP/PBO/core ratio are untouched.\n\nAssumptions stated in the file: metrics per NOTES.md definitions (nearest-rank p99), sensor second N maps to capture interval [N, N+1), and only the GPU root port needs the change since NVMe ASPM showed no correlation.\n\n[next] Owner applies the BIOS change on arena-01 and re-runs the same one-minute replay; expect the 4 s bursts gone and 1% low near ~120+ fps. No further revision needed."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"avg_fps\": 137.3,\n  \"low_1pct_fps\": 45.4,\n  \"cause\": \"PCIe ASPM L1 is enabled on the GPU root port (pcie_aspm_rp1_gpu = L1). The GPU link drops into L1 every 4 seconds (sensor log gpu_pcie_link_state = L1 at seconds 2, 6, 10, ... 58), and each L1 exit stalls presentation: PresentMon shows a ~0.25 s burst of 21-23.7 ms frames at t = 2.4, 6.4, 10.4, ... 58.4 s, exactly matching the L1 seconds. Outside these bursts frame time is a steady ~6.95 ms (~144 fps), so the average looks fine (137.3 fps) while the 99th-percentile frame time is 22.05 ms, giving a 1% low of only 45.4 fps. Red herrings ruled out: the MsMpEng.exe/Defender CPU+DPC spike at 43-45 s and the disk-activity spikes at 13/27/52 s produced no frame-time anomaly (max 8.1 ms in those windows); CPU clocks stayed 5.15-5.45 GHz throughout, so the Balanced plan / 5% min processor state is not downclocking. Disabling ASPM on the GPU root port is a power-management change only: it keeps the validated Gen5 x4 link speed/width and touches no XMP/PBO/core-ratio setting, so it satisfies the owner's constraints.\",\n  \"changes\": [\n    {\n      \"setting\": \"pcie_aspm_rp1_gpu\",\n      \"from\": \"L1\",\n      \"to\": \"disabled\"\n    }\n  ],\n  \"evidence\": {\n    \"frames\": 8238,\n    \"capture_seconds\": 59.999,\n    \"mean_MsBetweenPresents\": 7.284,\n    \"p99_MsBetweenPresents\": 22.048,\n    \"hitch_burst_start_seconds\": [2.4, 6.4, 10.4, 14.4, 18.4, 22.4, 26.4, 30.4, 34.4, 38.4, 42.4, 46.4, 50.4, 54.4, 58.4],\n    \"gpu_link_L1_seconds\": [2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58],\n    \"non_burst_mean_ms\": 6.955,\n    \"non_burst_max_ms\": 8.2\n  },\n  \"assumptions\": [\n    \"avg_fps = frames presented / capture duration (8238 / 59.999 s), per NOTES.md; equals 1000 / mean MsBetweenPresents.\",\n    \"1% low = 1000 / p99(MsBetweenPresents), p99 by nearest-rank on sorted frame times, per NOTES.md.\",\n    \"Sensor second N covers the capture interval [N, N+1); the L1 state logged at second N explains the burst starting at N+0.4 s (link enters L1 mid-second, exit latency hits the following frames).\",\n    \"Only the GPU root port ASPM needs changing; NVMe root port ASPM (rp0) is left as-is because disk spikes showed zero correlation with frame hitches, and no other setting change is justified by the data.\",\n    \"Nothing was applied to this host; analysis was read-only on the provided files.\"\n  ]\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem .. | Select-Object Name,Length; Get-ChildItem .\" ok -> \"\\u001b[32;1mName         \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----         \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\nworkspace     \\r\\ncapture       1\\r\\nAGENTS.md     394\\r\\nNOTES.md      774\\r\\nsettings.json 2429\"\n[step 1] read \"NOTES.md\" ok -> \"Read file NOTES.md, lines 1-15\\n1: # Owner notes - rig \\\"arena-01\\\"\\n2: \\n3: The game hitches every few seconds even though the average frame rate looks fine.\\n4: Capture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\n5: taken at the same time (same clock: second 0 of both files is the same instant).\\n6: settings.json is a dump of the rig's current settings.\\n7: \\n8: How [... 455 chars cut by the benchmark]\"\n[step 1] read \"settings.json\" ok -> \"Read file settings.json, lines 1-125\\n1: {\\n2:   \\\"rig\\\": \\\"arena-01\\\",\\n3:   \\\"settings\\\": [\\n4:     {\\n5:       \\\"setting\\\": \\\"power_plan\\\",\\n6:       \\\"value\\\": \\\"Balanced\\\",\\n7:       \\\"where\\\": \\\"Windows\\\"\\n8:     },\\n9:     {\\n10:       \\\"setting\\\": \\\"hardware_accelerated_gpu_scheduling\\\",\\n11:       \\\"value\\\": \\\"on\\\",\\n12:       \\\"where\\\": \\\"Windows\\\"\\n13:     },\\n14:     {\\n15:       \\\"setting\\\": \\\"game_mode\\\",\\n16:       \\\"value\\\": \\\"on\\\",\\n1[... 2582 chars cut by the benchmark]\"\n[step 1] shell \"Get-ChildItem capture | Select-Object Name,Length\" ok -> \"\\u001b[32;1mName          \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----          \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\npresentmon.csv 715870\\r\\nsensors.csv      2660\"\n[step 1] read \"capture/sensors.csv\" ok -> \"Read file capture/sensors.csv, lines 1-61\\n1: time_s,cpu_clock_mhz,cpu_util_pct,gpu_clock_mhz,gpu_pcie_link_state,gpu_pcie_link_speed,dpc_latency_us,disk_active_pct,top_cpu_process\\n2: 0,5354,35,2724,L0,Gen5 x4,52,1,Arena.exe\\n3: 1,5350,40,2754,L0,Gen5 x4,88,4,Arena.exe\\n4: 2,5270,31,2754,L1,Gen5 x4,40,3,Arena.exe\\n5: 3,5373,31,2720,L0,Gen5 x4,81,2,Arena.exe\\n6: 4,5290,33,2759,L0,Gen5 x4,41,1,Arena.exe\\n[... 2536 chars cut by the benchmark]\"\n[step 1] shell \"Get-Content capture/presentmon.csv -TotalCount 3; python --version\" ok -> \"Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.000000,6.861,6.847,0.294,4.901,5.568\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.006861,6.773,6.812,0.387,4.013,6.252\\r\\nPython 3.13.14\"\n[step 1] shell \"python -c \\\"\\nimport csv,statistics\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\nts=[float(r['TimeInSeconds']) for r in rows]\\nms=[float(r['MsBetweenPresents']) for r in rows]\\ndur=ts[-1]-ts[0]\\navg=len(ms)/dur\\ns=sorted(ms); p99=s[int(0.99*(len(s)-1))]\\nprint('frames',len(ms),'dur',dur,'avg',round(avg,2),'p99_ms',round(p99,3),'low1pct',round(1000/p99,2),'mean_ms',round(statistics.mean(ms),3))\\nhitches=[(round(t,2),round(m,1)) for t,m in zip(ts,ms) if m>20]\\nprint('hitches>20ms:',hitches)\\n\\\"\" ok -> \"frames 8238 dur 59.999207 avg 137.3 p99_ms 22.048 low1pct 45.36 mean_ms 7.284\\r\\nhitches>20ms: [(2.4, 21.9), (2.42, 22.9), (2.45, 22.1), (2.47, 21.6), (2.49, 22.7), (2.51, 21.0), (2.53, 22.1), (2.55, 21.9), (2.58, 22.0), (2.6, 22.5), (2.62, 21.2), (2.64, 20.6), (6.41, 21.8), (6.43, 21.6), (6.45, 22.5), (6.47, 21.2), (6.49, 23.0), (6.52, 21.8), (6.54, 22.4), (6.56, 22.8), (6.58, 21.1), (6.6, 21.6), ([... 2347 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\nms=[(float(r['TimeInSeconds']),float(r['MsBetweenPresents'])) for r in rows]\\ntop=sorted(ms,key=lambda x:-x[1])[:15]\\nprint('worst:',[(round(t,2),m) for t,m in top])\\nfor lo,hi in [(13,14),(27,28),(43,46),(52,53)]:\\n    w=[m for t,m in ms if lo<=t<hi]\\n    print(lo,hi,'max',round(max(w),1),'mean',round(sum(w)/len(w),2))\\nbase=[m for t,m in ms if not any(abs(t-(2.4+4*k))<0.5 for k in range(15))]\\nprint('non-burst mean',round(sum(base)/len(base),3),'max',round(max(base),1))\\n\\\"\" ok -> \"worst: [(14.45, 23.675), (58.49, 23.327), (58.4, 23.224), (30.43, 23.203), (22.4, 23.02), (6.49, 22.988), (54.56, 22.975), (42.49, 22.974), (38.47, 22.946), (18.62, 22.944), (30.58, 22.908), (22.58, 22.904), (22.64, 22.864), (2.42, 22.853), (6.56, 22.844)]\\r\\n13 14 max 7.7 mean 6.92\\r\\n27 28 max 7.8 mean 6.99\\r\\n43 46 max 8.1 mean 6.96\\r\\n52 53 max 7.7 mean 6.96\\r\\nnon-burst mean 6.955 max 8.2\"\n[step 1] write \"result.json\" ok -> \"Created file successfully: result.json\"\n[step 1] shell \"python -c \\\"import json; d=json.load(open('result.json')); print('valid json;', d['avg_fps'], d['low_1pct_fps'], d['changes'])\\\"\" ok -> \"valid json; 137.3 45.4 [{'setting': 'pcie_aspm_rp1_gpu', 'from': 'L1', 'to': 'disabled'}]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 10,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 3684,
+  "reasoning_tokens": 1465,
+  "largest_turn_tokens": 1514
+ },
+ "deliverables": [],
+ "render": null
+}

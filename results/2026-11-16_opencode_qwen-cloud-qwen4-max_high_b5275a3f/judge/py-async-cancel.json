@@ -1,0 +1,51 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [],
+ "diff": "A run.py\n\n--- run.py ---\n\"\"\"Bounded-concurrency task runner for batch scripts (Python 3.11+, stdlib only).\n\nUsage:\n    from run import run_tasks\n    asyncio.run(run_tasks([make_job_a, make_job_b, ...], max_concurrent=4))\n\nEach item of `tasks` is a zero-argument callable returning an awaitable.\nThe callable is only invoked once a concurrency slot is free, so jobs are\nstarted lazily. On cancellation (Ctrl+C under asyncio.run cancels the main\ntask), every started job is cancelled and awaited, so job-level try/finally\ncleanup runs before run_tasks re-raises.\n\"\"\"\n\nfrom __future__ import annotations\n\nimport asyncio\nfrom collections.abc import Awaitable, Callable, Iterable\n\nJobFactory = Callable[[], Awaitable[object]]\n\n\nasync def run_tasks(tasks: Iterable[JobFactory], max_concurrent: int) -> None:\n    \"\"\"Run all jobs, at most `max_concurrent` at once; return when all are done.\n\n    Raises ValueError for max_concurrent < 1. The first job exception\n    propagates after all other jobs have been cancelled and their cleanup\n    awaited. Cancellation (Ctrl+C) likewise runs every job's cleanup first.\n    \"\"\"\n    if not isinstance(max_concurrent, int) or max_concurrent < 1:\n        raise ValueError(\n            f\"max_concurrent must be an int >= 1, got {max_concurrent!r}\"\n        )\n\n    gate = asyncio.Semaphore(max_concurrent)\n\n    async def run_guarded(factory: JobFactory) -> None:\n        async with gate:\n            await factory()\n\n    workers = [asyncio.create_task(run_guarded(factory)) for factory in tasks]\n    if not workers:\n        return\n    try:\n        await asyncio.gather(*workers)\n    except BaseException:\n        # Cancel stragglers, then await them so finally-blocks (cleanup)\n        # complete before we propagate the error/cancellation.\n        for worker in workers:\n            worker.cancel()\n        await asyncio.gather(*workers, return_exceptions=True)\n        raise\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Created file successfully: run.py\"\n[step 1] shell \"python -c \\\"\\nimport asyncio, sys\\nsys.path.insert(0, '.')\\nfrom run import run_tasks\\n\\nasync def main():\\n    live = 0; peak = 0; done = []\\n    def make(i):\\n        async def job():\\n            nonlocal live, peak\\n            live += 1; peak = max(peak, live)\\n            try:\\n                await asyncio.sleep(0.02)\\n                done.append(i)\\n            finally:\\n                live -= 1\\n        return job\\n    await run_tasks([lambda i=i: make(i)() for i in range(10)], 3)\\n    assert peak <= 3 and len(done) == 10, (peak, done)\\n    print('cap+completion OK, peak =', peak)\\n\\n    cleaned = []\\n    def slow(i):\\n        async def job():\\n            try:\\n                await asyncio.sleep(5)\\n            finally:\\n                await asyncio.sleep(0.01)  # async cleanup\\n                cleaned.append(i)\\n        return job\\n    runner = asyncio.create_task(run_tasks([lambda i=i: slow(i)() for i in range(6)], 2))\\n    await asyncio.sleep(0.05)\\n    runner.cancel()  # what Ctrl+C does to the main task under asyncio.run\\n    try:\\n        await runner\\n    except asyncio.CancelledError:\\n        pass\\n    assert len(cleaned) == 2, cleaned  # only the 2 started jobs ran cleanup\\n    print('cancel cleanup OK:', cleaned)\\n\\n    started = []\\n    def bad(i):\\n        async def job():\\n            started.append(i)\\n            try:\\n                await asyncio.sleep(0.02 if i else 0.01)\\n                if i == 0: raise RuntimeError('boom')\\n            finally:\\n                cleaned.append(('err', i))\\n [... 536 chars cut by the benchmark]\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<string>\\\", line 68, in <module>\\r\\n    asyncio.run(main())\\r\\n    ~~~~~~~~~~~^^^^^^^^\\r\\n  File \\\"<HOME>\\\\AppData\\\\Roaming\\\\uv\\\\python\\\\cpython-3.13.14-windows-x86_64-none\\\\Lib\\\\asyncio\\\\runners.py\\\", line 196, in run\\r\\n    return runner.run(main)\\r\\n           ~~~~~~~~~~^^^^^^\\r\\n  File \\\"<HOME>\\\\AppData\\\\Roaming\\\\uv\\\\python\\\\cpython-3.13.14-windows-x86_[... 547 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 3,
+  "tool_calls": 2,
+  "tool_errors": 0,
+  "shell_commands": 1,
+  "shell_failures": 1,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1846,
+  "reasoning_tokens": 717,
+  "largest_turn_tokens": 1218
+ },
+ "deliverables": [],
+ "render": null
+}

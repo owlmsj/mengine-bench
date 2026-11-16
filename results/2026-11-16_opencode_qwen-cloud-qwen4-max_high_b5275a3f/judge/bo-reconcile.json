@@ -1,0 +1,49 @@
+{
+ "task_id": "bo-reconcile",
+ "prompts": [
+  "Finance has to chase June's receivables. The invoices, the bank statement and our reconciliation notes are in {WS}/backoffice. What do we still have to collect or fix? Record it in {WS}/result.json: unpaid and duplicated (invoice ids) and mismatched (id, invoiced, paid)."
+ ],
+ "answers": [
+  "[goal] Reconcile June receivables from ./backoffice and record findings in ./result.json.\n\n[action] Matched all 41 bank statement lines to the 40 invoices by extracting the invoice number from each memo format (`invNNNN payment`, `PIX INV-NNNN ...`, `TED invoice NNNN ...`), then classified per the README rules. Verified with a script; result written to result.json.\n\n[result]\n- **Unpaid (collect):** INV-1008 (23,693.91, Coruja Labs), INV-1030 (8,092.29, Vetor BI), INV-1033 (21,266.69, Arena Studio). Total 53,052.89.\n- **Duplicated (refund/credit):** INV-1015, paid twice at 1,904.29 (Jun 5 \"ARENA STUDIO\" and Jun 17 \"resend\").\n- **Mismatched (collect shortfall):** INV-1021 invoiced 21,320.36, paid 21,070.36 (short 250.00); INV-1036 invoiced 8,619.16, paid 7,757.24 (short 861.92).\n\nAssumptions: the README in ./backoffice is the reconciliation notes; \"PIX received unidentified 1099\" (1,500.00), CDB INTEREST and the bank fee are ignored per its rules; duplicated and mismatched categories kept exclusive; amounts compared to the cent.\n\nHow I know it's right: script output matches my manual line-by-line check. 40 invoices = 34 paid in full + 3 unpaid + 1 duplicated + 2 mismatched; 38 matched payment lines = 41 statement lines minus the 3 ignored entries. Every invoice id accounted for exactly once.\n\n[next] Chase the 3 unpaid invoices and the two shortfalls; arrange refund or credit for the duplicate INV-1015 payment. No browser tabs or apps were opened, nothing to close."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"unpaid\": [\"INV-1008\", \"INV-1030\", \"INV-1033\"],\n  \"duplicated\": [\"INV-1015\"],\n  \"mismatched\": [\n    {\"id\": \"INV-1021\", \"invoiced\": 21320.36, \"paid\": 21070.36},\n    {\"id\": \"INV-1036\", \"invoiced\": 8619.16, \"paid\": 7757.24}\n  ]\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem -Recurse ./backoffice | Select-Object FullName, Length\" ok -> \"\\u001b[32;1mFullName                                                                                                        \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m--------                                                                                                        \\u001b[0m \\u001b[32;<WORKSPACE>\\\\backoffice\\\\bank_statement_june.csv  [... 247 chars cut by the benchmark]\"\n[step 1] read \"backoffice/invoices.csv\" ok -> \"Read file backoffice/invoices.csv, lines 1-41\\n1: id,customer,amount,due_date\\n2: INV-1001,Kestrel Games,14387.10,2026-06-20\\n3: INV-1002,Coruja Labs,3751.37,2026-06-20\\n4: INV-1003,Arena Studio,3742.23,2026-06-20\\n5: INV-1004,Pampa Foods,10182.62,2026-06-20\\n6: INV-1005,Ateliê Norte,5192.93,2026-06-20\\n7: INV-1006,Vetor BI,16374.73,2026-06-20\\n8: INV-1007,Kestrel Games,18866.76,2026-06-20\\n9: INV-1008,Cor[... 1461 chars cut by the benchmark]\"\n[step 1] read \"backoffice/README.md\" ok -> \"Read file backoffice/README.md, lines 1-7\\n1: # How we reconcile receivables\\n2: \\n3: - The bank memo cites the invoice in different formats.\\n4: - Ignore fees, interest and PIX transfers without an identifiable invoice.\\n5: - unpaid: invoices with no payment. duplicated: invoices paid more than once.\\n6: - mismatched: a single payment whose amount differs from its invoice.\\n7: - The three categories are[... 58 chars cut by the benchmark]\"\n[step 1] read \"backoffice/bank_statement_june.csv\" ok -> \"Read file backoffice/bank_statement_june.csv, lines 1-42\\n1: date,memo,amount\\n2: 2026-06-02,inv1007 payment,18866.76\\n3: 2026-06-17,PIX INV-1015 resend,1904.29\\n4: 2026-06-18,PIX INV-1016 PAMPA FOODS,4219.04\\n5: 2026-06-04,TED invoice 1023 Ateliê Norte,1714.10\\n6: 2026-06-25,PIX INV-1028 PAMPA FOODS,10327.03\\n7: 2026-06-18,TED invoice 1039 Arena Studio,21184.42\\n8: 2026-06-27,TED invoice 1037 Kestrel Gam[... 1584 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv,re,json\\nfrom collections import defaultdict\\ninv={r['id']:float(r['amount']) for r in csv.DictReader(open('backoffice/invoices.csv',encoding='utf-8'))}\\npay=defaultdict(list)\\nfor r in csv.DictReader(open('backoffice/bank_statement_june.csv',encoding='utf-8')):\\n    m=re.search(r'10\\\\d\\\\d',r['memo'])\\n    if not m: continue\\n    iid='INV-'+m.group()\\n    if iid in inv: pay[iid].append(float(r['amount']))\\nunpaid=[i for i in inv if i not in pay]\\ndup=[i for i in pay if len(pay[i])>1]\\nmis=[{'id':i,'invoiced':inv[i],'paid':pay[i][0]} for i in pay if len(pay[i])==1 and abs(pay[i][0]-inv[i])>0.005]\\nprint(json.dumps({'unpaid':sorted(unpaid),'duplicated':sorted(dup),'mismatched':sorted(mis,key=lambda x:x['id'])},indent=2))\\nprint('invoices',len(inv),'payment lines matched',sum(len(v) for v in pay.values()))\\n\\\"\" ok -> \"{\\r\\n  \\\"unpaid\\\": [\\r\\n    \\\"INV-1008\\\",\\r\\n    \\\"INV-1030\\\",\\r\\n    \\\"INV-1033\\\"\\r\\n  ],\\r\\n  \\\"duplicated\\\": [\\r\\n    \\\"INV-1015\\\"\\r\\n  ],\\r\\n  \\\"mismatched\\\": [\\r\\n    {\\r\\n      \\\"id\\\": \\\"INV-1021\\\",\\r\\n      \\\"invoiced\\\": 21320.36,\\r\\n      \\\"paid\\\": 21070.36\\r\\n    },\\r\\n    {\\r\\n      \\\"id\\\": \\\"INV-1036\\\",\\r\\n      \\\"invoiced\\\": 8619.16,\\r\\n      \\\"paid\\\": 7757.24\\r\\n    }\\r\\n  ]\\r\\n}\\r\\ninvoices 40 payment lines matched 38\"\n[step 1] write \"result.json\" ok -> \"Created file successfully: result.json\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "unpaid invoices",
+   true
+  ],
+  [
+   "duplicated payments",
+   true
+  ],
+  [
+   "mismatched amounts",
+   true
+  ],
+  [
+   "invoiced vs paid on mismatches",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 6,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 4014,
+  "reasoning_tokens": 2924,
+  "largest_turn_tokens": 3141
+ },
+ "deliverables": [],
+ "render": null
+}

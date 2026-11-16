@@ -1,0 +1,67 @@
+{
+ "task_id": "file-media-edit",
+ "prompts": [
+  "Tidewater Studio is announcing its balloon launch. Two small jobs before the post goes out:\n\n1. `launch.jpg` becomes the feed picture: a 1080x1350 JPEG at `out/feed-photo.jpg`. The magenta balloon is the\n   subject, so it has to be fully in the picture and still look like itself.\n2. The park's permit form `permit-form.pdf` filled in with the details Ines sent in `event-details.txt`, saved at\n   `out/permit-filled.pdf` and flattened, so the answers can no longer be edited.\n\nKeep the originals as they are."
+ ],
+ "answers": [],
+ "diff": "A make_outputs.py\n\n--- make_outputs.py ---\n\"\"\"One-shot build of out/feed-photo.jpg and out/permit-filled.pdf. Originals untouched.\"\"\"\nimport os\nfrom PIL import Image\nfrom pypdf import PdfReader, PdfWriter\nfrom pypdf.generic import NameObject, ArrayObject, FloatObject, DictionaryObject\n\nos.makedirs(\"out\", exist_ok=True)\n\n# --- Job 1: 4:5 crop containing the whole magenta balloon + basket ---\nim = Image.open(\"launch.jpg\").convert(\"RGB\")\nW, H = im.size\npx = im.load()\nxs, ys = [], []\nfor y in range(0, H, 2):\n    for x in range(0, W, 2):\n        r, g, b = px[x, y]\n        if r > 170 and g < 110 and b > 110:  # magenta envelope\n            xs.append(x); ys.append(y)\nbx0, bx1, by0, by1 = min(xs), max(xs), min(ys), max(ys)\n# basket + ropes hang below the envelope; pad generously, then margin all round\nby1 += int(0.30 * (by1 - by0))\nmh = int(0.12 * (by1 - by0)); mw = int(0.12 * (bx1 - bx0))\nbx0 -= mw; bx1 += mw; by0 -= mh; by1 += mh\n# smallest 4:5 box covering that region, clamped to the image\nch = min(H, by1 - by0); cw = int(ch * 0.8)\nif cw < bx1 - bx0:\n    cw = bx1 - bx0; ch = int(cw / 0.8)\ncx = (bx0 + bx1) // 2; cy = (by0 + by1) // 2\nx0 = max(0, min(W - cw, cx - cw // 2)); y0 = max(0, min(H - ch, cy - ch // 2))\ncrop = im.crop((x0, y0, x0 + cw, y0 + ch)).resize((1080, 1350), Image.LANCZOS)\ncrop.save(\"out/feed-photo.jpg\", \"JPEG\", quality=92)\nprint(\"balloon bbox\", (bx0, by0, bx1, by1), \"crop\", (x0, y0, cw, ch))\n# verify subject pixels survive inside the saved feed image\nchk = Image.open(\"out/feed-photo.jpg\"); print(\"feed size\", chk.size)\ncpx = chk.load(); n = 0\nfor y in range(0, 1350, 3):\n    for x in range(0, 1080, 3):\n        r, g, b = cpx[x, y]\n        if r > 170 and g < 110 and b > 110:\n            n += 1\nprint(\"magenta samples in feed:\", n)\n\n# --- Job 2: fill permit fields, then flatten into page content ---\nVALUES = {\n    \"organizer\": \"Tidewater Studio\",\n    \"event_date\": \"Saturday 5 December 2026\",\n    \"location\": \"North Cove Lawn\",\n    \"attendees\": \"about 40\",\n}\nreader = PdfReader(\"permit-form.pdf\")\nwriter = PdfWriter()\nwriter.append(reader)\nwriter.update_page_form_field_values(writer.pages[0], VALUES, auto_regenerate=False)\n\npage = writer.pages[0]\nxobjs = page.get(\"/Resources\", DictionaryObject()).setdefault(NameObject(\"/XObject\"), DictionaryObject())\nextra = []\nfor i, annot_ref in enumerate(list(page.get(\"/Annots\", ArrayObject()))):\n    annot = annot_ref.get_object()\n    if annot.get(\"/Subtype\") != \"/Widget\":\n        continue\n    ap = annot[\"/AP\"][\"/N\"]\n    bbox = ap.get(\"/BBox\", ArrayObject([FloatObject(0)] * 4))\n    rect = annot[\"/Rect\"]\n    dx = float(rect[0]) - float(bbox[0]); dy = float(rect[1]) - float(bbox[1])\n    name = NameObject(f\"/FlatFld{i}\")\n    xobjs[name] = ap\n    extra.append(f\"q 1 0 0 1 {dx:.2f} {dy:.2f} cm {name} Do Q\\n\".encode())\nif extra:\n    from pypdf.generic import DecodedStreamObject, EncodedStreamObject\n    old = page.get_contents()\n    data = b\"\".join(s.get_data() for s in ([old] if not isinstance(old, list) else old)) if old else b\"\"\n    stream = DecodedStreamObject()\n    stream.set_data(b\"\".join(extra) + data)\n    page[NameObject(\"/Contents\")] = writer._add_object(stream)\ndel page[NameObject(\"/Annots\")]\nroot = writer._root_object\nif \"/AcroForm\" in root:\n    del root[NameObject(\"/AcroForm\")]\nwith open(\"out/permit-filled.pdf\", \"wb\") as fh:\n    writer.write(fh)\n\n# --- verify ---\nout = PdfReader(\"out/permit-filled.pdf\")\nprint(\"fields after flatten:\", out.get_fields())\nprint(\"annots after flatten:\", out.pages[0].get(\"/Annots\"))\ntext = out.pages[0].extract_text()\nprint(\"extracted text:\\n\" + text)\nfor v in VALUES.values():\n    assert v in text, v\nprint(\"OK\")\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \".\" ok -> \"Read directory ., entries 1-4\\nAGENTS.md\\nevent-details.txt\\nlaunch.jpg\\npermit-form.pdf\"\n[step 1] shell \"python -c \\\"import PIL, pypdf, fitz; print(PIL.__version__, pypdf.__version__, fitz.__doc__)\\\"\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<string>\\\", line 1, in <module>\\r\\n    import PIL, pypdf, fitz; print(PIL.__version__, pypdf.__version__, fitz.__doc__)\\r\\n    ^^^^^^^^^^^^^^^^^^^^^^^\\r\\nModuleNotFoundError: No module named 'fitz'\"\n[step 1] read \"event-details.txt\" ok -> \"Read file event-details.txt, lines 1-9\\n1: From: Ines Varga\\n2: Subject: balloon launch permit\\n3: \\n4: Details for the park permit:\\n5: \\n6: Organizer: Tidewater Studio\\n7: Date: Saturday 5 December 2026\\n8: Where: North Cove Lawn\\n9: People: about 40\"\n[step 1] read \"launch.jpg\" ok -> \"Image read successfully\"\n[step 1] shell \"python -c \\\"\\nfrom PIL import Image\\nim=Image.open('launch.jpg'); print(im.size)\\nfrom pypdf import PdfReader\\nr=PdfReader('permit-form.pdf')\\nprint('pages',len(r.pages))\\nf=r.get_fields()\\nfor k,v in (f or {}).items(): print(repr(k), v.get('/FT'), repr(v.get('/V')), v.get('/_States_'))\\n\\\"\" ok -> \"(3000, 2000)\\r\\npages 1\\r\\n'organizer' /Tx None None\\r\\n'event_date' /Tx None None\\r\\n'location' /Tx None None\\r\\n'attendees' /Tx None None\"\n[step 1] write \"make_outputs.py\" ok -> \"Created file successfully: make_outputs.py\"\n[step 1] shell \"python make_outputs.py\" ok -> \"balloon bbox (2302, 438, 2798, 1082) crop (2293, 438, 515, 644)\\r\\nfeed size (1080, 1350)\\r\\nmagenta samples in feed: 61527\\r\\nfields after flatten: None\\r\\nannots after flatten: None\\r\\nextracted text:\\r\\nTidewater Studio\\r\\nSaturday 5 December 2026\\r\\nNorth Cove Lawn\\r\\nabout 40\\r\\nOK\"",
+ "checks": [
+  [
+   "the original photo and form left as they were",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "photo is a JPEG",
+   true
+  ],
+  [
+   "photo is exactly 1080x1350",
+   true
+  ],
+  [
+   "balloon fully in frame and undistorted",
+   true
+  ],
+  [
+   "permit organizer filled",
+   true
+  ],
+  [
+   "permit event_date filled",
+   false
+  ],
+  [
+   "permit location filled",
+   true
+  ],
+  [
+   "permit attendees filled",
+   true
+  ],
+  [
+   "permit flattened",
+   true
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 1,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 4008,
+  "reasoning_tokens": 2360,
+  "largest_turn_tokens": 3377
+ },
+ "deliverables": [],
+ "render": null
+}
