@@ -152,3 +152,30 @@ def test_a_site_task_must_have_one_step() -> None:
         EvalTask(id="x", category="t", provenance="t", summary="t", setup=_workspace_setup,
                  steps=(Step("a {SITE}"), Step("b", fresh_session=True)), check=_counter_check,
                  reference=lambda ws: [""], site=SITE)
+
+
+OPENCODE_AGENT = """
+import sys
+from pathlib import Path
+print(Path(sys.argv[1], "opencode.json").read_text(encoding="utf-8"))
+"""
+
+
+def _opencode_setup(ws: Path) -> None:
+    _workspace_setup(ws)
+    (ws / "opencode.json").write_text(
+        '{"mcp": {"servers": {"unreal-mcp": {"type": "remote", "url": "{SITE}/mcp", "codemode": false}}}}',
+        encoding="utf-8")
+
+
+def test_run_task_puts_the_url_in_the_workspace_opencode_json(fake_agent: FakeAgent, tmp_path: Path) -> None:
+    """mengine-qlora #22 track U: an MCP site task names its server in the workspace opencode.json as {SITE}."""
+    template = json.loads(fake_agent("opencode", OPENCODE_AGENT))
+    task = EvalTask(id="site-opencode", category="test", provenance="test", summary="read the MCP config",
+                    setup=_opencode_setup, steps=(Step("Print the MCP config."),),
+                    check=lambda ws, answers: CheckResult(), reference=lambda ws: [""], site=SITE)
+    record = run_task(task, CmdAgent(template=json.dumps(template), model="m", effort=None), tmp_path / "run")
+    assert record.status == "ok", record.error
+    config = json.loads(record.answers[0])
+    url = config["mcp"]["servers"]["unreal-mcp"]["url"]
+    assert url.startswith("http://127.0.0.1:") and url.endswith("/mcp"), url
