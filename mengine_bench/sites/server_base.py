@@ -27,6 +27,7 @@ import re
 import sys
 import threading
 import time
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -178,9 +179,12 @@ def _with_presence_routes(handler: type[SiteHandler]) -> type[SiteHandler]:
     return PresenceHandler
 
 
-def serve(handler: type[SiteHandler], apply: ApplyEvent, seed: SiteState) -> None:
+def serve(handler: type[SiteHandler], apply: ApplyEvent, seed: SiteState | Callable[[Path], SiteState]) -> None:
+    """`seed` is the first state, or a function of the workspace that reads it there (a task's own world, #22)."""
     config = json.loads(sys.stdin.readline())
     workspace, key = Path(config["workspace"]), bytes.fromhex(config["key"])
+    if callable(seed):
+        seed = seed(workspace)
     handler = _with_presence_routes(handler)
     handler.workspace = workspace
     handler.run_key = config["key"]

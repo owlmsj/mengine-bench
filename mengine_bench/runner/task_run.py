@@ -160,6 +160,19 @@ def render_prompt(task: EvalTask, index: int, workspace: Path, hidden: Path, sit
     return text
 
 
+def render_site_config(workspace: Path, site_url: str | None) -> None:
+    """Put this run's site URL in the workspace `opencode.json`, where an MCP site task names its server as {SITE}.
+
+    mengine-qlora #22 track U: OpenCode reads the project `opencode.json`, and each run's site has its own port.
+    """
+    config = workspace / "opencode.json"
+    if site_url is None or not config.is_file():
+        return
+    text = config.read_text(encoding="utf-8")
+    if SITE_PLACEHOLDER in text:
+        config.write_text(text.replace(SITE_PLACEHOLDER, site_url), encoding="utf-8", newline="")
+
+
 def snapshot(workspace: Path) -> dict[str, bytes]:
     """Readable workspace files; unreadable (locked) ones, browser profiles, cargo output and git objects are skipped.
 
@@ -224,6 +237,7 @@ def _run_steps(task: EvalTask, agent: Agent, root: Path, fresh_root: Path | None
             prompt = render_prompt(task, index, workspace, root / "hidden" / str(index), site_url)
             prompt += BRIEF_NOTE + ANY_TOOL_NOTE + CLOSE_NOTE + TIME_LIMIT_NOTE.format(minutes=f"{task.timeout_s / 60:g}")
             (workspace / "AGENTS.md").write_text(WORKSPACE_RULES, encoding="utf-8", newline="")
+            render_site_config(workspace, site_url)
             _run_step(agent, task, workspace, root, index, prompt, record)
         except StepFailed as failure:
             record.status, record.error = failure.status, str(failure)
