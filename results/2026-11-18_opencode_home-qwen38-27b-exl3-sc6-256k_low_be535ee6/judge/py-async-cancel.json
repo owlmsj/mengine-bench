@@ -1,0 +1,51 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [],
+ "diff": "A run.py\nA test_run.py\n\n--- run.py ---\n\"\"\"Concurrency-limited batch runner with clean Ctrl+C shutdown.\n\nUsage:\n    from run import run_tasks\n    results = await run_tasks([task_a, task_b, ...], max_concurrent=4)\n\nEach task is a zero-argument callable returning an awaitable job.\n\"\"\"\nimport asyncio\n\n\nasync def run_tasks(tasks, max_concurrent):\n    \"\"\"Run jobs with at most ``max_concurrent`` running at once.\n\n    Returns a list of results in input order once every job is done.\n\n    If the run is interrupted before completion (Ctrl+C / KeyboardInterrupt,\n    or cancellation of the surrounding task), every job is cancelled and\n    awaited so that in-flight jobs finish their cleanup (finally blocks,\n    ``async with`` exits) before the exception propagates. Jobs that had not\n    started yet simply never run. On any job failure the same shutdown path\n    runs: siblings are cancelled, cleanup is awaited, then the first\n    exception is re-raised.\n    \"\"\"\n    if max_concurrent < 1:\n        raise ValueError(\n            f\"max_concurrent must be >= 1, got {max_concurrent!r}\"\n        )\n    sem = asyncio.Semaphore(max_concurrent)\n\n    async def _run(task):\n        async with sem:\n            return await task()\n\n    jobs = [asyncio.ensure_future(_run(t)) for t in tasks]\n    try:\n        return await asyncio.gather(*jobs)\n    except BaseException:\n        # Interruption or failure: stop everything, but give every in-flight\n        # job a chance to run its cleanup before we propagate.\n        for job in jobs:\n            job.cancel()\n        await asyncio.gather(*jobs, return_exceptions=True)\n        raise\n\n\nif __name__ == \"__main__\":\n    async def _demo(i):\n        await asyncio.sleep(0.1)\n        return i\n\n    print(asyncio.run(run_tasks([lambda i=i: _demo(i) for i in range(5)], 2)))\n\n--- test_run.py ---\n\"\"\"Checks for run.run_tasks: concurrency cap, ordering, cleanup on stop.\"\"\"\nimport asyncio\nimport os\nimport signal\nimport subprocess\nimport sys\nimport time\n\nfrom run import run_tasks\n\nCHILD = r\"\"\"\nimport asyncio\nfrom run import run_tasks\n\nasync def main():\n    print(\"started\", flush=True)\n    async def job(i):\n        try:\n            await asyncio.sleep(30)\n        finally:\n            print(f\"cleanup {i}\", flush=True)\n    await run_tasks([lambda i=i: job(i) for i in range(4)], 2)\n    print(\"finished\", flush=True)\n\nasyncio.run(main())\n\"\"\"\n\n\nasync def test_concurrency_and_order():\n    running = 0\n    peak = 0\n\n    async def job(i):\n        nonlocal running, peak\n        running += 1\n        peak = max(peak, running)\n        await asyncio.sleep(0.05)\n        running -= 1\n        return i\n\n    results = await run_tasks([lambda i=i: job(i) for i in range(10)], 3)\n    assert results == list(range(10)), results\n    assert peak == 3, peak\n    print(f\"concurrency OK (peak={peak}, results in order)\")\n\n\nasync def test_cancel_runs_cleanup():\n    cleaned = []\n\n    async def job(i):\n        try:\n            await asyncio.sleep(10)\n        finally:\n            cleaned.append(i)\n\n    t = asyncio.create_task(run_tasks([lambda i=i: job(i) for i in range(4)], 2))\n    await asyncio.sleep(0.1)\n    t.cancel()\n    try:\n        await t\n    except asyncio.CancelledError:\n        pass\n    # 2 jobs in flight clean up; 2 still waiting on the semaphore never start.\n    assert sorted(cleaned) == [0, 1], cleaned\n    print(f\"cancel cleanup OK (cleaned={sorted(cleaned)})\")\n\n\nasync def test_empty_and_validation():\n    assert await run_tasks([], 3) == []\n    try:\n        await run_tasks([], 0)\n    except ValueError:\n        print(\"validation OK (max_concurrent=0 rejected)\")\n    else:\n        raise AssertionError(\"expected ValueError\")\n\n\ndef test_sigint_runs_cleanup():\n    # Real Ctrl+C: child in its own console, parent sends CTRL_C_EVENT to it.\n    kwargs = {}\n    if os.name == \"nt\":\n        kwargs[\"creationflags\"] = subprocess.CREATE_NEW_CONSOLE\n    with subprocess.Popen(\n        [sys.executable, \"-c\", CHILD],\n        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,\n        text=True, **kwargs,\n    ) as p:\n        line = p.stdout.readline()\n        assert \"started\" in line, line\n        time.sleep(1.0)\n        os.kill(p.pid, signal.CTRL_C_EVENT if os.name == \"nt\" else signal.SIGINT)\n        out, _ = p.communicate(timeout=10)\n    print(\"child output:\", out.strip().replace(\"\\n\", \" | \"))\n    assert \"cleanup 0\" in out and \"cleanup 1\" in out, out\n    assert \"finished\" not in out, out\n    print(\"sigint cleanup OK (in-flight jobs cleaned, run did not finish)\")\n\n\nasync def main():\n    await test_concurrency_and_order()\n    await test_cancel_runs_cleanup()\n    await test_empty_and_validation()\n    test_sigint_runs_cleanup()\n    print(\"ALL TESTS PASSED\")\n\nasyncio.run(main())",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Created file successfully: <WORKSPACE>/run.py\"\n[step 1] write \"<WORKSPACE>\\\\test_run.py\" ok -> \"Created file successfully: <WORKSPACE>/test_run.py\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 2,
+  "tool_calls": 2,
+  "tool_errors": 0,
+  "shell_commands": 0,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 6156,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 6156
+ },
+ "deliverables": [],
+ "render": null
+}
