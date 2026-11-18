@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-ab-playtest",
+ "prompts": [
+  "We playtested two versions of the Pixel Arena tutorial and have to pick one for the next release. The export and its notes are in {WS}/telemetry. Should we ship B instead of A? Give a recommendation a skeptical lead would accept. Record it in {WS}/result.json with ship_b, sessions_a, sessions_b, completion_rate_a, completion_rate_b and p_value."
+ ],
+ "answers": [
+  "Done. No browser tabs, windows, or apps were opened, so nothing to close.\n\n**Recommendation: ship B.**\n\n**What I found:**\n- 1870 raw rows → 1800 unique sessions after deduping by `session_id` (70 exact-repeat rows from the ETL resend, zero conflicting rows).\n- Normalized `variant` (stripped leading spaces, lowercased) → 900 sessions per arm.\n- Completion: A = 342/900 = **38.0%**, B = 420/900 = **46.7%**.\n- Two-proportion z-test (pooled): z = 3.72, **p ≈ 0.0002** — far below the 5% release threshold. B's +8.7-point gain is statistically significant.\n\n**Assumptions I made (the brief left these open):**\n1. Dedupe by `session_id`, last-row-wins. I verified all 70 duplicate rows are byte-identical in variant+completion, so the choice of which copy to keep is immaterial.\n2. Two-sided two-proportion z-test at α=0.05, pooled variance. The README's \"statistically significant at the 5% level\" maps to this standard test.\n3. `match_minutes` is not part of the ship decision; the release rule is completion-rate significance only.\n4. No player-level clustering adjustment (a player can appear in both arms via different sessions). With 900 sessions/arm and z=3.72, the result is robust to mild within-player correlation; I'd flag it to the lead as a caveat but it doesn't change the call.\n\n**How I know it's right:** I read the full CSV, confirmed the dedup is conflict-free, and computed the test directly from the raw data rather than trusting any pre-aggregated number. The p-value (0.0002) is ~250× below the 0.05 bar, so the conclusion is not borderline.\n\n`result.json` is written: `{\"ship_b\": true, \"sessions_a\": 900, \"sessions_b\": 900, \"completion_rate_a\": 0.38, \"completion_rate_b\": 0.4667, \"p_value\": 0.000198}`."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\"ship_b\": true, \"sessions_a\": 900, \"sessions_b\": 900, \"completion_rate_a\": 0.38, \"completion_rate_b\": 0.4667, \"p_value\": 0.000198}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"./telemetry\" ok -> \"Read directory ./telemetry, entries 1-2\\nplaytest_ab.csv\\nREADME.md\"\n[step 1] read \"./telemetry/README.md\" ok -> \"Read file ./telemetry/README.md, lines 1-5\\n1: # Playtest A/B - Pixel Arena tutorial\\n2: \\n3: Export from arena-panel. The ETL resends sessions: `session_id` is the unique key (repeated rows are the same session). `variant` may come lowercase or with a leading space. `completed_tutorial` is 0/1.\\n4: \\n5: Release rule: a variant ships only when its gain in tutorial completion is statistically significan[... 18 chars cut by the benchmark]\"\n[step 1] read \"./telemetry/playtest_ab.csv\" ok -> \"Read file ./telemetry/playtest_ab.csv, lines 1-1871\\n1: session_id,variant,player_id,completed_tutorial,match_minutes\\n2: s01423,b,p0798,1,12.6\\n3: s01632,a,p0693,1,9.0\\n4: s00612,A,p0098,0,12.2\\n5: s00389, B,p0202,1,16.5\\n6: s00509, B,p0896,0,14.8\\n7: s00206,a,p0059,1,13.0\\n8: s01758,a,p0342,0,20.4\\n9: s01097, B,p0084,1,15.1\\n10: s01547, B,p0372,0,17.4\\n11: s01715,b,p0660,0,12.8\\n12: s01716, A,p0314,0,16.8\\n1[... 51357 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv, math\\n\\nsessions = {}\\nwith open('telemetry/playtest_ab.csv', newline='') as f:\\n    r = csv.DictReader(f)\\n    for row in r:\\n        sid = row['session_id'].strip()\\n        v = row['variant'].strip().lower()\\n        comp = int(row['completed_tutorial'])\\n        # last occurrence wins? README says repeated rows are the same session.\\n        # Check consistency first.\\n        if sid in sessions:\\n            prev = sessions[sid]\\n            if prev != (v, comp):\\n                print('CONFLICT', sid, prev, (v, comp))\\n        sessions[sid] = (v, comp)\\n\\na = [c for v,c in sessions.values() if v=='a']\\nb = [c for v,c in sessions.values() if v=='b']\\nna, nb = len(a), len(b)\\nca, cb = sum(a), sum(b)\\npa, pb = ca/na, cb/nb\\nprint('n_a', na, 'comp_a', ca, 'rate_a', pa)\\nprint('n_b', nb, 'comp_b', cb, 'rate_b', pb)\\n\\n# two-proportion z-test, pooled\\np = (ca+cb)/(na+nb)\\nse = math.sqrt(p*(1-p)*(1/na+1/nb))\\nz = (pb-pa)/se\\n# two-sided p-value\\npval = 2*(1-0.5*(1+math.erf(abs(z)/math.sqrt(2))))\\nprint('pooled p', p, 'se', se, 'z', z, 'p_value', pval)\\n\\\"\" ok -> \"n_a 900 comp_a 342 rate_a 0.38\\r\\nn_b 900 comp_b 420 rate_b 0.4666666666666667\\r\\npooled p 0.42333333333333334 se 0.02329149688535483 z 3.7209573559508202 p_value 0.00019846895397623854\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nrows = list(csv.DictReader(open('telemetry/playtest_ab.csv', newline='')))\\nprint('total rows', len(rows))\\nsids = [r['session_id'].strip() for r in rows]\\nprint('unique sids', len(set(sids)))\\n# variants before normalization\\nfrom collections import Counter\\nprint(Counter(r['variant'] for r in rows))\\n\\\"\" ok -> \"total rows 1870\\r\\nunique sids 1800\\r\\nCounter({'b': 323, 'B': 322, 'A': 318, ' A': 316, 'a': 304, ' B': 287})\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nfrom collections import defaultdict\\nd = defaultdict(list)\\nfor r in csv.DictReader(open('telemetry/playtest_ab.csv', newline='')):\\n    d[r['session_id'].strip()].append((r['variant'].strip().lower(), int(r['completed_tutorial'])))\\nconflicts = {k:v for k,v in d.items() if len(set(v))>1}\\nprint('sessions with conflicting rows:', len(conflicts))\\nfor k,v in list(conflicts.items())[:10]:\\n    print(k, v)\\n# count dup rows\\ndups = sum(len(v)-1 for v in d.values())\\nprint('extra duplicate rows:', dups)\\n\\\"\" ok -> \"sessions with conflicting rows: 0\\r\\nextra duplicate rows: 70\"\n[step 1] write \"./result.json\" failed -> \"\"\n[step 1] write \"./result.json\" failed -> \"\"\n[step 1] shell \"python -c \\\"\\nimport json\\ndata = {'ship_b': True, 'sessions_a': 900, 'sessions_b': 900, 'completion_rate_a': 0.38, 'completion_rate_b': 0.4667, 'p_value': 0.000198}\\nopen('result.json','w').write(json.dumps(data))\\nprint(open('result.json').read())\\n\\\"\" ok -> \"{\\\"ship_b\\\": true, \\\"sessions_a\\\": 900, \\\"sessions_b\\\": 900, \\\"completion_rate_a\\\": 0.38, \\\"completion_rate_b\\\": 0.4667, \\\"p_value\\\": 0.000198}\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "deduplicated session counts",
+   true
+  ],
+  [
+   "completion rates",
+   true
+  ],
+  [
+   "the gain is significant",
+   true
+  ],
+  [
+   "ship decision",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 9,
+  "tool_calls": 9,
+  "tool_errors": 2,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 1824,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 525
+ },
+ "deliverables": [],
+ "render": null
+}
