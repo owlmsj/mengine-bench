@@ -1,0 +1,51 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [],
+ "diff": "A recover.py\nA recovered.json\n\n--- recover.py ---\nimport json\n\ndata = open('prices.db','rb').read()\n\ndef varint(buf, i):\n    v = 0\n    for n in range(9):\n        b = buf[i]; i += 1\n        if n == 8:\n            return (v << 8) | b, i\n        v = (v << 7) | (b & 0x7F)\n        if not b & 0x80:\n            return v, i\n\ndef parse_record(buf, i):\n    hdr_len, i = varint(buf, i)\n    hdr_end = i\n    serials = []\n    j = i\n    while j < hdr_end:\n        s, j = varint(buf, j)\n        serials.append(s)\n    vals = []\n    j = hdr_end\n    for s in serials:\n        if s == 0:\n            vals.append(None)\n        elif 1 <= s <= 6:\n            n = {1:1,2:2,3:3,4:4,5:6,6:8}[s]\n            vals.append(int.from_bytes(buf[j:j+n],'big',signed=True)); j += n\n        elif s == 8:\n            vals.append(0)\n        elif s == 9:\n            vals.append(1)\n        elif s >= 13 and s % 2 == 1:\n            n = (s-13)//2\n            vals.append(buf[j:j+n].decode('utf-8','replace')); j += n\n        elif s >= 12 and s % 2 == 0:\n            n = (s-12)//2\n            vals.append(buf[j:j+n]); j += n\n        else:\n            vals.append(None)\n    return vals\n\nrows = []\ni = 0\nn = len(data)\nwhile i < n - 4:\n    pl = data[i]\n    if not (5 <= pl <= 64):\n        i += 1; continue\n    rowid, i2 = varint(data, i+1)\n    if rowid > 100000:\n        i += 1; continue\n    hdr_len = data[i2]\n    if not (2 <= hdr_len <= 12):\n        i += 1; continue\n    j = i2+1\n    serials = []\n    ok = True\n    while j < i2+1+hdr_len:\n        s, j = varint(data, j)\n        if not (s == 0 or 1 <= s <= 9 or s >= 12):\n            ok = False; break\n        serials.append(s)\n    if not ok or j != i2+1+hdr_len:\n        i += 1; continue\n    # find exactly one text (odd>=13) and one int (0..9) among serials\n    texts = [s for s in serials if s >= 13 and s % 2 == 1]\n    ints = [s for s in serials if s in (0,1,2,3,4,5,6,8,9)]\n    if len(texts) != 1 or len(ints) != 1:\n        i += 1; continue\n    tl = texts[0]; il = ints[0]\n    textlen = (tl-13)//2\n    intlen = {0:0,1:1,2:2,3:3,4:4,5:6,6:8,8:0,9:0}[il]\n    end = i2+1+hdr_len+textlen+intlen\n    if end > n:\n        i += 1; continue\n    vals = parse_record(data, i2)\n    item = next(v for v in vals if isinstance(v, str))\n    price = next(v for v in vals if isinstance(v, int))\n    if not item.strip():\n        i += 1; continue\n    rows.append({'item': item, 'price': price})\n    i = end\n\nprint(json.dumps(rows, indent=1))\nwith open('recovered.json','w',encoding='utf-8') as f:\n    json.dump(rows, f, ensure_ascii=False, indent=1)\n\n--- recovered.json ---\n[]",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-Item .\\\\prices.db | Select-Object Length; Format-Hex -Path .\\\\prices.db -Count 256\" ok -> \"\\u001b[32;1mLength\\u001b[0m\\r\\n\\u001b[32;1m------\\u001b[0m\\r\\n  4096\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\"\n[step 1] shell \"$b=[IO.File]::ReadAllBytes('.\\\\prices.db'); $b.Length; ($b[0..15] | ForEach-Object { $_.ToString('X2') }) -join ' '\" ok -> \"4096\\r\\n0D 00 00 00 0A 0F 3D 00 0F F1 0F E3 0F CB 0F BD\"\n[step 1] shell \"$b=[IO.File]::ReadAllBytes('.\\\\prices.db'); $s=[Text.Encoding]::ASCII.GetString($b); $s -replace '[^\\\\x20-\\\\x7E]','.'\" ok -> \"......=..?.?.?.?.?.?...m.X.=....................................................................................................................................................................................................................................................................................................................................................................................[... 3696 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\recover.py\" ok -> \"Created file successfully: recover.py\"\n[step 1] shell \"python recover.py\" failed -> \"page size 0\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\recover.py\\\", line 22, in <module>\\r\\n    for page in range(1, len(data)//page_size + 1):\\r\\n                         ~~~~~~~~~^^~~~~~~~~~\\r\\nZeroDivisionError: integer division or modulo by zero\"\n[step 1] write \"<WORKSPACE>\\\\recover.py\" ok -> \"Wrote file successfully: recover.py\"\n[step 1] shell \"python recover.py\" ok -> \"len 4096\\r\\n3907 'first aid kit?'\\r\\n3934 'compass@/'\\r\\n3955 'camp stove'\\r\\n3973 'sleeping bag'\\r\\n3993 'water filter@C'\\r\\n4008 '33333'\\r\\n4019 'rope coil'\\r\\n4035 'lantern'\\r\\n4049 'tent stake@'\\r\\n4073 'matchbox'\\r\\n4087 'trail map'\"\n[step 1] shell \"$b=[IO.File]::ReadAllBytes('.\\\\prices.db'); ($b[3890..4095] | ForEach-Object { if($_ -ge 32 -and $_ -lt 127){[char]$_}else{'.'} }) -join ''\" ok -> \"...............'.first aid kit?...z.G.......compass@/..........!.camp stove.6....%.sleeping bag......%.water filter@C.33333......rope coil.......lantern.....!.tent stake@.............matchbox......trail map\"\n[step 1] shell \"$b=[IO.File]::ReadAllBytes('.\\\\prices.db'); for($i=3890;$i -lt 4096;$i++){ '{0:X4} {1:X2}' -f $i,$b[$i] }\" ok -> \"0F32 00\\r\\n0F33 00\\r\\n0F34 00\\r\\n0F35 00\\r\\n0F36 00\\r\\n0F37 00\\r\\n0F38 00\\r\\n0F39 00\\r\\n0F3A 00\\r\\n0F3B 00\\r\\n0F3C 00\\r\\n0F3D 19\\r\\n0F3E 0A\\r\\n0F3F 04\\r\\n0F40 00\\r\\n0F41 27\\r\\n0F42 07\\r\\n0F43 66\\r\\n0F44 69\\r\\n0F45 72\\r\\n0F46 73\\r\\n0F47 74\\r\\n0F48 20\\r\\n0F49 61\\r\\n0F4A 69\\r\\n0F4B 64\\r\\n0F4C 20\\r\\n0F4D 6B\\r\\n0F4E 69\\r\\n0F4F 74\\r\\n0F50 3F\\r\\n0F51 EF\\r\\n0F52 AE\\r\\n0F53 14\\r\\n0F54 7A\\r\\n0F55 E1\\r\\n0F56 47\\r\\n0F57 AE\\r\\n0F58 13\\r\\n0F59 09\\r\\n0F5A 04\\r\\n0F5B 00\\r\\n0F5C 1B\\r\\n0F5D 07\\r\\n0F5E[... 1452 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\recover.py\" ok -> \"Wrote file successfully: recover.py\"\n[step 1] shell \"python recover.py\" ok -> \"[]\"\n[step 1] write \"<WORKSPACE>\\\\recover.py\" ok -> \"Wrote file successfully: recover.py\"\n[step 1] shell \"python recover.py\" ok -> \"[]\"\n[step 1] edit \"<WORKSPACE>\\\\recover.py\" ok -> \"Edited recover.py (1 replacement)\"\n[step 1] edit \"<WORKSPACE>\\\\recover.py\" ok -> \"Edited recover.py (1 replacement)\"\n[step 1] shell \"python recover.py\" ok -> \"[]\"\n[step 1] shell \"python -c \\\"\\ndata=open('prices.db','rb').read()\\ni=0xF3D\\nprint('pl',data[i],'rowid',data[i+1],'hdr',data[i+2])\\nprint('serials bytes',data[i+3:i+7].hex())\\n\\\"\" ok -> \"pl 25 rowid 10 hdr 4\\r\\nserials bytes 00270766\"\n[step 1] write \"<WORKSPACE>\\\\recover.py\" ok -> \"Wrote file successfully: recover.py\"\n[step 1] shell \"python recover.py\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\recover.py\\\", line 80, in <module>\\r\\n    item = next(v for v in vals if isinstance(v, str))\\r\\nStopIteration\"\n[step 1] shell \"python -c \\\"\\ndata=open('prices.db','rb').read()\\ndef varint(buf,i):\\n    v=0\\n    for n in range(9):\\n        b=buf[i];i+=1\\n        if n==8: return (v<<8)|b,i\\n        v=(v<<7)|(b&0x7F)\\n        if not b&0x80: return v,i\\ni=0xF3D\\npl=data[i]; rowid,i2=varint(data,i+1); hdr=data[i2]\\nprint('pl',pl,'rowid',rowid,'hdr',hdr)\\nserials=[];j=i2+1\\nwhile j<i2+1+hdr:\\n    s,j=varint(data,j);serials.append(s)\\nprint('serials',serials)\\n# data starts at i2+1+hdr\\nd=i2+1+hdr\\nprint('data hex',data[d:d+20].hex())\\n\\\"\" ok -> \"pl 25 rowid 10 hdr 4\\r\\nserials [0, 39, 7, 102]\\r\\ndata hex 6972737420616964206b69743fefae147ae147ae\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   false
+  ],
+  [
+   "rows with fractional prices recovered",
+   false
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   false
+  ],
+  [
+   "no row that is not in the table",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 21,
+  "tool_calls": 20,
+  "tool_errors": 0,
+  "shell_commands": 13,
+  "shell_failures": 2,
+  "file_writes": 7,
+  "repeated_tool_calls": 5,
+  "outside_path_uses": 0,
+  "generated_tokens": 6663,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1633
+ },
+ "deliverables": [],
+ "render": null
+}
