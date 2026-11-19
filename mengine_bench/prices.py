@@ -39,6 +39,9 @@ LIST_PRICES: Mapping[str, ListPrice] = {
     "gpt-6-astra": ListPrice(10.0, 1.0, 50.0, OPENAI_PRICING, PRICE_READ_DATE),
     "gpt-6.1-sol": ListPrice(2.0, 0.10, 10.0, OPENAI_PRICING, PRICE_READ_DATE),
     "gpt-6.1-terra": ListPrice(1.0, 0.05, 5.0, OPENAI_PRICING, PRICE_READ_DATE),
+    # #258: read 2026-11-19.
+    "gpt-6.2-sol": ListPrice(2.0, 0.10, 10.0, OPENAI_PRICING, PRICE_READ_DATE_1119),
+    "gpt-6.2-astra": ListPrice(8.0, 0.40, 40.0, OPENAI_PRICING, PRICE_READ_DATE_1119),
     "zai/glm-5.3-flash": ListPrice(0.15, 0.03, 0.50, ZAI_PRICING, PRICE_READ_DATE),
     # Off-peak; peak hours cost twice this. Gemini's rise on 2026-12-01 is not applied.
     "deepseek/deepseek-flash": ListPrice(0.15, 0.003, 0.60, DEEPSEEK_PRICING, PRICE_READ_DATE),
@@ -53,6 +56,8 @@ FAST_PRICES: Mapping[str, ListPrice] = {
     "gpt-6-astra": ListPrice(20.0, 2.0, 100.0, OPENAI_PRICING, PRICE_READ_DATE),
     "gpt-6.1-sol": ListPrice(4.0, 0.20, 20.0, OPENAI_PRICING, PRICE_READ_DATE),
     "gpt-6.1-terra": ListPrice(2.0, 0.10, 10.0, OPENAI_PRICING, PRICE_READ_DATE),
+    "gpt-6.2-sol": ListPrice(4.0, 0.20, 20.0, OPENAI_PRICING, PRICE_READ_DATE_1119),
+    "gpt-6.2-astra": ListPrice(16.0, 0.80, 80.0, OPENAI_PRICING, PRICE_READ_DATE_1119),
 }
 _SMALLEST_SHOWN = 0.01
 

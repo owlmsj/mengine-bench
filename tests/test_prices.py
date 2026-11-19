@@ -50,7 +50,8 @@ def test_the_fast_tier_costs_what_openai_lists_for_it() -> None:
 def test_every_model_on_the_board_has_a_price() -> None:
     assert set(LIST_PRICES) == {"claude-opus-5-5", "claude-sonnet-5-5", "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra",
                                 "zai/glm-5.3-flash", "deepseek/deepseek-flash", "gemini-4-argon",
-                                "claude-fable-5-2", "gemini-4-carbon", "gemini-4-hydrogen", "gemini-4-neon"}
+                                "claude-fable-5-2", "gemini-4-carbon", "gemini-4-hydrogen", "gemini-4-neon",
+                                "gpt-6.2-sol", "gpt-6.2-astra"}
 
 
 def test_hydrogen_costs_what_ai_studio_lists() -> None:
@@ -63,6 +64,14 @@ def test_neon_costs_what_ai_studio_lists() -> None:
     # AI Studio pricing read 2026-11-19 (#252): input 3.00, implicit cache 0.15, output 15.00 USD/MTok.
     run = _result("gemini-4-neon", 2_000_000, 1_000_000, 1_000_000)
     assert abs(estimated_usd(run) - (3.00 + 0.15 + 15.00)) < 1e-9
+
+
+def test_gpt_6_2_costs_what_openai_lists_standard_and_fast_258() -> None:
+    # OpenAI pricing read 2026-11-19: Fast is twice Standard for both.
+    assert estimated_usd(_result("gpt-6.2-sol", 1_000_000, 0, 1_000_000)) == 12.0
+    assert estimated_usd(_result("gpt-6.2-sol", 1_000_000, 0, 1_000_000, config={"service_tier": "fast"})) == 24.0
+    assert estimated_usd(_result("gpt-6.2-astra", 1_000_000, 0, 1_000_000)) == 48.0
+    assert estimated_usd(_result("gpt-6.2-astra", 1_000_000, 0, 1_000_000, config={"service_tier": "fast"})) == 96.0
 
 
 def test_the_cell_says_it_is_an_estimate() -> None:
