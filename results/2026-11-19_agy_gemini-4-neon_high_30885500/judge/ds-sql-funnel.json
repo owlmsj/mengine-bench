@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-sql-funnel",
+ "prompts": [
+  "Product wants to know where players drop off on each platform. The data is in {WS}/analytics.db and our reporting rules are in {WS}/METRICS.md. Where do we lose the most players? Record it in {WS}/result.json: funnel (per platform, players at each step) and biggest_drop (per platform, the step)."
+ ],
+ "answers": [
+  "[goal]\nIdentify per-platform funnel counts and biggest player drop-off step from [analytics.db](<WORKSPACE>/analytics.db) using [METRICS.md](<WORKSPACE>/METRICS.md), and record them in [result.json](<WORKSPACE>/result.json).\n\n[action]\n- Inspected `users` (900 rows: 866 `is_test=0`, 34 `is_test=1`; platforms `pc`, `steamdeck`) and `events` (2,268 rows; 0 nulls; all timestamps `YYYY-MM-DD HH:MM:SS` fixed length 19).\n- Filtered out test accounts (`is_test != 0`, 79 events across 24 users) and unknown players not in `users` (15 events across 15 `ghost*` IDs).\n- Applied strict ordered funnel (`install -> tutorial_complete -> first_match -> purchase`) where each step takes a player's first valid timestamp `>=` the previous step's valid timestamp; excluded 19 players with later steps but no `install`, and 25 out-of-order `purchase` events timestamped before `first_match` (e.g. `2026-05-30 12:00:00`).\n- Cross-checked Python per-user sequential logic against an independent SQLite CTE chain and wrote [result.json](<WORKSPACE>/result.json).\n- Assumptions: `biggest_drop` evaluates steps with a prior step (`tutorial_complete`, `first_match`, `purchase`) using conversion = `step_players / prev_step_players` per [METRICS.md](<WORKSPACE>/METRICS.md); `result.json` maps `funnel.<platform>.<step>` to integer player counts and `biggest_drop.<platform>` to the lowest-conversion step name.\n\n[result]\n- **pc**: `install` 470, `tutorial_complete` 389 (82.77%), `first_match` 326 (83.80%), `purchase` 269 (82.52%). Biggest drop: **`purchase`** (lowest conversion at 269/326 = 82.52%; filtering out-of-order pre-match purchases is decisive here vs `tutorial_complete` at 82.77%).\n- **steamdeck**: `install` 192, `tutorial_complete` 128 (66.67%), `first_match` 87 (67.97%), `purchase` 61 (70.11%). Biggest drop: **`tutorial_complete`** (lowest conversion at 128/192 = 66.67%).\n- Verification output matching [result.json](<WORKSPACE>/result.json) against SQL CTE:\n  `VERIFIED OK: {\"funnel\": {\"pc\": {\"install\": 470, \"tutorial_complete\": 389, \"first_match\": 326, \"purchase\": 269}, \"steamdeck\": {\"install\": 192, \"tutorial_complete\": 128, \"first_match\": 87, \"purchase\": 61}}, \"biggest_drop\": {\"pc\": \"purchase\", \"steamdeck\": \"tutorial_complete\"}}`\n\n[next]\nDone; [result.json](<WORKSPACE>/result.json) is ready for product review.\n"
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"funnel\": {\n    \"pc\": {\n      \"install\": 470,\n      \"tutorial_complete\": 389,\n      \"first_match\": 326,\n      \"purchase\": 269\n    },\n    \"steamdeck\": {\n      \"install\": 192,\n      \"tutorial_complete\": 128,\n      \"first_match\": 87,\n      \"purchase\": 61\n    }\n  },\n  \"biggest_drop\": {\n    \"pc\": \"purchase\",\n    \"steamdeck\": \"tutorial_complete\"\n  }\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\METRICS.md\" ok -> \"6 lines, 406 bytes\"\n[step 1] shell \"Get-ChildItem; python -c \\\"\\nimport sqlite3\\nconn = sqlite3.connect('analytics.db')\\ncur = conn.cursor()\\nprint('TABLES:', cur.execute(\\\\\\\"SELECT name, sql FROM sqlite_master WHERE type='table'\\\\\\\").fetchall())\\nfor (name,) in cur.execute(\\\\\\\"SELECT name FROM sqlite_master WHERE type='table'\\\\\\\").fetchall():\\n    print(f'--- {name} count:', cur.execute(f'SELECT COUNT(*) FROM {name}').fetchone()[0])\\n    print(cur.execute(f'SELECT * FROM {name} LIMIT 10').fetchall())\\n\\\"\" ok -> \"Created At: 2026-11-19T08:12:36-03:00\\nCompleted At: 2026-11-19T08:12:38-03:00\\nCommand exited with code 1.\\n\\nCommand output:\\n\\r\\n\\r\\n    Directory: <WORKSPACE>\\r\\n\\r\\n\\r\\nMode                 LastWriteTime         Length Name                                                                 \\r\\n----                 -------------         ------ ----[... 656 chars cut by the benchmark]\"\n[step 1] shell \"@'\\nimport sqlite3, json\\nconn = sqlite3.connect('analytics.db')\\ncur = conn.cursor()\\nfor name, sql in cur.execute(\\\"SELECT name, sql FROM sqlite_master WHERE type IN ('table', 'view')\\\").fetchall():\\n    print(\\\"SCHEMA:\\\", name, sql)\\n    print(\\\"COUNT:\\\", cur.execute(f\\\"SELECT COUNT(*) FROM {name}\\\").fetchone()[0])\\n    print(\\\"SAMPLE:\\\", cur.execute(f\\\"SELECT * FROM {name} LIMIT 10\\\").fetchall())\\n'@ | python -\" ok -> \"Created At: 2026-11-19T08:12:42-03:00\\nCompleted At: 2026-11-19T08:12:44-03:00\\nCommand exited with code 0.\\n\\nCommand output:\\nSCHEMA: users CREATE TABLE users (user_id text primary key, platform text, is_test integer)\\r\\nCOUNT: 900\\r\\nSAMPLE: [('p0000', 'pc', 0), ('p0001', 'pc', 0), ('p0002', 'pc', 0), ('p0003', 'pc', 0), ('p0004', 'steamdeck', 0), ('p0005', 'steamdeck', 0), ('p0006', 'pc', 0), ('p0007',[... 651 chars cut by the benchmark]\"\n[step 1] shell \"@'\\nimport sqlite3\\nfrom collections import Counter, defaultdict\\nfrom datetime import datetime\\n\\nconn = sqlite3.connect('analytics.db')\\ncur = conn.cursor()\\n\\nprint(\\\"platforms:\\\", cur.execute(\\\"SELECT platform, COUNT(*) FROM users GROUP BY platform\\\").fetchall())\\nprint(\\\"is_test:\\\", cur.execute(\\\"SELECT is_test, COUNT(*) FROM users GROUP BY is_test\\\").fetchall())\\nprint(\\\"user_id nulls/dups:\\\", cur.execute(\\\"SELECT COUNT(*) FROM users WHERE user_id IS NULL OR trim(user_id) != user_id\\\").fetchone())\\nprint(\\\"event names:\\\", cur…\" ok -> \"Created At: 2026-11-19T08:13:00-03:00\\nCompleted At: 2026-11-19T08:13:02-03:00\\nCommand exited with code 0.\\n\\nCommand output:\\nplatforms: [('pc', 614), ('steamdeck', 286)]\\r\\nis_test: [(0, 866), (1, 34)]\\r\\nuser_id nulls/dups: (0,)\\r\\nevent names: [('first_match', 479), ('install', 759), ('purchase', 441), ('tutorial_complete', 589)]\\r\\nevent nulls: (0,)\\r\\nunknown users events: (15, 15)\\r\\ntest users events: (79[... 1582 chars cut by the benchmark]\"\n[step 1] shell \"@'\\nimport sqlite3\\n\\nconn = sqlite3.connect('analytics.db')\\ncur = conn.cursor()\\n\\nsql = \\\"\\\"\\\"\\nWITH valid_events AS (\\n    SELECT e.user_id, u.platform, e.name, e.ts\\n    FROM events e\\n    JOIN users u ON e.user_id = u.user_id\\n    WHERE u.is_test = 0\\n),\\ns1 AS (\\n    SELECT user_id, platform, MIN(ts) AS t1\\n    FROM valid_events\\n    WHERE name = 'install'\\n    GROUP BY user_id, platform\\n),\\ns2 AS (\\n    SELECT s1.user_id, s1.platform, MIN(e.ts) AS t2\\n    FROM s1\\n    JOIN valid_events e ON e.user_id = s1.user_id AND e.nam…\" ok -> \"Created At: 2026-11-19T08:13:19-03:00\\nCompleted At: 2026-11-19T08:13:21-03:00\\nCommand exited with code 0.\\n\\nCommand output:\\nSQL RESULT:\\r\\n('pc', 470, 389, 326, 269)\\r\\n('steamdeck', 192, 128, 87, 61)\\r\\n\\r\\nSample users with purchase before first_match:\\r\\n('p0146', 'pc', '2026-06-24 23:00:00', '2026-05-30 12:00:00')\\r\\n('p0492', 'steamdeck', '2026-06-05 04:00:00', '2026-05-30 12:00:00')\\r\\n('p0142', 'steamdeck[... 540 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\result.json\" ok -> \"\"\n[step 1] shell \"@'\\nimport json, sqlite3\\n\\nwith open(\\\"result.json\\\", \\\"r\\\", encoding=\\\"utf-8\\\") as f:\\n    res = json.load(f)\\n\\nconn = sqlite3.connect(\\\"analytics.db\\\")\\ncur = conn.cursor()\\nsteps = [\\\"install\\\", \\\"tutorial_complete\\\", \\\"first_match\\\", \\\"purchase\\\"]\\n\\n# Verify exact match with SQL CTE\\nsql = \\\"\\\"\\\"\\nWITH ve AS (\\n    SELECT e.user_id, u.platform, e.name, e.ts\\n    FROM events e JOIN users u ON e.user_id = u.user_id\\n    WHERE u.is_test = 0\\n),\\ns1 AS (SELECT user_id, platform, MIN(ts) t1 FROM ve WHERE name='install' GROUP BY user_id, pla…\" ok -> \"Created At: 2026-11-19T08:13:39-03:00\\nCompleted At: 2026-11-19T08:13:41-03:00\\nCommand exited with code 0.\\n\\nCommand output:\\nVERIFIED OK: {\\\"funnel\\\": {\\\"pc\\\": {\\\"install\\\": 470, \\\"tutorial_complete\\\": 389, \\\"first_match\\\": 326, \\\"purchase\\\": 269}, \\\"steamdeck\\\": {\\\"install\\\": 192, \\\"tutorial_complete\\\": 128, \\\"first_match\\\": 87, \\\"purchase\\\": 61}}, \\\"biggest_drop\\\": {\\\"pc\\\": \\\"purchase\\\", \\\"steamdeck\\\": \\\"tutorial_complete\\\"}}\\r\\nA[... 47 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "players per step on pc",
+   true
+  ],
+  [
+   "players per step on steamdeck",
+   true
+  ],
+  [
+   "biggest drop on each platform",
+   true
+  ],
+  [
+   "final answer does not contradict biggest drops",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 7,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 5,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 6529,
+  "reasoning_tokens": 1681,
+  "largest_turn_tokens": 1625
+ },
+ "deliverables": [],
+ "render": null
+}

@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Great Wave off Kanagawa — Low-Poly 3D Wallpaper</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #efe3c6;
+      user-select: none;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+// Deterministic PRNG (Mulberry32) so low-poly jitter, claws, and spray are reproducible.
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const rand = mulberry32(183106);
+
+// Palette sampled directly from print.jpg (Hokusai's Great Wave off Kanagawa).
+const PAL = {
+  skyTop:        new THREE.Color('#e4cea8'),
+  skyMid:        new THREE.Color('#efe3c6'),
+  skyBright:     new THREE.Color('#f7f0dd'),
+  mistHorizon:   new THREE.Color('#7c7b75'),
+  mistUpper:     new THREE.Color('#b6ae9b'),
+  prussianDark:  new THREE.Color('#091e3c'),
+  prussian:      new THREE.Color('#10315c'),
+  indigo:        new THREE.Color('#1f527f'),
+  cerulean:      new THREE.Color('#41789f'),
+  foamShadow:    new THREE.Color('#b0cdd5'),
+  foamMid:       new THREE.Color('#d7e6e6'),
+  foamWhite:     new THREE.Color('#f5f0e1'),
+  inkOutline:    new THREE.Color('#132c4c'),
+  fujiDark:      new THREE.Color('#132f55'),
+  fujiMid:       new THREE.Color('#214a75'),
+  boatWood:      new THREE.Color('#dca970'),
+  boatWoodLight: new THREE.Color('#eac28f'),
+  boatWoodDark:  new THREE.Color('#7a5738'),
+  boatInside:    new THREE.Color('#3b3127'),
+  rowerBlue:     new THREE.Color('#224b73'),
+  rowerSkin:     new THREE.Color('#ead7bd')
+};
+
+// Renderer setup
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.NoToneMapping;
+document.body.appendChild(renderer.domElement);
+
+// Scene & Camera: telephoto-like FOV preserves woodblock monumentality while giving true 3D depth.
+const scene = new THREE.Scene();
+scene.background = PAL.skyMid.clone();
+
+const BASE_CAM_POS = new THREE.Vector3(0.0, 2.1, 26.5);
+const BASE_CAM_LOOK = new THREE.Vector3(0.0, 2.1, 0.0);
+
+const camera = new THREE.PerspectiveCamera(34, window.innerWidth / window.innerHeight, 0.5, 160);
+camera.position.copy(BASE_CAM_POS);
+camera.lookAt(BASE_CAM_LOOK);
+
+// Lighting tuned for crisp faceted low-poly shading that keeps woodblock colors clean.
+const hemiLight = new THREE.HemisphereLight('#fbf5e6', '#2a4d70', 1.15);
+scene.add(hemiLight);
+
+const keyLight = new THREE.DirectionalLight('#fff6e3', 1.05);
+keyLight.position.set(16, 22, 18);
+scene.add(keyLight);
+
+const fillLight = new THREE.DirectionalLight('#9ec2d9', 0.45);
+fillLight.position.set(-18, 6, 12);
+scene.add(fillLight);
+
+const rimLight = new THREE.DirectionalLight('#f4e2be', 0.35);
+rimLight.position.set(4, 14, -18);
+scene.add(rimLight);
+
+// Shared flat-shaded materials
+function makeFlatVertexMat(side = THREE.FrontSide) {
+  return new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    flatShading: true,
+    roughness: 0.88,
+    metalness: 0.02,
+    side
+  });
+}
+
+function makeSolidMat(color, roughness = 0.86, side = THREE.FrontSide) {
+  return new THREE.MeshStandardMaterial({
+    color,
+    flatShading: true,
+    roughness,
+    metalness: 0.02,
+    side
+  });
+}
+
+const outlineMat = new THREE.MeshBasicMaterial({
+  color: PAL.inkOutline,
+  side: THREE.BackSide
+});
+
+// Helper: add subtle woodblock-ink silhouette shell along smoothed vertex normals.
+function addInkOutline(mesh, thickness = 0.065) {
+  const g = mesh.geometry.clone();
+  g.computeVertexNormals();
+  const pos = g.attributes.position;
+  const norm = g.attributes.normal;
+  for (let i = 0; i < pos.count; i++) {
+    pos.setXYZ(
+      i,
+      pos.getX(i) + norm.getX(i) * thickness,
+      pos.getY(i) + norm.getY(i) * thickness,
+      pos.getZ(i) + norm.getZ(i) * thickness
+    );
+  }
+  pos.needsUpdate = true;
+  const shell = new THREE.Mesh(g, outlineMat);
+  mesh.add(shell);
+  return shell;
+}
+
+// Helper: convert indexed geometry to non-indexed and color per face with slight facet variation.
+function bakeFacetColors(geometry, colorFn) {
+  const g = geometry.index ? geometry.toNonIndexed() : geometry;
+  const pos = g.attributes.position;
+  const count = pos.count;
+  const colors = new Float32Array(count * 3);
+  const vA = new THREE.Vector3();
+  const vB = new THREE.Vector3();
+  const vC = new THREE.Vector3();
+  const centroid = new THREE.Vector3();
+  const e1 = new THREE.Vector3();
+  const e2 = new THREE.Vector3();
+  const normal = new THREE.Vector3();
+  const col = new THREE.Color();
+
+  for (let i = 0; i < count; i += 3) {
+    vA.fromBufferAttribute(pos, i);
+    vB.fromBufferAttribute(pos, i + 1);
+    vC.fromBufferAttribute(pos, i + 2);
+    centroid.copy(vA).add(vB).add(vC).multiplyScalar(1 / 3);
+    e1.subVectors(vB, vA);
+    e2.subVectors(vC, vA);
+    normal.crossVectors(e1, e2).normalize();
+
+    colorFn(centroid, normal, col, i / 3);
+
+    for (let k = 0; k < 3; k++) {
+      colors[(i + k) * 3]     = col.r;
+      colors[(i + k) * 3 + 1] = col.g;
+      colors[(i + k) * 3 + 2] = col.b;
+    }
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+// ============================================================================
+// 1. SKY BACKDROP & LOW-POLY CUMULUS CLOUDS
+// ============================================================================
+function buildSkyBackdrop() {
+  const group = new THREE.Group();
+  const skyGeo = new THREE.PlaneGeometry(115, 68, 28, 18);
+  const pos = skyGeo.attributes.position;
+  // Slight facet depth & gentle curvature so it wraps cleanly when camera drifts.
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const curveZ = -0.0045 * x * x;
+    pos.setZ(i, curveZ + (rand() - 0.5) * 0.12);
+  }
+  const coloredSky = bakeFacetColors(skyGeo, (c, _n, out) => {
+    // Normalize y roughly from -16 (bottom) to +28 (top)
+    const yn = THREE.MathUtils.clamp((c.y + 12) / 36, 0, 1);
+    const xn = THREE.MathUtils.clamp((c.x + 50) / 100, 0, 1);
+
+    if (yn < 0.28) {
+      // Smoky grey-slate mist behind Mount Fuji (strongest near center-right horizon)
+      const mistFactor = THREE.MathUtils.smoothstep(yn, 0.04, 0.28);
+      out.copy(PAL.mistHorizon).lerp(PAL.mistUpper, mistFactor);
+      // Warm slightly near far edges
+      const centerFocus = Math.exp(-Math.pow((xn - 0.60) / 0.28, 2));
+      out.lerp(PAL.skyMid, (1 - centerFocus) * 0.45);
+    } else if (yn < 0.62) {
+      const t = (yn - 0.28) / 0.34;
+      out.copy(PAL.mistUpper).lerp(PAL.skyMid, Math.pow(t, 0.72));
+    } else {
+      const t = (yn - 0.62) / 0.38;
+      // Soft warm ochre-parchment band at top of print
+      out.copy(PAL.skyMid).lerp(PAL.skyTop, Math.pow(t, 0.85));
+    }
+    const j = (rand() - 0.5) * 0.014;
+    out.offsetHSL(0, 0, j);
+  });
+
+  const skyMat = new THREE.MeshBasicMaterial({ vertexColors: true });
+  const skyMesh = new THREE.Mesh(coloredSky, skyMat);
+  skyMesh.position.set(0, 4, -36);
+  group.add(skyMesh);
+
+  // Iconic rising cream cumulus cloud bank in the upper-right (matching print.jpg)
+  const cloudGroup = new THREE.Group();
+  const cloudPuffs = [
+    // [x, y, z, rx, ry, rz]
+    [4.5,  5.5, -27, 4.2, 2.4, 1.5],
+    [8.2,  7.6, -27.5, 4.8, 3.2, 1.6],
+    [11.8, 10.6, -28, 4.4, 3.5, 1.6],
+    [14.2, 8.2, -27.2, 5.0, 2.7, 1.5],
+    [17.5, 5.8, -26.8, 4.6, 2.2, 1.4],
+    [1.8,  3.8, -26.5, 3.2, 1.7, 1.2],
+    [7.4,  4.4, -26.6, 5.2, 2.1, 1.4],
+    [12.4, 5.2, -26.4, 4.8, 2.3, 1.4],
+    [-1.2, 6.2, -28.5, 3.0, 1.6, 1.2]
+  ];
+  cloudPuffs.forEach(([x, y, z, rx, ry, rz], idx) => {
+    const ico = new THREE.IcosahedronGeometry(1, 1);
+    const p = ico.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const vx = p.getX(i), vy = p.getY(i), vz = p.getZ(i);
+      const n = 0.88 + 0.24 * Math.sin(vx * 3.1 + idx) * Math.cos(vy * 2.7 - idx);
+      p.setXYZ(i, vx * rx * n, vy * ry * n, vz * rz * n);
+    }
+    const g = bakeFacetColors(ico, (c, norm, out) => {
+      const topMix = THREE.MathUtils.clamp((norm.y + 0.5) * 0.7, 0, 1);
+      out.copy(PAL.skyMid).lerp(PAL.skyBright, 0.45 + topMix * 0.55);
+      // Warm bottom edge softly
+      if (norm.y < -0.15) out.lerp(PAL.skyTop, 0.25);
+    });
+    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true }));
+    m.position.set(x, y, z);
+    m.userData = { baseX: x, baseY: y, phase: idx * 0.9 };
+    cloudGroup.add(m);
+  });
+  group.add(cloudGroup);
+
+  return { group, cloudGroup };
+}
+
+// ============================================================================
+// 2. MOUNT FUJI (DISTANT HORIZON ANCHOR, RIGHT-OF-CENTER)
+// ============================================================================
+function buildMountFuji() {
+  const radialSegs = 28;
+  const heightSegs = 12;
+  const totalHeight = 9.2;
+  const baseRadius = 11.8;
+  const summitRadius = 0.42;
+
+  const geo = new THREE.CylinderGeometry(summitRadius, baseRadius, totalHeight, radialSegs, heightSegs, true);
+  const pos = geo.attributes.position;
+
+  // Sculpt Fuji's unmistakable graceful concave volcanic catenary profile & crater rim.
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i); // -totalHeight/2 .. +totalHeight/2
+    const z = pos.getZ(i);
+    const h = (y + totalHeight * 0.5) / totalHeight; // 0 at base .. 1 at summit
+    const angle = Math.atan2(z, x);
+
+    // Concave volcano curve: steep near summit, flaring wide near base
+    const curveR = summitRadius + (baseRadius - summitRadius) * Math.pow(1 - h, 1.58);
+    const ridge = 1 + 0.042 * Math.sin(angle * 7 + h * 4) + 0.025 * Math.cos(angle * 11 - h * 6);
+    const r = curveR * ridge;
+
+    let newY = y;
+    // Slight classic twin-notched summit silhouette
+    if (h > 0.96) {
+      newY += 0.14 * Math.cos(angle * 2 + 0.4);
+    }
+    pos.setXYZ(i, Math.cos(angle) * r, newY, Math.sin(angle) * r);
+  }
+
+  // Cap the small summit crater
+  const coloredFuji = bakeFacetColors(geo, (c, norm, out) => {
+    const h = (c.y + totalHeight * 0.5) / totalHeight;
+    const angle = Math.atan2(c.z, c.x);
+
+    // Jagged snowline fingers descending Fuji's upper 46% (matching print.jpg)
+    const snowLine = 0.54
+      + 0.085 * Math.sin(angle * 6 + 0.7)
+      + 0.055 * Math.cos(angle * 11 - 0.5)
+      + 0.03 * Math.sin(angle * 17);
+
+    if (h > snowLine) {
+      out.copy(PAL.foamWhite);
+      // Slight shadow facet on left/back flank
+      if (norm.x < -0.15) out.lerp(PAL.foamShadow, 0.32);
+    } else if (h > snowLine - 0.06) {
+      // Crisp dark-indigo ridge transition
+      out.copy(PAL.prussianDark).lerp(PAL.fujiDark, 0.4);
+    } else {
+      // Deep Prussian blue slopes getting slightly softer toward misty base
+      const baseFade = THREE.MathUtils.clamp(1 - h / 0.52, 0, 1);
+      out.copy(PAL.fujiDark).lerp(PAL.fujiMid, baseFade * 0.48);
+      if (norm.x < 0) out.lerp(PAL.prussianDark, 0.25);
+    }
+    out.offsetHSL(0, 0, (rand() - 0.5) * 0.015);
+  });
+
+  const fuji = new THREE.Mesh(coloredFuji, makeFlatVertexMat());
+  // Positioned at z = -22 so projected screen peak sits at u ≈ 0.635, v ≈ 0.36
+  fuji.position.set(7.6, -4.6, -22);
+  addInkOutline(fuji, 0.09);
+  return fuji;
+}
+
+// ============================================================================
+// 3. THE GREAT WAVE (HERO CURLING CREST + HOLLOW BARREL + FOAM CLAWS)
+// ============================================================================
+function buildGreatWave() {
+  const waveGroup = new THREE.Group();
+
+  // Parametric curling wave ribbon:
+  // u in [0..1] sweeps along the great arc from far-left trough up to apex and curling over right.
+  // v in [0..1] sweeps across the C-shaped wave cross-section:
+  //   v = 0.0 -> outer-back white foam slope (upper/left edge)
+  //   v = 0.35 -> crest lip / top arch
+  //   v = 0.65 -> deep hollow Prussian blue barrel interior
+  //   v = 1.0 -> lower plunging dark-blue trough base
+  const segU = 34;
+  const segV = 18;
+  const positions = [];
+  const uvMeta = []; // store [u, v] per vertex for coloring & animation
+  const indices = [];
+
+  function sampleGreatWavePoint(u, v) {
+    // Spine of the towering crest arch in XY
+    // Sweeps from (-15.5, -2.0) -> (-9.5, 4.8) -> (-4.0, 8.7) -> (0.2, 6.8) -> (2.4, 3.6)
+    const archX =
+      -15.6 * Math.pow(1 - u, 3) +
+      3 * (-11.2) * Math.pow(1 - u, 2) * u +
+      3 * (-2.6) * (1 - u) * u * u +
+      2.3 * Math.pow(u, 3);
+
+    const archY =
+      -1.2 * Math.pow(1 - u, 3) +
+      3 * (9.2) * Math.pow(1 - u, 2) * u +
+      3 * (10.6) * (1 - u) * u * u +
+      3.5 * Math.pow(u, 3);
+
+    // Depth z sweeps slightly forward as the wave curls over toward the viewer
+    const archZ = -3.8 + 4.2 * Math.sin(u * Math.PI * 0.78) - 1.1 * u;
+
+    // Cross-section width & hollow barrel curl depth grow huge in the middle of the arch
+    const barrelScale = Math.sin(Math.pow(u, 0.72) * Math.PI * 0.92);
+    const width = 2.6 + 6.4 * Math.pow(Math.max(0.05, barrelScale), 0.75);
+
+    // Tangent direction along arch (approx)
+    const du = 0.01;
+    const u2 = Math.min(1, u + du);
+    const archX2 =
+      -15.6 * Math.pow(1 - u2, 3) +
+      3 * (-11.2) * Math.pow(1 - u2, 2) * u2 +
+      3 * (-2.6) * (1 - u2) * u2 * u2 +
+      2.3 * Math.pow(u2, 3);
+    const archY2 =
+      -1.2 * Math.pow(1 - u2, 3) +
+      3 * (9.2) * Math.pow(1 - u2, 2) * u2 +
+      3 * (10.6) * (1 - u2) * u2 * u2 +
+      3.5 * Math.pow(u2, 3);
+
+    const tx = archX2 - archX;
+    const ty = archY2 - archY;
+    const tLen = Math.hypot(tx, ty) || 1;
+    // Outward normal (pointing up-left) & inward normal (pointing down-right into hollow)
+    const nx = -ty / tLen;
+    const ny = tx / tLen;
+
+    // Build a thick sculpted 3D volume profile from outer mantle -> curling lip -> hollow barrel -> lower trough
+    let offIn = 0;
+    let offZ = 0;
+    let dropY = 0;
+
+    if (v <= 0.34) {
+      // Back & upper white foam mantle rising smoothly to the crest lip
+      const s = v / 0.34; // 0 = far back/lower-left, 1 = sharp crest lip
+      offIn = -width * 0.42 * (1 - s);
+      offZ = -2.6 * (1 - s) + 1.25 * Math.sin(s * Math.PI * 0.5);
+      dropY = -2.4 * Math.pow(1 - s, 1.7) * (0.4 + 0.6 * (1 - u));
+    } else if (v <= 0.78) {
+      // Hollow curling Prussian-blue interior barrel sweeping down-left under the overhang
+      const s = (v - 0.34) / 0.44; // 0 = crest lip, 1 = deep inner trough
+      const curlAngle = s * Math.PI * 0.88;
+      offIn = -width * (0.04 + 0.56 * Math.sin(curlAngle * 0.75)) - 0.7 * s * width;
+      offZ = 1.25 * Math.cos(curlAngle) - 1.45 * Math.sin(curlAngle);
+      dropY = -width * 0.68 * Math.pow(s, 1.15);
+    } else {
+      // Base plunging down into the foreground sea trough behind Boat 1 & Foreground Wave
+      const s = (v - 0.78) / 0.22;
+      offIn = -width * (0.58 + 0.42 * (1 - s)) - 0.4 * width;
+      offZ = -1.6 + 3.2 * s;
+      dropY = -width * 0.68 - 3.6 * s;
+    }
+
+    // Subtle organic faceted ripple
+    const ripple = 0.18 * Math.sin(u * 23 + v * 11) + 0.1 * Math.cos(u * 13 - v * 17);
+
+    const px = archX + nx * (-offIn) + ripple * 0.35;
+    const py = archY + ny * (-offIn) + dropY + ripple * 0.25;
+    const pz = archZ + offZ + ripple * 0.45;
+    return [px, py, pz];
+  }
+
+  for (let iu = 0; iu <= segU; iu++) {
+    const u = iu / segU;
+    for (let iv = 0; iv <= segV; iv++) {
+      const v = iv / segV;
+      const [px, py, pz] = sampleGreatWavePoint(u, v);
+      positions.push(px, py, pz);
+      uvMeta.push(u, v);
+    }
+  }
+
+  const stride = segV + 1;
+  for (let iu = 0; iu < segU; iu++) {
+    for (let iv = 0; iv < segV; iv++) {
+      const a = iu * stride + iv;
+      const b = (iu + 1) * stride + iv;
+      const c = (iu + 1) * stride + (iv + 1);
+      const d = iu * stride + (iv + 1);
+      indices.push(a, b, d);
+      indices.push(b, c, d);
+    }
+  }
+
+  const indexedGeo = new THREE.BufferGeometry();
+  indexedGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  indexedGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uvMeta, 2));
+  indexedGeo.setIndex(indices);
+
+  // Convert to non-indexed so every triangle has crisp flat woodblock colors
+  const waveGeo = indexedGeo.toNonIndexed();
+  const posAttr = waveGeo.attributes.position;
+  const uvAttr = waveGeo.attributes.uv;
+  const triCount = posAttr.count / 3;
+  const colors = new Float32Array(posAttr.count * 3);
+  const col = new THREE.Color();
+
+  for (let t = 0; t < triCount; t++) {
+    const i0 = t * 3;
+    const uAvg = (uvAttr.getX(i0) + uvAttr.getX(i0 + 1) + uvAttr.getX(i0 + 2)) / 3;
+    const vAvg = (uvAttr.getY(i0) + uvAttr.getY(i0 + 1) + uvAttr.getY(i0 + 2)) / 3;
+
+    // Iconic Hokusai woodblock banding:
+    // Upper/outer foam mantle -> crisp white + ice-blue underside
+    // Hollow barrel -> deep Prussian blue with curving indigo/cerulean flow ribs!
+    const foamEdge = 0.36 + 0.06 * Math.sin(uAvg * 18) + (uAvg > 0.68 ? (uAvg - 0.68) * 0.45 : 0);
+
+    if (vAvg < foamEdge * 0.72) {
+      // Bright sweeping white foam back & crest crown
+      col.copy(PAL.foamWhite);
+      if (vAvg < 0.08) col.lerp(PAL.foamShadow, 0.35);
+    } else if (vAvg < foamEdge) {
+      // Pale ice-blue foam shadow right along the breaking overhang
+      col.copy(PAL.foamShadow).lerp(PAL.foamWhite, 0.32);
+    } else {
+      // Inside the dark Prussian blue hollow barrel with Hokusai's flowing dark-and-light ribs!
+      const ribWave = Math.sin(vAvg * 46 - uAvg * 10);
+      const depthBand = (vAvg - foamEdge) / (1 - foamEdge);
+      if (ribWave > 0.38 && depthBand < 0.72) {
+        col.copy(PAL.cerulean).lerp(PAL.indigo, 0.42);
+      } else if (ribWave < -0.22) {
+        col.copy(PAL.prussianDark);
+      } else {
+        col.copy(PAL.prussian).lerp(PAL.indigo, depthBand * 0.38);
+      }
+      // Deepest indigo shadow right under the curling overhang
+      if (vAvg < foamEdge + 0.14 && uAvg > 0.25 && uAvg < 0.82) {
+        col.lerp(PAL.prussianDark, 0.55);
+      }
+    }
+
+    // Slight faceted tonal step for low-poly vibrancy
+    col.offsetHSL(0, 0, (rand() - 0.5) * 0.022);
+    for (let k = 0; k < 3; k++) {
+      colors[(i0 + k) * 3]     = col.r;
+      colors[(i0 + k) * 3 + 1] = col.g;
+      colors[(i0 + k) * 3 + 2] = col.b;
+    }
+  }
+  waveGeo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  waveGeo.computeVertexNormals();
+
+  const waveMesh = new THREE.Mesh(waveGeo, makeFlatVertexMat(THREE.DoubleSide));
+  waveGroup.add(waveMesh);
+  addInkOutline(waveMesh, 0.055);
+
+  // Sculpted secondary outer-white sweeping shoulder on the left flank so the wave reads thick & iconic
+  const flankGeo = new THREE.ConeGeometry(5.6, 11.5, 9, 4);
+  const fp = flankGeo.attributes.position;
+  for (let i = 0; i < fp.count; i++) {
+    const x = fp.getX(i), y = fp.getY(i), z = fp.getZ(i);
+    // Curve the shoulder upward toward the wave apex
+    const h = (y + 5.75) / 11.5;
+    fp.setXYZ(i, x * 1.15 + Math.pow(h, 1.5) * 4.8, y, z * 0.65 - h * 1.2);
+  }
+  const coloredFlank = bakeFacetColors(flankGeo, (c, n, out) => {
+    if (c.y > -1.0) {
+      out.copy(PAL.foamWhite).lerp(PAL.foamShadow, n.y < 0.15 ? 0.35 : 0.05);
+    } else {
+      out.copy(PAL.prussian).lerp(PAL.indigo, 0.45);
+    }
+  });
+  const flankMesh = new THREE.Mesh(coloredFlank, makeFlatVertexMat());
+  flankMesh.position.set(-10.8, 1.8, -1.8);
+  flankMesh.rotation.z = -0.35;
+  waveGroup.add(flankMesh);
+  addInkOutline(flankMesh, 0.05);
+
+  // ---- ICONIC SEA CLAWS (Curling low-poly foam talons breaking off the Great Wave) ----
+  const clawsGroup = new THREE.Group();
+  const clawAnimList = [];
+
+  function createClawCluster(origin, dirAngle, scale, count, zSpread, tintShadow = false) {
+    const cluster = new THREE.Group();
+    cluster.position.copy(origin);
+    cluster.rotation.z = dirAngle;
+
+    for (let i = 0; i < count; i++) {
+      const t = count > 1 ? i / (count - 1) : 0.5;
+      const clawLen = scale * (0.75 + 0.55 * Math.sin(t * Math.PI) + rand() * 0.25);
+      const clawRad = scale * (0.14 + 0.08 * (1 - Math.abs(t - 0.5) * 2));
+
+      // Curved low-poly talon built from a bent 5-sided cone
+      const g = new THREE.ConeGeometry(clawRad, clawLen, 5, 3);
+      g.translate(0, clawLen * 0.5, 0);
+      const gp = g.attributes.position;
+      const hookDir = (t - 0.35) * 0.55 + 0.45;
+      for (let k = 0; k < gp.count; k++) {
+        const vx = gp.getX(k), vy = gp.getY(k), vz = gp.getZ(k);
+        const f = vy / clawLen;
+        // Hook downward/rightward like Hokusai's grasping wave claws!
+        gp.setXYZ(
+          k,
+          vx + Math.pow(f, 1.8) * clawLen * 0.52 * hookDir,
+          vy - Math.pow(f, 2.2) * clawLen * 0.18,
+          vz + Math.sin(f * Math.PI) * clawRad * 0.4
+        );
+      }
+      const cg = bakeFacetColors(g, (c, norm, out) => {
+        const f = THREE.MathUtils.clamp(c.y / clawLen, 0, 1);
+        out.copy(tintShadow ? PAL.foamShadow : PAL.foamMid).lerp(PAL.foamWhite, 0.35 + f * 0.65);
+        if (norm.y < -0.2) out.lerp(PAL.foamShadow, 0.5);
+      });
+      const claw = new THREE.Mesh(cg, makeFlatVertexMat());
+      claw.position.set(
+        (t - 0.5) * scale * 1.15,
+        (rand() - 0.5) * scale * 0.22,
+        (rand() - 0.5) * zSpread
+      );
+      claw.rotation.set(
+        (rand() - 0.5) * 0.35,
+        (rand() - 0.5) * 0.45,
+        -(t - 0.4) * 0.75 + (rand() - 0.5) * 0.2
+      );
+      addInkOutline(claw, 0.032);
+      cluster.add(claw);
+    }
+
+    // Small faceted foam puff at cluster root
+    const puffGeo = new THREE.DodecahedronGeometry(scale * 0.48, 0);
+    const puffColored = bakeFacetColors(puffGeo, (_c, norm, out) => {
+      out.copy(PAL.foamWhite).lerp(PAL.foamShadow, norm.y < 0.1 ? 0.45 : 0.08);
+    });
+    const puff = new THREE.Mesh(puffColored, makeFlatVertexMat());
+    puff.scale.set(1.25, 0.85, 0.9);
+    cluster.add(puff);
+
+    clawsGroup.add(cluster);
+    clawAnimList.push({
+      mesh: cluster,
+      baseRotZ: dirAngle,
+      basePos: origin.clone(),
+      phase: rand() * Math.PI * 2,
+      amp: 0.045 + rand() * 0.035
+    });
+  }
+
+  // Place dramatic claw clusters along the entire breaking crown & overhanging beak of the Great Wave
+  const clawSpecs = [
+    // [x, y, z, angleRad, scale, count, zSpread, tintShadow]
+    [-7.6, 7.2, -0.6, -0.45, 1.15, 4, 0.9, false],
+    [-5.8, 8.4, -0.4, -0.78, 1.45, 5, 1.1, false],
+    [-3.7, 9.0, -0.2, -1.15, 1.65, 6, 1.2, false],
+    [-1.6, 8.6,  0.1, -1.52, 1.75, 6, 1.3, false],
+    [ 0.4, 7.6,  0.3, -1.85, 1.85, 7, 1.4, false],
+    [ 1.8, 6.2,  0.5, -2.12, 1.75, 6, 1.2, false],
+    [ 2.5, 4.7,  0.4, -2.35, 1.55, 5, 1.1, true],
+    [ 1.4, 5.1, -0.6, -1.95, 1.35, 5, 0.9, true],
+    [-0.7, 6.4, -0.8, -1.65, 1.30, 5, 0.9, true],
+    [-3.1, 7.2, -0.9, -1.25, 1.25, 4, 0.8, true],
+    // Inner curling spray claws cascading along the left-mid slope above Boat 1
+    [-8.6, 3.6,  1.0, -0.75, 1.15, 5, 0.8, false],
+    [-6.6, 4.4,  1.2, -0.95, 1.20, 5, 0.8, true],
+    [-10.4, 2.2, 1.4, -0.50, 1.10, 4, 0.8, false],
+    [-12.2, 0.8, 1.5, -0.35, 1.05, 4, 0.8, true]
+  ];
+  clawSpecs.forEach(([x, y, z, ang, sc, cnt, zs, sh]) => {
+    createClawCluster(new THREE.Vector3(x, y, z), ang, sc, cnt, zs, sh);
+  });
+
+  waveGroup.add(clawsGroup);
+
+  return { waveGroup, waveMesh, clawAnimList };
+}
+
+// ============================================================================
+// 4. FOREGROUND FUJI-ECHO WAVE + SWEEPING LAYERED OCEAN SWELLS
+// ============================================================================
+function buildOceanAndForegroundWaves() {
+  const seaGroup = new THREE.Group();
+
+  // A. Foreground Fuji-Echo Wave (lower-left-center pyramid echoing Mt. Fuji's silhouette!)
+  const echoGeo = new THREE.ConeGeometry(5.8, 7.4, 11, 6);
+  const ep = echoGeo.attributes.position;
+  for (let i = 0; i < ep.count; i++) {
+    const x = ep.getX(i), y = ep.getY(i), z = ep.getZ(i);
+    const h = (y + 3.7) / 7.4;
+    const angle = Math.atan2(z, x);
+    // Asymmetric wave slope: steeper on right facing trough, sweeping back to left
+    const skewX = (1 - h) * (x > 0 ? 1.35 : 1.05) * x - h * 0.45;
+    const ridge = 1 + 0.08 * Math.sin(angle * 5 + h * 4);
+    ep.setXYZ(i, skewX * ridge, y, z * 0.68 * ridge);
+  }
+  const echoColored = bakeFacetColors(echoGeo, (c, norm, out) => {
+    const h = (c.y + 3.7) / 7.4;
+    if (h > 0.36) {
+      out.copy(PAL.foamWhite);
+      if (norm.x > 0.35 && h < 0.65) out.lerp(PAL.foamShadow, 0.45);
+    } else if (h > 0.18) {
+      out.copy(PAL.foamShadow).lerp(PAL.cerulean, 0.35);
+    } else {
+      out.copy(PAL.prussian).lerp(PAL.indigo, 0.35);
+    }
+    out.offsetHSL(0, 0, (rand() - 0.5) * 0.02);
+  });
+  const echoWave = new THREE.Mesh(echoColored, makeFlatVertexMat());
+  echoWave.position.set(-4.3, -1.9, 4.4);
+  addInkOutline(echoWave, 0.05);
+  seaGroup.add(echoWave);
+
+  // Foreground bottom-left dark-blue & white-claw surging breakers
+  const fgClawSpecs = [
+    [-10.2, -3.5, 6.2, -0.55, 1.35, 5],
+    [-8.2,  -2.4, 5.9, -0.75, 1.30, 5],
+    [-6.1,  -1.4, 5.5, -1.05, 1.25, 4],
+    [-4.3,   1.4, 4.7, -1.25, 1.15, 4],
+    [-11.8, -4.4, 6.8, -0.35, 1.40, 5]
+  ];
+  fgClawSpecs.forEach(([x, y, z, ang, sc, cnt]) => {
+    const g = new THREE.DodecahedronGeometry(sc * 0.65, 0);
+    const cg = bakeFacetColors(g, (c, n, out) => {
+      out.copy(n.y > 0.15 ? PAL.foamWhite : PAL.foamShadow);
+    });
+    const m = new THREE.Mesh(cg, makeFlatVertexMat());
+    m.position.set(x, y, z);
+    m.scale.set(1.2, 0.9, 0.8);
+    m.rotation.z = ang;
+    addInkOutline(m, 0.035);
+    seaGroup.add(m);
+
+    for (let k = 0; k < cnt; k++) {
+      const talon = new THREE.ConeGeometry(sc * 0.16, sc * 0.95, 5, 2);
+      talon.translate(0, sc * 0.45, 0);
+      const tc = bakeFacetColors(talon, (_c, n, out) => {
+        out.copy(PAL.foamWhite).lerp(PAL.foamShadow, n.y < 0 ? 0.45 : 0.05);
+      });
+      const tm = new THREE.Mesh(tc, makeFlatVertexMat());
+      tm.position.set(x + (k - cnt * 0.5) * sc * 0.34, y + sc * 0.3, z + (rand() - 0.5) * 0.5);
+      tm.rotation.z = ang - (k - cnt * 0.5) * 0.25;
+      addInkOutline(tm, 0.028);
+      seaGroup.add(tm);
+    }
+  });
+
+  // B. Sculpted Layered 3D Ocean Swell Surface (spanning full width & depth, dipping low in front of Mt. Fuji!)
+  const seaW = 48;
+  const seaD = 32;
+  const segX = 46;
+  const segZ = 28;
+  const seaGeo = new THREE.PlaneGeometry(seaW, seaD, segX, segZ);
+  seaGeo.rotateX(-Math.PI / 2);
+
+  const sp = seaGeo.attributes.position;
+  const baseHeights = new Float32Array(sp.count);
+
+  function computeSeaElevation(x, z) {
+    // Sweeping diagonal right-hand waves climbing high toward the right edge (matching print.jpg!)
+    let h = -4.8;
+
+    // 1. Right-side rising swell carrying Boat 2 (behind foreground trough, rising steeply toward +x)
+    const rightSlope = Math.max(0, (x - 2.5) / 14.5);
+    const rightSwell1 = Math.pow(rightSlope, 1.55) * 7.8 * Math.exp(-Math.pow((z + 5.5) / 8.5, 2));
+    h += rightSwell1;
+
+    // 2. Foreground right-side sweeping wave ridge (in front of Boat 3's right half)
+    const rightSlopeFg = Math.max(0, (x - 4.5) / 13.0);
+    const rightSwellFg = Math.pow(rightSlopeFg, 1.35) * 5.2 * Math.exp(-Math.pow((z - 6.0) / 6.5, 2));
+    h += rightSwellFg;
+
+    // 3. Lower-left turbulent swell supporting Boat 1 & foreground foam
+    const leftSlope = Math.max(0, (-x - 3.5) / 14.0);
+    const leftSwell = Math.pow(leftSlope, 1.25) * 4.2 * Math.exp(-Math.pow((z - 4.5) / 8.0, 2));
+    h += leftSwell;
+
+    // 4. Sweeping woodblock wave troughs & ridges (diagonal undulating ribbons)
+    const diag = Math.sin(x * 0.34 - z * 0.42) * 0.85 + Math.cos(x * 0.19 + z * 0.55) * 0.55;
+    h += diag;
+
+    // 5. Deliberate valley framing Mount Fuji (x around 3..9, z around -14..-6) so Fuji is NEVER blocked!
+    const fujiWindow = Math.exp(-Math.pow((x - 5.2) / 5.2, 2)) * Math.exp(-Math.pow((z + 10.5) / 6.0, 2));
+    h -= fujiWindow * 2.4;
+
+    return h;
+  }
+
+  for (let i = 0; i < sp.count; i++) {
+    const x = sp.getX(i);
+    const z = sp.getZ(i);
+    const y = computeSeaElevation(x, z);
+    sp.setY(i, y);
+    baseHeights[i] = y;
+  }
+
+  // Convert to non-indexed for crisp woodblock striped water facets
+  const seaFlatGeo = seaGeo.toNonIndexed();
+  const sPos = seaFlatGeo.attributes.position;
+  const sBaseY = new Float32Array(sPos.count);
+  for (let i = 0; i < sPos.count; i++) {
+    sBaseY[i] = sPos.getY(i);
+  }
+
+  const coloredSea = bakeFacetColors(seaFlatGeo, (c, norm, out) => {
+    // Diagonal woodblock color bands alternating Prussian blue, cerulean, ice-blue, and crisp white crests
+    const ridgeBand = Math.sin(c.x * 0.48 - c.z * 0.62 + c.y * 0.45);
+    const highCrest = c.y > -0.45 || (c.x > 8.5 && c.y > -2.2) || (c.x < -7.5 && c.y > -2.4);
+
+    if (highCrest && norm.y > 0.35) {
+      out.copy(PAL.foamWhite).lerp(PAL.foamShadow, ridgeBand < 0 ? 0.32 : 0.04);
+    } else if (c.y > -2.1 && ridgeBand > 0.45) {
+      out.copy(PAL.foamMid).lerp(PAL.foamShadow, 0.4);
+    } else if (ridgeBand > 0.1) {
+      out.copy(PAL.cerulean).lerp(PAL.indigo, 0.32);
+    } else if (ridgeBand > -0.45) {
+      out.copy(PAL.indigo).lerp(PAL.prussian, 0.48);
+    } else {
+      out.copy(PAL.prussianDark).lerp(PAL.prussian, 0.35);
+    }
+    out.offsetHSL(0, 0, (rand() - 0.5) * 0.018);
+  });
+
+  const seaMesh = new THREE.Mesh(coloredSea, makeFlatVertexMat());
+  seaGroup.add(seaMesh);
+
+  // C. Right-edge breaking wave crest & foam claws (matching far-right surging crest of print.jpg)
+  const rightWaveGroup = new THREE.Group();
+  const rightCrestGeo = new THREE.CylinderGeometry(0.9, 3.6, 12.5, 8, 5);
+  const rcp = rightCrestGeo.attributes.position;
+  for (let i = 0; i < rcp.count; i++) {
+    const x = rcp.getX(i), y = rcp.getY(i), z = rcp.getZ(i);
+    const h = (y + 6.25) / 12.5;
+    // Curve upward-right like the right border wave in print.jpg
+    rcp.setXYZ(i, x * 0.9 + Math.pow(h, 1.35) * 3.8, y, z * 0.65);
+  }
+  const rightCrestCol = bakeFacetColors(rightCrestGeo, (c, n, out) => {
+    if (c.x < 1.2 || c.y > 1.0) {
+      out.copy(PAL.foamWhite).lerp(PAL.foamShadow, n.y < 0.2 ? 0.35 : 0.05);
+    } else {
+      out.copy(PAL.prussian).lerp(PAL.cerulean, 0.35);
+    }
+  });
+  const rightCrest = new THREE.Mesh(rightCrestCol, makeFlatVertexMat());
+  rightCrest.position.set(13.6, -1.2, -3.5);
+  rightCrest.rotation.z = -0.58;
+  addInkOutline(rightCrest, 0.05);
+  rightWaveGroup.add(rightCrest);
+  seaGroup.add(rightWaveGroup);
+
+  return { seaGroup, seaMesh, sBaseY, echoWave, rightWaveGroup };
+}
+
+// ============================================================================
+// 5. THE 3 OSHIOKURI-BUNE BOATS WITH HUDDLED LOW-POLY ROWERS
+// ============================================================================
+function createOshiokuriBoat(length = 8.4, rowerCount = 7, scale = 1.0) {
+  const boat = new THREE.Group();
+
+  // Sleek, gracefully up-curved wooden hull (sharp high prow on -x, tapered stern on +x)
+  const segL = 14;
+  const hullPositions = [];
+  const hullIndices = [];
+
+  // Cross-section has 5 points: left-gunwale, left-chine, keel, right-chine, right-gunwale
+  for (let i = 0; i <= segL; i++) {
+    const t = i / segL; // 0 = sharp prow (-x), 1 = stern (+x)
+    const x = (t - 0.5) * length;
+
+    // Classic upturned sheer curve (higher at bow and stern, low amidships)
+    const sheer = 1.65 * Math.pow(1 - t, 2.35) + 0.85 * Math.pow(t, 2.2) - 0.35;
+    // Narrow razor prow widening amidships then tapering cleanly at stern
+    const halfBeam = (0.04 + 0.56 * Math.sin(Math.pow(t, 0.72) * Math.PI)) * (1 - 0.28 * t);
+    const depth = (0.14 + 0.42 * Math.sin(Math.pow(t, 0.75) * Math.PI));
+
+    const pts = [
+      [x, sheer + depth * 0.25, -halfBeam],
+      [x, sheer - depth * 0.45, -halfBeam * 0.65],
+      [x, sheer - depth * 0.72,  0],
+      [x, sheer - depth * 0.45,  halfBeam * 0.65],
+      [x, sheer + depth * 0.25,  halfBeam]
+    ];
+    pts.forEach(p => hullPositions.push(p[0], p[1], p[2]));
+  }
+
+  for (let i = 0; i < segL; i++) {
+    const r0 = i * 5;
+    const r1 = (i + 1) * 5;
+    for (let j = 0; j < 4; j++) {
+      hullIndices.push(r0 + j, r1 + j, r0 + j + 1);
+      hullIndices.push(r1 + j, r1 + j + 1, r0 + j + 1);
+    }
+    // Inner deck floor connecting gunwales
+    hullIndices.push(r0, r0 + 4, r1 + 4);
+    hullIndices.push(r0, r1 + 4, r1);
+  }
+
+  const hullIdxGeo = new THREE.BufferGeometry();
+  hullIdxGeo.setAttribute('position', new THREE.Float32BufferAttribute(hullPositions, 3));
+  hullIdxGeo.setIndex(hullIndices);
+
+  const hullGeo = bakeFacetColors(hullIdxGeo, (c, norm, out) => {
+    if (norm.y > 0.75) {
+      // Slatted wooden deck interior
+      out.copy(PAL.boatWoodDark).lerp(PAL.boatInside, 0.45);
+    } else if (norm.z > 0.2) {
+      // Sunlit warm sandy-ochre side facing viewer (iconic Hokusai boat hue!)
+      out.copy(PAL.boatWood).lerp(PAL.boatWoodLight, c.y > 0.2 ? 0.35 : 0.0);
+    } else {
+      out.copy(PAL.boatWood).lerp(PAL.boatWoodDark, 0.45);
+    }
+    out.offsetHSL(0, 0, (rand() - 0.5) * 0.02);
+  });
+
+  const hullMesh = new THREE.Mesh(hullGeo, makeFlatVertexMat(THREE.DoubleSide));
+  addInkOutline(hullMesh, 0.042);
+  boat.add(hullMesh);
+
+  // Dark horizontal rub-rail / timber stripe along the hull flank
+  const railGeo = new THREE.BoxGeometry(length * 0.78, 0.09, 0.08);
+  const railMat = makeSolidMat(PAL.boatWoodDark);
+  const railFront = new THREE.Mesh(railGeo, railMat);
+  railFront.position.set(0.15, 0.14, 0.46);
+  boat.add(railFront);
+
+  // Raised slatted timber cargo/bow plank bundle (distinctive detail on the boats in print.jpg!)
+  const bowPlankGeo = new THREE.BoxGeometry(length * 0.28, 0.16, 0.62);
+  const bowPlank = new THREE.Mesh(bowPlankGeo, makeSolidMat(PAL.boatWoodDark));
+  bowPlank.position.set(-length * 0.19, 0.36, 0.0);
+  bowPlank.rotation.z = -0.18;
+  addInkOutline(bowPlank, 0.025);
+  boat.add(bowPlank);
+
+  // Huddled low-poly rowers crouched along the mid-to-stern section (indigo robes + pale heads)
+  const robeMat = makeSolidMat(PAL.rowerBlue);
+  const headMat = makeSolidMat(PAL.rowerSkin);
+  const oarMat = makeSolidMat(PAL.boatWoodDark);
+
+  for (let r = 0; r < rowerCount; r++) {
+    const frac = r / Math.max(1, rowerCount - 1);
+    const rx = length * (0.04 + frac * 0.34);
+    const rz = (r % 2 === 0 ? 0.14 : -0.12);
+    const ry = 0.25 + 0.55 * Math.pow(0.5 + rx / length, 2.2) - 0.1;
+
+    const rower = new THREE.Group();
+    rower.position.set(rx, ry, rz);
+
+    // Hunched shoulders/torso (low-poly faceted dome)
+    const body = new THREE.Mesh(new THREE.DodecahedronGeometry(0.24, 0), robeMat);
+    body.scale.set(1.25, 0.85, 0.95);
+    body.position.set(0.05, 0.1, 0);
+    rower.add(body);
+
+    // Bowed head tucked forward against the spray
+    const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.14, 0), headMat);
+    head.position.set(-0.18, 0.18, 0.05);
+    rower.add(head);
+
+    // Short oar tucked along gunwale
+    if (r % 2 === 0) {
+      const oar = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.035, 1.35, 5), oarMat);
+      oar.rotation.z = Math.PI * 0.44;
+      oar.rotation.x = 0.28;
+      oar.position.set(-0.1, 0.04, 0.38);
+      rower.add(oar);
+    }
+
+    boat.add(rower);
+  }
+
+  boat.scale.setScalar(scale);
+  return boat;
+}
+
+function buildAllBoats() {
+  // Exactly 3 oshiokuri-bune boats positioned to match print.jpg!
+  const boats = [];
+
+  // Boat 1: Left side, plunging nose-up into the dark lower flank of the Great Wave
+  const boat1 = createOshiokuriBoat(7.4, 5, 0.92);
+  boat1.position.set(-9.4, -0.35, 1.45);
+  boat1.rotation.set(0.12, 0.28, -0.66);
+  boat1.userData = { basePos: boat1.position.clone(), baseRot: boat1.rotation.clone(), phase: 0.4, bobAmp: 0.18, pitchAmp: 0.055 };
+  scene.add(boat1);
+  boats.push(boat1);
+
+  // Boat 2: Mid-right, riding steeply up the right wave ridge right in front of Mount Fuji's base
+  const boat2 = createOshiokuriBoat(9.8, 8, 0.94);
+  boat2.position.set(7.4, -1.75, -5.2);
+  boat2.rotation.set(0.06, -0.14, 0.44);
+  boat2.userData = { basePos: boat2.position.clone(), baseRot: boat2.rotation.clone(), phase: 2.1, bobAmp: 0.22, pitchAmp: 0.048 };
+  scene.add(boat2);
+  boats.push(boat2);
+
+  // Boat 3: Foreground center-bottom, sweeping across the trough with prow cutting into foreground foam
+  const boat3 = createOshiokuriBoat(8.8, 8, 0.96);
+  boat3.position.set(2.2, -3.55, 6.2);
+  boat3.rotation.set(0.08, -0.06, -0.11);
+  boat3.userData = { basePos: boat3.position.clone(), baseRot: boat3.rotation.clone(), phase: 4.0, bobAmp: 0.16, pitchAmp: 0.04 };
+  scene.add(boat3);
+  boats.push(boat3);
+
+  return boats;
+}
+
+// ============================================================================
+// 6. DRIFTING SEA SPRAY PARTICLES (INSTANCED LOW-POLY DROPLETS)
+// ============================================================================
+function buildSeaSpray() {
+  const count = 210;
+  const dropGeo = new THREE.OctahedronGeometry(0.11, 0);
+  const dropMat = new THREE.MeshBasicMaterial({ color: PAL.foamWhite });
+  const inst = new THREE.InstancedMesh(dropGeo, dropMat, count);
+
+  const data = [];
+  const dummy = new THREE.Object3D();
+
+  for (let i = 0; i < count; i++) {
+    const isHollowSpeck = i < 75;
+    let x, y, z, vx, vy, sc;
+    if (isHollowSpeck) {
+      // White spray speckles inside the dark Prussian blue hollow barrel (classic print.jpg texture!)
+      x = -7.8 + rand() * 6.8;
+      y = 0.2 + rand() * 5.8;
+      z = -0.3 + rand() * 1.4;
+      vx = 0.15 + rand() * 0.25;
+      vy = -0.25 - rand() * 0.35;
+      sc = 0.45 + rand() * 0.65;
+    } else {
+      // Mist & spray snowflakes falling from the breaking crest toward Mount Fuji
+      x = -1.5 + rand() * 10.5;
+      y = -1.8 + rand() * 8.6;
+      z = -7.5 + rand() * 9.5;
+      vx = 0.32 + rand() * 0.48;
+      vy = -0.35 - rand() * 0.48;
+      sc = 0.4 + rand() * 0.85;
+    }
+    data.push({ x, y, z, ox: x, oy: y, oz: z, vx, vy, sc, phase: rand() * Math.PI * 2, life: rand(), isHollowSpeck });
+    dummy.position.set(x, y, z);
+    dummy.scale.setScalar(sc);
+    dummy.updateMatrix();
+    inst.setMatrixAt(i, dummy.matrix);
+  }
+  inst.instanceMatrix.needsUpdate = true;
+  scene.add(inst);
+
+  return { inst, data, dummy };
+}
+
+// ============================================================================
+// ASSEMBLE SCENE
+// ============================================================================
+const { group: skyGroup, cloudGroup } = buildSkyBackdrop();
+scene.add(skyGroup);
+
+const fujiMesh = buildMountFuji();
+scene.add(fujiMesh);
+
+const { waveGroup, clawAnimList } = buildGreatWave();
+scene.add(waveGroup);
+
+const { seaGroup, seaMesh, sBaseY, echoWave, rightWaveGroup } = buildOceanAndForegroundWaves();
+scene.add(seaGroup);
+
+const boats = buildAllBoats();
+const spray = buildSeaSpray();
+
+// ============================================================================
+// GENTLE WALLPAPER INTERACTION (SUBTLE MOUSE PARALLAX + DRAG TILT)
+// ============================================================================
+let pointerX = 0, pointerY = 0;
+let dragYaw = 0, dragPitch = 0;
+let isDragging = false, lastX = 0, lastY = 0;
+let paused = false;
+
+window.addEventListener('pointermove', (e) => {
+  const nx = (e.clientX / window.innerWidth) * 2 - 1;
+  const ny = (e.clientY / window.innerHeight) * 2 - 1;
+  pointerX = nx;
+  pointerY = ny;
+  if (isDragging) {
+    dragYaw   = THREE.MathUtils.clamp(dragYaw   + (e.clientX - lastX) * 0.004, -0.32, 0.32);
+    dragPitch = THREE.MathUtils.clamp(dragPitch + (e.clientY - lastY) * 0.003, -0.18, 0.18);
+    lastX = e.clientX;
+    lastY = e.clientY;
+  }
+});
+window.addEventListener('pointerdown', (e) => { isDragging = true; lastX = e.clientX; lastY = e.clientY; });
+window.addEventListener('pointerup', () => { isDragging = false; });
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') paused = !paused;
+  if (e.code === 'KeyR') { dragYaw = 0; dragPitch = 0; }
+});
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ============================================================================
+// ANIMATION LOOP (GENTLE BREATHING OCEAN & DRIFTING SPRAY)
+// ============================================================================
+const clock = new THREE.Clock();
+let simTime = 0;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  if (!paused) simTime += dt;
+  const t = simTime;
+
+  // 1. Gentle breathing motion of the Great Wave & swaying foam claws
+  waveGroup.position.y = Math.sin(t * 0.85) * 0.22;
+  waveGroup.position.x = Math.cos(t * 0.55) * 0.14;
+  waveGroup.rotation.z = Math.sin(t * 0.72) * 0.014;
+
+  for (let i = 0; i < clawAnimList.length; i++) {
+    const item = clawAnimList[i];
+    item.mesh.rotation.z = item.baseRotZ + Math.sin(t * 1.45 + item.phase) * item.amp;
+    item.mesh.position.y = item.basePos.y + Math.cos(t * 1.15 + item.phase) * 0.06;
+  }
+
+  // 2. Subtle rolling swells across the faceted sea surface
+  const seaPos = seaMesh.geometry.attributes.position;
+  for (let i = 0; i < seaPos.count; i++) {
+    const x = seaPos.getX(i);
+    const z = seaPos.getZ(i);
+    const dy = Math.sin(t * 1.05 + x * 0.26 - z * 0.32) * 0.16 + Math.cos(t * 0.75 + x * 0.15 + z * 0.2) * 0.09;
+    seaPos.setY(i, sBaseY[i] + dy);
+  }
+  seaPos.needsUpdate = true;
+  seaMesh.geometry.computeVertexNormals();
+
+  echoWave.position.y = -1.9 + Math.sin(t * 0.95 + 1.2) * 0.16;
+  rightWaveGroup.position.y = Math.sin(t * 0.8 + 2.4) * 0.18;
+
+  // 3. Organic bobbing & pitching of the 3 oshiokuri-bune boats
+  for (let i = 0; i < boats.length; i++) {
+    const b = boats[i];
+    const u = b.userData;
+    b.position.y = u.basePos.y + Math.sin(t * 1.1 + u.phase) * u.bobAmp;
+    b.rotation.z = u.baseRot.z + Math.cos(t * 1.1 + u.phase) * u.pitchAmp;
+    b.rotation.x = u.baseRot.x + Math.sin(t * 0.8 + u.phase) * 0.025;
+  }
+
+  // 4. Glacial drift of upper-right cream cumulus clouds
+  cloudGroup.children.forEach((puff) => {
+    const u = puff.userData;
+    puff.position.x = u.baseX + Math.sin(t * 0.12 + u.phase) * 0.55;
+    puff.position.y = u.baseY + Math.cos(t * 0.09 + u.phase) * 0.16;
+  });
+
+  // 5. Drifting & recycling low-poly sea spray droplets
+  for (let i = 0; i < spray.data.length; i++) {
+    const p = spray.data[i];
+    if (!paused) {
+      p.life = (p.life + dt * (p.isHollowSpeck ? 0.18 : 0.14)) % 1;
+    }
+    const age = p.life;
+    const x = p.ox + p.vx * age * 3.2 + Math.sin(t * 1.6 + p.phase) * 0.12;
+    const y = p.oy + p.vy * age * 3.0;
+    const z = p.oz + Math.cos(t * 1.2 + p.phase) * 0.15;
+    const fade = Math.sin(age * Math.PI);
+    spray.dummy.position.set(x, y, z);
+    spray.dummy.rotation.set(t + p.phase, t * 0.7, p.phase);
+    spray.dummy.scale.setScalar(p.sc * (0.35 + 0.65 * fade));
+    spray.dummy.updateMatrix();
+    spray.inst.setMatrixAt(i, spray.dummy.matrix);
+  }
+  spray.inst.instanceMatrix.needsUpdate = true;
+
+  // 6. Gentle wallpaper camera drift + subtle mouse parallax + spring-back drag tilt
+  if (!isDragging) {
+    dragYaw *= 0.96;
+    dragPitch *= 0.96;
+  }
+  const targetX = BASE_CAM_POS.x + Math.sin(t * 0.22) * 0.85 + pointerX * 0.75 + dragYaw * 12;
+  const targetY = BASE_CAM_POS.y + Math.cos(t * 0.18) * 0.28 - pointerY * 0.35 + dragPitch * 8;
+  camera.position.x += (targetX - camera.position.x) * 0.04;
+  camera.position.y += (targetY - camera.position.y) * 0.04;
+  camera.lookAt(BASE_CAM_LOOK);
+
+  renderer.render(scene, camera);
+}
+
+// Render immediately on load so first frame is never blank
+renderer.render(scene, camera);
+animate();
+
+// Expose lightweight inspection stats for visual verification
+window.__SCENE_INFO = () => ({
+  boats: boats.length,
+  drawCalls: renderer.info.render.calls,
+  triangles: renderer.info.render.triangles
+});
+</script>
+</body>
+</html>
