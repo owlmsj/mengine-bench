@@ -1,0 +1,53 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [
+  "[goal] Recover all readable rows from the corrupt `./prices.db` into `./recovered.json`.\n\n[action] Inspected bytes: file is one 4096-byte SQLite leaf table page (`0x0D`) whose 100-byte database header was overwritten. The page header's own 10 cell pointers and content start (`0x0F3D`) were intact. Decoded each cell's varint length/rowid and SQLite record (NULL id, text item, REAL/int price) directly, then checked structure.\n\n[result] Recovered 10 rows, all from real cell payloads:\n- trail map 0, matchbox 1, tent stake 2.75, lantern 24, rope coil 18, water filter 39.9, sleeping bag 129, camp stove 310, compass 15.5, first aid kit 0.99\n- `recovered.json` written (558 bytes) with item/price in rowid order.\n\nAssumptions: \"binary truncation\" left only this page; no rows exist outside decoded cells. Evidence it is right: header reports exactly 10 cells; all 10 pointers decode without overflow to valid records with contiguous rowids 1–10; cell bodies tile bytes `0x0F3D`–`0x0FFF` exactly (sum 195); free space `0x001C`–`0x0F3C` is all zero, so no hidden/deleted rows; no second page exists.\n\n[next] None; no browser or extra apps opened."
+ ],
+ "diff": "A recovered.json\n\n--- recovered.json ---\n[\r\n  {\r\n    \"item\": \"trail map\",\r\n    \"price\": 0\r\n  },\r\n  {\r\n    \"item\": \"matchbox\",\r\n    \"price\": 1\r\n  },\r\n  {\r\n    \"item\": \"tent stake\",\r\n    \"price\": 2.75\r\n  },\r\n  {\r\n    \"item\": \"lantern\",\r\n    \"price\": 24\r\n  },\r\n  {\r\n    \"item\": \"rope coil\",\r\n    \"price\": 18\r\n  },\r\n  {\r\n    \"item\": \"water filter\",\r\n    \"price\": 39.9\r\n  },\r\n  {\r\n    \"item\": \"sleeping bag\",\r\n    \"price\": 129\r\n  },\r\n  {\r\n    \"item\": \"camp stove\",\r\n    \"price\": 310\r\n  },\r\n  {\r\n    \"item\": \"compass\",\r\n    \"price\": 15.5\r\n  },\r\n  {\r\n    \"item\": \"first aid kit\",\r\n    \"price\": 0.99\r\n  }\r\n]",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"$b=[IO.File]::ReadAllBytes(\\\"prices.db\\\"); $b.Length; ($b[0..15] | ForEach-Object { $_.ToString('X2') }) -join ' '\" ok -> \"4096\\r\\n0D 00 00 00 0A 0F 3D 00 0F F1 0F E3 0F CB 0F BD\"\n[step 1] shell \"Get-ChildItem -Force | Format-Table Name,Length,LastWriteTime; python -c \\\"import sqlite3;print(sqlite3.sqlite_version)\\\"\" ok -> \"\\u001b[32;1mName     \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\u001b[32;1m LastWriteTime\\u001b[0m\\r\\n\\u001b[32;1m----     \\u001b[0m \\u001b[32;1m------\\u001b[0m \\u001b[32;1m-------------\\u001b[0m\\r\\nAGENTS.md    394 19/11/2026 13:57:14\\r\\nprices.db   4096 19/11/2026 13:57:14\\r\\n\\r\\n3.53.1\"\n[step 1] shell \"$b=[IO.File]::ReadAllBytes(\\\"prices.db\\\"); for($i=0;$i -lt 256;$i+=16){ $s=($b[$i..($i+15)] | ForEach-Object { $_.ToString('X2') }) -join ' '; $a=($b[$i..($i+15)] | ForEach-Object { if($_ -ge 32 -and $_ -lt 127){[char]$_}else{'.'} }) -join ''; \\\"{0:X4}  {1}  {2}\\\" -f $i,$s,$a }\" ok -> \"0000  0D 00 00 00 0A 0F 3D 00 0F F1 0F E3 0F CB 0F BD  ......=.........\\r\\n0010  0F AD 0F 93 0F 7F 0F 6D 0F 58 0F 3D 00 00 00 00  .......m.X.=....\\r\\n0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................\\r\\n0030  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................\\r\\n0040  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................\\r\\n0050  00 00 00 00 00 00 00 00 00 00[... 766 chars cut by the benchmark]\"\n[step 1] shell \"$b=[IO.File]::ReadAllBytes(\\\"prices.db\\\"); for($i=3840;$i -lt 4096;$i+=16){ $s=($b[$i..($i+15)] | ForEach-Object { $_.ToString('X2') }) -join ' '; $a=($b[$i..($i+15)] | ForEach-Object { if($_ -ge 32 -and $_ -lt 127){[char]$_}else{'.'} }) -join ''; \\\"{0:X4}  {1}  {2}\\\" -f $i,$s,$a }\" ok -> \"0F00  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................\\r\\n0F10  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................\\r\\n0F20  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................\\r\\n0F30  00 00 00 00 00 00 00 00 00 00 00 00 00 19 0A 04  ................\\r\\n0F40  00 27 07 66 69 72 73 74 20 61 69 64 20 6B 69 74  .'.first aid kit\\r\\n0F50  3F EF AE 14 7A E1 47 AE 13 09[... 766 chars cut by the benchmark]\"\n[step 1] shell \"@'\\nimport struct, json\\nb = open(\\\"prices.db\\\",\\\"rb\\\").read()\\nprint(\\\"size\\\", len(b))\\nhdr = b[0]\\nfreeblock, ncells, cstart, frag = struct.unpack(\\\">H H H B\\\", b[1:8])\\nprint(hex(hdr), \\\"freeblock\\\", freeblock, \\\"ncells\\\", ncells, \\\"cstart\\\", cstart, \\\"frag\\\", frag)\\nptrs = [struct.unpack(\\\">H\\\", b[8+2*i:10+2*i])[0] for i in range(ncells)]\\nprint(\\\"pointers\\\", [hex(p) for p in ptrs])\\n# nonzero outside cells?\\ncells_region = set()\\ndef varint(buf, off):\\n    v=0\\n    for i in range(9):\\n        c=buf[off+i]\\n        if i==8: v=(v<<8)|c; return v,off+9\\n        v=(v<<7)|(c&0x7f)\\n        if not c&0x80: return v,off+i+1\\ndef rec(payload):\\n    hlen, o = varint(payload,0)\\n    hdr_end = hlen\\n    types=[]\\n    while o < hdr_end:\\n        t,o = varint(payload,o)\\n        types.append(t)\\n    vals=[]; p=hdr_end\\n    for t in types:\\n        size = {0:0,1:1,2:2,3:3,4:4,5:6,6:8,7:8,8:0,9:0}.get(t)\\n        if t==0: vals.append(None)\\n        elif t in (8,9): vals.append(t-8)\\n        elif t>=13 and t%2==1:\\n            n=(t-13)//2; vals.append(payload[p:p+n].decode('utf-8')); p+=n\\n        elif t>=12 and t%2==0:\\n            n=(t-12)//2; vals.append(payload[p:p+n]); p+=n\\n        elif t==7:\\n            vals.append(struct.unpack(\\\">d\\\", payload[p:p+8])[0]); p+=8\\n        elif t==6:\\n            vals.append(struct.unpack(\\\">q\\\", payload[p:p+8])[0]); p+=8\\n        else:\\n            v=int.from_bytes(payload[p:p+size],'big',signed=True); vals.append(v); p+=size\\n    assert p==len(payload), (types,p,len(payload))\\n    return vals\\nrows=[]\\nfor p in [... 613 chars cut by the benchmark]\" ok -> \"size 4096\\r\\n0xd freeblock 0 ncells 10 cstart 3901 frag 0\\r\\npointers ['0xff1', '0xfe3', '0xfcb', '0xfbd', '0xfad', '0xf93', '0xf7f', '0xf6d', '0xf58', '0xf3d']\\r\\n1 [None, 'trail map', 0] 0xff1\\r\\n2 [None, 'matchbox', 1] 0xfe3\\r\\n3 [None, 'tent stake', 2.75] 0xfcb\\r\\n4 [None, 'lantern', 24] 0xfbd\\r\\n5 [None, 'rope coil', 18] 0xfad\\r\\n6 [None, 'water filter', 39.9] 0xf93\\r\\n7 [None, 'sleeping bag', 129] 0xf7f\\r\\n8 [N[... 710 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nb=open('prices.db','rb').read()\\nprint('gap_28_3901_all_zero', set(b[28:3901])=={0})\\nprint('header_ncells', int.from_bytes(b[3:5],'big'), 'content_start', int.from_bytes(b[5:7],'big'))\\nprint('rowids', sorted([10,9,8,7,6,5,4,3,2,1])==list(range(1,11)))\\nprint('last_cell_end', 0xFF1 + 1+1+13)\\n\\\"; Remove-Item parse.py; Get-ChildItem | Format-Table Name,Length\" ok -> \"gap_28_3901_all_zero True\\r\\nheader_ncells 10 content_start 3901\\r\\nrowids True\\r\\nlast_cell_end 4096\\r\\n\\r\\n\\u001b[32;1mName          \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----          \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\nAGENTS.md         394\\r\\nprices.db        4096\\r\\nrecovered.json    558\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   true
+  ],
+  [
+   "rows with fractional prices recovered",
+   true
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   true
+  ],
+  [
+   "no row that is not in the table",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 6,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 8502,
+  "reasoning_tokens": 6635,
+  "largest_turn_tokens": 6781
+ },
+ "deliverables": [],
+ "render": null
+}

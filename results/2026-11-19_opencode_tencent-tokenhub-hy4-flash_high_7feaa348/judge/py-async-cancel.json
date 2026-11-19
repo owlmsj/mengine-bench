@@ -1,0 +1,51 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [],
+ "diff": "A _test_run.py\nA run.py\n\n--- _test_run.py ---\nimport asyncio\nimport os\nimport signal\n\nfrom run import run_tasks\n\n# 1) concurrency limit + completes all\ndef test_limit():\n    active = 0\n    peak = 0\n    done = []\n\n    def make_job(i):\n        async def job():\n            nonlocal active, peak\n            active += 1\n            peak = max(peak, active)\n            try:\n                await asyncio.sleep(0.01)\n                done.append(i)\n            finally:\n                active -= 1\n        return job()\n\n    async def main():\n        await run_tasks((lambda i=i: make_job(i) for i in range(12)), 3)\n        return peak, sorted(done)\n\n    peak, done = asyncio.run(main())\n    assert peak <= 3, peak\n    assert done == list(range(12)), done\n    print(\"limit ok, peak=\", peak)\n\n# 2) cleanup on cancellation of the main task\ndef test_cancel_cleanup():\n    cleaned = []\n\n    def make_job(i):\n        async def job():\n            try:\n                await asyncio.sleep(10)\n            finally:\n                cleaned.append(i)\n        return job()\n\n    async def main():\n        t = asyncio.create_task(\n            run_tasks((lambda i=i: make_job(i) for i in range(5)), 5)\n        )\n        await asyncio.sleep(0.05)\n        t.cancel()\n        try:\n            await t\n        except asyncio.CancelledError:\n            pass\n        return sorted(cleaned)\n\n    c = asyncio.run(main())\n    assert c == list(range(5)), c\n    print(\"cancel cleanup ok\", c)\n\n# 3) real SIGINT through asyncio.run -> KeyboardInterrupt + cleanup\ndef test_sigint():\n    cleaned = []\n\n    def make_job(i):\n        async def job():\n            try:\n                await asyncio.sleep(10)\n            finally:\n                cleaned.append(i)\n        return job()\n\n    async def main():\n        asyncio.get_running_loop().call_later(\n            0.05, os.kill, os.getpid(), signal.SIGINT\n        )\n        await run_tasks((lambda i=i: make_job(i) for i in range(5)), 5)\n\n    try:\n        asyncio.run(main())\n    except KeyboardInterrupt:\n        pass\n    assert sorted(cleaned) == list(range(5)), cleaned\n    print(\"sigint cleanup ok\", sorted(cleaned))\n\ntest_limit()\ntest_cancel_cleanup()\ntest_sigint()\nprint(\"ALL OK\")\n\n\n--- run.py ---\n\"\"\"Bounded-concurrency helper for batches of async jobs.\n\nPublic API:\n    from run import run_tasks\n    await run_tasks(tasks, max_concurrent)\n\n`tasks` is an iterable of zero-argument callables; calling one returns an\nawaitable job. At most `max_concurrent` jobs are awaited at once and the\nfunction returns only after every job has finished.\n\nCancellation (including the SIGINT that ``asyncio.run`` turns into cancellation\nof the main task) is propagated to the in-flight jobs and awaited before it is\nre-raised, so each job's ``finally`` / ``async with`` cleanup gets to run.\n\"\"\"\n\nfrom __future__ import annotations\n\nimport asyncio\nfrom typing import Awaitable, Callable, Iterable, TypeVar\n\n_T = TypeVar(\"_T\")\n\n_SENTINEL = object()\n\n\nasync def run_tasks(\n    tasks: Iterable[Callable[[], Awaitable[_T]]],\n    max_concurrent: int,\n) -> None:\n    \"\"\"Run every job produced by `tasks`, at most `max_concurrent` at once.\n\n    Assumptions (the brief leaves these open):\n      * `tasks` is a finite iterable, possibly a one-shot generator. It is\n        consumed lazily: a factory is called only when a slot is free.\n      * `max_concurrent` is a positive int.\n      * Job results are ignored. If a job raises, the other jobs are cancelled\n        and the failure propagates (as an ExceptionGroup from the TaskGroup).\n      * On cancellation the running jobs are cancelled and awaited to\n        completion before the cancellation is re-raised, so their cleanup runs.\n    \"\"\"\n    if not isinstance(max_concurrent, int) or max_concurrent < 1:\n        raise ValueError(\"max_concurrent must be a positive integer\")\n\n    iterator = iter(tasks)\n\n    def next_factory():\n        try:\n            return next(iterator)\n        except StopIteration:\n            return _SENTINEL\n\n    async def worker() -> None:\n        while True:\n            make_job = next_factory()\n            if make_job is _SENTINEL:\n                return\n            await make_job()\n\n    # A fixed pool of workers enforces the limit without creating one task per\n    # input item (so it also works for very large or streaming iterables).\n    # TaskGroup provides structured cancellation: leaving the block, normally\n    # or because the enclosing task is cancelled, cancels the workers and\n    # waits for every one of them to finish its cleanup before propagating.\n    async with asyncio.TaskGroup() as tg:\n        for _ in range(max_concurrent):\n            tg.create_task(worker())\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"run.py\" ok -> \"Created file successfully: run.py\"\n[step 1] write \"_test_run.py\" ok -> \"Created file successfully: _test_run.py\"\n[step 1] shell \"python --version; python _test_run.py\" failed -> \"Python 3.13.14\\r\\n  + Exception Group Traceback (most recent call last):\\r\\n  |   File \\\"<WORKSPACE>\\\\_test_run.py\\\", line 88, in <module>\\r\\n  |     test_limit()\\r\\n  |     ~~~~~~~~~~^^\\r\\n  |   File \\\"<WORKSPACE>\\\\_test_run.py\\\", line 30, in test_limit\\r\\n  |     peak, done = asyncio[... 2603 chars cut by the benchmark]\"\n[step 1] write \"_test_run.py\" ok -> \"Wrote file successfully: _test_run.py\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   true
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 4,
+  "tool_calls": 4,
+  "tool_errors": 0,
+  "shell_commands": 1,
+  "shell_failures": 1,
+  "file_writes": 3,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 6939,
+  "reasoning_tokens": 5206,
+  "largest_turn_tokens": 5589
+ },
+ "deliverables": [],
+ "render": null
+}

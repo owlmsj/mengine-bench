@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Golden Arrow — Level 1: Balloon Meadow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bungee&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0;height:100%;background:#141a2e;overflow:hidden}
+  #c{display:block;width:100vw;height:100vh;cursor:crosshair;touch-action:none;
+     font-family:'Outfit',system-ui,sans-serif}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+"use strict";
+/* ============================================================
+   GOLDEN ARROW — Level 1: Balloon Meadow
+   Single-file canvas game. Art: golden-hour silhouette style.
+   Audio: WebAudio synth only (no files).
+   Aim with the pointer, hold to draw the bow, release to loose.
+   Pop 15 balloons in 60s. Out of time or arrows = defeat.
+   ============================================================ */
+
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+let W=0,H=0,DPR=1;
+function resize(){
+  DPR = Math.min(window.devicePixelRatio||1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = W*DPR; cv.height = H*DPR;
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+addEventListener('resize', resize); resize();
+
+/* ---------------- palette (roles) ---------------- */
+const PAL = {
+  skyTop:'#232c52', skyMid:'#5b4a7a', skyHot:'#e8894f', skyLow:'#f6c06a',
+  hillFar:'#3b3f68', hillMid:'#2a2f52', hillNear:'#1a2040',
+  ground:'#161b34', grass:'#0e1228',
+  ink:'#f6efe3', accent:'#f5b942', danger:'#e7574c',
+  good:'#7bd36b',
+};
+const BALLOON_COLORS = ['#e7574c','#f5b942','#3ec6c0','#ec6ea7','#7bd36b','#8f7ae5'];
+
+/* ---------------- utils ---------------- */
+const R = (a,b)=>a+Math.random()*(b-a);
+const RI = (a,b)=>Math.floor(R(a,b+1));
+const clamp=(v,a,b)=>v<a?a:v>b?b:v;
+const lerp=(a,b,t)=>a+(b-a)*t;
+const TAU = Math.PI*2;
+
+/* ---------------- audio engine ---------------- */
+let AC=null, master=null;
+function audioInit(){
+  if(AC) return;
+  AC = new (window.AudioContext||window.webkitAudioContext)();
+  master = AC.createGain(); master.gain.value=0.9;
+  const comp = AC.createDynamicsCompressor();
+  master.connect(comp); comp.connect(AC.destination);
+}
+function noiseBuf(dur){
+  const n = Math.max(1,(AC.sampleRate*dur)|0);
+  const b = AC.createBuffer(1,n,AC.sampleRate);
+  const d=b.getChannelData(0);
+  for(let i=0;i<n;i++) d[i]=Math.random()*2-1;
+  return b;
+}
+function env(g,t0,a,peak,dec,end){
+  g.gain.setValueAtTime(0.0001,t0);
+  g.gain.linearRampToValueAtTime(peak,t0+a);
+  g.gain.exponentialRampToValueAtTime(0.0001,t0+dec);
+}
+function tone(freq,dur,type,vol,slide){
+  if(!AC)return;
+  const t0=AC.currentTime, o=AC.createOscillator(), g=AC.createGain();
+  o.type=type||'sine'; o.frequency.setValueAtTime(freq,t0);
+  if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(20,slide),t0+dur);
+  env(g,t0,0.006,vol||0.2,dur);
+  o.connect(g); g.connect(master); o.start(t0); o.stop(t0+dur+0.05);
+}
+function burst(dur,vol,fStart,fEnd,q){
+  if(!AC)return;
+  const t0=AC.currentTime;
+  const s=AC.createBufferSource(); s.buffer=noiseBuf(dur);
+  const f=AC.createBiquadFilter(); f.type='bandpass'; f.Q.value=q||1;
+  f.frequency.setValueAtTime(fStart,t0);
+  f.frequency.exponentialRampToValueAtTime(Math.max(60,fEnd),t0+dur);
+  const g=AC.createGain(); env(g,t0,0.004,vol,dur);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t0);
+}
+const SFX = {
+  click(){ tone(700,0.06,'square',0.06,500); },
+  creak(p){ burst(0.05,0.05+p*0.1, 500+p*700, 200, 6); },
+  drawFull(){ tone(1200,0.08,'triangle',0.05); },
+  twang(p){ // bow release: string snap + body
+    burst(0.09,0.35,3000+p*2000,300,1.2);
+    tone(180+p*140,0.16,'triangle',0.22,60);
+  },
+  pop(size){ // balloon: snap crack + body thump, pitch by size
+    const f = lerp(1500,700,(size-24)/22);
+    burst(0.05,0.5, f*2.2, 300, 1);
+    tone(f,0.09,'sine',0.5,f*0.4);
+    burst(0.03,0.25,6000,2000,2);
+  },
+  gold(){ [660,880,1100,1320].forEach((f,i)=>setTimeout(()=>tone(f,0.25,'triangle',0.2),i*70)); },
+  thud(){ burst(0.12,0.3,300,80,1); tone(90,0.14,'sine',0.25,45); },
+  whistle(){ burst(0.35,0.06,2500,1200,9); },
+  fanfare(){ [523,659,784,1046,1319].forEach((f,i)=>setTimeout(()=>{tone(f,0.35,'triangle',0.25);tone(f/2,0.35,'sine',0.12);},i*110)); },
+  sad(){ [392,330,262,196].forEach((f,i)=>setTimeout(()=>tone(f,0.5,'sawtooth',0.12,f*0.85),i*180)); },
+  tick(){ tone(1000,0.05,'square',0.05); },
+};
+
+/* ---------------- game state ---------------- */
+const ST = {MENU:0, PLAY:1, WIN:2, LOSE:3};
+let state = ST.MENU;
+const QUOTA=15, TIME=60, START_ARROWS=20;
+
+let G = {};
+function resetGame(){
+  G = {
+    t:TIME, arrows:START_ARROWS, pops:0, shots:0, hits:0,
+    streak:0, bestStreak:0,
+    balloons:[], flying:[], stuck:[], parts:[], floats:[],
+    spawnT:0.4, power:0, drawing:false, aimX:W*0.6, aimY:H*0.4,
+    shake:0, hitstop:0, flash:0, creakT:0, tickedAt:-1,
+    bowAng:-0.6, bowAngShown:-0.6,
+    clouds:Array.from({length:6},()=>({x:R(0,W),y:R(30,H*0.35),s:R(0.6,1.5),v:R(4,12)})),
+    stars:Array.from({length:40},()=>({x:R(0,W),y:R(0,H*0.5),p:R(0,TAU)})),
+    menuBalloons:Array.from({length:9},(_,i)=>makeBalloon(true)),
+  };
+}
+function groundY(){ return H-Math.max(70,H*0.13); }
+function archerPos(){ return {x:clamp(W*0.14,110,190), y:groundY()}; }
+
+function makeBalloon(forMenu){
+  const gold = !forMenu && Math.random()<0.09;
+  const r = gold? 22 : R(24,44);
+  const y = forMenu? R(H*0.2,H*0.8) : groundY()+r+R(20,140);
+  return {
+    x: forMenu? R(W*0.3,W*0.95) : R(W*0.3,W*0.98),
+    y, r, gold,
+    vy: gold? R(34,46) : R(40,72)*(r<30?1.2:1),
+    drift:R(-14,14), phase:R(0,TAU), wob:R(0.8,1.6),
+    hue: gold? '#f5b942' : BALLOON_COLORS[RI(0,BALLOON_COLORS.length-1)],
+    alive:true,
+  };
+}
+
+/* ---------------- input ---------------- */
+function pointer(e){
+  const r=cv.getBoundingClientRect();
+  G.aimX = e.clientX-r.left; G.aimY = e.clientY-r.top;
+}
+addEventListener('pointermove', e=>{ if(G) pointer(e); });
+cv.addEventListener('pointerdown', e=>{
+  audioInit(); if(AC.state==='suspended') AC.resume();
+  pointer(e);
+  if(state===ST.MENU){ SFX.click(); state=ST.PLAY; resetGame(); G.t=TIME+1.2; return; }
+  if(state===ST.WIN||state===ST.LOSE){ SFX.click(); state=ST.PLAY; resetGame(); G.t=TIME+1.2; return; }
+  if(state===ST.PLAY && G.arrows>0){ G.drawing=true; G.power=0; }
+});
+addEventListener('pointerup', ()=>{
+  if(state===ST.PLAY && G.drawing) looseArrow();
+  G.drawing=false;
+});
+addEventListener('keydown', e=>{
+  if(e.code==='Space'&&(state===ST.MENU||state===ST.WIN||state===ST.LOSE)){
+    audioInit(); if(AC.state==='suspended') AC.resume();
+    SFX.click(); state=ST.PLAY; resetGame(); G.t=TIME+1.2;
+  }
+});
+
+function looseArrow(){
+  if(G.power<0.08){ return; }
+  const A = archerPos();
+  const sp = 760 + G.power*1150;
+  const nx = G.aimX-A.x, ny = G.aimY-A.y-26;
+  const l = Math.hypot(nx,ny)||1;
+  G.flying.push({
+    x:A.x+nx/l*34, y:A.y-26+ny/l*34,
+    vx:nx/l*sp, vy:ny/l*sp, alive:true, t:0,
+  });
+  G.arrows--; G.shots++;
+  SFX.twang(G.power);
+  G.shake=Math.max(G.shake,2+G.power*3);
+  G.power=0;
+}
+
+/* ---------------- update ---------------- */
+function update(dt){
+  // ambient always
+  (G.clouds||[]).forEach(c=>{ c.x+=c.v*dt; if(c.x>W+150)c.x=-150; });
+  if(state===ST.MENU){
+    G.menuBalloons.forEach(b=>{ b.y-=b.vy*dt*0.7; if(b.y<-60){Object.assign(b,makeBalloon(true)); b.y=H+80;} });
+    return;
+  }
+  if(state!==ST.PLAY) return;
+
+  if(G.hitstop>0){ G.hitstop-=dt; dt*=0.25; }
+  const A=archerPos();
+
+  // timer
+  G.t-=dt;
+  const shown = Math.ceil(clamp(G.t,0,TIME));
+  if(shown<=5 && shown!==G.tickedAt && G.t>0){ G.tickedAt=shown; SFX.tick(); }
+  if(G.t<=0){ finish(false); return; }
+
+  // drawing
+  if(G.drawing){
+    G.power = clamp(G.power + dt/0.9, 0, 1);
+    G.creakT-=dt;
+    if(G.creakT<=0 && G.power<1){ SFX.creak(G.power); G.creakT=lerp(0.16,0.3,G.power); }
+    if(G.power>=1 && !G.fullPlayed){ SFX.drawFull(); }
+    G.fullPlayed = G.power>=1;
+  } else G.fullPlayed=false;
+
+  // aim angle shown smoothly
+  const targetAng = clamp(Math.atan2(G.aimY-(A.y-26), G.aimX-A.x), -1.35, 0.5);
+  G.bowAngShown = lerp(G.bowAngShown, targetAng, 1-Math.pow(0.0001,dt));
+
+  // spawn balloons
+  G.spawnT-=dt;
+  if(G.spawnT<=0){
+    G.spawnT = R(0.8,1.9);
+    const cluster = Math.random()<0.3;
+    const n = cluster? RI(2,3):1;
+    const bx = R(W*0.35,W*0.95);
+    for(let i=0;i<n;i++){
+      const b=makeBalloon();
+      if(cluster){ b.x=clamp(bx+R(-70,70),W*0.3,W*0.98); b.y=groundY()+R(20,90)+i*30; }
+      G.balloons.push(b);
+    }
+  }
+
+  // balloons
+  for(const b of G.balloons){
+    b.y-=b.vy*dt;
+    b.x+=Math.sin(b.y*0.012+b.phase)*b.drift*dt;
+    if(b.y<-b.r-70) b.alive=false;
+  }
+
+  // arrows
+  const grav=1500;
+  for(const a of G.flying){
+    const steps=3, sdt=dt/steps;
+    for(let s=0;s<steps&&a.alive;s++){
+      const px=a.x, py=a.y;
+      a.vy+=grav*sdt; a.x+=a.vx*sdt; a.y+=a.vy*sdt; a.t+=sdt;
+      if(a.t>0.15&&a.t<0.22&&!a.whistled){a.whistled=true;SFX.whistle();}
+      // balloon hit (swept segment vs circle)
+      for(const b of G.balloons){
+        if(!b.alive) continue;
+        if(segCircle(px,py,a.x,a.y,b.x,b.y,b.r+2)){
+          hitBalloon(b,a); break;
+        }
+      }
+      if(a.y>=groundY()){ a.alive=false; a.gx=a.x; a.gy=groundY(); missArrow(a); }
+      if(a.x>W+80||a.x<-80||a.y<-400) a.alive=false;
+    }
+  }
+  G.flying=G.flying.filter(a=>a.alive);
+  G.balloons=G.balloons.filter(b=>b.alive);
+
+  // stuck arrows fade
+  for(const s of G.stuck){ s.t+=dt; }
+  G.stuck=G.stuck.filter(s=>s.t<6);
+
+  // particles
+  for(const p of G.parts){ p.vy+=900*p.m*dt*1.6; p.x+=p.vx*dt; p.y+=p.vy*dt; p.t+=dt; p.a=1-p.t/p.life; }
+  G.parts=G.parts.filter(p=>p.t<p.life);
+  for(const f of G.floats){ f.y+=f.vy*dt; f.t+=dt; }
+  G.floats=G.floats.filter(f=>f.t<f.life);
+
+  G.shake=Math.max(0,G.shake-dt*22);
+  G.flash=Math.max(0,G.flash-dt*3);
+
+  if(G.pops>=QUOTA){ finish(true); }
+  if(G.arrows<=0 && G.flying.length===0 && G.pops<QUOTA){ finish(false); }
+}
+
+function segCircle(x1,y1,x2,y2,cx,cy,r){
+  const dx=x2-x1, dy=y2-y1;
+  const l2=dx*dx+dy*dy||1e-6;
+  let t=((cx-x1)*dx+(cy-y1)*dy)/l2; t=clamp(t,0,1);
+  const px=x1+dx*t-cx, py=y1+dy*t-cy;
+  return px*px+py*py<=r*r;
+}
+
+function hitBalloon(b,a){
+  b.alive=false; a.alive=false;
+  G.hits++; G.streak++; G.bestStreak=Math.max(G.bestStreak,G.streak);
+  const mult = 1+Math.min(4,Math.floor(G.streak/3)); // streak bonus
+  const base = b.gold? 250:100;
+  const score = base*mult;
+  G.pops++;
+  G.score+=score;
+  SFX.pop(b.r);
+  if(b.gold){
+    SFX.gold(); G.arrows+=3;
+    floatText('+'+score+'  +3 ARROWS','#f5b942',b.x,b.y,1.4,26);
+  } else {
+    floatText('+'+score, mult>1?'#f5b942':PAL.ink, b.x,b.y,1.0,20);
+  }
+  if(G.streak>=3) floatText('STREAK x'+mult,'#7bd36b',b.x,b.y-34,1.1,15);
+  // confetti
+  const col = b.hue;
+  for(let i=0;i<16;i++){
+    G.parts.push({x:b.x,y:b.y,vx:R(-220,220),vy:R(-320,60),
+      life:R(0.5,1.0),t:0,r:R(2.5,6),col:Math.random()<0.25?'#ffffff':col,m:R(0.5,1),sq:Math.random()<0.7});
+  }
+  for(let i=0;i<5;i++){
+    G.parts.push({x:b.x,y:b.y,vx:R(-40,40),vy:R(-120,-20),life:R(0.7,1.2),t:0,r:R(8,16),col:'rgba(255,255,255,0.35)',m:0.02,sq:false});
+  }
+  G.shake=Math.max(G.shake,5); G.hitstop=0.055; G.flash=0.5;
+}
+
+function missArrow(a){
+  SFX.thud();
+  G.streak=0;
+  for(let i=0;i<7;i++){
+    G.parts.push({x:a.gx,y:a.gy,vx:R(-90,90),vy:R(-160,-30),life:R(0.3,0.6),t:0,r:R(2,4),col:'#5a5f7a',m:R(0.4,0.9),sq:false});
+  }
+  const ang=Math.atan2(a.vy,a.vx);
+  G.stuck.push({x:a.gx,y:a.gy,ang,t:0});
+  G.flash=0;
+}
+
+function floatText(txt,col,x,y,life,size){
+  G.floats.push({txt,col,x,y,vy:-46,t:0,life:life||1,size:size||18});
+}
+function finish(won){
+  state = won? ST.WIN:ST.LOSE;
+  won? SFX.fanfare():SFX.sad();
+  G.shake=won?6:9;
+}
+
+/* ---------------- draw ---------------- */
+function draw(){
+  ctx.save();
+  if(G.shake>0){ ctx.translate(R(-G.shake,G.shake)*0.5, R(-G.shake,G.shake)*0.5); }
+
+  drawSky();
+  drawHills();
+  if(state===ST.MENU){ drawMenuBalloons(); drawGround(); drawArcherIdle(); drawMenu(); ctx.restore(); return; }
+
+  drawGround();
+  // balloons rise from behind the ground line: clip them at the horizon
+  ctx.save(); ctx.beginPath(); ctx.rect(0,0,W,groundY()-1); ctx.clip();
+  for(const b of G.balloons) drawBalloon(b);
+  ctx.restore();
+  drawArcher();
+  for(const a of G.flying) drawArrow(a.x,a.y,Math.atan2(a.vy,a.vx),1);
+  for(const s of G.stuck) drawArrow(s.x,s.y-2,s.ang,clamp(1-s.t/6,0,1));
+  drawParts();
+  drawFloats();
+  if(G.flash>0){ ctx.fillStyle=`rgba(255,240,200,${G.flash*0.16})`; ctx.fillRect(0,0,W,H); }
+  drawHUD();
+  if(state===ST.WIN) drawEnd(true);
+  if(state===ST.LOSE) drawEnd(false);
+  ctx.restore();
+}
+
+function drawSky(){
+  const g=ctx.createLinearGradient(0,0,0,groundY()+40);
+  g.addColorStop(0,PAL.skyTop); g.addColorStop(0.42,PAL.skyMid);
+  g.addColorStop(0.72,PAL.skyHot); g.addColorStop(0.92,PAL.skyLow);
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  // sun
+  const sx=W*0.72, sy=groundY()-26;
+  const sg=ctx.createRadialGradient(sx,sy,4,sx,sy,150);
+  sg.addColorStop(0,'rgba(255,225,150,0.95)'); sg.addColorStop(0.25,'rgba(255,190,110,0.5)'); sg.addColorStop(1,'rgba(255,180,100,0)');
+  ctx.fillStyle=sg; ctx.beginPath(); ctx.arc(sx,sy,150,0,TAU); ctx.fill();
+  ctx.fillStyle='#ffe9b8'; ctx.beginPath(); ctx.arc(sx,sy,17,0,TAU); ctx.fill();
+  // early stars
+  for(const s of G.stars||[]){
+    const tw=0.5+0.5*Math.sin(performance.now()/900+s.p);
+    ctx.fillStyle=`rgba(255,250,230,${0.35*tw*(1-s.y/(H*0.55))})`;
+    ctx.fillRect(s.x,s.y,2,2);
+  }
+  // clouds
+  for(const c of G.clouds||[]){
+    ctx.fillStyle='rgba(255,205,160,0.16)';
+    ctx.beginPath();
+    ctx.ellipse(c.x,c.y,70*c.s,16*c.s,0,0,TAU);
+    ctx.ellipse(c.x+40*c.s,c.y-9*c.s,44*c.s,12*c.s,0,0,TAU);
+    ctx.fill();
+  }
+}
+function drawHills(){
+  const gy=groundY();
+  hillPath(gy-H*0.10, 0.006, 40, PAL.hillFar, gy+4);
+  hillPath(gy-H*0.05, 0.009, 26, PAL.hillMid, gy+4);
+  // near trees silhouettes
+  ctx.fillStyle=PAL.hillNear;
+  for(let i=0;i<7;i++){
+    const x=(i*0.17+0.05)*W, y=gy-4, s=18+((i*53)%3)*10;
+    ctx.beginPath();
+    ctx.moveTo(x-2,y); ctx.lineTo(x+2,y); ctx.lineTo(x+2,y-s*0.5); ctx.lineTo(x-2,y-s*0.5); ctx.fill();
+    ctx.beginPath(); ctx.arc(x,y-s*0.62,s*0.42,0,TAU); ctx.arc(x-s*0.3,y-s*0.42,s*0.3,0,TAU); ctx.arc(x+s*0.3,y-s*0.42,s*0.3,0,TAU); ctx.fill();
+  }
+}
+function hillPath(base, freq, amp, col, gy){
+  ctx.fillStyle=col; ctx.beginPath(); ctx.moveTo(0,gy);
+  for(let x=0;x<=W;x+=14){ ctx.lineTo(x, base - Math.sin(x*freq+3)*amp - Math.sin(x*freq*2.7)*amp*0.4); }
+  ctx.lineTo(W,gy); ctx.closePath(); ctx.fill();
+}
+function drawGround(){
+  const gy=groundY();
+  ctx.fillStyle=PAL.ground; ctx.fillRect(0,gy,W,H-gy);
+  ctx.fillStyle=PAL.grass;
+  ctx.beginPath(); ctx.moveTo(0,gy);
+  for(let x=0;x<=W;x+=9){ ctx.lineTo(x, gy - (x%27<9? R(4,11):2)); }
+  ctx.lineTo(W,gy+6); ctx.closePath(); ctx.fill();
+  // rim light on ground line
+  ctx.fillStyle='rgba(255,190,110,0.25)'; ctx.fillRect(0,gy-1,W,2);
+}
+
+/* archer + bow */
+function drawArcherIdle(){
+  const A=archerPos();
+  drawArcherBody(A, -0.5, 0);
+}
+function drawArcher(){
+  const A=archerPos();
+  const p = G.drawing? G.power : 0;
+  drawArcherBody(A, G.bowAngShown, p);
+  if(G.drawing && p>0.05) drawTrajectory(A);
+}
+function drawArcherBody(A,ang,power){
+  const gy=A.y;
+  ctx.save(); ctx.translate(A.x,gy);
+  // body silhouette
+  ctx.fillStyle='#0b0e1c';
+  ctx.strokeStyle='rgba(255,190,110,0.5)'; // rim light
+  ctx.lineWidth=1.6;
+  // legs
+  ctx.beginPath();
+  ctx.moveTo(-7,0); ctx.lineTo(-4,-26); ctx.lineTo(1,-26); ctx.lineTo(2,0); ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(4,0); ctx.lineTo(5,-26); ctx.lineTo(10,-26); ctx.lineTo(12,0); ctx.closePath(); ctx.fill(); ctx.stroke();
+  // torso
+  ctx.beginPath();
+  ctx.moveTo(-6,-24); ctx.quadraticCurveTo(-9,-46,-4,-56);
+  ctx.lineTo(8,-56); ctx.quadraticCurveTo(12,-44,9,-24); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // head + hat
+  ctx.beginPath(); ctx.arc(4,-64,8,0,TAU); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-6,-68); ctx.quadraticCurveTo(4,-80,16,-70); ctx.lineTo(14,-66); ctx.quadraticCurveTo(4,-72,-4,-66); ctx.closePath();
+  ctx.fillStyle='#12203c'; ctx.fill();
+  ctx.fillStyle='#e7574c'; // feather
+  ctx.beginPath(); ctx.ellipse(13,-70,2.4,6,-0.5,0,TAU); ctx.fill();
+  ctx.fillStyle='#0b0e1c';
+
+  // bow arm + bow, rotate at shoulder
+  ctx.save();
+  ctx.translate(3,-48); ctx.rotate(ang);
+  // arm
+  ctx.strokeStyle='#0b0e1c'; ctx.lineWidth=6; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(30,0); ctx.stroke();
+  // bow (recurve arc), at hand x=34
+  const bx=34;
+  ctx.strokeStyle='#6b4a26'; ctx.lineWidth=3.4;
+  ctx.beginPath(); ctx.arc(bx,0,26,-1.15,1.15); ctx.stroke();
+  // limb tips
+  const t1x=bx+26*Math.cos(-1.15), t1y=26*Math.sin(-1.15);
+  const t2x=bx+26*Math.cos(1.15), t2y=26*Math.sin(1.15);
+  // string pulled back by power
+  const pull = power*20;
+  ctx.strokeStyle='rgba(246,239,227,0.85)'; ctx.lineWidth=1.3;
+  ctx.beginPath(); ctx.moveTo(t1x,t1y); ctx.lineTo(bx-pull,0); ctx.lineTo(t2x,t2y); ctx.stroke();
+  // nocked arrow
+  if(power>0.02){
+    ctx.rotate(0);
+    drawArrowLocal(bx-pull-46, 0, 1, true);
+  }
+  // draw arm to string
+  ctx.strokeStyle='#0b0e1c'; ctx.lineWidth=5.5;
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(bx-pull-6, 2); ctx.stroke();
+  ctx.restore();
+
+  ctx.restore();
+}
+function drawArrowLocal(x,y,alpha,nocked){
+  ctx.save(); ctx.globalAlpha=alpha;
+  ctx.strokeStyle='#d9c9a3'; ctx.lineWidth=2.2;
+  ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+52,y); ctx.stroke();
+  ctx.fillStyle='#8fa1c0';
+  ctx.beginPath(); ctx.moveTo(x-6,y); ctx.lineTo(x+3,y-3.5); ctx.lineTo(x+3,y+3.5); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#f6efe3';
+  ctx.beginPath(); ctx.moveTo(x+52,y); ctx.lineTo(x+45,y-4); ctx.lineTo(x+46,y); ctx.lineTo(x+45,y+4); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function drawArrow(x,y,ang,alpha){
+  ctx.save(); ctx.globalAlpha=alpha; ctx.translate(x,y); ctx.rotate(ang);
+  // trail
+  ctx.strokeStyle='rgba(255,230,180,0.25)'; ctx.lineWidth=1.4;
+  ctx.beginPath(); ctx.moveTo(-46,0); ctx.lineTo(-6,0); ctx.stroke();
+  drawArrowLocal(-6,0,alpha,false);
+  ctx.restore();
+}
+function drawTrajectory(A){
+  const sp=760+G.power*1150;
+  const nx=G.aimX-A.x, ny=G.aimY-(A.y-26);
+  const l=Math.hypot(nx,ny)||1;
+  let px=A.x+nx/l*34, py=A.y-26+ny/l*34, vx=nx/l*sp, vy=ny/l*sp;
+  ctx.fillStyle='rgba(246,239,227,0.6)';
+  for(let i=0;i<26;i++){
+    vy+=1500*0.038; px+=vx*0.038; py+=vy*0.038;
+    if(i%6===5){ const s=clamp(4-i*0.06,1.2,4);
+      ctx.globalAlpha=0.55-(i/26)*0.4;
+      ctx.beginPath(); ctx.arc(px,py,s,0,TAU); ctx.fill(); }
+    if(py>groundY()) break;
+  }
+  ctx.globalAlpha=1;
+}
+
+function drawBalloon(b){
+  const wob=Math.sin(performance.now()/700+b.phase)*0.07;
+  ctx.save(); ctx.translate(b.x,b.y); ctx.rotate(wob);
+  // string
+  ctx.strokeStyle='rgba(246,239,227,0.4)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(0,b.r*1.08);
+  ctx.quadraticCurveTo(6,b.r*1.5,-3,b.r*1.95); ctx.stroke();
+  // body
+  const g=ctx.createRadialGradient(-b.r*0.35,-b.r*0.4,b.r*0.15,0,0,b.r*1.15);
+  const c=b.hue;
+  g.addColorStop(0, lighten(c,0.45)); g.addColorStop(0.55,c); g.addColorStop(1, darken(c,0.35));
+  ctx.fillStyle=g;
+  ctx.beginPath(); ctx.ellipse(0,0,b.r*0.88,b.r,0,0,TAU); ctx.fill();
+  // knot
+  ctx.fillStyle=darken(c,0.4);
+  ctx.beginPath(); ctx.moveTo(-4,b.r*0.96); ctx.lineTo(4,b.r*0.96); ctx.lineTo(0,b.r*1.12); ctx.closePath(); ctx.fill();
+  // shine
+  ctx.fillStyle='rgba(255,255,255,0.5)';
+  ctx.beginPath(); ctx.ellipse(-b.r*0.32,-b.r*0.38,b.r*0.16,b.r*0.28,0.5,0,TAU); ctx.fill();
+  if(b.gold){
+    ctx.fillStyle='#7a4c00'; ctx.font='700 '+Math.round(b.r*0.8)+'px Bungee, sans-serif';
+    ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('3',0,0);
+    ctx.strokeStyle='rgba(255,240,180,0.9)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.ellipse(0,0,b.r*0.98,b.r*1.1,0,0,TAU); ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawParts(){
+  for(const p of G.parts){
+    ctx.globalAlpha=clamp(p.a,0,1); ctx.fillStyle=p.col;
+    if(p.sq){ ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.t*9+p.r); ctx.fillRect(-p.r/2,-p.r/2,p.r,p.r*0.6); ctx.restore(); }
+    else { ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,TAU); ctx.fill(); }
+  }
+  ctx.globalAlpha=1;
+}
+function drawFloats(){
+  for(const f of G.floats){
+    const a=clamp(1-f.t/f.life,0,1);
+    ctx.globalAlpha=a; ctx.fillStyle=f.col;
+    ctx.font=`800 ${f.size}px 'Outfit', sans-serif`; ctx.textAlign='center';
+    ctx.strokeStyle='rgba(10,12,25,0.7)'; ctx.lineWidth=3;
+    ctx.strokeText(f.txt,f.x,f.y); ctx.fillText(f.txt,f.x,f.y);
+  }
+  ctx.globalAlpha=1;
+}
+
+/* color helpers */
+function hex2rgb(h){ const n=parseInt(h.slice(1),16); return [(n>>16)&255,(n>>8)&255,n&255]; }
+function lighten(h,t){ const [r,g,b]=hex2rgb(h); return `rgb(${r+(255-r)*t|0},${g+(255-g)*t|0},${b+(255-b)*t|0})`; }
+function darken(h,t){ const [r,g,b]=hex2rgb(h); return `rgb(${r*(1-t)|0},${g*(1-t)|0},${b*(1-t)|0})`; }
+
+/* ---------------- HUD ---------------- */
+function drawHUD(){
+  const pad=18;
+  ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+  // score
+  ctx.fillStyle=PAL.ink;
+  ctx.font="800 30px 'Outfit', sans-serif";
+  ctx.fillText(G.score, pad+42, pad+30);
+  ctx.font="600 12px 'Outfit', sans-serif"; ctx.fillStyle='rgba(246,239,227,0.6)';
+  ctx.fillText('SCORE', pad+42, pad+12);
+  // score icon: balloon
+  drawBalloonIcon(pad+8, pad+10);
+  // timer bar top-center
+  const tw=Math.min(340,W*0.4), tx=W/2-tw/2, ty=pad;
+  const frac=clamp(G.t/TIME,0,1);
+  ctx.fillStyle='rgba(10,12,25,0.5)'; rr(tx,ty,tw,10,5); ctx.fill();
+  ctx.fillStyle= frac<0.18? PAL.danger: PAL.accent;
+  rr(tx,ty,Math.max(6,tw*frac),10,5); ctx.fill();
+  ctx.fillStyle=PAL.ink; ctx.font="800 14px 'Outfit', sans-serif"; ctx.textAlign='center';
+  ctx.fillText(Math.max(0,Math.ceil(G.t))+'s', W/2, ty+28);
+  // quota pips
+  ctx.textAlign='left';
+  ctx.font="600 12px 'Outfit', sans-serif"; ctx.fillStyle='rgba(246,239,227,0.7)';
+  ctx.fillText('BALLOONS '+G.pops+' / '+QUOTA, pad+42, pad+56);
+  for(let i=0;i<QUOTA;i++){
+    ctx.fillStyle=i<G.pops? PAL.good:'rgba(246,239,227,0.22)';
+    ctx.beginPath(); ctx.arc(pad+42+i*11, pad+70, 4,0,TAU); ctx.fill();
+  }
+  // arrows right
+  ctx.textAlign='right';
+  ctx.font="800 26px 'Outfit', sans-serif"; ctx.fillStyle=G.arrows<=4?PAL.danger:PAL.ink;
+  ctx.fillText(G.arrows, W-pad-2, pad+30);
+  ctx.font="600 12px 'Outfit', sans-serif"; ctx.fillStyle='rgba(246,239,227,0.6)';
+  ctx.fillText('ARROWS', W-pad, pad+12);
+  // streak flame
+  if(G.streak>=3){
+    ctx.textAlign='center'; ctx.font="800 20px Bungee, sans-serif"; ctx.fillStyle=PAL.accent;
+    ctx.strokeStyle='rgba(10,12,25,0.8)'; ctx.lineWidth=4;
+    const s='x'+(1+Math.min(4,Math.floor(G.streak/3)));
+    ctx.strokeText(s,W/2,pad+62); ctx.fillText(s,W/2,pad+62);
+  }
+  // hint
+  if(G.shots===0 && !G.drawing){
+    ctx.textAlign='center'; ctx.font="600 15px 'Outfit', sans-serif";
+    ctx.globalAlpha=0.55+0.3*Math.sin(performance.now()/300);
+    ctx.fillStyle=PAL.ink;
+    ctx.fillText('Hold to draw — release to loose', W/2, H-24);
+    ctx.globalAlpha=1;
+  }
+}
+function drawBalloonIcon(x,y){
+  ctx.fillStyle=PAL.danger; ctx.beginPath(); ctx.ellipse(x,y+8,7,9,0,0,TAU); ctx.fill();
+  ctx.strokeStyle='rgba(246,239,227,0.5)'; ctx.beginPath(); ctx.moveTo(x,y+17); ctx.lineTo(x+2,y+24); ctx.stroke();
+}
+function rr(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+
+function drawMenu(){
+  ctx.textAlign='center';
+  const cy=H*0.4;
+  ctx.fillStyle='rgba(10,12,25,0.35)'; ctx.fillRect(0,0,W,H);
+  ctx.font=`800 ${clamp(W*0.09,42,86)}px Bungee, Impact, sans-serif`;
+  ctx.lineWidth=6; ctx.strokeStyle='#231a2e';
+  ctx.strokeText('GOLDEN ARROW', W/2, cy);
+  const tg=ctx.createLinearGradient(0,cy-60,0,cy+10);
+  tg.addColorStop(0,'#ffe9b8'); tg.addColorStop(0.5,'#f5b942'); tg.addColorStop(1,'#c97b2a');
+  ctx.fillStyle=tg; ctx.fillText('GOLDEN ARROW', W/2, cy);
+  ctx.font="600 18px 'Outfit', sans-serif"; ctx.fillStyle=PAL.ink;
+  ctx.fillText('LEVEL 1  ·  BALLOON MEADOW', W/2, cy+34);
+  ctx.font="400 15px 'Outfit', sans-serif"; ctx.fillStyle='rgba(246,239,227,0.85)';
+  ctx.fillText('Pop '+QUOTA+' balloons in '+TIME+' seconds. Gold ones give you arrows.', W/2, cy+66);
+  ctx.fillText('Hold the mouse to draw the bow — longer pull, flatter shot.', W/2, cy+88);
+  const pulse=0.6+0.4*Math.sin(performance.now()/350);
+  ctx.font="800 22px Bungee, sans-serif";
+  ctx.fillStyle=`rgba(245,185,66,${pulse})`;
+  ctx.fillText('CLICK TO START', W/2, cy+140);
+  ctx.font="400 12px 'Outfit', sans-serif"; ctx.fillStyle='rgba(246,239,227,0.5)';
+  ctx.fillText('after the old Windows Gold standard', W/2, cy+166);
+}
+function drawMenuBalloons(){
+  for(const b of G.menuBalloons) drawBalloon(b);
+}
+function drawEnd(won){
+  ctx.fillStyle='rgba(12,10,24,0.72)'; ctx.fillRect(0,0,W,H);
+  ctx.textAlign='center';
+  const cy=H*0.42;
+  ctx.font=`800 ${clamp(W*0.07,40,72)}px Bungee, Impact, sans-serif`;
+  ctx.fillStyle= won? PAL.accent : PAL.danger;
+  ctx.strokeStyle='rgba(10,12,25,0.9)'; ctx.lineWidth=6;
+  const t= won? 'MEADOW CLEARED' : (G.arrows<=0? 'OUT OF ARROWS':'TIME UP');
+  ctx.strokeText(t,W/2,cy); ctx.fillText(t,W/2,cy);
+  const acc=G.shots? Math.round(G.hits/G.shots*100):0;
+  ctx.font="600 17px 'Outfit', sans-serif"; ctx.fillStyle=PAL.ink;
+  ctx.fillText('Score '+G.score+'   ·   Balloons '+G.pops+'/'+QUOTA+'   ·   Accuracy '+acc+'%   ·   Best streak x'+(1+Math.min(4,Math.floor(G.bestStreak/3))), W/2, cy+36);
+  const pulse=0.6+0.4*Math.sin(performance.now()/350);
+  ctx.font="800 20px Bungee, sans-serif"; ctx.fillStyle=`rgba(246,239,227,${pulse})`;
+  ctx.fillText('CLICK TO PLAY AGAIN', W/2, cy+84);
+}
+
+/* G.score init */
+function ensureScore(){ if(G&&G.score===undefined) G.score=0; }
+
+/* ---------------- main loop ---------------- */
+resetGame();
+let last=performance.now();
+function frame(now){
+  let dt=(now-last)/1000; last=now;
+  dt=clamp(dt,0,0.05);
+  ensureScore();
+  update(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

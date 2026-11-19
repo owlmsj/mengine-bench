@@ -1,0 +1,69 @@
+{
+ "task_id": "gd-integration-repo",
+ "prompts": [
+  "An integration test of the Pixel Arena backend in {WS} fails while the unit tests pass. Make the backend behave as {WS}/docs says: fix every cause, not just the symptom this test shows. Existing tests stay as they are, and the project takes no new dependencies."
+ ],
+ "answers": [
+  "[goal] Match the configuration, payout, and persistence rules in `docs`.\n\n[action] Fixed three causes. Environment settings now override JSON values, decimal payouts round half up to the nearest ten, and loading a profile restores its saved credits. Added three regression tests. Existing tests stayed unchanged. No dependencies were added.\n\n[result] Before the fixes, the integration test reported `AssertionError: 0 != 1690`, and the new regressions reported `FAILED (failures=3)`. Afterward, the full suite reported `Ran 16 tests in 0.007s` and `OK`. The integration test now confirms that 1,690 credits survive save/load.\n\n[next] No follow-up required. I assumed older profiles without a `credits` field should retain the existing zero default and verified that behavior."
+ ],
+ "diff": "M arena_server/config/loader.py\nM arena_server/economy/payout.py\nM arena_server/persistence/codec.py\nA tests/unit/test_economy_contract.py\n\n--- arena_server/config/loader.py ---\n\"\"\"Runtime config. Precedence, lowest to highest: DEFAULTS < JSON file < env (docs/CONFIG.md).\"\"\"\n\nimport json\nimport os\n\nfrom arena_server.config.defaults import DEFAULTS\n\n\ndef _coerce(raw, like):\n    return type(like)(raw)\n\n\ndef load_config(file_path=None, env=None):\n    cfg = dict(DEFAULTS)\n    if file_path:\n        with open(file_path, encoding=\"utf-8\") as fh:\n            cfg.update(json.load(fh))\n    env = os.environ if env is None else env\n    for key, default in DEFAULTS.items():\n        value = env.get(f\"ARENA_{key.upper()}\")\n        if value is not None:\n            cfg[key] = _coerce(value, default)\n    return cfg\n\n\n--- arena_server/economy/payout.py ---\n\"\"\"Match payout. Rules live in docs/ECONOMY.md.\"\"\"\n\nfrom decimal import Decimal, ROUND_HALF_UP\n\n\ndef match_payout(won, kills, cfg):\n    base = cfg[\"win_base\"] if won else cfg[\"loss_base\"]\n    subtotal = Decimal(str(base)) + kills * Decimal(str(cfg[\"kill_bonus\"]))\n    raw = subtotal * Decimal(str(cfg[\"event_multiplier\"]))\n    return int(raw.quantize(Decimal(\"1E1\"), rounding=ROUND_HALF_UP))\n\n\n--- arena_server/persistence/codec.py ---\nimport json\n\nfrom arena_server.models.profile import Profile\n\n\ndef encode(profile):\n    return json.dumps({\"name\": profile.name, \"level\": profile.level,\n                       \"credits\": profile.credits, \"cosmetics\": profile.cosmetics})\n\n\ndef decode(blob):\n    data = json.loads(blob)\n    return Profile(name=data[\"name\"], level=data.get(\"level\", 1),\n                   credits=data.get(\"credits\", 0), cosmetics=data.get(\"cosmetics\", []))\n\n\n--- tests/unit/test_economy_contract.py ---\nimport tempfile\nimport unittest\nfrom pathlib import Path\n\nfrom arena_server.config.loader import load_config\nfrom arena_server.economy.payout import match_payout\nfrom arena_server.models.profile import Profile\nfrom arena_server.persistence.codec import decode, encode\n\n\nclass EconomyContract(unittest.TestCase):\n    def test_environment_overrides_file(self):\n        with tempfile.TemporaryDirectory(dir=Path(__file__).parent) as directory:\n            path = Path(directory) / \"config.json\"\n            path.write_text('{\"kill_bonus\": 40, \"loss_base\": 700}', encoding=\"utf-8\")\n            cfg = load_config(path, env={\"ARENA_KILL_BONUS\": \"75\"})\n        self.assertEqual((cfg[\"kill_bonus\"], cfg[\"loss_base\"]), (75, 700))\n\n    def test_decimal_half_rounds_up(self):\n        cfg = load_config(env={\"ARENA_EVENT_MULTIPLIER\": \"0.7\"})\n        self.assertEqual(match_payout(False, 1, cfg), 460)\n\n    def test_profile_credit_round_trip(self):\n        profile = Profile(\"player\", 3, 125, [\"skin\"])\n        self.assertEqual(decode(encode(profile)), profile)\n        self.assertEqual(decode('{\"name\":\"player\"}'), Profile(\"player\"))\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"rg --files --hidden -g '\\\"'!.git'\\\"' | Select-Object -First 180\\\"\" ok -> \"tests\\\\__init__.py\\r\\ntests\\\\unit\\\\__init__.py\\r\\ntests\\\\unit\\\\test_telemetry.py\\r\\ntests\\\\unit\\\\test_store.py\\r\\ntests\\\\unit\\\\test_quests.py\\r\\ntests\\\\unit\\\\test_notifications.py\\r\\ntests\\\\unit\\\\test_matchmaking.py\\r\\ntests\\\\unit\\\\test_locales.py\\r\\ntests\\\\unit\\\\test_leaderboard.py\\r\\ntests\\\\unit\\\\test_cosmetics.py\\r\\ntests\\\\unit\\\\test_core_units.py\\r\\ntests\\\\unit\\\\test_chat.py\\r\\ntests\\\\unit\\\\test_anticheat.py\\r\\ntests\\\\integration\\\\__init__.py\\r\\nt[... 4036 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-Content AGENTS.md,README.md,docs/*.md'\" ok -> \"Use any skill, tool or MCP server you have. Write local files only inside this directory.\\r\\nYou may read installed tools and skills outside it, but not other task workspaces, runs or benchmark answers.\\r\\nOther programs run on this machine: stop only the processes you started, by their id, never by name.\\r\\nDo not print credentials, environment variables or personal data: this session is published.\\r\\n# [... 581 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-Content tests/integration/test_match_flow.py,tests/unit/test_core_units.py'\" ok -> \"import json\\r\\nimport tempfile\\r\\nimport unittest\\r\\nfrom pathlib import Path\\r\\n\\r\\nfrom arena_server.config.loader import load_config\\r\\nfrom arena_server.models.profile import Profile\\r\\nfrom arena_server.persistence.store import load, save\\r\\nfrom arena_server.services.match_service import finish_match\\r\\n\\r\\n\\r\\nclass MatchFlow(unittest.TestCase):\\r\\n    def test_event_weekend_win_is_paid_and_persisted(self):\\r\\n     [... 1070 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-Content arena_server/config/*.py,arena_server/economy/*.py,arena_server/models/*.py,arena_server/persistence/*.py,arena_server/services/*.py'\" ok -> \"DEFAULTS = {\\r\\n    \\\"win_base\\\": 900,\\r\\n    \\\"loss_base\\\": 600,\\r\\n    \\\"kill_bonus\\\": 50,\\r\\n    \\\"event_multiplier\\\": 1.0,\\r\\n}\\r\\n\\\"\\\"\\\"Runtime config. Precedence, lowest to highest: DEFAULTS < JSON file < env (docs/CONFIG.md).\\\"\\\"\\\"\\r\\n\\r\\nimport json\\r\\nimport os\\r\\n\\r\\nfrom arena_server.config.defaults import DEFAULTS\\r\\n\\r\\n\\r\\ndef _coerce(raw, like):\\r\\n    return type(like)(raw)\\r\\n\\r\\n\\r\\ndef load_config(file_path=None, env=None):\\r\\n  [... 1844 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'python -B -m unittest tests.integration.test_match_flow'\" failed -> \"F\\r\\n======================================================================\\r\\nFAIL: test_event_weekend_win_is_paid_and_persisted (tests.integration.test_match_flow.MatchFlow.test_event_weekend_win_is_paid_and_persisted)\\r\\n----------------------------------------------------------------------\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-_p1todb[... 357 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'python -B -c \\\"print(next((n,k/100,n*k/100,n*(k/100)) for n in range(600,3000,50) for k in range(1,301) if n*k%1000==500 and int(n*(k/100)/10+.5)*10 < (n*k//1000+1)*10))\\\"'\" ok -> \"(650, 0.7, 455.0, 454.99999999999994)\"\n[step 1] edit \"<WORKSPACE>\\\\tests\\\\unit\\\\test_economy_contract.py\" ok -> \"\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'python -B -m unittest tests.unit.test_economy_contract'\" failed -> \"FFF\\r\\n======================================================================\\r\\nFAIL: test_decimal_half_rounds_up (tests.unit.test_economy_contract.EconomyContract.test_decimal_half_rounds_up)\\r\\n----------------------------------------------------------------------\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\tests\\\\unit\\\\test[... 1808 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>\\\\arena_server\\\\config\\\\loader.py, <WORKSPACE>\\\\arena_server\\\\economy\\\\payout.py, <WORKSPACE>\\\\arena_server\\\\persistence\\\\codec.py\" ok -> \"\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'python -B -m unittest discover -s tests -t .'\" ok -> \"................\\r\\n----------------------------------------------------------------------\\r\\nRan 16 tests in 0.007s\\r\\n\\r\\nOK\"",
+ "checks": [
+  [
+   "existing tests untouched",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hidden config override and persistence",
+   true
+  ],
+  [
+   "hidden env float wins over file",
+   true
+  ],
+  [
+   "hidden round trip keeps everything",
+   true
+  ],
+  [
+   "hidden half up tie rounds up",
+   true
+  ],
+  [
+   "hidden half up fractional multiplier",
+   true
+  ],
+  [
+   "hidden persisted name survives",
+   true
+  ],
+  [
+   "hidden real environment when env is none",
+   true
+  ],
+  [
+   "existing test suite passes",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 10,
+  "tool_errors": 2,
+  "shell_commands": 8,
+  "shell_failures": 2,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1271,
+  "reasoning_tokens": 33,
+  "largest_turn_tokens": 1271
+ },
+ "deliverables": [],
+ "render": null
+}

@@ -1,0 +1,51 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [],
+ "diff": "",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"python -c \\\"import sqlite3,os; print(os.path.getsize('prices.db'))\\\"\" ok -> \"4096\"\n[step 1] shell \"powershell -Command \\\"Format-Hex -Path prices.db -Count 128\\\"\" failed -> \"Format-Hex : A parameter cannot be found that matches parameter name 'Count'.\\r\\nAt line:1 char:28\\r\\n+ Format-Hex -Path prices.db -Count 128\\r\\n+                            ~~~~~~\\r\\n    + CategoryInfo          : InvalidArgument: (:) [Format-Hex], ParameterBindingException\\r\\n    + FullyQualifiedErrorId : NamedParameterNotFound,Format-Hex\"\n[step 1] shell \"python - <<'EOF'\\nimport struct\\ndata=open('prices.db','rb').read()\\nprint(len(data))\\nprint(data[:16])\\npageSize=struct.unpack('>H',data[16:18])[0]\\nif pageSize==1: pageSize=65536\\nprint('pageSize',pageSize,'pages',len(data)//pageSize)\\nprint('dbSizePages field',struct.unpack('>I',data[28:32])[0])\\nprint('rootpage off',struct.unpack('>I',data[32:36])[0])\\nEOF\" ok -> \"4096\\r\\nb'\\\\r\\\\x00\\\\x00\\\\x00\\\\n\\\\x0f=\\\\x00\\\\x0f\\\\xf1\\\\x0f\\\\xe3\\\\x0f\\\\xcb\\\\x0f\\\\xbd'\\r\\npageSize 4013 pages 1\\r\\ndbSizePages field 0\\r\\nrootpage off 0\"\n[step 1] shell \"python - <<'EOF'\\nimport struct, json\\ndata=open('prices.db','rb').read()\\n# page starts at file offset 0 (100-byte db header was stripped)\\nnFree=data[0]; nCells=struct.unpack('>H',data[3:5])[0]\\nstart=struct.unpack('>H',data[5:7])[0]\\nprint('type',nFree,'cells',nCells,'contentstart',start)\\nptrs=[struct.unpack('>H',data[8+2*i:10+2*i])[0] for i in range(nCells)]\\nprint(ptrs)\\ndef varint(b,o):\\n    v=0\\n    for i in range(9):\\n        c=b[o+i]; \\n        if i==8: v=(v<<8)|c; return v,o+i+1\\n        v=(v<<7)|(c&0x7f)\\n        if not c&0x80: return v,o+i+1\\ndef serial(b,o,t):\\n    if t==0: return None,o\\n    if t==1: return struct.unpack('b',b[o:o+1])[0],o+1\\n    if t==2: return struct.unpack('>h',b[o:o+2])[0],o+2\\n    if t==3: return int.from_bytes(b[o:o+3],'big',signed=True),o+3\\n    if t==4: return struct.unpack('>i',b[o:o+4])[0],o+4\\n    if t==5: return int.from_bytes(b[o:o+6],'big',signed=True),o+6\\n    if t==6: return struct.unpack('>q',b[o:o+8])[0],o+8\\n    if t==8: return 0,o\\n    if t==9: return 1,o\\n    if t>=12 and t%2==0:\\n        n=(t-12)//2; return b[o:o+n],o+n\\n    if t>=13 and t%2==1:\\n        n=(t-13)//2; return b[o:o+n].decode('utf8','replace'),o+n\\n    raise ValueError(t)\\nrows=[]\\ntrunc=[]\\nfor p in ptrs:\\n    off=p-100  # file offset for page offset p\\n    if off<0: trunc.append((p,'header region lost')); continue\\n    try:\\n        plen,off=varint(data,off)\\n        rowid,off=varint(data,off)\\n        if off+plen>len(data):\\n            trunc.append((rowid,'cell body cut')); \\n            avail=l[... 494 chars cut by the benchmark]\" ok -> \"type 13 cells 10 contentstart 3901\\r\\n[4081, 4067, 4043, 4029, 4013, 3987, 3967, 3949, 3928, 3901]\\r\\n(4, [], 9, 9)\\r\\nTRUNC: [(4081, 'index out of range'), (4067, 'unpack requires a buffer of 2 bytes'), (4043, 'index out of range'), (4013, 'index out of range'), (3987, 'index out of range'), (3967, 'index out of range'), (3949, 'index out of range'), (3928, 'index out of range'), (3901, 'index out of r[... 7 chars cut by the benchmark]\"\n[step 1] shell \"python - <<'EOF'\\ndata=open('prices.db','rb').read()\\nfor o in range(3900,4096,32):\\n    print(o, data[o:o+32].hex(' '))\\nEOF\" ok -> \"3900 00 19 0a 04 00 27 07 66 69 72 73 74 20 61 69 64 20 6b 69 74 3f ef ae 14 7a e1 47 ae 13 09 04 00\\r\\n3932 1b 07 63 6f 6d 70 61 73 73 40 2f 00 00 00 00 00 00 10 08 04 00 21 02 63 61 6d 70 20 73 74 6f 76\\r\\n3964 65 01 36 12 07 04 00 25 02 73 6c 65 65 70 69 6e 67 20 62 61 67 00 81 18 06 04 00 25 07 77 61 74\\r\\n3996 65 72 20 66 69 6c 74 65 72 40 43 f3 33 33 33 33 33 0e 05 04 00 1f 01 72 6f 70 65 20 63 6f[... 228 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   false
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   false
+  ],
+  [
+   "rows with fractional prices recovered",
+   false
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   false
+  ],
+  [
+   "no row that is not in the table",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 5,
+  "tool_errors": 0,
+  "shell_commands": 5,
+  "shell_failures": 1,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2596,
+  "reasoning_tokens": 1512,
+  "largest_turn_tokens": 1785
+ },
+ "deliverables": [],
+ "render": null
+}

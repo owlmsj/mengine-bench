@@ -159,7 +159,21 @@ class LocalNames:
             if name and len(name) >= 3 and name.lower() not in _GENERIC_NAMES:
                 found.append((kind, label, re.compile(_TOKEN_BEFORE + re.escape(name) + _TOKEN_AFTER,
                                                       re.IGNORECASE)))
+                if kind != "host":
+                    found.append((kind, label, _account_forms(name)))
         return found
+
+
+def _account_forms(name: str) -> re.Pattern[str]:
+    """#260: an account name also leaks as `pytest-of-<name>`, as the Windows 8.3 short name
+    (`<FIRST6>~1` when longer than 8) and cut mid-name by the transcript limit (`<prefix>[... N chars cut`)."""
+    forms = [r"(?<=-)" + re.escape(name) + _TOKEN_AFTER]
+    if len(name) > 8:
+        forms.append(_TOKEN_BEFORE + re.escape(name[:6]) + r"~\d+" + _TOKEN_AFTER)
+    prefixes = [re.escape(name[:size]) for size in range(len(name) - 1, 4, -1)]
+    if prefixes:
+        forms.append(_TOKEN_BEFORE + "(?:" + "|".join(prefixes) + r")(?=\[\.\.\.)")
+    return re.compile("|".join(forms), re.IGNORECASE)
 
 
 def secret_env_values(env: Mapping[str, str]) -> tuple[str, ...]:

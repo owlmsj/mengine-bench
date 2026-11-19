@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-sql-funnel",
+ "prompts": [
+  "Product wants to know where players drop off on each platform. The data is in {WS}/analytics.db and our reporting rules are in {WS}/METRICS.md. Where do we lose the most players? Record it in {WS}/result.json: funnel (per platform, players at each step) and biggest_drop (per platform, the step)."
+ ],
+ "answers": [
+  "[goal] Find the lowest-converting funnel step on each platform, as defined in `METRICS.md`.\n\n[action] Wrote `result.json` with player counts at all four steps and each platform’s biggest drop. I used each player’s registered platform and assumed the full database was in scope.\n\n[result] **PC loses the largest share at purchase**: 57 of 326 first-match players dropped off (17.5%). **Steam Deck loses the largest share at tutorial completion**: 64 of 192 installers dropped off (33.3%).\n\n[next] Verification is complete. An independent SQL calculation matched the saved counts, winning steps, and conversion rates. Counts are in install, tutorial completion, first match, purchase order.\n\n```text\npc 470 389 326 269 purchase 82.5%\nsteamdeck 192 128 87 61 tutorial_complete 66.7%\n```"
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\r\n  \"funnel\": {\r\n    \"pc\": {\r\n      \"install\": 470,\r\n      \"tutorial_complete\": 389,\r\n      \"first_match\": 326,\r\n      \"purchase\": 269\r\n    },\r\n    \"steamdeck\": {\r\n      \"install\": 192,\r\n      \"tutorial_complete\": 128,\r\n      \"first_match\": 87,\r\n      \"purchase\": 61\r\n    }\r\n  },\r\n  \"biggest_drop\": {\r\n    \"pc\": \"purchase\",\r\n    \"steamdeck\": \"tutorial_complete\"\r\n  }\r\n}\r\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-Content -Raw METRICS.md'\" ok -> \"# How we report the funnel\\n\\nSteps, in order: install, tutorial_complete, first_match, purchase.\\nA step counts only at or after the same player's previous step, with no time limit; its time is the first valid occurrence.\\nTest accounts and events from unknown players do not count.\\nA step's conversion is its players over the previous step's players. The biggest drop is the step with the lowest conver[... 5 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"python -c \\\\\\\"import sqlite3; c=sqlite3.connect('file:analytics.db?mode=ro',uri=True); print(*c.execute('select sql from sqlite_master'),sep=chr(10))\\\\\\\"\\\"\" ok -> \"('CREATE TABLE users (user_id text primary key, platform text, is_test integer)',)\\r\\n(None,)\\r\\n('CREATE TABLE events (user_id text, name text, ts text)',)\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"python -c \\\\\\\"import sqlite3; c=sqlite3.connect('file:analytics.db?mode=ro',uri=True); print(list(c.execute('select platform,is_test,count(*) from users group by 1,2'))); print(list(c.execute('select name,count(*),min(ts),max(ts) from events group by 1')))\\\\\\\"\\\"\" ok -> \"[('pc', 0, 593), ('pc', 1, 21), ('steamdeck', 0, 273), ('steamdeck', 1, 13)]\\r\\n[('first_match', 479, '2026-06-05 04:00:00', '2026-07-04 21:00:00'), ('install', 759, '2026-06-01 12:00:00', '2026-06-21 11:00:00'), ('purchase', 441, '2026-05-30 12:00:00', '2026-07-12 08:00:00'), ('tutorial_complete', 589, '2026-06-01 22:00:00', '2026-06-29 12:00:00')]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport sqlite3,json\\nfrom fractions import Fraction\\nfrom pathlib import Path\\ndb=sqlite3.connect(\\\\\\\"file:analytics.db?mode=ro\\\\\\\",uri=True)\\nsteps=[\\\\\\\"install\\\\\\\",\\\\\\\"tutorial_complete\\\\\\\",\\\\\\\"first_match\\\\\\\",\\\\\\\"purchase\\\\\\\"]\\nevents={}\\nfor uid,name,ts in db.execute(\\\\\\\"select user_id,name,ts from events order by ts\\\\\\\"):\\n    events.setdefault(uid,[]).append((name,ts))\\nfunnel={}\\nfor uid,platform in db.execute(\\\\\\\"select user_id,platform from users where is_test=0\\\\\\\"):\\n    counts=funnel.setdefault(platform,dict.fromkeys(steps,0))\\n    prev=None\\n    for step in steps:\\n        prev=next((ts for name,ts in events.get(uid,[]) if name==step and (prev is None or ts>=prev)),None)\\n        if prev is None: break\\n        counts[step]+=1\\ndrop={p:min(steps[1:],key=lambda s:Fraction(c[s],c[steps[steps.index(s)-1]])) for p,c in funnel.items()}\\nout=Path(\\\\\\\"result.json\\\\\\\")\\nout.write_text(json.dumps(dict(funnel=funnel,biggest_drop=drop),indent=2)+\\\\\\\"\\\\\\\\n\\\\\\\",encoding=\\\\\\\"utf-8\\\\\\\")\\nsaved=json.loads(out.read_text())\\nq=\\\\\\\"with s0 as (select user_id,platform,'' as t from users where is_test=0)\\\\\\\"\\nfor i,step in enumerate(steps,1):\\n    q+=f\\\\\\\", s{i} as (select s.user_id,s.platform,min(e.ts) t from s{i-1} s join events e on e.user_id=s.user_id and e.name='{step}' and e.ts>=s.t group by s.user_id,s.platform)\\\\\\\"\\nfor platform in funnel:\\n    values=[db.execute(q+f\\\\\\\" select count(*) from s{i} where platform=?\\\\\\\",(platform,)).f[... 312 chars cut by the benchmark]\" ok -> \"pc 470 389 326 269 purchase 82.5%\\r\\nsteamdeck 192 128 87 61 tutorial_complete 66.7%\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "players per step on pc",
+   true
+  ],
+  [
+   "players per step on steamdeck",
+   true
+  ],
+  [
+   "biggest drop on each platform",
+   true
+  ],
+  [
+   "final answer does not contradict biggest drops",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 4,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 890,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 890
+ },
+ "deliverables": [],
+ "render": null
+}

@@ -1,0 +1,49 @@
+{
+ "task_id": "cfg-source-drift",
+ "prompts": [
+  "The model configs our coding harnesses use are in {WS}: OpenCode, Codex and Claude Code each get one. They disagree about the context window of fast-coder: OpenCode's config says 262144, the other two say 131072. 262144 is the right value. Make all three agree, for good. Every other model setting stays as it is."
+ ],
+ "answers": [
+  "[goal] Make OpenCode, Codex and Claude Code configs agree on fast-coder context window = 262144 without touching other settings.\n\n[action] Root-caused the disagreement: `models.json` is the single source of truth and `gen.py` generates all three configs in `out/` from it; `models.json` said 131072, so the OpenCode config's 262144 was a manual edit in the generated copy. Fixed only `context_window` for fast-coder in `models.json` and re-ran `gen.py`.\n\n[result] All three regenerated configs now show 262144 and zero occurrences of 131072 remain (`grep` output above). `models.json` was edited in exactly one field, so every other model setting (max_output, tool_calling, other models, all other config fields) is unchanged — the generator is deterministic and reads only those values.\n\n[assumptions] \"For good\" means fixing the source of truth rather than hand-editing `out/` copies (hand edits would be lost on next regeneration). Regenerating `out/` is intended since it is derived output.\n\n[verification] Evidence is the two `Select-String` runs quoted above: `claude.json:5`, `codex.toml:2`, `opencode.json:9` each show 262144; a follow-up scan for 131072 across `models.json` and all of `out/` returned 0 matches. No browser, windows or apps were opened, so nothing to close."
+ ],
+ "diff": "M models.json\nM out/claude.json\nM out/codex.toml\n\n--- models.json ---\n{\n  \"models\": [\n    {\"name\": \"fast-coder\", \"context_window\": 262144, \"max_output\": 16384, \"tool_calling\": true},\n    {\"name\": \"deep-thinker\", \"context_window\": 200000, \"max_output\": 32768, \"tool_calling\": true},\n    {\"name\": \"tiny-chat\", \"context_window\": 32768, \"max_output\": 4096, \"tool_calling\": false}\n  ]\n}\n\n\n--- out/claude.json ---\n{\n  \"models\": [\n    {\n      \"id\": \"fast-coder\",\n      \"contextWindow\": 262144,\n      \"maxOutputTokens\": 16384,\n      \"supportsTools\": true\n    },\n    {\n      \"id\": \"deep-thinker\",\n      \"contextWindow\": 200000,\n      \"maxOutputTokens\": 32768,\n      \"supportsTools\": true\n    },\n    {\n      \"id\": \"tiny-chat\",\n      \"contextWindow\": 32768,\n      \"maxOutputTokens\": 4096,\n      \"supportsTools\": false\n    }\n  ]\n}\n\n\n--- out/codex.toml ---\n[models.\"fast-coder\"]\ncontext_window = 262144\nmax_output_tokens = 16384\ntool_calling = true\n\n[models.\"deep-thinker\"]\ncontext_window = 200000\nmax_output_tokens = 32768\ntool_calling = true\n\n[models.\"tiny-chat\"]\ncontext_window = 32768\nmax_output_tokens = 4096\ntool_calling = false\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem -Force | Select-Object Name,Mode\" ok -> \"\\u001b[32;1mName       \\u001b[0m\\u001b[32;1m Mode\\u001b[0m\\r\\n\\u001b[32;1m----       \\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\nout         d----\\r\\nAGENTS.md   -a---\\r\\ngen.py      -a---\\r\\nmodels.json -a---\\r\\nREADME.md   -a---\"\n[step 1] read \"models.json\" ok -> \"Read file models.json, lines 1-7\\n1: {\\n2:   \\\"models\\\": [\\n3:     {\\\"name\\\": \\\"fast-coder\\\", \\\"context_window\\\": 131072, \\\"max_output\\\": 16384, \\\"tool_calling\\\": true},\\n4:     {\\\"name\\\": \\\"deep-thinker\\\", \\\"context_window\\\": 200000, \\\"max_output\\\": 32768, \\\"tool_calling\\\": true},\\n5:     {\\\"name\\\": \\\"tiny-chat\\\", \\\"context_window\\\": 32768, \\\"max_output\\\": 4096, \\\"tool_calling\\\": false}\\n6:   ]\\n7: }\"\n[step 1] read \"gen.py\" ok -> \"Read file gen.py, lines 1-58\\n1: \\\"\\\"\\\"Writes the harness configs in out/ from models.json. Python stdlib only.\\\"\\\"\\\"\\n2: \\n3: import json\\n4: from pathlib import Path\\n5: \\n6: ROOT = Path(__file__).resolve().parent\\n7: \\n8: \\n9: def opencode(models):\\n10:     entries = {\\n11:         model[\\\"name\\\"]: {\\n12:             \\\"name\\\": model[\\\"name\\\"],\\n13:             \\\"limit\\\": {\\\"context\\\": model[\\\"context_window\\\"], \\\"output\\\": mod[... 1562 chars cut by the benchmark]\"\n[step 1] edit \"models.json\" ok -> \"Edited models.json (1 replacement)\"\n[step 1] shell \"python gen.py\" ok -> \"wrote out/opencode.json\\r\\nwrote out/codex.toml\\r\\nwrote out/claude.json\"\n[step 1] shell \"Select-String -Path out\\\\* -Pattern \\\"262144|131072\\\" -Context 2,0 | ForEach-Object { \\\"$($_.Filename):$($_.LineNumber): $($_.Line)\\\" }\" ok -> \"claude.json:5:       \\\"contextWindow\\\": 262144,\\r\\ncodex.toml:2: context_window = 262144\\r\\nopencode.json:9:             \\\"context\\\": 262144,\"\n[step 1] shell \"Select-String -Path models.json,out\\\\* -Pattern \\\"131072\\\" | Measure-Object | Select-Object -ExpandProperty Count\" ok -> \"0\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "regenerating gives fast-coder 262144 in all three configs",
+   true
+  ],
+  [
+   "the delivered configs equal what the source generates",
+   true
+  ],
+  [
+   "the delivered generator still writes those configs",
+   true
+  ],
+  [
+   "the other models and fields are unchanged",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 7,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1226,
+  "reasoning_tokens": 498,
+  "largest_turn_tokens": 535
+ },
+ "deliverables": [],
+ "render": null
+}

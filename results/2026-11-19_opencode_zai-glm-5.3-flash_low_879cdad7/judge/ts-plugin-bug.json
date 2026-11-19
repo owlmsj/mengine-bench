@@ -1,0 +1,61 @@
+{
+ "task_id": "ts-plugin-bug",
+ "prompts": [
+  "Users of our harness plugins report that tool.after hooks run out of order, that sometimes a hook never runs, and that a failing hook is silently ignored. The hook bus and the plugin are in {WS}; the README there says how the bus must behave. Fix the bus. Its public API stays as it is, the tests in {WS}/test stay as they are, and package.json takes no dependencies."
+ ],
+ "answers": [
+  "[goal] Fix the hook bus so handlers run in order, emit waits for async handlers, and errors propagate — per README contract.\n\n[action] Rewrote `emit` in `src/bus.ts`: snapshot the handler list at emit start (spread), then `await` each handler sequentially in a `for` loop instead of `forEach(async ...)`.\n\n[result] `npm test`: 2 pass, 0 fail. Verified with a live repro: order is `[\"slow-first\",\"second\",...]` (subscription order, awaited), second emit rejects with `boom` (error propagates, later handlers skipped), the plugin's notice fires once then unsubscribes (`count: 2`), and redaction runs before the audit log (`bash: password=[redacted] ok`).\n\nAssumptions: the API (`on`/`emit`/`count`) and tests stay as-is; no changes needed to `src/plugin.ts` — its behavior was correct once the bus awaited handlers. One note: an off() during emit still lets the current list finish, per README line 13-14.\n\nHow I know it's right: test output quoted above plus the node repro showing ordering, rejection, one-time notice and redaction all match README's four bullet points. No dependencies added; no browser or apps were opened, so nothing to close."
+ ],
+ "diff": "M src/bus.ts\n\n--- src/bus.ts ---\n/**\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\n * handlers run one after another in subscription order, emit resolves after all of them,\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\n */\n\nexport type Handler<T> = (payload: T) => void | Promise<void>;\n\nexport class HookBus {\n  private handlers: Map<string, Handler<unknown>[]> = new Map();\n\n  /** Subscribes a handler to an event; returns the function that unsubscribes it. */\n  on<T>(event: string, handler: Handler<T>): () => void {\n    const list = this.handlers.get(event) ?? [];\n    list.push(handler as Handler<unknown>);\n    this.handlers.set(event, list);\n    return () => {\n      const index = list.indexOf(handler as Handler<unknown>);\n      if (index >= 0) {\n        list.splice(index, 1);\n      }\n    };\n  }\n\n  /** Runs the handlers of an event with the payload. */\n  async emit<T>(event: string, payload: T): Promise<void> {\n    // Snapshot: handlers subscribed when emit starts, so mid-emit off() does not stop the others.\n    const list = [...(this.handlers.get(event) ?? [])];\n    for (const handler of list) {\n      await handler(payload); // errors propagate and reject emit, stopping later handlers\n    }\n  }\n\n  /** How many handlers an event has. */\n  count(event: string): number {\n    return (this.handlers.get(event) ?? []).length;\n  }\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \".\" ok -> \"Read directory ., entries 1-5\\nsrc\\\\\\ntest\\\\\\nAGENTS.md\\npackage.json\\nREADME.md\"\n[step 1] read \"README.md\" ok -> \"Read file README.md, lines 1-19\\n1: # harness-hooks\\n2: \\n3: The hook bus our harness plugins use (OpenCode-style hooks such as `tool.before` and `tool.after`).\\n4: Plain TypeScript run by Node 24 directly (`npm test` runs `node --test`); no dependencies.\\n5: \\n6: ## How the bus behaves\\n7: \\n8: - `bus.on(event, handler)` subscribes a handler and returns a function that unsubscribes it.\\n9: - `await bus.em[... 775 chars cut by the benchmark]\"\n[step 1] read \"package.json\" ok -> \"Read file package.json, lines 1-9\\n1: {\\n2:   \\\"name\\\": \\\"harness-hooks\\\",\\n3:   \\\"version\\\": \\\"0.3.0\\\",\\n4:   \\\"private\\\": true,\\n5:   \\\"type\\\": \\\"module\\\",\\n6:   \\\"scripts\\\": {\\n7:     \\\"test\\\": \\\"node --test\\\"\\n8:   }\\n9: }\"\n[step 1] read \"src\" ok -> \"Read directory src, entries 1-2\\nbus.ts\\nplugin.ts\"\n[step 1] read \"src\\\\plugin.ts\" ok -> \"Read file src\\\\plugin.ts, lines 1-26\\n1: import type { HookBus } from \\\"./bus.ts\\\";\\n2: \\n3: export type ToolResult = { tool: string; output: string };\\n4: \\n5: const PASSWORD = /password=\\\\S+/g;\\n6: \\n7: /** The redaction rules load asynchronously in production (from the workspace settings). */\\n8: async function loadRules(): Promise<RegExp> {\\n9:   await new Promise((resolve) => setTimeout(resolve, 5));\\n10: [... 685 chars cut by the benchmark]\"\n[step 1] read \"src\\\\bus.ts\" ok -> \"Read file src\\\\bus.ts, lines 1-37\\n1: /**\\n2:  * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\\n3:  * handlers run one after another in subscription order, emit resolves after all of them,\\n4:  * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\\n5:  */\\n6: \\n7: export type Handler<T> = (payload: T) => void | Promise<void>;\\n8: \\n[... 1012 chars cut by the benchmark]\"\n[step 1] read \"test\" ok -> \"Read directory test, entries 1-1\\nbus.test.ts\"\n[step 1] read \"test\\\\bus.test.ts\" ok -> \"Read file test\\\\bus.test.ts, lines 1-21\\n1: import { test } from \\\"node:test\\\";\\n2: import assert from \\\"node:assert/strict\\\";\\n3: import { HookBus } from \\\"../src/bus.ts\\\";\\n4: \\n5: test(\\\"emit calls a subscribed handler with the payload\\\", async () => {\\n6:   const bus = new HookBus();\\n7:   const seen: string[] = [];\\n8:   bus.on<string>(\\\"tool.after\\\", (payload) => {\\n9:     seen.push(payload);\\n10:   });\\n11:   aw[... 346 chars cut by the benchmark]\"\n[step 1] edit \"src\\\\bus.ts\" ok -> \"Edited src/bus.ts (1 replacement)\"\n[step 1] shell \"npm test 2>&1 | Select-Object -Last 15\" ok -> \"> harness-hooks@0.3.0 test\\r\\n> node --test\\r\\n\\r\\n✔ emit calls a subscribed handler with the payload (0.9183ms)\\r\\n✔ unsubscribe removes the handler (0.1773ms)\\r\\nℹ tests 2\\r\\nℹ suites 0\\r\\nℹ pass 2\\r\\nℹ fail 0\\r\\nℹ cancelled 0\\r\\nℹ skipped 0\\r\\nℹ todo 0\\r\\nℹ duration_ms 89.8559\"\n[step 1] shell \"node -e \\\"\\nimport('./src/plugin.ts').then(async ({registerAuditPlugin}) => {\\n  const { HookBus } = await import('./src/bus.ts');\\n  const bus = new HookBus(); const audit = []; const res = { tool: 'bash', output: 'password=abc ok' };\\n  registerAuditPlugin(bus, audit);\\n  await bus.emit('tool.after', res);\\n  await bus.emit('tool.after', { tool: 'bash', output: 'password=xyz' });\\n  console.log(JSON.stringify(audit, null, 1), '| count:', bus.count('tool.after'));\\n  const bus2 = new HookBus(); const order = [];\\n  bus2.on('e', async () => { await new Promise(r => setTimeout(r, 10)); order.push('slow-first'); });\\n  bus2.on('e', () => order.push('second'));\\n  await bus2.emit('e', null);\\n  try { bus2.on('e', () => { throw new Error('boom'); }); await bus2.emit('e', null); } catch (e) { order.push('rejected:' + e.message); }\\n  console.log(JSON.stringify(order), 'count after:', bus2.count('e'));\\n})\\\"\" ok -> \"[\\n \\\"notice: tool output is audited\\\",\\n \\\"bash: password=[redacted] ok\\\",\\n \\\"bash: password=[redacted]\\\"\\n] | count: 2\\n[\\\"slow-first\\\",\\\"second\\\",\\\"slow-first\\\",\\\"second\\\",\\\"rejected:boom\\\"] count after: 3\"",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "package.json takes no dependencies",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hidden handlers run in subscription order",
+   true
+  ],
+  [
+   "hidden emit resolves after every handler",
+   true
+  ],
+  [
+   "hidden a failing handler rejects emit",
+   true
+  ],
+  [
+   "hidden a handler that unsubscribes itself does not stop the others",
+   true
+  ],
+  [
+   "hidden the audit plugin redacts before it logs",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 11,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 905,
+  "reasoning_tokens": 196,
+  "largest_turn_tokens": 319
+ },
+ "deliverables": [],
+ "render": null
+}

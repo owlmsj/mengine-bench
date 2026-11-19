@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Under the Wave off Kanagawa</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#e8d1a5}
+canvas{display:block;width:100%;height:100%}
+#cartouche{position:absolute;left:0;top:0;width:48px;height:218px;box-sizing:border-box;transform-origin:top left;pointer-events:none;border:1px solid #153852;outline:1px solid #153852;outline-offset:-5px;color:#153852;background:#f6e9c9b0;writing-mode:vertical-rl;display:flex;align-items:center;justify-content:center;gap:5px;font:17px/1 "Yu Mincho","MS Mincho",serif;letter-spacing:1px;white-space:nowrap}
+#cartouche small{font-size:14px}
+#status{position:absolute;inset:0;display:grid;place-content:center;font:1rem Georgia,serif;color:#203c4e;padding:2rem;text-align:center}
+#status[hidden],#cartouche[hidden]{display:none}
+</style>
+</head>
+<body>
+<div id="cartouche" lang="ja" hidden><span>冨嶽三十六景</span><small>神奈川沖浪裏</small></div>
+<div id="status" role="status">Loading the scene…</div>
+<script type="module">
+const status = document.querySelector('#status');
+const cartouche = document.querySelector('#cartouche');
+try {
+const T = await import('https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js');
+const W = 1280, H = 860;
+const scene = new T.Scene();
+const camera = new T.OrthographicCamera(-640,640,430,-430,1,1600);
+camera.position.z = 800;
+const renderer = new T.WebGLRenderer({antialias:true});
+renderer.setClearColor('#e8d1a5');
+renderer.domElement.setAttribute('role','img');
+renderer.domElement.setAttribute('aria-label','Under the Wave off Kanagawa. A vast curling blue wave towers over three wooden boats, with snow-covered Mount Fuji in the distance.');
+document.body.append(renderer.domElement);
+const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+const ink = '#153852', deep = '#16456a', cobalt = '#205b83', blue = '#317498';
+const mist = '#b6d3cb', pale = '#d4e2cf', cream = '#f8efd4';
+let seed = 417;
+function random(){
+  seed = (1664525 * seed + 1013904223) >>> 0;
+  return seed / 4294967296;
+}
+function group(name,z){
+  const g = new T.Group();
+  g.name = name; g.position.z = z; scene.add(g);
+  return g;
+}
+const sky = group('Paper sky',0);
+const peak = group('Mount Fuji',16);
+const swell = group('Distant swell',32);
+const breaker = group('Great wave',62);
+const leftBoat = group('Left boat',84);
+const middleBoat = group('Distant boat',93);
+const basin = group('Middle sea',109);
+const nearBoat = group('Foreground boat',125);
+const foreground = group('Foreground sea',145);
+const spray = group('Airborne foam',161);
+const materials = new Map();
+function material(color) {
+  if(!materials.has(color)) materials.set(color,new T.MeshBasicMaterial({color,side:T.DoubleSide}));
+  return materials.get(color);
+}
+function curve(path){
+  const tokens = path.match(/[MLCQ]|-?\d+(?:\.\d+)?/g);
+  const outline = new T.Shape();
+  for(let i=0;i<tokens.length;){
+    const cmd = tokens[i++];
+    const count = {M:2,L:2,Q:4,C:6}[cmd];
+    const values = tokens.slice(i,i+count).map(Number);
+    i+=count;
+    if(cmd==='M') outline.moveTo(...values);
+    if(cmd==='L') outline.lineTo(...values);
+    if(cmd==='Q') outline.quadraticCurveTo(...values);
+    if(cmd==='C') outline.bezierCurveTo(...values);
+  }
+  return outline.getPoints(8);
+}
+function polygon(parent,points,z,colors,relief=0) {
+  const flat = points.map(([x,y])=>new T.Vector2(x,y));
+  const triangles = T.ShapeUtils.triangulateShape(flat,[]);
+  const vertices=[], palette=[];
+  for(const [a,b,c] of triangles){
+    const face = new T.Color(Array.isArray(colors) ? colors[Math.floor(random()*colors.length)] : colors);
+    const corners = [points[a],points[b],points[c]];
+    for(const [x,y] of corners){
+      vertices.push(x-W/2,H/2-y,z+relief*Math.sin(x*.012+y*.017));
+      palette.push(face.r,face.g,face.b);
+    }
+  }
+  const geo = new T.BufferGeometry();
+  geo.setAttribute('position',new T.Float32BufferAttribute(vertices,3));
+  geo.setAttribute('color',new T.Float32BufferAttribute(palette,3));
+  const mesh = new T.Mesh(geo,facets);
+  parent.add(mesh);
+}
+const facets = new T.MeshBasicMaterial({vertexColors:true,side:T.DoubleSide});
+function fill(parent,path,z,colors,relief=0){
+  polygon(parent,curve(path).map(p=>[p.x,p.y]),z,colors,relief);
+}
+function stroke(parent,path,z,color,width){
+  const p = curve(path);
+  const ribbon = [[],[]];
+  for(let i=0;i<p.length;i++){
+    const tangent = p[Math.min(i+1,p.length-1)].clone().sub(p[Math.max(i-1,0)]).normalize();
+    const radius = width*(.12+.38*Math.sin(Math.PI*i/(p.length-1))**.45);
+    ribbon[0].push([p[i].x-tangent.y*radius,p[i].y+tangent.x*radius]);
+    ribbon[1].push([p[i].x+tangent.y*radius,p[i].y-tangent.x*radius]);
+  }
+  polygon(parent,ribbon[0].concat(ribbon[1].reverse()),z,color);
+}
+function solid(parent,geometry,x,y,z,color,sx,sy,sz,rotation=0){
+  const m = new T.Mesh(geometry,material(color));
+  m.position.set(x-W/2,H/2-y,z);
+  m.scale.set(sx,sy,sz);
+  m.rotation.z=rotation;
+  parent.add(m);
+  return m;
+}
+const pebble = new T.IcosahedronGeometry(1,0);
+
+// A mesh gradient and flecks give the sky the warm tones of printed paper.
+const skyGeo = new T.PlaneGeometry(1800,1150,24,18);
+const skyPos = skyGeo.getAttribute('position');
+const skyColors=[];
+const stops = [[0,'#e9d3ab'],[.48,'#f4e6c8'],[.61,'#efe3c9'],[.76,'#8d8b79'],[1,'#776e60']];
+for(let i=0;i<skyPos.count;i++){
+  const y = (H/2-skyPos.getY(i))/H;
+  const k = Math.max(0,stops.findIndex(([p])=>p>=y)-1);
+  const [a,c] = stops[k], [b,d] = stops[k+1];
+  const color = new T.Color(c).lerp(new T.Color(d),T.MathUtils.clamp((y-a)/(b-a),0,1));
+  color.multiplyScalar(.975+random()*.05);
+  skyColors.push(color.r,color.g,color.b);
+}
+skyGeo.setAttribute('color',new T.Float32BufferAttribute(skyColors,3));
+sky.add(new T.Mesh(skyGeo,facets));
+fill(sky,'M 677 155 L 741 122 L 775 124 L 800 98 L 851 96 L 887 65 L 924 68 L 951 97 L 997 102 L 1055 126 L 1015 157 L 964 174 L 857 175 L 801 190 L 744 179',1,['#f3e5c7','#f5e8cc','#f7e9cc']);
+fill(sky,'M 115 179 L 164 151 L 217 152 L 250 142 L 297 151 L 334 170 L 276 189 L 204 193 L 151 198',1,['#f3e3c4','#efe0bf']);
+
+const grains = new T.BufferGeometry();
+const grit=[];
+for(let i=0;i<22000;i++) grit.push((random()-.5)*1550,(random()-.5)*980,3);
+grains.setAttribute('position',new T.Float32BufferAttribute(grit,3));
+sky.add(new T.Points(grains,new T.PointsMaterial({color:'#8c6946',opacity:.15,transparent:true,size:1.1,sizeAttenuation:false,depthWrite:false})));
+
+fill(peak,'M 658 641 L 720 617 L 756 604 L 786 579 L 804 559 L 817 553 L 827 565 L 842 585 L 865 602 L 903 618 L 949 639 L 974 670 L 642 675',0,[ink,'#234d66',deep,'#345c71'],2);
+fill(peak,'M 728 618 L 756 603 L 786 579 L 804 559 L 817 553 L 827 565 L 842 585 L 865 602 L 898 616 L 878 619 L 860 613 L 855 622 L 846 617 L 835 623 L 829 607 L 822 619 L 818 613 L 814 627 L 806 622 L 801 610 L 795 624 L 788 617 L 776 628 L 775 617 L 752 625 L 743 621',4,[cream,'#f3ebd3','#e6e4cf']);
+stroke(peak,'M 726 620 L 756 604 L 786 580 L 804 559 L 817 553 L 827 565 L 842 584 L 866 603 L 904 618',7,ink,2.8);
+
+fill(swell,'M -80 279 C 10 339 80 282 142 288 C 365 323 480 591 693 641 C 867 701 1088 594 1155 481 C 1200 416 1240 361 1350 300 L 1350 910 L -80 910',0,[ink,deep,'#204e71'],4);
+fill(swell,'M 659 642 C 849 728 1076 598 1155 481 C 1200 416 1240 361 1350 300 L 1350 500 C 1246 519 1145 648 993 677 C 855 716 755 700 659 642',8,[cream,pale,'#eee9cd'],3);
+for(let i=0;i<17;i++){
+  const x=1000+i*19, y=657-Math.pow(i/16,1.7)*164;
+  fill(swell,`M ${x} ${y} Q ${x-14} ${y-14} ${x-10} ${y-24} Q ${x+3} ${y-22} ${x+6} ${y-14} Q ${x+13} ${y-8} ${x+36} ${y-23} L ${x+35} ${y+2}`,13,[ink,deep,cobalt]);
+}
+
+// The inner face and the overhanging cap are modeled as separate wave surfaces.
+fill(breaker,'M -95 376 C 59 363 143 277 231 186 C 312 114 419 74 495 77 C 550 74 603 114 633 166 C 600 160 575 171 578 198 C 650 213 729 217 746 291 C 678 254 630 261 583 280 C 529 304 496 354 507 408 C 521 500 575 556 660 628 C 541 664 426 651 348 608 C 186 684 53 697 -88 643',0,[ink,deep,'#193e5e','#1b4b70',deep],7);
+fill(breaker,'M -84 365 C -7 369 64 334 107 298 C 170 247 199 199 265 157 C 348 106 402 82 466 78 C 491 69 534 75 559 93 C 597 119 627 126 645 169 C 633 169 628 156 610 155 C 595 150 589 165 598 175 C 607 188 616 192 621 207 C 664 203 700 216 726 245 C 744 263 754 281 758 304 C 743 289 727 280 714 283 C 702 286 700 297 710 308 C 683 307 682 283 663 282 C 653 281 641 287 641 297 C 624 282 607 275 597 284 C 583 290 593 301 579 313 C 569 296 571 278 559 275 C 548 269 540 282 527 291 C 530 270 518 268 526 253 C 513 244 495 255 488 246 C 501 230 519 221 512 210 C 503 204 492 216 482 213 C 484 198 473 190 458 195 C 453 181 440 170 429 182 C 416 193 424 206 408 207 C 402 195 405 180 392 181 C 375 183 382 209 369 212 C 360 197 344 194 333 204 C 327 215 343 229 328 232 C 317 210 287 216 285 239 C 283 262 294 283 320 290 C 282 312 277 347 238 360 C 152 377 97 455 -72 466',10,[cream,'#f7efd6','#efe8cb','#f8f1da'],4);
+stroke(breaker,'M -50 362 C 30 372 102 308 148 260 C 211 194 256 152 336 115 C 388 89 439 78 466 78 C 499 66 534 79 559 93 C 596 118 632 132 645 169',16,ink,3.5);
+const ribs=[
+'M 308 260 C 322 219 367 205 401 191 C 372 216 343 236 340 296 C 318 303 313 281 308 260',
+'M 355 310 C 363 253 423 201 468 186 C 443 216 389 247 383 327 C 378 353 355 340 355 310',
+'M 396 363 C 413 279 468 214 504 209 C 485 237 447 294 442 360 C 438 408 465 462 496 511 C 444 478 403 411 396 363',
+'M 461 382 C 469 322 505 281 553 271 C 521 300 489 335 490 389 C 487 463 550 535 582 573 C 523 543 456 462 461 382',
+'M 94 451 C 136 414 184 403 224 389 C 174 433 173 479 215 529 C 253 573 292 593 325 610 C 246 592 159 547 119 494',
+'M 221 414 C 251 395 279 375 312 376 C 268 419 273 456 300 499 C 326 536 353 559 397 590 C 326 575 263 530 237 479',
+'M 317 404 C 327 381 346 363 364 358 C 349 414 364 476 423 537 C 373 510 330 463 317 404'];
+for(const rib of ribs) fill(breaker,rib,6,[cobalt,blue,'#28688f',deep],2);
+
+// Each recursive-looking curl is a tapered, outlined foam blade.
+function claw(parent,x,y,s,angle,z){
+  const cs=Math.cos(angle), sn=Math.sin(angle);
+  const points=[[-8,24],[-10,11],[-8,-1],[-1,-10],[9,-15],[20,-13],[27,-6],[29,3],[23,-2],[17,-5],[11,-4],[7,2],[10,8],[16,12],[10,12],[4,10],[0,15],[1,23],[7,29],[-1,27]];
+  const reach=.76+random()*.58, height=.76+random()*.53;
+  function transform(scale){
+    return points.map(([u,v])=>[x+(u*reach*cs-v*height*sn)*s*scale,y+(u*reach*sn+v*height*cs)*s*scale]);
+  }
+  polygon(parent,transform(1.12),z,ink);
+  polygon(parent,transform(1),z+.12,random()<.25?pale:cream);
+}
+const curlLines=[
+ [[290,235],[351,200],[418,174],[483,147],[542,147],[598,152],[627,162]],
+ [[321,273],[371,250],[415,220],[484,202],[535,200],[592,205],[636,224],[691,238],[734,267]],
+ [[475,264],[525,252],[569,264],[619,278],[665,298],[707,313],[735,338]],
+ [[19,418],[86,366],[141,362],[193,334],[241,345],[276,371],[321,341],[362,325],[399,338],[439,323]],
+ [[18,487],[65,468],[122,448],[168,435],[219,421],[264,446],[309,420],[353,407],[397,421]]
+];
+for(let row=0;row<curlLines.length;row++){
+  const line=curlLines[row];
+  for(let j=0;j<line.length-1;j++){
+    const [x,y]=line[j], [u,v]=line[j+1];
+    const n=Math.round(Math.hypot(u-x,v-y)/20);
+    for(let i=0;i<n;i++){
+      const t=i/n, px=x+(u-x)*t+(random()-.5)*13, py=y+(v-y)*t+(random()-.5)*20;
+      const size=.32+random()*.59;
+      const angle=-1.1+random()*2.3;
+      claw(breaker,px,py,size,angle,19+row*2);
+      if(random()<.55){
+        claw(breaker,px+8+random()*11,py+9+random()*17,size*.54,angle+.75,20+row*2);
+      }
+    }
+  }
+}
+
+function boat(parent,anchors,depth,people,crewFrom,crewTo){
+  const [a,b,c,d]=anchors;
+  function center(t){
+    const q=1-t;
+    return [q*q*q*a[0]+3*q*q*t*b[0]+3*q*t*t*c[0]+t*t*t*d[0],
+      q*q*q*a[1]+3*q*q*t*b[1]+3*q*t*t*c[1]+t*t*t*d[1]];
+  }
+  function edge(t,f){
+    const [x,y]=center(t);
+    return [x,y+Math.sin(Math.PI*t)**.68*depth*f];
+  }
+  function plank(top,bottom,z,colors){
+    const strip=[];
+    for(let i=0;i<=24;i++) strip.push(edge(i/24,top));
+    for(let i=23;i>=1;i--) strip.push(edge(i/24,bottom));
+    polygon(parent,strip,z,colors,1);
+  }
+  plank(-.72,1.12,0,ink);
+  plank(-.62,-.09,3,['#efd7a6','#c99c6c','#ad805a','#dfb78a']);
+  plank(-.08,1,5,['#d99f74','#e6b18a','#eac298','#c38a64']);
+  plank(.64,.79,7,['#f0d2a2','#f5d7a5','#e2b482']);
+  plank(-.14,-.065,8,ink);
+  for(let i=2;i<23;i++){
+    const t=i/24;
+    const far=edge(t,-.59), near=edge(t,-.12);
+    polygon(parent,[far,edge(t+.006,-.59),edge(t+.008,-.12),near],8.5,'#765a49');
+  }
+  for(let i=0;i<people;i++){
+    const t=crewFrom+(crewTo-crewFrom)*i/Math.max(1,people-1);
+    const [x,y]=edge(t,-.5);
+    const scale=.6+depth/42;
+    solid(parent,pebble,x+6*scale,y-3*scale,11,ink,14*scale,7*scale,5*scale,.3);
+    solid(parent,pebble,x+5*scale,y-5*scale,14,i%2?deep:cobalt,11*scale,6*scale,5*scale,.3);
+    solid(parent,pebble,x-5*scale,y-4*scale,17,'#e9c5a1',4.8*scale,5*scale,4*scale);
+  }
+}
+boat(leftBoat,[[37,406],[125,557],[241,659],[376,597]],27,5,.56,.83);
+boat(middleBoat,[[708,595],[840,735],[1058,604],[1167,449]],15,8,.55,.91);
+
+fill(basin,'M -66 553 C 81 731 190 614 303 581 C 366 562 407 486 433 479 C 474 474 485 507 511 506 C 565 519 606 606 668 633 C 776 704 1063 688 1211 605 C 1272 573 1320 536 1370 504 L 1380 925 L -70 925',0,[cream,'#f4eed2','#e6e7cd',pale],5);
+stroke(basin,'M 288 587 C 369 564 407 486 433 479 C 474 474 485 507 511 506 C 565 519 606 606 668 633 C 776 704 1063 688 1211 605 C 1272 573 1320 536 1370 504',7,ink,3);
+const channels=[
+'M 499 700 C 493 656 519 644 532 650 C 556 669 581 724 624 759 C 705 826 838 845 965 796 C 912 851 787 881 675 857 C 599 841 525 795 499 700',
+'M 550 589 C 577 603 592 650 625 680 C 680 731 745 763 809 777 C 755 782 704 770 653 746 C 596 717 569 660 550 589',
+'M 617 631 C 648 620 667 684 719 718 C 778 752 836 758 880 761 C 809 780 709 749 669 711 C 651 694 627 655 617 631',
+'M 704 669 C 720 650 750 690 779 705 C 826 730 892 744 961 744 C 909 771 813 746 767 722 C 732 704 706 679 704 669',
+'M 843 697 C 918 710 981 684 1029 682 C 1100 677 1181 626 1241 604 C 1178 658 1110 710 1044 723 C 971 733 920 725 843 697',
+'M 955 689 C 1012 675 1081 667 1158 635 C 1209 612 1253 592 1307 557 C 1256 606 1210 630 1165 652 C 1089 690 1015 704 955 689'];
+for(const path of channels) {
+  fill(basin,path,9,[ink,deep,cobalt,'#204c6f'],2);
+}
+stroke(basin,'M 513 671 C 536 763 654 870 819 845 C 871 837 917 822 964 797',13,blue,9);
+stroke(basin,'M 584 632 C 610 700 671 738 735 763',14,mist,10);
+stroke(basin,'M 777 690 C 840 729 955 749 1041 713',14,mist,12);
+
+boat(nearBoat,[[520,650],[617,836],[857,851],[1075,730]],28,8,.66,.89);
+
+fill(foreground,'M -94 774 C -23 653 43 657 93 692 C 144 733 171 668 217 659 C 269 642 300 702 328 733 C 370 761 403 702 450 729 C 530 775 534 815 606 846 C 753 906 909 827 1015 790 C 1097 753 1179 662 1299 578 L 1385 536 L 1385 920 L -94 920',0,[cream,pale,'#e8e9ce','#f1efd7'],3);
+const frontInk=[
+'M -30 856 C 2 790 22 738 60 734 C 91 726 104 773 151 748 C 138 785 108 789 106 818 C 101 836 124 845 154 863 L -30 893',
+'M 115 875 C 137 838 135 816 162 796 C 194 773 185 744 202 718 C 220 704 239 712 225 742 C 208 772 212 779 233 768 C 284 748 253 816 296 863 L 305 901',
+'M 324 873 C 314 842 345 806 369 823 C 396 834 388 850 422 863 L 443 900',
+'M 410 776 C 408 747 438 747 460 772 C 485 797 488 806 528 820 C 496 820 499 848 541 868 L 470 885 C 466 849 440 811 410 776',
+'M 949 821 C 1007 803 1043 774 1113 768 C 1185 761 1227 720 1327 700 L 1350 747 C 1250 758 1212 799 1139 807 C 1075 817 1034 848 949 821',
+'M 1086 754 C 1128 730 1166 706 1199 704 C 1253 703 1262 668 1345 650 L 1342 678 C 1265 704 1220 741 1086 754',
+'M 1160 835 C 1222 807 1257 795 1347 784 L 1343 829 C 1275 826 1233 851 1160 835'];
+for(const path of frontInk) fill(foreground,path,7,[ink,deep,cobalt,'#1d5075'],3);
+stroke(foreground,'M 973 824 C 1044 820 1087 795 1153 787 C 1219 778 1263 744 1320 735',13,blue,10);
+stroke(foreground,'M 1015 790 C 1097 753 1179 662 1299 578',8,ink,2.7);
+const foamBanks=[[[13,770],[62,720],[120,748],[174,708],[218,681],[275,729],[310,796]],
+[[278,664],[327,646],[385,614],[438,576],[477,629],[509,687]],
+[[268,800],[312,765],[351,704],[400,691],[435,726],[480,752],[534,825]]];
+for(const bank of foamBanks){
+  for(let j=0;j<bank.length-1;j++){
+    const [x,y]=bank[j], [a,b]=bank[j+1];
+    for(let i=0;i<4;i++){
+      const t=i/4;
+      claw(foreground,x+(a-x)*t+(random()-.5)*19,y+(b-y)*t+(random()-.5)*28,.34+random()*.48,-.75+random()*1.5,16);
+    }
+  }
+}
+
+const drops = new T.InstancedMesh(pebble,material(cream),410);
+const dummy = new T.Object3D();
+for(let i=0;i<drops.count;i++){
+  let x,y;
+  if(i<192){
+    x=298+random()*215; y=225+random()*288;
+    if(y<305) x=Math.max(x,315+(300-y)*1.3);
+    x+=Math.max(0,(y-398)*.25);
+  } else if(i<312){
+    x=530+random()*365; y=536+(random()-.5)*145*Math.pow(random(),.55);
+  } else {
+    x=random()*360; y=737+random()*125;
+  }
+  const size=.65+random()**2*3.25;
+  dummy.position.set(x-W/2,H/2-y,random()*6);
+  dummy.scale.set(size,size*(.65+random()*.6),size);
+  dummy.rotation.set(random(),random(),random()*6);
+  dummy.updateMatrix();
+  drops.setMatrixAt(i,dummy.matrix);
+}
+spray.add(drops);
+
+// Keep the crest in frame while using a modest vertical crop on wide displays.
+function resize(){
+  const aspect=innerWidth/innerHeight;
+  const width=Math.max(W,H*aspect*Math.min(1,1-.32*Math.max(0,aspect-W/H)));
+  const height=width/aspect;
+  camera.left=-width/2; camera.right=width/2;
+  camera.top=height/2; camera.bottom=-height/2;
+  camera.updateProjectionMatrix();
+  renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+  renderer.setSize(innerWidth,innerHeight);
+  const scale=innerWidth/width;
+  cartouche.style.transform=`translate(${innerWidth/2+(67-W/2)*scale}px,${innerHeight/2+(57-H/2)*scale}px) scale(${scale})`;
+}
+addEventListener('resize',resize);
+resize();
+function frame(ms){
+  const t=reduced.matches?0:ms*.001;
+  breaker.position.y=1.8*Math.sin(t*.72);
+  breaker.rotation.z=.0024*Math.sin(t*.66);
+  swell.position.y=1.2*Math.sin(t*.75+.9);
+  basin.position.y=1.7*Math.sin(t*.85+1);
+  foreground.position.y=1.4*Math.sin(t*.78+2);
+  for(const [index,vessel] of [leftBoat,middleBoat,nearBoat].entries()){
+    vessel.position.y=1.8*Math.sin(t*.92+index*1.3);
+    vessel.rotation.z=.003*Math.sin(t*.82+index);
+  }
+  spray.position.x=2.8*Math.sin(t*.68);
+  spray.position.y=2.1*Math.sin(t*.93);
+  renderer.render(scene,camera);
+}
+frame(0);
+status.hidden=true;
+status.textContent='';
+cartouche.hidden=false;
+document.body.dataset.scene='ready';
+renderer.setAnimationLoop(frame);
+} catch (error) {
+  status.textContent='The scene requires WebGL and access to the Three.js CDN.';
+  console.error(error);
+}
+</script>
+</body>
+</html>
+

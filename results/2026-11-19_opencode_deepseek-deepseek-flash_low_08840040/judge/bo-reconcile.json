@@ -1,0 +1,49 @@
+{
+ "task_id": "bo-reconcile",
+ "prompts": [
+  "Finance has to chase June's receivables. The invoices, the bank statement and our reconciliation notes are in {WS}/backoffice. What do we still have to collect or fix? Record it in {WS}/result.json: unpaid and duplicated (invoice ids) and mismatched (id, invoiced, paid)."
+ ],
+ "answers": [
+  "[goal] Reconcile June's 40 invoices against the bank statement and write the gaps to `./result.json`.\n\n[action] Parsed every bank memo for a 4-digit invoice id in any format (`inv1007`, `INV-1015`, `invoice 1023`), grouped payments per invoice, then classified: no payment = unpaid; >1 payment = duplicated; exactly 1 payment with a differing amount = mismatched. Non-invoice lines ignored.\n\n[result] Written to `./result.json`:\n- unpaid: `INV-1008` (23,693.91), `INV-1030` (8,092.29), `INV-1033` (21,266.69)\n- duplicated: `INV-1015` — paid twice, 2026-06-05 and 2026-06-17, 1,904.29 each\n- mismatched: `INV-1021` invoiced 21,320.36 / paid 21,070.36 (short 250.00); `INV-1036` invoiced 8,619.16 / paid 7,757.24 (short 861.92)\n\n[what I found and why it's right] All 40 invoice ids map to exactly one classification and every statement line is accounted for: 37 invoices paid at least once, 36 of those fully and exactly. The three ignored lines are `CDB INTEREST` (+1,204.33), `BANK SERVICE PACKAGE FEE` (-89.90) and `PIX received unidentified 1099` (1,500.00) — the README says to ignore fees, interest and PIX transfers without an identifiable invoice, and no INV-1099 exists. Assumptions: amounts compared to the cent (tolerance 0.005), \"duplicated\" means more than one payment regardless of amount, and categories are exclusive per the README — so INV-1015 is only duplicated even though both of its payments equal its invoice. Verified by re-reading the emitted JSON and printing the parsed object.\n\n[next] None; hand `result.json` to Finance."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"unpaid\": [\"INV-1008\", \"INV-1030\", \"INV-1033\"],\n  \"duplicated\": [\"INV-1015\"],\n  \"mismatched\": [\n    {\"id\": \"INV-1021\", \"invoiced\": 21320.36, \"paid\": 21070.36},\n    {\"id\": \"INV-1036\", \"invoiced\": 8619.16, \"paid\": 7757.24}\n  ]\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"ls -la ./backoffice; echo ---; find ./backoffice -type f | head -50\" ok -> \"\\u001b[31;1mGet-ChildItem: \\u001b[31;1mA parameter cannot be found that matches parameter name 'la'.\\u001b[0m\\r\\n---\\r\\n./backoffice/bank_statement_june.csv\\n./backoffice/invoices.csv\\n./backoffice/README.md\"\n[step 1] shell \"cat ./backoffice/README.md; echo ---INV; cat ./backoffice/invoices.csv; echo ---BANK; cat ./backoffice/bank_statement_june.csv\" ok -> \"# How we reconcile receivables\\r\\n\\r\\n- The bank memo cites the invoice in different formats.\\r\\n- Ignore fees, interest and PIX transfers without an identifiable invoice.\\r\\n- unpaid: invoices with no payment. duplicated: invoices paid more than once.\\r\\n- mismatched: a single payment whose amount differs from its invoice.\\r\\n- The three categories are exclusive: a duplicated invoice is never also mismatched[... 3531 chars cut by the benchmark]\"\n[step 1] shell \"python - <<'EOF'\\nimport csv,re\\ninv={}\\nfor r in csv.DictReader(open('backoffice/invoices.csv',encoding='utf-8',errors='replace')):\\n    inv[r['id']]=float(r['amount'])\\npay={}\\nfor r in csv.DictReader(open('backoffice/bank_statement_june.csv',encoding='utf-8',errors='replace')):\\n    m=re.search(r'(?:inv(?:oice)?[\\\\s-]*)?(\\\\d{4})',r['memo'],re.I)\\n    if not m: print('skip',r); continue\\n    iid='INV-'+m.group(1)\\n    if iid not in inv: print('unknown',r); continue\\n    pay.setdefault(iid,[]).append(float(r['amount']))\\nunpaid=[i for i in inv if i not in pay]\\ndup=[i for i,v in pay.items() if len(v)>1]\\nmis=[(i,inv[i],v[0]) for i,v in pay.items() if len(v)==1 and abs(v[0]-inv[i])>0.005]\\nprint('unpaid',sorted(unpaid))\\nprint('dup',sorted(dup))\\nprint('mis',mis)\\nprint('missing check', sorted(set(inv)-set(pay)))\\nEOF\" ok -> \"unknown {'date': '2026-06-12', 'memo': 'PIX received unidentified 1099', 'amount': '1500.00'}\\r\\nskip {'date': '2026-06-30', 'memo': 'CDB INTEREST', 'amount': '1204.33'}\\r\\nskip {'date': '2026-06-05', 'memo': 'BANK SERVICE PACKAGE FEE', 'amount': '-89.90'}\\r\\nunpaid ['INV-1008', 'INV-1030', 'INV-1033']\\r\\ndup ['INV-1015']\\r\\nmis [('INV-1036', 8619.16, 7757.24), ('INV-1021', 21320.36, 21070.36)]\\r\\nmissing che[... 39 chars cut by the benchmark]\"\n[step 1] write \"./result.json\" ok -> \"Created file successfully: result.json\"\n[step 1] shell \"python -c \\\"import json;d=json.load(open('result.json'));print(d)\\\"\" ok -> \"{'unpaid': ['INV-1008', 'INV-1030', 'INV-1033'], 'duplicated': ['INV-1015'], 'mismatched': [{'id': 'INV-1021', 'invoiced': 21320.36, 'paid': 21070.36}, {'id': 'INV-1036', 'invoiced': 8619.16, 'paid': 7757.24}]}\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "unpaid invoices",
+   true
+  ],
+  [
+   "duplicated payments",
+   true
+  ],
+  [
+   "mismatched amounts",
+   true
+  ],
+  [
+   "invoiced vs paid on mismatches",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 5,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1242,
+  "reasoning_tokens": 102,
+  "largest_turn_tokens": 460
+ },
+ "deliverables": [],
+ "render": null
+}
