@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "**Goal** — find why arena-01 hitches and which setting fixes it, write `result.json`.\n\n**Action** — Parsed both captures (same clock). PresentMon: 8238 frames, mean 7.284 ms → 137.29 fps; p99 frame time 22.05 ms → 1% low 45.36 fps. Frame-time spikes (~22 ms, ~10 frames each) recur at t≈2.4, 6.4, 10.4, …, 58.4 — every 4 s. Sensor log: `gpu_pcie_link_state` = L1 exactly at t=2, 6, 10, 14, …, 58 (every 4 s), L0 otherwise; CPU clock, DPC and disk are flat at those moments (one-off disk spike at t=27, Defender DPC 420 µs at t=43 — neither periodic). `settings.json` has `pcie_aspm_rp1_gpu: L1` (BIOS) — the GPU root port's ASPM L1 puts the link to sleep every 4 s; the wake-up is the hitch.\n\n**Result** — `result.json` written: avg_fps 137.29, low_1pct_fps 45.36, cause = PCIe ASPM L1 on GPU root port, change `pcie_aspm_rp1_gpu: L1 → disabled`. Constraint check: link speed/width (Gen5 x4) untouched, no XMP/PBO/ratio changes. Assumption: \"disabled\" is the BIOS value for off (matches sibling `pcie_aspm_rp2_chipset: disabled`).\n\n**How I know it's right** — the hitch period (4.0 s) and phase (t≈2.4, 6.4, …) match the L1 intervals one-to-one across all 15 cycles; no other sensor correlates.\n\n**Next** — none; no browser tabs or windows were opened."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\"avg_fps\": 137.29, \"low_1pct_fps\": 45.36, \"cause\": \"PCIe ASPM L1 on the GPU root port (pcie_aspm_rp1_gpu=L1): the GPU link drops to L1 every ~4 s (sensors.csv shows L1 at t=2,6,10,...,58, matching the ~22 ms frame-time spikes in presentmon.csv at the same times), and each wake-up hitches the frame. One-off disk (t=27) and Defender DPC (t=43) spikes are not the periodic cause.\", \"changes\": [{\"setting\": \"pcie_aspm_rp1_gpu\", \"from\": \"L1\", \"to\": \"disabled\"}]}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem .. | Select-Object Name, Length\" ok -> \"\\u001b[32;1mName     \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----     \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\nworkspace\"\n[step 1] shell \"Get-ChildItem .. -Force | Select-Object Name, Length; Get-ChildItem . -Force | Select-Object Name, Length\" ok -> \"\\u001b[32;1mName         \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----         \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\nworkspace     \\r\\ncapture       \\r\\nAGENTS.md     394\\r\\nNOTES.md      774\\r\\nsettings.json 2429\"\n[step 1] read \"<WORKSPACE>\\\\NOTES.md\" ok -> \"Read file <WORKSPACE>\\\\NOTES.md, lines 1-15\\n1: # Owner notes - rig \\\"arena-01\\\"\\n2: \\n3: The game hitches every few seconds even though the average frame rate looks fine.\\n4: Capture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\n5: taken at the same time (same clock: second 0 of both files is the same ins[... 531 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\settings.json\" ok -> \"Read file <WORKSPACE>\\\\settings.json, lines 1-125\\n1: {\\n2:   \\\"rig\\\": \\\"arena-01\\\",\\n3:   \\\"settings\\\": [\\n4:     {\\n5:       \\\"setting\\\": \\\"power_plan\\\",\\n6:       \\\"value\\\": \\\"Balanced\\\",\\n7:       \\\"where\\\": \\\"Windows\\\"\\n8:     },\\n9:     {\\n10:       \\\"setting\\\": \\\"hardware_accelerated_gpu_scheduling\\\",\\n11:       \\\"value\\\": \\\"on\\\",\\n12:       \\\"where\\\": \\\"Windows\\\"\\n13:  [... 2658 chars cut by the benchmark]\"\n[step 1] shell \"Get-ChildItem capture -Force | Select-Object Name, Length\" ok -> \"\\u001b[32;1mName          \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----          \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\npresentmon.csv 715870\\r\\nsensors.csv      2660\"\n[step 1] shell \"Get-Content capture\\\\presentmon.csv -TotalCount 5; Write-Host '---'; Get-Content capture\\\\sensors.csv -TotalCount 10\" ok -> \"Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.000000,6.861,6.847,0.294,4.901,5.568\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.006861,6.773,6.812,0.387,4.013,6.252\\r\\nArena.exe,7316,0x000001F2A8C40000,D[... 656 chars cut by the benchmark]\"\n[step 1] other \"{\\\"code\\\": \\\"const fs = await import('fs');\\\\nconst pm = fs.readFileSync('capture/presentmon.csv','utf8').trim().split('\\\\\\\\n').slice(1).map(l=>l.split(','));\\\\nconst rows = pm.map(c=>({t:+c[7], dt:+c[8]}));\\\\nconst mean = rows.reduce((a,r)=>a+r.dt,0)/rows.length;\\\\nconst srt = rows.map(r=>r.dt).sort((a,b)=>a-b);\\\\nconst p99 = srt[Math.floor(0.99*(srt.length-1))];\\\\nconst avg = 1000/mean, low1 = 1000/p99;\\\\nconsole.log('frames', rows.length, 'mean ms', mean.toFixed(3), 'avg fps', avg.toFixed(2), 'p99', p99.toFixed(2), '1% low', low1.toFixed(2));\\\\n// find hitches: dt > 2x median\\\\nconst med = srt[Math.floor(srt.length/2)];\\\\nconst hitches = rows.filter(r=>r.dt > 3*med);\\\\nconsole.log('median', med.toFixed(2), 'hitches >3x med:', hitches.length);\\\\nfor (const h of hitches.slice(0,40)) console.log(h.t.toFixed(3), h.dt.toFixed(1));\\\"}\" ok -> \"Error: Cannot import \\\"fs\\\": it isn't available here, where packages and files can't be loaded. Use the provided globals. (line 1, col 18)\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nrows=[]\\nwith open('capture/presentmon.csv') as f:\\n    r=csv.DictReader(f)\\n    for c in r: rows.append((float(c['TimeInSeconds']), float(c['MsBetweenPresents'])))\\ndts=[d for _,d in rows]\\nmean=sum(dts)/len(dts)\\nsrt=sorted(dts)\\np99=srt[int(0.99*(len(srt)-1))]\\nprint('frames',len(rows),'mean',round(mean,3),'avg_fps',round(1000/mean,2),'p99',round(p99,2),'low1',round(1000/p99,2))\\nmed=srt[len(srt)//2]\\nh=[(t,d) for t,d in rows if d>3*med]\\nprint('median',round(med,2),'hitches',len(h))\\nfor t,d in h: print(round(t,2), round(d,1))\\n\\\"\" ok -> \"frames 8238 mean 7.284 avg_fps 137.29 p99 22.05 low1 45.36\\r\\nmedian 6.96 hitches 177\\r\\n2.4 21.9\\r\\n2.42 22.9\\r\\n2.45 22.1\\r\\n2.47 21.6\\r\\n2.49 22.7\\r\\n2.51 21.0\\r\\n2.53 22.1\\r\\n2.55 21.9\\r\\n2.58 22.0\\r\\n2.6 22.5\\r\\n2.62 21.2\\r\\n6.41 21.8\\r\\n6.43 21.6\\r\\n6.45 22.5\\r\\n6.47 21.2\\r\\n6.49 23.0\\r\\n6.52 21.8\\r\\n6.54 22.4\\r\\n6.56 22.8\\r\\n6.58 21.1\\r\\n6.6 21.6\\r\\n6.63 21.8\\r\\n6.65 22.4\\r\\n10.4 21.3\\r\\n10.42 22.1\\r\\n10.44 22.5\\r\\n10.47 21.9\\r\\n10.49 22.2\\r\\n10.51 [... 1762 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nrows=list(csv.DictReader(open('capture/sensors.csv')))\\nprint('rows',len(rows))\\nfor r in rows:\\n    t=int(r['time_s'])\\n    if t%4 in (2,3):\\n        print(r['time_s'], r['gpu_pcie_link_state'], r['dpc_latency_us'], r['disk_active_pct'], r['top_cpu_process'], r['cpu_clock_mhz'])\\n\\\"\" ok -> \"rows 60\\r\\n2 L1 40 3 Arena.exe 5270\\r\\n3 L0 81 2 Arena.exe 5373\\r\\n6 L1 77 4 Arena.exe 5380\\r\\n7 L0 57 3 Arena.exe 5381\\r\\n10 L1 84 5 Arena.exe 5450\\r\\n11 L0 46 1 Arena.exe 5406\\r\\n14 L1 68 2 Arena.exe 5242\\r\\n15 L0 82 0 Arena.exe 5187\\r\\n18 L1 61 0 Arena.exe 5319\\r\\n19 L0 63 5 Arena.exe 5171\\r\\n22 L1 75 4 Arena.exe 5218\\r\\n23 L0 61 5 Arena.exe 5422\\r\\n26 L1 78 4 Arena.exe 5296\\r\\n27 L0 77 86 Arena.exe 5224\\r\\n30 L1 57 2 Arena[... 418 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\result.json\" failed -> \"\"\n[step 1] write \"<WORKSPACE>\\\\result.json\" failed -> \"\"\n[step 1] shell \"@'\\n{\\\"avg_fps\\\": 137.29, \\\"low_1pct_fps\\\": 45.36, \\\"cause\\\": \\\"PCIe ASPM L1 on the GPU root port (pcie_aspm_rp1_gpu=L1): the GPU link drops to L1 every ~4 s (sensors.csv shows L1 at t=2,6,10,...,58, matching the ~22 ms frame-time spikes in presentmon.csv at the same times), and each wake-up hitches the frame. One-off disk (t=27) and Defender DPC (t=43) spikes are not the periodic cause.\\\", \\\"changes\\\": [{\\\"setting\\\": \\\"pcie_aspm_rp1_gpu\\\", \\\"from\\\": \\\"L1\\\", \\\"to\\\": \\\"disabled\\\"}]}\\n'@ | Set-Content -NoNewline result.json\" ok -> \"(no output)\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 11,
+  "tool_calls": 12,
+  "tool_errors": 2,
+  "shell_commands": 7,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2263,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 452
+ },
+ "deliverables": [],
+ "render": null
+}

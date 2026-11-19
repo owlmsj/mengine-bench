@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-sql-funnel",
+ "prompts": [
+  "Product wants to know where players drop off on each platform. The data is in {WS}/analytics.db and our reporting rules are in {WS}/METRICS.md. Where do we lose the most players? Record it in {WS}/result.json: funnel (per platform, players at each step) and biggest_drop (per platform, the step)."
+ ],
+ "answers": [
+  "Done.\n\n**[goal]** Per-platform funnel + biggest drop per METRICS.md.\n\n**[action]** Read users/events from analytics.db; excluded test accounts and events from unknown players; a step counts at the first occurrence at/after the previous step's time (strict ordering, no time limit); conversion = step players / previous step players; biggest drop = step with lowest conversion.\n\n**[result]** `result.json` written:\n- **pc**: 470 → 389 → 326 → 269; conversions 82.8% / 83.8% / 82.5% → biggest drop **purchase**\n- **steamdeck**: 192 → 128 → 87 → 61; conversions 66.7% / 68.0% / 70.1% → biggest drop **tutorial_complete**\n\n**Assumptions:** \"unknown players\" = event user_ids not in users table (skipped); a player who reaches step N is counted at all steps ≤ N (sequential funnel); install is the funnel base (no conversion defined for it).\n\n**How I know it's right:** computed directly from the DB with the exact rules in METRICS.md; sanity-checked the conversion list per platform (printed above) — pc's lowest is purchase (82.5%), steamdeck's lowest is tutorial_complete (66.7%).\n\n**[next]** None — no tabs/windows opened to close."
+ ],
+ "diff": "A result.json\nA tmp/funnel.py\nA tmp/inspect.py\n\n--- result.json ---\n{\r\n  \"funnel\": {\r\n    \"pc\": {\r\n      \"install\": 470,\r\n      \"tutorial_complete\": 389,\r\n      \"first_match\": 326,\r\n      \"purchase\": 269\r\n    },\r\n    \"steamdeck\": {\r\n      \"install\": 192,\r\n      \"tutorial_complete\": 128,\r\n      \"first_match\": 87,\r\n      \"purchase\": 61\r\n    }\r\n  },\r\n  \"biggest_drop\": {\r\n    \"pc\": \"purchase\",\r\n    \"steamdeck\": \"tutorial_complete\"\r\n  }\r\n}\n\n--- tmp/funnel.py ---\nimport sqlite3, json\nfrom collections import defaultdict\n\nc = sqlite3.connect('analytics.db')\nusers = {uid: (plat, test) for uid, plat, test in c.execute(\"select user_id, platform, is_test from users\")}\nevents = defaultdict(list)\nfor uid, name, ts in c.execute(\"select user_id, name, ts from events\"):\n    events[uid].append((ts, name))\n\nsteps = ['install', 'tutorial_complete', 'first_match', 'purchase']\nfunnel = defaultdict(lambda: [0]*4)\nfor uid, (plat, test) in users.items():\n    if test:\n        continue\n    evs = sorted(events[uid])\n    prev = None\n    for i, s in enumerate(steps):\n        t = None\n        for ts, name in evs:\n            if name == s and (prev is None or ts >= prev):\n                t = ts\n                break\n        if t is None:\n            break\n        funnel[plat][i] += 1\n        prev = t\n\nresult = {\n    'funnel': {p: dict(zip(steps, v)) for p, v in sorted(funnel.items())},\n    'biggest_drop': {},\n}\nfor p, v in funnel.items():\n    convs = [(steps[i+1], v[i+1]/v[i]) for i in range(3) if v[i] > 0]\n    result['biggest_drop'][p] = min(convs, key=lambda x: x[1])[0]\n\nwith open('result.json', 'w') as f:\n    json.dump(result, f, indent=2)\nprint(json.dumps(result, indent=2))\nfor p, v in funnel.items():\n    print(p, v, [round(v[i+1]/v[i],3) if v[i] else None for i in range(3)])\n\n--- tmp/inspect.py ---\nimport sqlite3\nc = sqlite3.connect('analytics.db')\nfor name, sql in c.execute(\"select name, sql from sqlite_master where type='table'\"):\n    print(sql, end='\\n\\n')\nfor (t,) in c.execute(\"select name from sqlite_master where type='table'\"):\n    print(t, c.execute(f'select count(*) from \"{t}\"').fetchone())\n    for row in c.execute(f'select * from \"{t}\" limit 5'):\n        print(row)\n    print()",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\METRICS.md\" ok -> \"Read file <WORKSPACE>\\\\METRICS.md, lines 1-6\\n1: # How we report the funnel\\n2: \\n3: Steps, in order: install, tutorial_complete, first_match, purchase.\\n4: A step counts only at or after the same player's previous step, with no time limit; its time is the first valid occurrence.\\n5: Test accounts and events from unknown players do not co[... 133 chars cut by the benchmark]\"\n[step 1] shell \"sqlite3 ./analytics.db \\\".tables\\\" 2>&1; echo ---; sqlite3 ./analytics.db \\\".schema\\\" 2>&1\" failed -> \"\\u001b[31;1msqlite3: \\u001b[31;1mThe term 'sqlite3' is not recognized as a name of a cmdlet, function, script file, or executable program.\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[31;1mCheck the spelling of the name, or if a path was included, verify that the path is correct and try again.\\u001b[0m\\r\\n---\\r\\n\\u001b[31;1msqlite3: \\u001b[31;1mThe term 'sqlite3' is not recognized as a name of a cmdlet, function, script file, or executable program.\\u001b[0m\\r\\n\\u001b[[... 121 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport sqlite3\\nc=sqlite3.connect('analytics.db')\\nfor r in c.execute(\\\\\\\"select name,sql from sqlite_master where type='table'\\\\\\\"): print(r[1]); print()\\nfor t in [r[0] for r in c.execute(\\\\\\\"select name from sqlite_master where type='table'\\\\\\\")]:\\n    print(t, c.execute(f'select count(*) from {t}').fetchone())\\n    for row in c.execute(f'select * from {t} limit 3'): print(row)\\n\\\"\" failed -> \"File \\\"<string>\\\", line 4\\r\\n    for r in c.execute(\\\\\\r\\n                      ^\\r\\nSyntaxError: '(' was never closed\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\inspect.py\" ok -> \"Created file successfully: <WORKSPACE>/tmp/inspect.py\"\n[step 1] shell \"python tmp/inspect.py\" ok -> \"CREATE TABLE users (user_id text primary key, platform text, is_test integer)\\r\\n\\r\\nCREATE TABLE events (user_id text, name text, ts text)\\r\\n\\r\\nusers (900,)\\r\\n('p0000', 'pc', 0)\\r\\n('p0001', 'pc', 0)\\r\\n('p0002', 'pc', 0)\\r\\n('p0003', 'pc', 0)\\r\\n('p0004', 'steamdeck', 0)\\r\\n\\r\\nevents (2268,)\\r\\n('p0654', 'tutorial_complete', '2026-06-11 23:05:00')\\r\\n('p0037', 'tutorial_complete', '2026-06-24 21:00:00')\\r\\n('p0292', 'f[... 129 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\funnel.py\" ok -> \"Created file successfully: <WORKSPACE>/tmp/funnel.py\"\n[step 1] shell \"python tmp/funnel.py\" ok -> \"{\\r\\n  \\\"funnel\\\": {\\r\\n    \\\"pc\\\": {\\r\\n      \\\"install\\\": 470,\\r\\n      \\\"tutorial_complete\\\": 389,\\r\\n      \\\"first_match\\\": 326,\\r\\n      \\\"purchase\\\": 269\\r\\n    },\\r\\n    \\\"steamdeck\\\": {\\r\\n      \\\"install\\\": 192,\\r\\n      \\\"tutorial_complete\\\": 128,\\r\\n      \\\"first_match\\\": 87,\\r\\n      \\\"purchase\\\": 61\\r\\n    }\\r\\n  },\\r\\n  \\\"biggest_drop\\\": {\\r\\n    \\\"pc\\\": \\\"purchase\\\",\\r\\n    \\\"steamdeck\\\": \\\"tutorial_complete\\\"\\r\\n  }\\r\\n}\\r\\npc [470, 389, 326, 269] [0.8[... 68 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "players per step on pc",
+   true
+  ],
+  [
+   "players per step on steamdeck",
+   true
+  ],
+  [
+   "biggest drop on each platform",
+   true
+  ],
+  [
+   "final answer does not contradict biggest drops",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 7,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 2,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1299,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 486
+ },
+ "deliverables": [],
+ "render": null
+}
