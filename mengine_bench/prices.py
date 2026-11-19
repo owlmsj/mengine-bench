@@ -28,6 +28,7 @@ GOOGLE_PRICING = "https://ai.google.dev/gemini-api/docs/pricing"
 PRICE_READ_DATE = "2026-11-07"
 PRICE_READ_DATE_1110 = "2026-11-10"
 PRICE_READ_DATE_1113 = "2026-11-13"
+PRICE_READ_DATE_1119 = "2026-11-19"
 
 LIST_PRICES: Mapping[str, ListPrice] = {
     # Input at the 1 h cache write price: Claude Code caches nearly all its uncached input.
@@ -45,6 +46,8 @@ LIST_PRICES: Mapping[str, ListPrice] = {
     "gemini-4-carbon": ListPrice(2.0, 0.10, 10.0, GOOGLE_PRICING, PRICE_READ_DATE_1110),
     # Implicit caching only; no date range on the AI Studio page.
     "gemini-4-hydrogen": ListPrice(1.50, 0.075, 7.50, GOOGLE_PRICING, PRICE_READ_DATE_1113),
+    # Paid Standard; implicit caching only, output includes thinking (#252).
+    "gemini-4-neon": ListPrice(3.0, 0.15, 15.0, GOOGLE_PRICING, PRICE_READ_DATE_1119),
 }
 FAST_PRICES: Mapping[str, ListPrice] = {
     "gpt-6-astra": ListPrice(20.0, 2.0, 100.0, OPENAI_PRICING, PRICE_READ_DATE),
