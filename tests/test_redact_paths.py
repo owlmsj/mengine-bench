@@ -76,3 +76,16 @@ def test_claude_project_slug_home_is_redacted() -> None:
     cleaned = redact_paths(line, PathScope())
     assert name not in cleaned and find_leaks(cleaned) == {}
     assert "C--Users-<USER>-AppData" in cleaned and "-home-<USER>-repo" in cleaned
+
+
+def test_user_short_cut_and_hyphen_forms_are_redacted_260() -> None:
+    # #260: published-bound bundles carried C:\Users\<8.3 short name>, pytest-of-<user> and a
+    # transcript cut mid-name ("<prefix>[... 546 chars cut"); whole-token matching missed all three.
+    user = fake_name("usr")
+    names = LocalNames(user=user)
+    short = user[:6].upper() + "~1"
+    text = f"temp {short}\AppData; dir pytest-of-{user}; tail {user[:8]}[... 546 chars cut by the benchmark]"
+    cleaned = redact_paths(text, PathScope(names=names))
+    assert cleaned == "temp <USER>\AppData; dir pytest-of-<USER>; tail <USER>[... 546 chars cut by the benchmark]"
+    assert find_leaks(text, names) == {"user": 3}
+    assert find_leaks(cleaned, names) == {}

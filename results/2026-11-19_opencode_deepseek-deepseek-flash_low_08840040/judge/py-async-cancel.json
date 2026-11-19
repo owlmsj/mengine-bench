@@ -1,0 +1,51 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [],
+ "diff": "A run.py\n\n--- run.py ---\n\"\"\"Bounded-concurrency helper for batch scripts.\n\n    from run import run_tasks\n    await run_tasks(tasks, max_concurrent=8)\n\nEach task is a zero-argument callable returning an awaitable job (coroutine or\nany awaitable). At most ``max_concurrent`` jobs run at once. The coroutine\nreturns once every job has finished.\n\nCtrl+C (KeyboardInterrupt): jobs that already started are cancelled so their\nown cleanup (``try/finally``, async context managers, ``__del__``-free orderly\nteardown) runs, and we wait for each to settle before re-raising. Tasks not yet\nstarted are never invoked. A repeated Ctrl+C during the drain does not abort\ncleanup; we keep draining.\n\"\"\"\n\nfrom __future__ import annotations\n\nimport asyncio\nfrom collections.abc import Awaitable, Callable, Iterable\nfrom typing import Any\n\n__all__ = [\"run_tasks\"]\n\nTask = Callable[[], Awaitable[Any]]\n\n\ndef _check_limit(max_concurrent: object) -> int:\n    if isinstance(max_concurrent, bool) or not isinstance(max_concurrent, int):\n        raise TypeError(f\"max_concurrent must be an int, got {max_concurrent!r}\")\n    if max_concurrent < 1:\n        raise ValueError(f\"max_concurrent must be >= 1, got {max_concurrent!r}\")\n    return max_concurrent\n\n\nasync def run_tasks(tasks: Iterable[Task], max_concurrent: int) -> None:\n    \"\"\"Run every task with at most ``max_concurrent`` jobs in flight.\n\n    A job that raises cancels the other in-flight jobs, awaits their cleanup,\n    then the first exception is re-raised. On KeyboardInterrupt the same cancel\n    and drain happens, then the interrupt is re-raised.\n    \"\"\"\n    limit = _check_limit(max_concurrent)\n\n    task_iter = iter(tasks)\n    pending: set[asyncio.Future] = set()\n    exhausted = False\n\n    async def cancel_and_drain() -> None:\n        # Cancel first, then keep waiting even if we get cancelled again.\n        for fut in list(pending):\n            fut.cancel()\n        while pending:\n            try:\n                await asyncio.gather(*pending, return_exceptions=True)\n            except asyncio.CancelledError:\n                continue\n            break\n        pending.clear()\n\n    try:\n        while True:\n            # Fill the window (lazily; an infinite generator is fine).\n            while len(pending) < limit and not exhausted:\n                try:\n                    task = next(task_iter)\n                except StopIteration:\n                    exhausted = True\n                    break\n                try:\n                    job = task()\n                except BaseException:\n                    # A task that blows up before returning an awaitable counts\n                    # like a failed job: clean up the others, then raise it.\n                    await cancel_and_drain()\n                    raise\n                pending.add(asyncio.ensure_future(job))\n\n            if not pending:\n                if exhausted:\n                    return\n                continue\n\n            done, still_running = await asyncio.wait(\n                pending, return_when=asyncio.FIRST_COMPLETED\n            )\n            pending = set(still_running)\n\n            first_error: BaseException | None = None\n            for fut in done:\n                if fut.cancelled():\n                    continue\n                exc = fut.exception()\n                if exc is not None and first_error is None:\n                    first_error = exc\n            if first_error is not None:\n                await cancel_and_drain()\n                raise first_error\n    except (KeyboardInterrupt, asyncio.CancelledError):\n        await cancel_and_drain()\n        raise\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Created file successfully: <WORKSPACE>/run.py\"\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Wrote file successfully: <WORKSPACE>/run.py\"\n[step 1] shell \"@'\\nimport asyncio, sys, time\\nfrom run import run_tasks\\n\\nasync def main():\\n    live=0; peak=0; cleaned=[]\\n    async def job(i, delay):\\n        nonlocal live,peak\\n        live+=1; peak=max(peak,live)\\n        try:\\n            await asyncio.sleep(delay)\\n            return i\\n        finally:\\n            live-=1; cleaned.append(i)\\n    t0=time.monotonic()\\n    await run_tasks([(lambda i=i: job(i,0.05)) for i in range(20)], 4)\\n    print(\\\"peak\\\",peak,\\\"elapsed\\\",round(time.monotonic()-t0,2))\\n\\n    # cleanup on cancel\\n    got=[]\\n    async def slow(i):\\n        try:\\n            await asyncio.sleep(10)\\n        finally:\\n            await asyncio.sleep(0.01); got.append(i)\\n    tasks=[(lambda i=i: slow(i)) for i in range(10)]\\n    async def canceller():\\n        await asyncio.sleep(0.1)\\n        t=[t for t in asyncio.all_tasks() if t is not asyncio.current_task()][0]\\n        t.cancel()\\n    asyncio.ensure_future(canceller())\\n    try:\\n        await run_tasks(tasks,3)\\n    except asyncio.CancelledError:\\n        print(\\\"cancelled, cleanup ran for\\\", sorted(got), \\\"started tasks pending count ok\\\")\\n    assert len(got)==3, got\\n\\n    # error propagation & cleanup\\n    done=[]\\n    async def boom():\\n        raise RuntimeError(\\\"boom\\\")\\n    async def ok(i):\\n        try: await asyncio.sleep(5)\\n        finally: done.append(i)\\n    try:\\n        await run_tasks([boom, lambda: ok(1), lambda: ok(2)], 3)\\n    except RuntimeError as e:\\n        print(\\\"raised\\\", e, \\\"cleaned\\\", done)\\n\\n    # empty\\n    await run_tasks([], 2)\\n    print[... 218 chars cut by the benchmark]\" ok -> \"peak 4 elapsed 0.31\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\tmptest.py\\\", line 55, in <module>\\r\\n    asyncio.run(main())\\r\\n    ~~~~~~~~~~~^^^^^^^^\\r\\n  File \\\"<HOME>\\\\AppData\\\\Roaming\\\\uv\\\\python\\\\cpython-3.13.14-windows-x86_64-none\\\\Lib\\\\asyncio\\\\runners.py\\\", line 196, in run\\r\\n    return runner.run(main)\\r\\n          [... 672 chars cut by the benchmark]\"\n[step 1] shell \"@'\\nimport asyncio, time\\nfrom run import run_tasks\\n\\nasync def main():\\n    got=[]\\n    async def slow(i):\\n        try:\\n            await asyncio.sleep(10)\\n        finally:\\n            await asyncio.sleep(0.01); got.append(i)\\n    tasks=[(lambda i=i: slow(i)) for i in range(10)]\\n    try:\\n        await asyncio.wait_for(run_tasks(tasks,3), 0.2)\\n    except (TimeoutError, asyncio.TimeoutError):\\n        print(\\\"timeout ok, cleaned\\\", sorted(got))\\n    assert len(got)==3, got\\n\\n    done=[]\\n    async def boom(): raise RuntimeError(\\\"boom\\\")\\n    async def ok(i):\\n        try: await asyncio.sleep(5)\\n        finally: done.append(i)\\n    try:\\n        await run_tasks([boom, lambda: ok(1), lambda: ok(2)], 3)\\n    except RuntimeError as e: print(\\\"raised\\\", e, \\\"cleaned\\\", done)\\n    await run_tasks([], 2)\\n    try: await run_tasks([], 0)\\n    except ValueError as e: print(\\\"valueerror\\\", e)\\n\\nasyncio.run(main())\\nprint(\\\"ALL OK\\\")\\n'@ | Set-Content -Encoding utf8 tmptest.py; python tmptest.py; Remove-Item tmptest.py\" ok -> \"timeout ok, cleaned [0, 1, 2]\\r\\nraised boom cleaned [1, 2]\\r\\nvalueerror max_concurrent must be >= 1, got 0\\r\\nALL OK\"\n[step 1] edit \"<WORKSPACE>\\\\run.py\" ok -> \"Edited <WORKSPACE>/run.py (1 replacement)\"\n[step 1] shell \"@'\\nimport asyncio\\nfrom run import run_tasks\\nasync def main():\\n    done=[]\\n    async def ok(i):\\n        try: await asyncio.sleep(5)\\n        finally: done.append(i)\\n    def bad(): raise TypeError(\\\"sync\\\")\\n    try: await run_tasks([lambda: ok(1), bad, lambda: ok(2)], 3)\\n    except TypeError as e: print(\\\"sync raised\\\", e, \\\"cleaned\\\", done)\\n    # non-int\\n    for bad_v in (2.5, True, \\\"2\\\"):\\n        try: await run_tasks([], bad_v)\\n        except TypeError as e: print(\\\"typeerror:\\\", e)\\nasyncio.run(main())\\nprint(\\\"OK\\\")\\n'@ | Set-Content -Encoding utf8 tmp2.py; python tmp2.py; Remove-Item tmp2.py\" ok -> \"sync raised sync cleaned []\\r\\ntypeerror: max_concurrent must be an int, got 2.5\\r\\ntypeerror: max_concurrent must be an int, got True\\r\\ntypeerror: max_concurrent must be an int, got '2'\\r\\nOK\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   true
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 6,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 3,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 4562,
+  "reasoning_tokens": 1391,
+  "largest_turn_tokens": 1493
+ },
+ "deliverables": [],
+ "render": null
+}

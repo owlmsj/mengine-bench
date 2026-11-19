@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "[goal] Diagnose the four-second hitch while preserving Gen5 x4 and the owner’s overclock settings.\n\n[action] I matched each frame to its sensor-log second using the shared clock and used linear interpolation for the 99th percentile. I recorded the findings in [result.json](./result.json).\n\n[result] **Disable ASPM on the GPU’s RP1 port** (`pcie_aspm_rp1_gpu`, `L1` → `disabled`). All 15 hitch bursts coincided with L1. Each contained 12 frames over 15 ms. Every L0 second stayed below that threshold, including during the Defender scan. The metric check returned `Verified FPS: 137.29 45.35` for average and 1% low, respectively.\n\n[next] Repeat the same replay on the owner’s rig after the change. The capture points to GPU link wake latency as the cause. A post-change capture would confirm whether disabling L1 removes the bursts."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"avg_fps\": 137.29,\n  \"low_1pct_fps\": 45.35,\n  \"cause\": \"GPU PCIe root port RP1 enters the ASPM L1 low-power state every four seconds. All 15 L1 samples coincide with hitch bursts, consistent with latency as the GPU link wakes.\",\n  \"changes\": [\n    {\"setting\": \"pcie_aspm_rp1_gpu\", \"from\": \"L1\", \"to\": \"disabled\"}\n  ]\n}\r\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'rg --files --hidden'\" ok -> \"settings.json\\nNOTES.md\\ncapture\\\\sensors.csv\\ncapture\\\\presentmon.csv\\nAGENTS.md\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-Content NOTES.md,settings.json\\nGet-Content capture/sensors.csv -TotalCount 5\\nGet-Content capture/presentmon.csv -TotalCount 5\\nGet-Content capture/sensors.csv -Tail 2'\" ok -> \"# Owner notes - rig \\\"arena-01\\\"\\r\\n\\r\\nThe game hitches every few seconds even though the average frame rate looks fine.\\r\\nCapture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\r\\ntaken at the same time (same clock: second 0 of both files is the same instant).\\r\\nsettings.json is a dump of the rig's current settings.\\r\\n\\r\\nHow we measure:\\r\\n- Average FPS = frames presented di[... 3870 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport csv, collections, statistics as s\\np=list(csv.DictReader(open('capture/presentmon.csv')))\\na=[float(r['MsBetweenPresents']) for r in p]\\nprint(len(a),1000/s.mean(a),1000/s.quantiles(a,n=100,method='inclusive')[98],max(a))\\ng=collections.defaultdict(list)\\nfor r,v in zip(p,a):g[int(float(r['TimeInSeconds']))].append(v)\\nfor r in csv.DictReader(open('capture/sensors.csv')):\\n t=int(r['time_s'])\\n print(t,round(max(g[t]),1),sum(x>15 for x in g[t]),r['gpu_pcie_link_state'],r['dpc_latency_us'],r['disk_active_pct'],r['top_cpu_process'])\\n'@ | python -\\\"\" ok -> \"8238 137.28571999702498 45.354291853960994 23.675\\r\\n0 7.8 0 L0 52 1 Arena.exe\\r\\n1 7.7 0 L0 88 4 Arena.exe\\r\\n2 22.9 12 L1 40 3 Arena.exe\\r\\n3 7.5 0 L0 81 2 Arena.exe\\r\\n4 7.7 0 L0 41 1 Arena.exe\\r\\n5 8.0 0 L0 49 2 Arena.exe\\r\\n6 23.0 12 L1 77 4 Arena.exe\\r\\n7 7.7 0 L0 57 3 Arena.exe\\r\\n8 7.7 0 L0 49 3 Arena.exe\\r\\n9 7.6 0 L0 51 4 Arena.exe\\r\\n10 22.5 12 L1 84 5 Arena.exe\\r\\n11 7.7 0 L0 46 1 Arena.exe\\r\\n12 7.7 0 L0 70 3 [... 1364 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\n{\\n  \\\\\\\"avg_fps\\\\\\\": 137.29,\\n  \\\\\\\"low_1pct_fps\\\\\\\": 45.35,\\n  \\\\\\\"cause\\\\\\\": \\\\\\\"GPU PCIe root port RP1 enters the ASPM L1 low-power state every four seconds. All 15 L1 samples coincide with hitch bursts, consistent with latency as the GPU link wakes.\\\\\\\",\\n  \\\\\\\"changes\\\\\\\": [\\n    {\\\\\\\"setting\\\\\\\": \\\\\\\"pcie_aspm_rp1_gpu\\\\\\\", \\\\\\\"from\\\\\\\": \\\\\\\"L1\\\\\\\", \\\\\\\"to\\\\\\\": \\\\\\\"disabled\\\\\\\"}\\n  ]\\n}\\n'@ | Set-Content -Encoding ascii result.json\\n@'\\nimport csv,json,statistics as s\\nfrom collections import Counter\\nr=json.load(open('result.json'))\\np=list(csv.DictReader(open('capture/presentmon.csv')))\\nv=[float(x['MsBetweenPresents']) for x in p]\\nassert r['avg_fps']==round(1000/s.mean(v),2) and r['low_1pct_fps']==round(1000/s.quantiles(v,n=100,method='inclusive')[98],2)\\nstates=[x['gpu_pcie_link_state'] for x in csv.DictReader(open('capture/sensors.csv'))]\\nprint(Counter(states[int(float(x['TimeInSeconds']))] for x,t in zip(p,v) if t>15))\\nprint('Verified FPS:',r['avg_fps'],r['low_1pct_fps'])\\n'@ | python -\\\"\" ok -> \"Counter({'L1': 180})\\r\\nVerified FPS: 137.29 45.35\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 4,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 831,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 831
+ },
+ "deliverables": [],
+ "render": null
+}

@@ -1,0 +1,51 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [],
+ "diff": "A run.py\nA tmp/test_run.py\n\n--- run.py ---\n\"\"\"Helper to run async job batches with bounded concurrency.\n\nTasks are zero-argument callables returning an awaitable job. At most\n`max_concurrent` jobs run at once. On Ctrl+C (KeyboardInterrupt) every job is\ncancelled, so each job's own cleanup code (finally / __aexit__ / except) runs\nbefore run_tasks propagates the interruption.\n\"\"\"\n\nimport asyncio\nfrom typing import Callable, Iterable\n\n__all__ = [\"run_tasks\"]\n\n\nasync def _run_one(task: Callable[[], object], sem: asyncio.Semaphore) -> None:\n    \"\"\"Await one job while holding a semaphore slot.\"\"\"\n    async with sem:\n        await task()  # a non-awaitable return raises TypeError early\n\n\nasync def run_tasks(tasks: Iterable[Callable[[], object]], max_concurrent: int) -> None:\n    \"\"\"Run every job, at most `max_concurrent` at a time.\n\n    Returns when every job is done. On KeyboardInterrupt, cancels all running\n    jobs, waits for their cleanup, then re-raises KeyboardInterrupt.\n    \"\"\"\n    if max_concurrent < 1:\n        raise ValueError(f\"max_concurrent must be >= 1, got {max_concurrent!r}\")\n\n    sem = asyncio.Semaphore(max_concurrent)\n    jobs = [asyncio.ensure_future(_run_one(t, sem)) for t in tasks]\n\n    try:\n        await asyncio.gather(*jobs)\n        return\n    except KeyboardInterrupt:\n        pass  # fall through to cancellation + cleanup below\n    except asyncio.CancelledError:\n        raise  # our own caller cancelled us; nothing extra to do\n\n    # Ctrl+C path: cancel every job and wait so their cleanup runs.\n    for j in jobs:\n        j.cancel()\n    results = await asyncio.gather(*jobs, return_exceptions=True)\n    errors = [r for r in results if isinstance(r, BaseException)\n              and not isinstance(r, asyncio.CancelledError)]\n    if errors:\n        raise KeyboardInterrupt from errors[0]\n    raise KeyboardInterrupt\n\n\n--- tmp/test_run.py ---\nimport asyncio, sys\nsys.path.insert(0, r\"<WORKSPACE>\")\nfrom run import run_tasks\n\nasync def test_normal():\n    order, cleanup = [], []\n    running = 0\n    def mk(i):\n        async def job():\n            nonlocal running\n            running += 1\n            assert running <= 2, \"concurrency exceeded\"\n            await asyncio.sleep(0.02)\n            running -= 1\n            order.append(i)\n            try:\n                yield  # not a generator; placeholder no-op\n            except StopIteration:\n                pass\n        return job\n    # clean job with finally cleanup\n    def mk2(i):\n        async def job():\n            try:\n                await asyncio.sleep(0.02)\n                order.append(i)\n            finally:\n                cleanup.append(i)\n        return job\n    await asyncio.wait_for(run_tasks([mk2(i) for i in range(5)], 2), 2)\n    assert order == [0, 1, 2, 3, 4], order\n    assert sorted(cleanup) == [0, 1, 2, 3, 4]\n    print(\"normal OK\")\n\nasync def test_interrupt():\n    cleanup = []\n    started = []\n    def mk(i):\n        async def job():\n            started.append(i)\n            try:\n                await asyncio.sleep(5)\n            finally:\n                cleanup.append(i)\n        return job\n    async def run():\n        await run_tasks([mk(i) for i in range(4)], 2)\n    t = asyncio.ensure_future(run())\n    await asyncio.sleep(0.1)  # let 2 jobs start\n    t.cancel()  # simulates Ctrl+C reaching the outer task (CancellationError path)\n    try:\n        await t\n    except (KeyboardInterrupt, asyncio.CancelledError):\n        pass\n    assert len(started) == 2, started\n    assert sorted(cleanup) == sorted(started), (started, cleanup)\n    print(\"interrupt-outer OK\")\n\nasync def test_kb_direct():\n    # simulate the KeyboardInterrupt arriving inside run_tasks' gather\n    cleanup = []\n    def mk(i):\n        async def job():\n            try:\n                await asyncio.sleep(5)\n            finally:\n                cleanup.append(i)\n        return job\n    async def sleeper():\n        await asyncio.sleep(0.1)\n        raise KeyboardInterrupt\n    async def run():\n        await asyncio.gather(run_tasks([mk(i) for i in range(4)], 2), sleeper())\n    try:\n        await asyncio.wait_for(run(), 3)\n    except (KeyboardInterrupt, asyncio.CancelledError):\n        pass\n    except Exception:\n        raise\n    assert len(cleanup) > 0, cleanup\n    print(\"interrupt-inner OK (cleanup ran for\", len(cleanup), \"jobs)\")\n\nasyncio.run(test_normal())\nasyncio.run(test_interrupt())\nasyncio.run(test_kb_direct())\nprint(\"ALL PASS\")\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"run.py\" ok -> \"Created file successfully: run.py\"\n[step 1] write \"tmp\\\\test_run.py\" ok -> \"Created file successfully: tmp/test_run.py\"\n[step 1] shell \"python tmp\\\\test_run.py\" failed -> \"normal OK\\r\\ninterrupt-outer OK\\r\\ninterrupt-inner OK (cleanup ran for 2 jobs)\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\tmp\\\\test_run.py\\\", line 83, in <module>\\r\\n    asyncio.run(test_kb_direct())\\r\\n    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^\\r\\n  File \\\"<WORKSPACE>\\\\tmp\\\\te[... 1855 chars cut by the benchmark]\"\n[step 1] edit \"run.py\" ok -> \"Edited run.py (1 replacement)\"\n[step 1] edit \"tmp\\\\test_run.py\" ok -> \"Edited tmp/test_run.py (1 replacement)\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 5,
+  "tool_errors": 0,
+  "shell_commands": 1,
+  "shell_failures": 1,
+  "file_writes": 4,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2117,
+  "reasoning_tokens": 759,
+  "largest_turn_tokens": 735
+ },
+ "deliverables": [],
+ "render": null
+}

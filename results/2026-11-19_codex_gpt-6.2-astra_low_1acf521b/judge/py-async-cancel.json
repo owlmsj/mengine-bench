@@ -1,0 +1,53 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [
+  "[goal] Run a finite batch with bounded concurrency and allow active jobs to finish cleanup on Ctrl+C.\n\n[action] Added `from run import run_tasks` in `run.py`. Assumptions: the limit must be a positive integer, job results are discarded, and ordinary failures are raised together as an `ExceptionGroup` after the batch finishes.\n\n[result] On Python 3.13.14, the regression test reported `OK`. With five jobs and a limit of two, only two started before cancellation, and both finished asynchronous cleanup.\n\n[next] Verification complete. A separate run under `asyncio.run` received SIGINT and printed `SIGINT: async cleanup finished before KeyboardInterrupt`."
+ ],
+ "diff": "A run.py\nA test_run.py\n\n--- run.py ---\n\"\"\"Bounded execution of asynchronous batch jobs.\"\"\"\n\nimport asyncio\nfrom collections.abc import Awaitable, Callable, Iterable\n\n\nasync def run_tasks(\n    tasks: Iterable[Callable[[], Awaitable[object]]], max_concurrent: int\n) -> None:\n    \"\"\"Run a finite batch, waiting for cleanup before returning or raising.\n\n    Ordinary job failures are reported together after the batch finishes.\n    Cancelling the caller cancels unfinished jobs.\n    \"\"\"\n    if isinstance(max_concurrent, bool) or not isinstance(max_concurrent, int):\n        raise TypeError(f\"expected a positive integer, got {max_concurrent!r}\")\n    if max_concurrent < 1:\n        raise ValueError(f\"expected a positive integer, got {max_concurrent!r}\")\n\n    slots = asyncio.Semaphore(max_concurrent)\n    errors: list[Exception] = []\n\n    async def run_one(factory: Callable[[], Awaitable[object]]) -> None:\n        async with slots:\n            try:\n                await factory()\n            except Exception as error:\n                errors.append(error)\n\n    async with asyncio.TaskGroup() as group:\n        for factory in tasks:\n            group.create_task(run_one(factory))\n\n    if errors:\n        raise ExceptionGroup(\"batch jobs failed\", errors)\r\n\n\n--- test_run.py ---\nimport asyncio\nimport unittest\n\nfrom run import run_tasks\n\n\nclass RunTasksTest(unittest.IsolatedAsyncioTestCase):\n    async def test_cancel_at_limit(self):\n        ready = asyncio.Event()\n        started = []\n        cleaned = []\n\n        async def job(i):\n            started.append(i)\n            try:\n                if len(started) == 2:\n                    ready.set()\n                await asyncio.Future()\n            finally:\n                await asyncio.sleep(0)\n                cleaned.append(i)\n\n        runner = asyncio.create_task(run_tasks(\n            [lambda i=i: job(i) for i in range(5)], 2\n        ))\n        await asyncio.wait_for(ready.wait(), 2)\n        runner.cancel()\n        with self.assertRaises(asyncio.CancelledError):\n            await runner\n        self.assertEqual(started, [0, 1])\n        self.assertCountEqual(cleaned, started)\r\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-ChildItem -Force -Name\\npython --version'\" ok -> \"AGENTS.md\\r\\nPython 3.13.14\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport asyncio\\nimport unittest\\n\\nfrom run import run_tasks\\n\\n\\nclass RunTasksTest(unittest.IsolatedAsyncioTestCase):\\n    async def test_cancel_at_limit(self):\\n        ready = asyncio.Event()\\n        started = []\\n        cleaned = []\\n\\n        async def job(i):\\n            started.append(i)\\n            try:\\n                if len(started) == 2:\\n                    ready.set()\\n                await asyncio.Future()\\n            finally:\\n                await asyncio.sleep(0)\\n                cleaned.append(i)\\n\\n        runner = asyncio.create_task(run_tasks(\\n            [lambda i=i: job(i) for i in range(5)], 2\\n        ))\\n        await asyncio.wait_for(ready.wait(), 2)\\n        runner.cancel()\\n        with self.assertRaises(asyncio.CancelledError):\\n            await runner\\n        self.assertEqual(started, [0, 1])\\n        self.assertCountEqual(cleaned, started)\\n'@ | Set-Content -Encoding ascii test_run.py\\npython -B -m unittest test_run.RunTasksTest.test_cancel_at_limit\\\"\" failed -> \"E\\r\\n======================================================================\\r\\nERROR: test_run (unittest.loader._FailedTest.test_run)\\r\\n----------------------------------------------------------------------\\r\\nImportError: Failed to import test module: test_run\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<HOME>\\\\AppData\\\\Roaming\\\\uv\\\\python\\\\cpython-3.13.14-windows-x86_64-none\\\\Lib\\\\unittest\\\\loade[... 390 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\n\\\\\\\"\\\\\\\"\\\\\\\"Bounded execution of asynchronous batch jobs.\\\\\\\"\\\\\\\"\\\\\\\"\\n\\nimport asyncio\\nfrom collections.abc import Awaitable, Callable, Iterable\\n\\n\\nasync def run_tasks(\\n    tasks: Iterable[Callable[[], Awaitable[object]]], max_concurrent: int\\n) -> None:\\n    \\\\\\\"\\\\\\\"\\\\\\\"Run a finite batch, waiting for cleanup before returning or raising.\\n\\n    Ordinary job failures are reported together after the batch finishes.\\n    Cancelling the caller cancels unfinished jobs.\\n    \\\\\\\"\\\\\\\"\\\\\\\"\\n    if isinstance(max_concurrent, bool) or not isinstance(max_concurrent, int):\\n        raise TypeError(f\\\\\\\"expected a positive integer, got {max_concurrent\\\"'!r}\\\")\\n    if max_concurrent < 1:\\n        raise ValueError(f\\\"expected a positive integer, got {max_concurrent!r}\\\")\\n\\n    slots = asyncio.Semaphore(max_concurrent)\\n    errors: list[Exception] = []\\n\\n    async def run_one(factory: Callable[[], Awaitable[object]]) -> None:\\n        async with slots:\\n            try:\\n                await factory()\\n            except Exception as error:\\n                errors.append(error)\\n\\n    async with asyncio.TaskGroup() as group:\\n        for factory in tasks:\\n            group.create_task(run_one(factory))\\n\\n    if errors:\\n        raise ExceptionGroup(\\\"batch jobs failed\\\", errors)\\n'\\\"'@ | Set-Content -Encoding ascii run.py\\npython -B -m unittest test_run.RunTasksTest.test_cancel_at_limit\\nGet-Content run.py -Tail 6\\\"\" ok -> \".\\r\\n----------------------------------------------------------------------\\r\\nRan 1 test in 0.114s\\r\\n\\r\\nOK\\r\\n    async with asyncio.TaskGroup() as group:\\r\\n        for factory in tasks:\\r\\n            group.create_task(run_one(factory))\\r\\n\\r\\n    if errors:\\r\\n        raise ExceptionGroup(\\\"batch jobs failed\\\", errors)\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport asyncio, signal\\nfrom run import run_tasks\\nclean = []\\nasync def job():\\n    try:\\n        asyncio.get_running_loop().call_soon(signal.raise_signal, signal.SIGINT)\\n        await asyncio.Future()\\n    finally:\\n        await asyncio.sleep(0)\\n        clean.append(1)\\ntry:\\n    asyncio.run(run_tasks([job], 1))\\nexcept KeyboardInterrupt:\\n    assert clean == [1]\\n    print(\\\\\\\"SIGINT: async cleanup finished before KeyboardInterrupt\\\\\\\")\\nelse:\\n    raise AssertionError(\\\\\\\"expected KeyboardInterrupt\\\\\\\")\\n'@ | python -B -\\\"\" ok -> \"SIGINT: async cleanup finished before KeyboardInterrupt\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 4,
+  "tool_errors": 1,
+  "shell_commands": 4,
+  "shell_failures": 1,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 950,
+  "reasoning_tokens": 69,
+  "largest_turn_tokens": 950
+ },
+ "deliverables": [],
+ "render": null
+}

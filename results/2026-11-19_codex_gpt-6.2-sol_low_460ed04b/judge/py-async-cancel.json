@@ -1,0 +1,53 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [
+  "[goal] Add a standard-library batch runner for Python 3.11+.\n\n[action] Implemented `from run import run_tasks` in [run.py](./run.py). It accepts a finite iterable of job factories and a positive integer concurrency limit. It discards return values. An ordinary job failure cancels unfinished work and propagates in an `ExceptionGroup` after cleanup.\n\n[result] Verification on Python 3.13.14 printed:\n\n```text\nAll five jobs finished with peak concurrency 2\nCancellation awaited asynchronous cleanup and skipped queued work\nSIGINT propagated as KeyboardInterrupt after asynchronous cleanup\nJob failure propagated in ExceptionGroup\n```\n\n[next] Run the helper through `asyncio.run()` in your batch script to get the Ctrl+C behavior verified above."
+ ],
+ "diff": "A run.py\n\n--- run.py ---\n\"\"\"Run batches of asynchronous jobs with a concurrency limit.\"\"\"\n\nimport asyncio\nfrom collections.abc import Awaitable, Callable, Iterable\n\n\nasync def run_tasks(\n    tasks: Iterable[Callable[[], Awaitable[object]]], max_concurrent: int\n) -> None:\n    \"\"\"Run a finite batch and discard job results.\n\n    On failure or caller cancellation, cancel unfinished jobs and wait for\n    their cleanup. Job failures propagate through asyncio.TaskGroup.\n    \"\"\"\n    if isinstance(max_concurrent, bool) or not isinstance(max_concurrent, int):\n        raise TypeError(f\"max_concurrent must be a positive integer, got {max_concurrent!r}\")\n    if max_concurrent < 1:\n        raise ValueError(f\"max_concurrent must be a positive integer, got {max_concurrent!r}\")\n\n    slots = asyncio.Semaphore(max_concurrent)\n\n    async def run_job(job: Callable[[], Awaitable[object]]) -> None:\n        async with slots:\n            await job()\n\n    async with asyncio.TaskGroup() as group:\n        for job in tasks:\n            group.create_task(run_job(job))\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-ChildItem -Force -Name; git status --short; python --version'\" ok -> \"AGENTS.md\\r\\nfatal: not a git repository (or any of the parent directories): .git\\nPython 3.13.14\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport asyncio\\nfrom run import run_tasks\\n\\nasync def main():\\n    active = peak = 0\\n    finished = []\\n    async def job(i):\\n        nonlocal active, peak\\n        active += 1\\n        peak = max(peak, active)\\n        try:\\n            await asyncio.sleep(0.01)\\n            finished.append(i)\\n        finally:\\n            active -= 1\\n    await run_tasks((lambda i=i: job(i) for i in range(5)), 2)\\n    assert peak == 2 and sorted(finished) == list(range(5))\\n    print(\\\\\\\"All five jobs finished with peak concurrency 2\\\\\\\")\\n\\n    ready = asyncio.Event()\\n    cleaned = []\\n    async def pending():\\n        try:\\n            ready.set()\\n            await asyncio.Future()\\n        finally:\\n            await asyncio.sleep(0)\\n            cleaned.append(True)\\n    def queued():\\n        raise AssertionError(\\\\\\\"queued job started\\\\\\\")\\n    run = asyncio.create_task(run_tasks([pending, queued], 1))\\n    await ready.wait()\\n    run.cancel()\\n    try:\\n        await run\\n    except asyncio.CancelledError:\\n        assert cleaned == [True]\\n        print(\\\\\\\"Cancellation awaited asynchronous cleanup and skipped queued work\\\\\\\")\\n    else:\\n        raise AssertionError(\\\\\\\"cancellation did not propagate\\\\\\\")\\n\\nasyncio.run(main())\\n'@ | python -B -\\\"\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<stdin>\\\", line 2, in <module>\\r\\nModuleNotFoundError: No module named 'run'\"\n[step 1] edit \"<WORKSPACE>\\\\run.py\" ok -> \"\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport asyncio\\nfrom run import run_tasks\\n\\nasync def main():\\n    active = peak = 0\\n    finished = []\\n    async def job(i):\\n        nonlocal active, peak\\n        active += 1\\n        peak = max(peak, active)\\n        try:\\n            await asyncio.sleep(0.01)\\n            finished.append(i)\\n        finally:\\n            active -= 1\\n    await run_tasks((lambda i=i: job(i) for i in range(5)), 2)\\n    assert peak == 2 and sorted(finished) == list(range(5))\\n    print(\\\\\\\"All five jobs finished with peak concurrency 2\\\\\\\")\\n\\n    ready = asyncio.Event()\\n    cleaned = []\\n    async def pending():\\n        try:\\n            ready.set()\\n            await asyncio.Future()\\n        finally:\\n            await asyncio.sleep(0)\\n            cleaned.append(True)\\n    def queued():\\n        raise AssertionError(\\\\\\\"queued job started\\\\\\\")\\n    run = asyncio.create_task(run_tasks([pending, queued], 1))\\n    await ready.wait()\\n    run.cancel()\\n    try:\\n        await run\\n    except asyncio.CancelledError:\\n        assert cleaned == [True]\\n        print(\\\\\\\"Cancellation awaited asynchronous cleanup and skipped queued work\\\\\\\")\\n    else:\\n        raise AssertionError(\\\\\\\"cancellation did not propagate\\\\\\\")\\n\\nasyncio.run(main())\\n'@ | python -B -\\\"\" ok -> \"All five jobs finished with peak concurrency 2\\r\\nCancellation awaited asynchronous cleanup and skipped queued work\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"Get-Content run.py\\n@'\\nimport asyncio\\nimport signal\\nfrom run import run_tasks\\n\\nevents = []\\n\\nasync def interrupted():\\n    try:\\n        signal.raise_signal(signal.SIGINT)\\n        await asyncio.Future()\\n    finally:\\n        await asyncio.sleep(0)\\n        events.append(\\\\\\\"cleaned\\\\\\\")\\n\\ntry:\\n    asyncio.run(run_tasks([interrupted], 1))\\nexcept KeyboardInterrupt:\\n    assert events == [\\\\\\\"cleaned\\\\\\\"]\\n    print(\\\\\\\"SIGINT propagated as KeyboardInterrupt after asynchronous cleanup\\\\\\\")\\nelse:\\n    raise AssertionError(\\\\\\\"SIGINT did not propagate\\\\\\\")\\n\\nasync def failure():\\n    raise RuntimeError(\\\\\\\"job failed\\\\\\\")\\n\\ntry:\\n    asyncio.run(run_tasks([failure], 1))\\nexcept ExceptionGroup as errors:\\n    assert len(errors.exceptions) == 1 and str(errors.exceptions[0]) == \\\\\\\"job failed\\\\\\\"\\n    print(\\\\\\\"Job failure propagated in ExceptionGroup\\\\\\\")\\nelse:\\n    raise AssertionError(\\\\\\\"job failure did not propagate\\\\\\\")\\n'@ | python -B -\\\"\" ok -> \"\\\"\\\"\\\"Run batches of asynchronous jobs with a concurrency limit.\\\"\\\"\\\"\\r\\n\\r\\nimport asyncio\\r\\nfrom collections.abc import Awaitable, Callable, Iterable\\r\\n\\r\\n\\r\\nasync def run_tasks(\\r\\n    tasks: Iterable[Callable[[], Awaitable[object]]], max_concurrent: int\\r\\n) -> None:\\r\\n    \\\"\\\"\\\"Run a finite batch and discard job results.\\r\\n\\r\\n    On failure or caller cancellation, cancel unfinished jobs and wait for\\r\\n    their clea[... 765 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 5,
+  "tool_errors": 1,
+  "shell_commands": 4,
+  "shell_failures": 1,
+  "file_writes": 1,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 1180,
+  "reasoning_tokens": 137,
+  "largest_turn_tokens": 1180
+ },
+ "deliverables": [],
+ "render": null
+}

@@ -1,0 +1,61 @@
+{
+ "task_id": "ts-plugin-bug",
+ "prompts": [
+  "Users of our harness plugins report that tool.after hooks run out of order, that sometimes a hook never runs, and that a failing hook is silently ignored. The hook bus and the plugin are in {WS}; the README there says how the bus must behave. Fix the bus. Its public API stays as it is, the tests in {WS}/test stay as they are, and package.json takes no dependencies."
+ ],
+ "answers": [
+  "[goal] Make `HookBus` follow the README contract while preserving its public API.\n\n[action] `emit` now snapshots the subscriptions and awaits each handler in order. A throw or rejection stops dispatch and propagates the original error. I assumed each `on` call creates an independent subscription, even when the same callback is registered twice. Only `src/bus.ts` changed.\n\n[result] The audit repro failed before the fix with `AssertionError [ERR_ASSERTION]: first emit must finish all hooks in order`. Async `forEach` let the audit writer run before redaction and detached hook failures from `emit`. Removing a handler from the live array could also skip the next hook. After the fix, the targeted checks reported:\n\n```text\nPASS: audit order, snapshot, completion, and fail-fast rejection\nPASS: subscription identity, additions deferred, and synchronous error identity\n```\n\n[next] No follow-up needed. Verification used the targeted checks above."
+ ],
+ "diff": "M src/bus.ts\n\n--- src/bus.ts ---\n/**\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\n * handlers run one after another in subscription order, emit resolves after all of them,\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\n */\n\nexport type Handler<T> = (payload: T) => void | Promise<void>;\n\nexport class HookBus {\n  private handlers: Map<string, Handler<unknown>[]> = new Map();\n\n  /** Subscribes a handler to an event; returns the function that unsubscribes it. */\n  on<T>(event: string, handler: Handler<T>): () => void {\n    const list = this.handlers.get(event) ?? [];\n    const subscription: Handler<unknown> = (payload) => handler(payload as T);\n    list.push(subscription);\n    this.handlers.set(event, list);\n    return () => {\n      const index = list.indexOf(subscription);\n      if (index >= 0) {\n        list.splice(index, 1);\n      }\n    };\n  }\n\n  /** Runs the handlers of an event with the payload. */\n  async emit<T>(event: string, payload: T): Promise<void> {\n    const list = [...(this.handlers.get(event) ?? [])];\n    for (const handler of list) {\n      await handler(payload);\n    }\n  }\n\n  /** How many handlers an event has. */\n  count(event: string): number {\n    return (this.handlers.get(event) ?? []).length;\n  }\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'rg --files; Get-Content README.md; git status --short'\" failed -> \"test\\\\bus.test.ts\\nsrc\\\\plugin.ts\\nsrc\\\\bus.ts\\nREADME.md\\npackage.json\\nAGENTS.md\\n# harness-hooks\\r\\n\\r\\nThe hook bus our harness plugins use (OpenCode-style hooks such as `tool.before` and `tool.after`).\\r\\nPlain TypeScript run by Node 24 directly (`npm test` runs `node --test`); no dependencies.\\r\\n\\r\\n## How the bus behaves\\r\\n\\r\\n- `bus.on(event, handler)` subscribes a handler and returns a function that unsubscri[... 839 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-Content AGENTS.md,src/bus.ts,src/plugin.ts,package.json,test/bus.test.ts; node --version'\" ok -> \"Use any skill, tool or MCP server you have. Write local files only inside this directory.\\r\\nYou may read installed tools and skills outside it, but not other task workspaces, runs or benchmark answers.\\r\\nOther programs run on this machine: stop only the processes you started, by their id, never by name.\\r\\nDo not print credentials, environment variables or personal data: this session is published.\\r\\n/*[... 3065 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport assert from \\\\\\\"node:assert/strict\\\\\\\";\\nimport { HookBus } from \\\\\\\"./src/bus.ts\\\\\\\";\\nimport { registerAuditPlugin } from \\\\\\\"./src/plugin.ts\\\\\\\";\\nconst bus = new HookBus();\\nconst audit = [];\\nregisterAuditPlugin(bus, audit);\\nawait bus.emit(\\\\\\\"tool.after\\\\\\\", { tool: \\\\\\\"read\\\\\\\", output: \\\\\\\"password=[REDACTED_SECRET]\\\" });\\nassert.deepEqual(audit, [\\\\\\\"notice: tool output is audited\\\\\\\", \\\\\\\"read: password=[REDACTED_SECRET]\\\"], \\\\\\\"first emit must finish all hooks in order\\\\\\\");\\nawait bus.emit(\\\\\\\"tool.after\\\\\\\", { tool: \\\\\\\"read\\\\\\\", output: \\\\\\\"password=[REDACTED_SECRET]\\\" });\\nassert.deepEqual(audit.slice(2), [\\\\\\\"read: password=[REDACTED_SECRET]\\\"]);\\nconst error = new Error(\\\\\\\"hook failed\\\\\\\");\\nlet later = false;\\nconst off = bus.on(\\\\\\\"failure\\\\\\\", async () => { throw error; });\\nbus.on(\\\\\\\"failure\\\\\\\", () => { later = true; });\\nawait assert.rejects(bus.emit(\\\\\\\"failure\\\\\\\", null), (actual) => actual === error);\\nassert.equal(later, false);\\noff();\\nawait bus.emit(\\\\\\\"failure\\\\\\\", null);\\nassert.equal(later, true);\\nconsole.log(\\\\\\\"PASS: audit order, snapshot, completion, and fail-fast rejection\\\\\\\");\\n'@ | node --input-type=module\\\"\" failed -> \"node:internal/modules/run_main:107\\r\\n    triggerUncaughtException(\\r\\n    ^\\r\\n\\r\\nAssertionError [ERR_ASSERTION]: first emit must finish all hooks in order\\r\\n+ actual - expected\\r\\n\\r\\n  [\\r\\n    'notice: tool output is audited',\\r\\n+   'read: password=example'\\r\\n-   'read: password=[redacted]'\\r\\n  ]\\r\\n\\r\\n    at <WORKSPACE>/[eval1]:8:8\\r\\n    at[... 360 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>\\\\src\\\\bus.ts\" ok -> \"\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport assert from \\\\\\\"node:assert/strict\\\\\\\";\\nimport { HookBus } from \\\\\\\"./src/bus.ts\\\\\\\";\\nimport { registerAuditPlugin } from \\\\\\\"./src/plugin.ts\\\\\\\";\\nconst bus = new HookBus();\\nconst audit = [];\\nregisterAuditPlugin(bus, audit);\\nawait bus.emit(\\\\\\\"tool.after\\\\\\\", { tool: \\\\\\\"read\\\\\\\", output: \\\\\\\"password=[REDACTED_SECRET]\\\" });\\nassert.deepEqual(audit, [\\\\\\\"notice: tool output is audited\\\\\\\", \\\\\\\"read: password=[REDACTED_SECRET]\\\"], \\\\\\\"first emit must finish all hooks in order\\\\\\\");\\nawait bus.emit(\\\\\\\"tool.after\\\\\\\", { tool: \\\\\\\"read\\\\\\\", output: \\\\\\\"password=[REDACTED_SECRET]\\\" });\\nassert.deepEqual(audit.slice(2), [\\\\\\\"read: password=[REDACTED_SECRET]\\\"]);\\nconst error = new Error(\\\\\\\"hook failed\\\\\\\");\\nlet later = false;\\nconst off = bus.on(\\\\\\\"failure\\\\\\\", async () => { throw error; });\\nbus.on(\\\\\\\"failure\\\\\\\", () => { later = true; });\\nawait assert.rejects(bus.emit(\\\\\\\"failure\\\\\\\", null), (actual) => actual === error);\\nassert.equal(later, false);\\noff();\\nawait bus.emit(\\\\\\\"failure\\\\\\\", null);\\nassert.equal(later, true);\\nconsole.log(\\\\\\\"PASS: audit order, snapshot, completion, and fail-fast rejection\\\\\\\");\\n'@ | node --input-type=module\\nif (\\\"'$LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\\nGet-Content src/bus.ts'\" ok -> \"PASS: audit order, snapshot, completion, and fail-fast rejection\\n/**\\r\\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\\r\\n * handlers run one after another in subscription order, emit resolves after all of them,\\r\\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\\r\\n */\\r\\n\\r\\nexport type Handler<T> = (payload: T) => void | Pr[... 992 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport assert from \\\\\\\"node:assert/strict\\\\\\\";\\nimport { HookBus } from \\\\\\\"./src/bus.ts\\\\\\\";\\nconst bus = new HookBus();\\nconst calls = [];\\nconst handler = () => { calls.push(\\\\\\\"duplicate\\\\\\\"); };\\nconst offFirst = bus.on(\\\\\\\"event\\\\\\\", handler);\\nlet firstEmit = true;\\nbus.on(\\\\\\\"event\\\\\\\", () => {\\n  calls.push(\\\\\\\"middle\\\\\\\");\\n  if (firstEmit) {\\n    firstEmit = false;\\n    offSecond();\\n    offSecond();\\n    bus.on(\\\\\\\"event\\\\\\\", () => { calls.push(\\\\\\\"new\\\\\\\"); });\\n  }\\n});\\nconst offSecond = bus.on(\\\\\\\"event\\\\\\\", handler);\\nawait bus.emit(\\\\\\\"event\\\\\\\");\\nassert.deepEqual(calls, [\\\\\\\"duplicate\\\\\\\", \\\\\\\"middle\\\\\\\", \\\\\\\"duplicate\\\\\\\"]);\\nassert.equal(bus.count(\\\\\\\"event\\\\\\\"), 3);\\nawait bus.emit(\\\\\\\"event\\\\\\\");\\nassert.deepEqual(calls.slice(3), [\\\\\\\"duplicate\\\\\\\", \\\\\\\"middle\\\\\\\", \\\\\\\"new\\\\\\\"]);\\noffFirst();\\nassert.equal(bus.count(\\\\\\\"event\\\\\\\"), 2);\\nconst error = new Error(\\\\\\\"sync\\\\\\\");\\nbus.on(\\\\\\\"sync\\\\\\\", () => { throw error; });\\nawait assert.rejects(bus.emit(\\\\\\\"sync\\\\\\\"), (actual) => actual === error);\\nconsole.log(\\\\\\\"PASS: subscription identity, additions deferred, and synchronous error identity\\\\\\\");\\n'@ | node --input-type=module\\\"\" ok -> \"PASS: subscription identity, additions deferred, and synchronous error identity\"",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "package.json takes no dependencies",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hidden handlers run in subscription order",
+   true
+  ],
+  [
+   "hidden emit resolves after every handler",
+   true
+  ],
+  [
+   "hidden a failing handler rejects emit",
+   true
+  ],
+  [
+   "hidden a handler that unsubscribes itself does not stop the others",
+   true
+  ],
+  [
+   "hidden the audit plugin redacts before it logs",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 6,
+  "tool_errors": 2,
+  "shell_commands": 5,
+  "shell_failures": 2,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1123,
+  "reasoning_tokens": 31,
+  "largest_turn_tokens": 1123
+ },
+ "deliverables": [],
+ "render": null
+}

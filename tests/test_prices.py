@@ -51,7 +51,8 @@ def test_every_model_on_the_board_has_a_price() -> None:
     assert set(LIST_PRICES) == {"claude-opus-5-5", "claude-sonnet-5-5", "gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra",
                                 "zai/glm-5.3-flash", "deepseek/deepseek-flash", "gemini-4-argon",
                                 "claude-fable-5-2", "gemini-4-carbon", "gemini-4-hydrogen", "gemini-4-neon",
-                                "gpt-6.2-sol", "gpt-6.2-astra"}
+                                "gpt-6.2-sol", "gpt-6.2-astra",
+                                "qwen-cloud/qwen3.8-flash", "tencent-tokenhub/hy4-flash"}
 
 
 def test_hydrogen_costs_what_ai_studio_lists() -> None:
@@ -377,3 +378,16 @@ def test_partial_task_stats_do_not_drop_another_tasks_output() -> None:
     result = build_results(meta, score_run(outcomes), details, {}, {})
     assert result["totals"]["cost_usd"] == 1.0
     assert "~$1.00" in render_summary(result)
+
+
+def test_zero_harness_cost_falls_back_to_the_list_price_260() -> None:
+    # #260: OpenCode reports cost 0 for a model it has no price for (qwen3.8-flash read ">= $0.00").
+    from mengine_bench.prices import finalize_run_cost, run_cost_text
+    result = _result("gpt-6.1-terra", 1_000_000, 0, 100_000)
+    result["totals"].update(cost_usd=0.0, cost_basis="harness", cost_lower_bound=True)
+    result["tasks"] = [{"steps": [{"usage": {"input_tokens": 1_000_000, "cached_input_tokens": 0, "output_tokens": 100_000,
+                                                "cost_usd": 0.0}}]}]
+    finalize_run_cost(result)
+    assert result["totals"]["cost_basis"] == "list-price"
+    assert result["cost_price"]["model"] == "gpt-6.1-terra"
+    assert run_cost_text(result) == ">= ~$1.50"

@@ -1,0 +1,53 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [
+  "[goal] Recover the camping shop’s prices from `prices.db`.\n\n[action] I interpreted the surviving 4,096 bytes as a SQLite table leaf page and decoded the item and price fields in row ID order.\n\n[result] [recovered.json](recovered.json) contains 10 rows. Every cell’s decoded length matched its byte boundary, and the source file remained byte-for-byte unchanged.\n\n> Verified 10/10 page cells and JSON round-trip.\n\n[next] The file accounts for every row on the surviving page. The original row count is unknown."
+ ],
+ "diff": "A recovered.json\n\n--- recovered.json ---\n[\r\n  {\r\n    \"item\": \"trail map\",\r\n    \"price\": 0\r\n  },\r\n  {\r\n    \"item\": \"matchbox\",\r\n    \"price\": 1\r\n  },\r\n  {\r\n    \"item\": \"tent stake\",\r\n    \"price\": 2.75\r\n  },\r\n  {\r\n    \"item\": \"lantern\",\r\n    \"price\": 24\r\n  },\r\n  {\r\n    \"item\": \"rope coil\",\r\n    \"price\": 18\r\n  },\r\n  {\r\n    \"item\": \"water filter\",\r\n    \"price\": 39.9\r\n  },\r\n  {\r\n    \"item\": \"sleeping bag\",\r\n    \"price\": 129\r\n  },\r\n  {\r\n    \"item\": \"camp stove\",\r\n    \"price\": 310\r\n  },\r\n  {\r\n    \"item\": \"compass\",\r\n    \"price\": 15.5\r\n  },\r\n  {\r\n    \"item\": \"first aid kit\",\r\n    \"price\": 0.99\r\n  }\r\n]\r\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"Get-ChildItem -Name\\npython -c \\\\\\\"import pathlib,sqlite3; p=pathlib.Path('prices.db'); b=p.read_bytes(); print(len(b),b[:100].hex()); print(sqlite3.connect('file:prices.db?mode=ro',uri=True).execute('select * from sqlite_master').fetchall())\\\\\\\"\\\"\" failed -> \"AGENTS.md\\r\\nprices.db\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<string>\\\", line 1, in <module>\\r\\n    import pathlib,sqlite3; p=pathlib.Path('prices.db'); b=p.read_bytes(); print(len(b),b[:100].hex()); print(sqlite3.connect('file:prices.db?mode=ro',uri=True).execute('select * from sqlite_master').fetchall())\\r\\n                                                                                         [... 364 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"python -c \\\\\\\"from pathlib import Path; b=Path('prices.db').read_bytes(); print(b[0xf3d:].hex(' ')); print(repr(b[0xf3d:]))\\\\\\\"\\\"\" ok -> \"19 0a 04 00 27 07 66 69 72 73 74 20 61 69 64 20 6b 69 74 3f ef ae 14 7a e1 47 ae 13 09 04 00 1b 07 63 6f 6d 70 61 73 73 40 2f 00 00 00 00 00 00 10 08 04 00 21 02 63 61 6d 70 20 73 74 6f 76 65 01 36 12 07 04 00 25 02 73 6c 65 65 70 69 6e 67 20 62 61 67 00 81 18 06 04 00 25 07 77 61 74 65 72 20 66 69 6c 74 65 72 40 43 f3 33 33 33 33 33 0e 05 04 00 1f 01 72 6f 70 65 20 63 6f 69 6c 12 0c 04 04 00 1b 0[... 613 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport json\\nimport struct\\nfrom pathlib import Path\\n\\nsource = Path(\\\\\\\"prices.db\\\\\\\")\\npage = source.read_bytes()\\nassert page[0] == 13\\ncount, content_start = struct.unpack_from(\\\\\\\">HH\\\\\\\", page, 3)\\npointers = struct.unpack_from(f\\\\\\\">{count}H\\\\\\\", page, 8)\\nassert min(pointers) == content_start and len(set(pointers)) == count\\nlimits = dict(zip(sorted(pointers), sorted(pointers)[1:] + [len(page)]))\\nrows = []\\nfor index, offset in enumerate(pointers, 1):\\n    size, rowid, header_size, id_type, item_type, price_type = page[offset:offset + 6]\\n    assert max(size, rowid, header_size, id_type, item_type, price_type) < 128\\n    assert rowid == index and header_size == 4 and id_type == 0\\n    assert item_type >= 13 and item_type % 2 == 1\\n    item_length = (item_type - 13) // 2\\n    price_start = offset + 6 + item_length\\n    width = {1: 1, 2: 2, 7: 8, 8: 0, 9: 0}[price_type]\\n    end = offset + 2 + size\\n    assert price_start + width == end == limits[offset]\\n    item = page[offset + 6:price_start].decode(\\\\\\\"utf-8\\\\\\\")\\n    raw_price = page[price_start:end]\\n    if price_type == 7:\\n        price = struct.unpack(\\\\\\\">d\\\\\\\", raw_price)[0]\\n    elif price_type in (8, 9):\\n        price = price_type - 8\\n    else:\\n        price = int.from_bytes(raw_price, \\\\\\\"big\\\\\\\", signed=True)\\n    rows.append({\\\\\\\"item\\\\\\\": item, \\\\\\\"price\\\\\\\": price})\\ntarget = Path(\\\\\\\"recovered.json\\\\\\\")\\ntarget.write_text(json.dumps(rows, ensu[... 270 chars cut by the benchmark]\" ok -> \"Verified 10/10 page cells and JSON round-trip.\\r\\n[\\r\\n  {\\r\\n    \\\"item\\\": \\\"trail map\\\",\\r\\n    \\\"price\\\": 0\\r\\n  },\\r\\n  {\\r\\n    \\\"item\\\": \\\"matchbox\\\",\\r\\n    \\\"price\\\": 1\\r\\n  },\\r\\n  {\\r\\n    \\\"item\\\": \\\"tent stake\\\",\\r\\n    \\\"price\\\": 2.75\\r\\n  },\\r\\n  {\\r\\n    \\\"item\\\": \\\"lantern\\\",\\r\\n    \\\"price\\\": 24\\r\\n  },\\r\\n  {\\r\\n    \\\"item\\\": \\\"rope coil\\\",\\r\\n    \\\"price\\\": 18\\r\\n  },\\r\\n  {\\r\\n    \\\"item\\\": \\\"water filter\\\",\\r\\n    \\\"price\\\": 39.9\\r\\n  },\\r\\n  {\\r\\n    \\\"item\\\": \\\"slee[... 206 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   true
+  ],
+  [
+   "rows with fractional prices recovered",
+   true
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   true
+  ],
+  [
+   "no row that is not in the table",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 3,
+  "tool_errors": 1,
+  "shell_commands": 3,
+  "shell_failures": 1,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 785,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 785
+ },
+ "deliverables": [],
+ "render": null
+}

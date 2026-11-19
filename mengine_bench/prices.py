@@ -25,6 +25,8 @@ OPENAI_PRICING = "https://developers.openai.com/api/docs/pricing"
 ZAI_PRICING = "https://docs.z.ai/guides/overview/pricing"
 DEEPSEEK_PRICING = "https://api-docs.deepseek.com/quick_start/pricing/"
 GOOGLE_PRICING = "https://ai.google.dev/gemini-api/docs/pricing"
+QWEN_CLOUD_PRICING = "https://www.alibabacloud.com/help/en/model-studio/model-pricing"
+TENCENT_TOKENHUB_PRICING = "https://www.tencentcloud.com/document/product/1300/78937"
 PRICE_READ_DATE = "2026-11-07"
 PRICE_READ_DATE_1110 = "2026-11-10"
 PRICE_READ_DATE_1113 = "2026-11-13"
@@ -45,6 +47,11 @@ LIST_PRICES: Mapping[str, ListPrice] = {
     "zai/glm-5.3-flash": ListPrice(0.15, 0.03, 0.50, ZAI_PRICING, PRICE_READ_DATE),
     # Off-peak; peak hours cost twice this. Gemini's rise on 2026-12-01 is not applied.
     "deepseek/deepseek-flash": ListPrice(0.15, 0.003, 0.60, DEEPSEEK_PRICING, PRICE_READ_DATE),
+    # #260: Model Studio intl, one tier up to 1M; the cached rate is console-only (not 20% of input),
+    # so cached input is priced at the input rate, an upper bound.
+    "qwen-cloud/qwen3.8-flash": ListPrice(0.15, 0.15, 0.47, QWEN_CLOUD_PRICING, PRICE_READ_DATE_1119),
+    # #260: standard rate (CNY 0.50 / 2.00); the TokenHub console bills 50% off until 2026-11-30.
+    "tencent-tokenhub/hy4-flash": ListPrice(0.07, 0.003, 0.281, TENCENT_TOKENHUB_PRICING, PRICE_READ_DATE_1119),
     "gemini-4-argon": ListPrice(2.0, 0.10, 10.0, GOOGLE_PRICING, PRICE_READ_DATE),
     "gemini-4-carbon": ListPrice(2.0, 0.10, 10.0, GOOGLE_PRICING, PRICE_READ_DATE_1110),
     # Implicit caching only; no date range on the AI Studio page.
@@ -201,6 +208,12 @@ def finalize_run_cost(result: dict[str, object]) -> None:
         totals.update(cost_usd=estimate, cost_basis="price",
                       cost_lower_bound=bool(totals.get("cost_lower_bound")) or incomplete)
         return
+    if totals.get("cost_basis") == "harness" and totals.get("cost_usd") == 0 and not declared and estimate is not None:
+        # #260: OpenCode reports 0 for a model it has no price for (qwen3.8-flash); the list price is the real number.
+        _snapshot_list_price(result, price, old_price)
+        totals.update(cost_usd=estimate, cost_basis="list-price",
+                      cost_lower_bound=bool(totals.get("cost_lower_bound")) or incomplete)
+        return
     if reported and totals.get("cost_basis") == "n/a":
         totals.update(cost_usd=round(sum(reported), 4), cost_basis="harness", cost_lower_bound=True)
         return
@@ -213,14 +226,20 @@ def finalize_run_cost(result: dict[str, object]) -> None:
         return
     if price is None or estimate is None:
         return
-    if not old_price and not declared:
-        agent = _mapping(result.get("agent"))
-        result["cost_price"] = {"model": agent.get("model"), "tier": _mapping(result.get("config")).get("service_tier"),
-                                "input": price.input, "cached": price.cached, "output": price.output,
-                                "source_url": price.source_url, "read_date": price.read_date}
+    if not declared:
+        _snapshot_list_price(result, price, old_price)
     totals.update(cost_usd=estimate, cost_basis="price" if declared and not old_price else "list-price",
                   cost_lower_bound=bool(totals.get("cost_lower_bound")) or incomplete)
 
+
+
+def _snapshot_list_price(result: dict[str, object], price: ListPrice | None, old_price: Mapping[str, object]) -> None:
+    if old_price or price is None:
+        return
+    agent = _mapping(result.get("agent"))
+    result["cost_price"] = {"model": agent.get("model"), "tier": _mapping(result.get("config")).get("service_tier"),
+                            "input": price.input, "cached": price.cached, "output": price.output,
+                            "source_url": price.source_url, "read_date": price.read_date}
 
 def missing_price_warning(model: str, config: Mapping[str, object], declared: object = None) -> str | None:
     """Warn before a run, even when a harness may later report the cost (#195)."""

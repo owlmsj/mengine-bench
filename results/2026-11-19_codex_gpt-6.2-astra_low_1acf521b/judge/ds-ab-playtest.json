@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-ab-playtest",
+ "prompts": [
+  "We playtested two versions of the Pixel Arena tutorial and have to pick one for the next release. The export and its notes are in {WS}/telemetry. Should we ship B instead of A? Give a recommendation a skeptical lead would accept. Record it in {WS}/result.json with ship_b, sessions_a, sessions_b, completion_rate_a, completion_rate_b and p_value."
+ ],
+ "answers": [
+  "[goal] **Ship B.** Tutorial completion rose from 38.00% with A (342/900 sessions) to 46.67% with B (420/900), a gain of 8.67 percentage points.\n\n[action] I normalized variant labels and removed 70 resent rows by `session_id`. All repeats agreed on variant, player, and completion. I treated completion per session as the release metric and assumed the variants were assigned comparably.\n\n[result] The two-sided pooled proportions test gave `p_value = 0.00019846895397607585`, below the 0.05 release threshold. I saved and read back all six requested fields in [result.json](./result.json).\n\n[next] Release B. Because some players contributed multiple sessions, I also checked uncertainty by grouping sessions by player. The gain remained significant: `Player-clustered p=0.00027265; 95% gain interval 4.00 to 13.33 pp`."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\r\n  \"ship_b\": true,\r\n  \"sessions_a\": 900,\r\n  \"sessions_b\": 900,\r\n  \"completion_rate_a\": 0.38,\r\n  \"completion_rate_b\": 0.4666666666666667,\r\n  \"p_value\": 0.00019846895397607585\r\n}\r\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"rg --files --hidden -g '\\\"'! .git'\\\"' | Select-Object -First 100\\\"\" ok -> \"telemetry\\\\README.md\\r\\ntelemetry\\\\playtest_ab.csv\\r\\nAGENTS.md\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-Content telemetry/README.md\\nGet-Content telemetry/playtest_ab.csv -TotalCount 4\\n(Get-Item telemetry/playtest_ab.csv).Length'\" ok -> \"# Playtest A/B - Pixel Arena tutorial\\r\\n\\r\\nExport from arena-panel. The ETL resends sessions: `session_id` is the unique key (repeated rows are the same session). `variant` may come lowercase or with a leading space. `completed_tutorial` is 0/1.\\r\\n\\r\\nRelease rule: a variant ships only when its gain in tutorial completion is statistically significant at the 5% level.\\r\\nsession_id,variant,player_id,compl[... 102 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport csv,collections as c, math\\nr=list(csv.DictReader(open('telemetry/playtest_ab.csv')))\\ns={}; conflicts=0\\nfor x in r:\\n k=x['session_id']; v=(x['variant'].strip().upper(),int(x['completed_tutorial']),x['player_id'])\\n conflicts+=k in s and s[k]\\\"'!=v\\n s[k]=v\\ng=c.Counter((a,y) for a,y,p in s.values()); players=c.defaultdict(set)\\nfor a,y,p in s.values(): players[p].add(a)\\nprint(len(r),len(s),conflicts,g,len(players),sum(len(v)>1 for v in players.values()))\\n'\\\"'@ | python -\\\"\" ok -> \"1870 1800 0 Counter({('A', 0): 558, ('B', 0): 480, ('B', 1): 420, ('A', 1): 342}) 763 366\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport csv,collections as c, math,json\\nfrom pathlib import Path\\nrows=list(csv.DictReader(open('telemetry/playtest_ab.csv')))\\ns={r['session_id']:(r['variant'].strip().upper(),int(r['completed_tutorial']),r['player_id']) for r in rows}\\nn=c.Counter(a for a,y,p in s.values()); wins=c.Counter(a for a,y,p in s.values() if y)\\na,b=(wins[k]/n[k] for k in 'AB'); d=b-a; pooled=sum(wins.values())/len(s)\\nse=math.sqrt(pooled*(1-pooled)*sum(1/v for v in n.values())); pv=math.erfc(abs(d/se)/math.sqrt(2))\\nres=dict(ship_b=d>0 and pv<.05,sessions_a=n['A'],sessions_b=n['B'],completion_rate_a=a,completion_rate_b=b,p_value=pv)\\nf=Path('result.json'); f.write_text(json.dumps(res,indent=2)+'\\\\\\\\n'); assert json.loads(f.read_text())==res\\nu=c.defaultdict(float)\\nfor k,y,p in s.values(): u[p]+=(1 if k=='B' else -1)*(y-(b if k=='B' else a))/n[k]\\nse=math.sqrt(sum(v*v for v in u.values())*len(u)/(len(u)-1))\\nprint(f.read_text().strip());print('Player-clustered p=%.8f; 95%% gain interval %.2f to %.2f pp'%(math.erfc(abs(d/se)/math.sqrt(2)),100*(d-1.96*se),100*(d+1.96*se)))\\n'@ | python -\\\"\" ok -> \"{\\r\\n  \\\"ship_b\\\": true,\\r\\n  \\\"sessions_a\\\": 900,\\r\\n  \\\"sessions_b\\\": 900,\\r\\n  \\\"completion_rate_a\\\": 0.38,\\r\\n  \\\"completion_rate_b\\\": 0.4666666666666667,\\r\\n  \\\"p_value\\\": 0.00019846895397607585\\r\\n}\\r\\nPlayer-clustered p=0.00027265; 95% gain interval 4.00 to 13.33 pp\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "deduplicated session counts",
+   true
+  ],
+  [
+   "completion rates",
+   true
+  ],
+  [
+   "the gain is significant",
+   true
+  ],
+  [
+   "ship decision",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 4,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 876,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 876
+ },
+ "deliverables": [],
+ "render": null
+}

@@ -1,0 +1,51 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [],
+ "diff": "A run.py\nA test_run.py\n\n--- run.py ---\n\"\"\"Helper for running batches of async jobs with a concurrency limit.\n\nUsage from batch scripts:\n\n    from run import run_tasks\n\n    async def main():\n        await run_tasks([job_a, job_b], max_concurrent=4)\n\nEach task is a zero-argument callable returning an awaitable (a coroutine).\nAt most ``max_concurrent`` jobs run at a time. On cancellation (Ctrl+C under\n``asyncio.run`` on Python 3.11+, which cancels the main task) already-started\njobs receive a CancelledError so their ``finally``/async-cleanup code runs,\njobs that never started are skipped, and the cancellation is propagated.\n\"\"\"\n\nimport asyncio\n\n\nasync def run_tasks(tasks, max_concurrent):\n    if max_concurrent < 1:\n        raise ValueError(\"max_concurrent must be >= 1\")\n\n    sem = asyncio.Semaphore(max_concurrent)\n\n    async def guarded(task):\n        # Skip jobs that never acquired a slot when we are already cancelling.\n        try:\n            await sem.acquire()\n        except asyncio.CancelledError:\n            return\n        try:\n            await task()\n        finally:\n            sem.release()\n\n    children = [asyncio.ensure_future(guarded(t)) for t in tasks]\n    try:\n        # return_exceptions=False: the first real error propagates once the\n        # other jobs have finished (their cleanup included) below.\n        await asyncio.gather(*children)\n    except (asyncio.CancelledError, Exception) as outer:\n        # Give every child a chance to unwind (cleanup runs inside the child's\n        # own finally blocks) before we re-raise.\n        results = await asyncio.gather(*children, return_exceptions=True)\n        if isinstance(outer, asyncio.CancelledError):\n            raise\n        # Prefer the original error; if the children swallowed it, raise the\n        # first child exception we find.\n        if isinstance(outer, asyncio.CancelledError):\n            raise outer\n        for r in results:\n            if isinstance(r, Exception) and not isinstance(r, asyncio.CancelledError):\n                raise r\n        raise outer\n\n\n--- test_run.py ---\nimport asyncio\nimport time\nfrom run import run_tasks\n\nrunning = 0\npeak = 0\ncleanups = []\ndone = []\n\n\nasync def make_job(i, dur):\n    global running, peak\n    running += 1\n    peak = max(peak, running)\n    try:\n        await asyncio.sleep(dur)\n        done.append(i)\n    finally:\n        running -= 1\n        cleanups.append(i)\n\n\nasync def phase1():\n    await run_tasks([lambda i=i: make_job(i, 0.05) for i in range(12)], 3)\n    assert peak <= 3, peak\n    assert len(done) == 12 and len(cleanups) == 12\n    print(\"PASS cap+complete peak=%d done=%d\" % (peak, len(done)))\n\n\nasync def phase2():\n    # Simulate Ctrl+C: cancel the run_tasks task mid-flight.\n    running = peak2 = 0\n    local_clean, local_started = [], []\n\n    async def job(i):\n        nonlocal running, peak2\n        running += 1\n        peak2 = max(peak2, running)\n        local_started.append(i)\n        try:\n            await asyncio.sleep(5)\n        finally:\n            running -= 1\n            local_clean.append(i)\n\n    t = asyncio.create_task(\n        run_tasks([lambda i=i: job(i) for i in range(10)], 4)\n    )\n    await asyncio.sleep(0.1)\n    t.cancel()\n    try:\n        await t\n        print(\"FAIL: no CancelledError\")\n    except asyncio.CancelledError:\n        pass\n    assert len(local_clean) == len(local_started) <= 4, (local_clean, local_started)\n    assert len(local_started) >= 4\n    print(\"PASS interrupt cleaned=%d started=%d\" % (len(local_clean), len(local_started)))\n\n\nasync def phase3():\n    # A failing job: others still finish and clean up, error propagates.\n    cleaned = []\n\n    async def bad():\n        raise RuntimeError(\"boom\")\n\n    async def good(i):\n        try:\n            await asyncio.sleep(0.05)\n        finally:\n            cleaned.append(i)\n\n    try:\n        await run_tasks([bad] + [lambda i=i: good(i) for i in range(5)], 2)\n        print(\"FAIL: no error\")\n    except RuntimeError:\n        assert len(cleaned) == 5, cleaned\n        print(\"PASS error-propagation cleaned=%d\" % len(cleaned))\n\n\nasyncio.run(asyncio.wait_for(phase1(), 5))\nasyncio.run(asyncio.wait_for(phase2(), 5))\nasyncio.run(asyncio.wait_for(phase3(), 5))\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Created file successfully: <WORKSPACE>/run.py\"\n[step 1] write \"<WORKSPACE>\\\\test_run.py\" ok -> \"Created file successfully: <WORKSPACE>/test_run.py\"\n[step 1] edit \"<WORKSPACE>\\\\run.py\" ok -> \"Edited <WORKSPACE>/run.py (1 replacement)\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   true
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 3,
+  "tool_calls": 3,
+  "tool_errors": 0,
+  "shell_commands": 0,
+  "shell_failures": 0,
+  "file_writes": 3,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2666,
+  "reasoning_tokens": 1322,
+  "largest_turn_tokens": 1609
+ },
+ "deliverables": [],
+ "render": null
+}

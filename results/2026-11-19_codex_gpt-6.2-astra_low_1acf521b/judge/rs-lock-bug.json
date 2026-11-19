@@ -1,0 +1,65 @@
+{
+ "task_id": "rs-lock-bug",
+ "prompts": [
+  "The match server of our game hangs under load, and the final scores come out low. The score board is the crate in {WS}. Find out why and fix it. Its public API stays as it is, the tests in {WS}/tests stay as they are, and the crate takes no new dependencies."
+ ],
+ "answers": [
+  "[goal] Fix scoreboard hangs and lost points while preserving the public API, dependencies, and existing tests.\n\n[action] Changed `src/lib.rs` so each operation holds one mutex over the player scores and total. Assumed that rejoining replaces the player’s score, as the original map insertion did, and corrected the total accordingly.\n\n[result] Self-transfers locked the same mutex twice. Opposite-direction transfers could each hold the lock the other needed. Awards read and wrote under separate locks, allowing concurrent updates to overwrite points.\n\n[next] Verification is complete. Before the fix, the regression reported `worker stalled: Timeout`. Afterward, four workers completed 4,000 awards plus opposing transfers with the exact expected scores and total. Both checks passed:\n\n```text\ntest tests::concurrent_updates_finish_and_preserve_scores ... ok\ntest one_thread_keeps_the_scores ... ok\n```"
+ ],
+ "diff": "M src/lib.rs\n\n--- src/lib.rs ---\n//! Player scores shared between the match threads of the Pixel Arena server.\n\nuse std::collections::HashMap;\nuse std::sync::{Arc, Mutex};\n\npub type PlayerId = u32;\n\n#[derive(Default)]\nstruct Scores {\n    players: HashMap<PlayerId, i64>,\n    total: i64,\n}\n\n/// Clones share the same scores, so each match thread keeps its own handle.\n#[derive(Clone, Default)]\npub struct Board {\n    scores: Arc<Mutex<Scores>>,\n}\n\nimpl Board {\n    pub fn new() -> Self {\n        Self::default()\n    }\n\n    pub fn join(&self, id: PlayerId, score: i64) {\n        let mut scores = self.scores.lock().unwrap();\n        let previous = scores.players.get(&id).copied().unwrap_or(0);\n        // The replacement delta can exceed i64 even when the final total fits.\n        let total = i128::from(scores.total) - i128::from(previous) + i128::from(score);\n        scores.total = i64::try_from(total).expect(\"board total exceeds i64\");\n        scores.players.insert(id, score);\n    }\n\n    /// Adds points to a player and to the board total.\n    pub fn award(&self, id: PlayerId, points: i64) {\n        let mut scores = self.scores.lock().unwrap();\n        let updated = scores.players[&id] + points;\n        scores.total += points;\n        scores.players.insert(id, updated);\n    }\n\n    /// Moves points between two players. The board total does not change.\n    /// Moving points from a player to the same player changes nothing.\n    pub fn transfer(&self, from: PlayerId, to: PlayerId, points: i64) {\n        let mut scores = self.scores.lock().unwrap();\n        let source = scores.players[&from];\n        if from == to {\n            return;\n        }\n        let destination = scores.players[&to] + points;\n        scores.players.insert(from, source - points);\n        scores.players.insert(to, destination);\n    }\n\n    pub fn score(&self, id: PlayerId) -> i64 {\n        self.scores.lock().unwrap().players[&id]\n    }\n\n    pub fn total(&self) -> i64 {\n        self.scores.lock().unwrap().total\n    }\n}\n\n#[cfg(test)]\nmod tests {\n    use super::Board;\n    use std::sync::{mpsc, Barrier};\n    use std::{sync::Arc, thread, time::Duration};\n\n    #[test]\n    fn concurrent_updates_finish_and_preserve_scores() {\n        let board = Board::new();\n        board.join(1, 9);\n        board.join(2, 0);\n        let start = Arc::new(Barrier::new(4));\n        let (done, finished) = mpsc::channel();\n        for worker in 0..4 {\n            let (board, start, done) = (board.clone(), start.clone(), done.clone());\n            thread::spawn(move || {\n                let (from, to) = if worker % 2 == 0 { (1, 2) } else { (2, 1) };\n                start.wait();\n                board.transfer(from, from, 7);\n                for _ in 0..1000 {\n                    board.award(1, 1);\n                    board.transfer(from, to, 1);\n                }\n                done.send(()).unwrap();\n            });\n        }\n        drop(done);\n        for _ in 0..4 {\n            finished\n                .recv_timeout(Duration::from_secs(5))\n                .expect(\"worker stalled\");\n        }\n        assert_eq!(\n            (board.score(1), board.score(2), board.total()),\n            (4009, 0, 4009)\n        );\n        board.join(1, 3);\n        assert_eq!((board.score(1), board.total()), (3, 3));\n    }\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"Get-ChildItem -Name; rg --files --hidden -g '\\\"'!target'\\\"' -g '\\\"'!.git'\\\"'\\\"\" ok -> \"src\\r\\ntests\\r\\nAGENTS.md\\r\\nCargo.toml\\r\\ntests\\\\board.rs\\nsrc\\\\lib.rs\\nCargo.toml\\nAGENTS.md\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-Content src/lib.rs; Get-Content tests/board.rs; Get-Content Cargo.toml; Get-Content AGENTS.md'\" ok -> \"//! Player scores shared between the match threads of the Pixel Arena server.\\r\\n\\r\\nuse std::collections::HashMap;\\r\\nuse std::sync::{Arc, Mutex};\\r\\n\\r\\npub type PlayerId = u32;\\r\\n\\r\\n/// Clones share the same scores, so each match thread keeps its own handle.\\r\\n#[derive(Clone, Default)]\\r\\npub struct Board {\\r\\n    players: Arc<Mutex<HashMap<PlayerId, Arc<Mutex<i64>>>>>,\\r\\n    total: Arc<Mutex<i64>>,\\r\\n}\\r\\n\\r\\nimpl B[... 2158 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-Command rustc,cargo -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name; Get-ChildItem -Force -Name'\" ok -> \"rustc.exe\\r\\ncargo.exe\\r\\nsrc\\r\\ntests\\r\\nAGENTS.md\\r\\nCargo.toml\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\n\\n#[cfg(test)]\\nmod tests {\\n    use super::Board;\\n    use std::sync::{mpsc, Barrier};\\n    use std::{sync::Arc, thread, time::Duration};\\n\\n    #[test]\\n    fn concurrent_updates_finish_and_preserve_scores() {\\n        let board = Board::new();\\n        board.join(1, 9);\\n        board.join(2, 0);\\n        let start = Arc::new(Barrier::new(4));\\n        let (done, finished) = mpsc::channel();\\n        for worker in 0..4 {\\n            let (board, start, done) = (board.clone(), start.clone(), done.clone());\\n            thread::spawn(move || {\\n                let (from, to) = if worker % 2 == 0 { (1, 2) } else { (2, 1) };\\n                start.wait();\\n                board.transfer(from, from, 7);\\n                for _ in 0..1000 {\\n                    board.award(1, 1);\\n                    board.transfer(from, to, 1);\\n                }\\n                done.send(()).unwrap();\\n            });\\n        }\\n        drop(done);\\n        for _ in 0..4 {\\n            finished.recv_timeout(Duration::from_secs(5)).expect(\\\\\\\"worker stalled\\\\\\\");\\n        }\\n        assert_eq\\\"'!((board.score(1), board.score(2), board.total()), (4009, 0, 4009));\\n        board.join(1, 3);\\n        assert_eq!((board.score(1), board.total()), (3, 3));\\n    }\\n}\\n'\\\"'@ | Add-Content src/lib.rs\\nNew-Item -ItemType Directory tmp | Out-Null\\n\\\"'$env:TMP=(Resolve-Path tmp).Path\\n$env:TEMP=$env:TMP\\nrustc --edition=2021 --test[... 76 chars cut by the benchmark]\" failed -> \"running 1 test\\ntest tests::concurrent_updates_finish_and_preserve_scores ... FAILED\\n\\nfailures:\\n\\n---- tests::concurrent_updates_finish_and_preserve_scores stdout ----\\n\\nthread 'tests::concurrent_updates_finish_and_preserve_scores' (29016) panicked at src/lib.rs:86:59:\\nworker stalled: Timeout\\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\\n\\n\\nfailures:\\n    tests::concurre[... 136 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command '$source = Get-Content -Raw src/lib.rs\\n$tests = $source.Substring($source.IndexOf('\\\"'#[cfg(test)]'))\\n\\\"'$impl = @'\\\"'\\n//\\\"'! Player scores shared between the match threads of the Pixel Arena server.\\n\\nuse std::collections::HashMap;\\nuse std::sync::{Arc, Mutex};\\n\\npub type PlayerId = u32;\\n\\n#[derive(Default)]\\nstruct Scores {\\n    players: HashMap<PlayerId, i64>,\\n    total: i64,\\n}\\n\\n/// Clones share the same scores, so each match thread keeps its own handle.\\n#[derive(Clone, Default)]\\npub struct Board {\\n    scores: Arc<Mutex<Scores>>,\\n}\\n\\nimpl Board {\\n    pub fn new() -> Self {\\n        Self::default()\\n    }\\n\\n    pub fn join(&self, id: PlayerId, score: i64) {\\n        let mut scores = self.scores.lock().unwrap();\\n        let previous = scores.players.get(&id).copied().unwrap_or(0);\\n        // The replacement delta can exceed i64 even when the final total fits.\\n        let total = i128::from(scores.total) - i128::from(previous) + i128::from(score);\\n        scores.total = i64::try_from(total).expect(\\\"board total exceeds i64\\\");\\n        scores.players.insert(id, score);\\n    }\\n\\n    /// Adds points to a player and to the board total.\\n    pub fn award(&self, id: PlayerId, points: i64) {\\n        let mut scores = self.scores.lock().unwrap();\\n        let updated = scores.players[&id] + points;\\n        scores.total += points;\\n        scores.players.insert(id, updated);\\n    }\\n\\n    /// [... 1260 chars cut by the benchmark]\" ok -> \"running 1 test\\ntest tests::concurrent_updates_finish_and_preserve_scores ... ok\\n\\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s\\n\\n\\nrunning 1 test\\ntest one_thread_keeps_the_scores ... ok\\n\\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-ChildItem tmp -Name; Remove-Item -LiteralPath tmp/repro.exe,tmp/libarena_scores.rlib,tmp/board.exe; Get-ChildItem tmp -Name'\" ok -> \"board.exe\\r\\nboard.pdb\\r\\nlibarena_scores.rlib\\r\\nrepro.exe\\r\\nrepro.pdb\\r\\nboard.pdb\\r\\nrepro.pdb\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Remove-Item -LiteralPath tmp/board.pdb,tmp/repro.pdb; Remove-Item -LiteralPath tmp; Get-ChildItem -Name'\" ok -> \"src\\r\\ntests\\r\\nAGENTS.md\\r\\nCargo.toml\"",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "no new dependencies",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hidden awards from many threads all count",
+   true
+  ],
+  [
+   "hidden opposite transfers do not hang",
+   true
+  ],
+  [
+   "hidden a transfer to the same player changes nothing",
+   true
+  ],
+  [
+   "hidden clones share the scores",
+   true
+  ],
+  [
+   "hidden asymmetric transfers move points",
+   true
+  ],
+  [
+   "hidden the visible score example passes",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 7,
+  "tool_errors": 1,
+  "shell_commands": 7,
+  "shell_failures": 1,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1710,
+  "reasoning_tokens": 55,
+  "largest_turn_tokens": 1710
+ },
+ "deliverables": [],
+ "render": null
+}

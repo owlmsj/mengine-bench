@@ -1,0 +1,57 @@
+{
+ "task_id": "infra-gpu-fit",
+ "prompts": [
+  "We want to serve the model described in {WS}/MODEL.md on rented GPUs. Today's offers are in {WS}/offers.csv and our rental rules in {WS}/POLICY.md. Pick the cheapest way to serve it under the policy and justify the choice. Record it in {WS}/result.json with weights_gb, kv_cache_gb, total_gb, offer_id, usd_per_hour and usd_per_month."
+ ],
+ "answers": [
+  "[goal] **of-117 is the cheapest qualifying offer at $3.58/hour, or $2,613.40 for 730 hours.** Recorded in `./result.json`.\n\n[action] Using decimal GB, 70 billion FP8 parameters require 70 GB. Four full contexts require 327,680 × 32,768 × 4 bytes, or 42.94967296 GB. Adding the deployment’s 8 GB overhead gives **120.94967296 GB**. I assumed no additional memory margin or throughput requirement.\n\n[result] of-117 is in stock in us-central. Its two 80 GB H100s provide 160 GB under the stated sharding rule. Filtering every offer by stock, region, the $4 hourly cap, and required memory returned exactly three, sorted by whole-offer hourly price:\n\n```text\nof-117 3.58\nof-120 3.79\nof-124 3.92\n```\n\n[next] Use of-117. The filtered prices verify the minimum, and $3.58 × 730 verifies the monthly cost."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\r\n  \"weights_gb\": 70,\r\n  \"kv_cache_gb\": 42.94967296,\r\n  \"total_gb\": 120.94967296,\r\n  \"offer_id\": \"of-117\",\r\n  \"usd_per_hour\": 3.58,\r\n  \"usd_per_month\": 2613.40\r\n}\r\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-Content -Raw ./MODEL.md'\" ok -> \"# Model to serve: arena-coder-70b\\n\\n| property | value |\\n| --- | --- |\\n| parameters | 70 billion |\\n| weight precision | 8-bit (FP8) |\\n| KV cache | 327,680 bytes per token (FP16, all layers, K and V) |\\n| context we want per sequence | 32,768 tokens |\\n| concurrent sequences | 4 |\\n| runtime overhead | 8 GB for the whole deployment (CUDA context, activations), whatever the GPU count |\\n\\nEvery sequence m[... 270 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-Content -Raw ./offers.csv'\" ok -> \"offer_id,provider,region,gpu,gpu_count,vram_gb_per_gpu,usd_per_hour,in_stock\\nof-101,cloudnine,us-east,RTX PRO 6000,1,96,1.79,yes\\nof-104,cloudnine,us-east,A100 80GB,1,80,1.29,yes\\nof-108,gridrent,eu-west,H100 80GB,2,80,3.1,no\\nof-111,gridrent,ap-southeast,RTX PRO 6000,2,96,2.98,yes\\nof-113,voltbay,us-central,L40S,2,48,1.84,yes\\nof-117,voltbay,us-central,H100 80GB,2,80,3.58,yes\\nof-120,cloudnine,eu-west,[... 199 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-Content -Raw ./POLICY.md'\" ok -> \"# Rental policy\\n\\n- Hourly cap: US$ 4 per hour for the whole deployment. Nothing above it is rented.\\n- Rent only offers that are in stock now (`in_stock` = yes).\\n- Allowed regions: us-east, us-central, eu-west.\\n- `usd_per_hour` in offers.csv is the price of the whole offer (all its GPUs), not per GPU.\\n- One offer per deployment; we do not combine offers.\\n- Monthly cost = hourly price x 730 hours.\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command '$w = 70\\n$kv = [decimal]327680 * 32768 * 4 / 1000000000\\n$t = $w + $kv + 8\\n$eligible = @(Import-Csv offers.csv | Where-Object { $_.in_stock -eq '\\\"'yes' -and \\\"'$_.region -in '\\\"'us-east','us-central','eu-west' -and [decimal]\\\"'$_.usd_per_hour -le 4 -and [int]$_.gpu_count * [int]$_.vram_gb_per_gpu -ge $t } | Sort-Object {[decimal]$_.usd_per_hour})\\n$o = $eligible[0]\\n$p = [decimal]$o.usd_per_hour\\n[ordered]@{weights_gb=$w;kv_cache_gb=$kv;total_gb=$t;offer_id=$o.offer_id;usd_per_hour=$p;usd_per_month=$p*730} | ConvertTo-Json | Set-Content result.json -Encoding ascii\\n$r = Get-Content -Raw result.json | ConvertFrom-Json\\nif ($r.total_gb -ne 120.94967296 -or $r.usd_per_month -ne 2613.4 -or $r.offer_id -ne $o.offer_id) { throw '\\\"'Result mismatch' }\\nGet-Content result.json\\n\\\"'$eligible | ForEach-Object { \\\"$($_.offer_id) $($_.usd_per_hour)\\\" }'\" ok -> \"{\\r\\n  \\\"weights_gb\\\": 70,\\r\\n  \\\"kv_cache_gb\\\": 42.94967296,\\r\\n  \\\"total_gb\\\": 120.94967296,\\r\\n  \\\"offer_id\\\": \\\"of-117\\\",\\r\\n  \\\"usd_per_hour\\\": 3.5800000000000000710542735760,\\r\\n  \\\"usd_per_month\\\": 2613.4000000000000518696197105\\r\\n}\\r\\nof-117 3.58\\r\\nof-120 3.79\\r\\nof-124 3.92\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command '$s = (Get-Content -Raw result.json).Trim() -replace '\\\"'3\\\\\\\\.5800000000000000710542735760','3.58' -replace '2613\\\\\\\\.4000000000000518696197105','2613.40'\\nSet-Content result.json \\\"'$s -Encoding ascii\\nGet-Content result.json'\" ok -> \"{\\r\\n  \\\"weights_gb\\\": 70,\\r\\n  \\\"kv_cache_gb\\\": 42.94967296,\\r\\n  \\\"total_gb\\\": 120.94967296,\\r\\n  \\\"offer_id\\\": \\\"of-117\\\",\\r\\n  \\\"usd_per_hour\\\": 3.58,\\r\\n  \\\"usd_per_month\\\": 2613.40\\r\\n}\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "weights size",
+   true
+  ],
+  [
+   "KV cache size",
+   true
+  ],
+  [
+   "total memory needed",
+   true
+  ],
+  [
+   "cheapest feasible offer",
+   true
+  ],
+  [
+   "hourly price",
+   true
+  ],
+  [
+   "monthly price",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 5,
+  "tool_errors": 0,
+  "shell_commands": 5,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 727,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 727
+ },
+ "deliverables": [],
+ "render": null
+}

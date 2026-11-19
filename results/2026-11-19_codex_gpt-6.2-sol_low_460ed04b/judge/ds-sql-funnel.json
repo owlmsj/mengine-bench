@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-sql-funnel",
+ "prompts": [
+  "Product wants to know where players drop off on each platform. The data is in {WS}/analytics.db and our reporting rules are in {WS}/METRICS.md. Where do we lose the most players? Record it in {WS}/result.json: funnel (per platform, players at each step) and biggest_drop (per platform, the step)."
+ ],
+ "answers": [
+  "[goal] Find the funnel step with the lowest conversion on each platform.\n\n[action] Wrote [result.json](result.json). I treated installs as the baseline and would report the earlier step if conversion rates tied.\n\n[result]\n\n| Platform | Install | Tutorial complete | First match | Purchase | Biggest drop |\n|---|---:|---:|---:|---:|---|\n| PC | 470 | 389 | 326 | 269 | Purchase, 82.52% conversion |\n| Steam Deck | 192 | 128 | 87 | 61 | Tutorial complete, 66.67% conversion |\n\n[next] An independent chronological replay matched every saved count and both drop steps. The check reported `Verified result.json against independent event replay.`"
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\r\n  \"funnel\": {\r\n    \"pc\": {\r\n      \"install\": 470,\r\n      \"tutorial_complete\": 389,\r\n      \"first_match\": 326,\r\n      \"purchase\": 269\r\n    },\r\n    \"steamdeck\": {\r\n      \"install\": 192,\r\n      \"tutorial_complete\": 128,\r\n      \"first_match\": 87,\r\n      \"purchase\": 61\r\n    }\r\n  },\r\n  \"biggest_drop\": {\r\n    \"pc\": \"purchase\",\r\n    \"steamdeck\": \"tutorial_complete\"\r\n  }\r\n}\r\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"Get-Content METRICS.md; Get-ChildItem -Name; python -c \\\\\\\"import sqlite3; c=sqlite3.connect('file:analytics.db?mode=ro',uri=True); print(c.execute('select sql from sqlite_master').fetchall())\\\\\\\"\\\"\" ok -> \"# How we report the funnel\\r\\n\\r\\nSteps, in order: install, tutorial_complete, first_match, purchase.\\r\\nA step counts only at or after the same player's previous step, with no time limit; its time is the first valid occurrence.\\r\\nTest accounts and events from unknown players do not count.\\r\\nA step's conversion is its players over the previous step's players. The biggest drop is the step with the lowest c[... 203 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport sqlite3\\nc=sqlite3.connect('file:analytics.db?mode=ro',uri=True)\\nfor q in [\\\\\\\"select platform,is_test,count(*) from users group by 1,2\\\\\\\",\\\\\\\"select name,count(*),min(length(ts)),max(length(ts)),count(*)-count(ts) from events group by 1\\\\\\\",\\\\\\\"select distinct substr(ts,11) from events limit 12\\\\\\\"]:\\n print(c.execute(q).fetchall())\\n'@ | python -\\\"\" ok -> \"[('pc', 0, 593), ('pc', 1, 21), ('steamdeck', 0, 273), ('steamdeck', 1, 13)]\\r\\n[('first_match', 479, 19, 19, 0), ('install', 759, 19, 19, 0), ('purchase', 441, 19, 19, 0), ('tutorial_complete', 589, 19, 19, 0)]\\r\\n[(' 23:05:00',), (' 21:00:00',), (' 05:00:00',), (' 02:00:00',), (' 14:00:00',), (' 13:00:00',), (' 18:00:00',), (' 01:00:00',), (' 11:00:00',), (' 17:00:00',), (' 22:00:00',), (' 09:05:00'[... 3 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport json, sqlite3\\nfrom fractions import Fraction\\nfrom pathlib import Path\\nc=sqlite3.connect('file:analytics.db?mode=ro',uri=True)\\nsteps=('install','tutorial_complete','first_match','purchase')\\nsql='WITH eligible AS (SELECT user_id, platform FROM users WHERE is_test=0)'\\nprevious='eligible'\\nfor i, name in enumerate(steps):\\n    threshold='' if i==0 else ' AND e.ts >= p.ts'\\n    sql+=f\\\\\\\", {name} AS (SELECT p.user_id,p.platform,MIN(e.ts) AS ts FROM {previous} p JOIN events e ON e.user_id=p.user_id AND e.name=?{threshold} GROUP BY p.user_id,p.platform)\\\\\\\"\\n    previous=name\\nsql+=' '+ ' UNION ALL '.join(f'SELECT platform, {i}, COUNT(*) FROM {name} GROUP BY platform' for i,name in enumerate(steps))\\nfunnel={p:dict.fromkeys(steps,0) for p, in c.execute('SELECT DISTINCT platform FROM eligible' if False else 'SELECT DISTINCT platform FROM users WHERE is_test=0 ORDER BY platform')}\\nfor platform,index,count in c.execute(sql,steps):\\n    funnel[platform][steps[index]]=count\\ndef biggest(counts):\\n    candidates=[(Fraction(counts[step],counts[prev]),i,step) for i,(prev,step) in enumerate(zip(steps,steps[1:])) if counts[prev]]\\n    return min(candidates)[2] if candidates else None\\nresult={'funnel':funnel,'biggest_drop':{p:biggest(counts) for p,counts in funnel.items()}}\\npath=Path('result.json')\\npath.write_text(json.dumps(result,indent=2)+'\\\\\\\\n',encoding='utf-8')\\n# Independentl[... 1105 chars cut by the benchmark]\" ok -> \"pc: [470, 389, 326, 269]; lowest conversion purchase (82.52%)\\r\\nsteamdeck: [192, 128, 87, 61]; lowest conversion tutorial_complete (66.67%)\\r\\nVerified result.json against independent event replay.\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "players per step on pc",
+   true
+  ],
+  [
+   "players per step on steamdeck",
+   true
+  ],
+  [
+   "biggest drop on each platform",
+   true
+  ],
+  [
+   "final answer does not contradict biggest drops",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 3,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1049,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1049
+ },
+ "deliverables": [],
+ "render": null
+}
