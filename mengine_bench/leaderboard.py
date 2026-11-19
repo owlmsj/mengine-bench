@@ -100,6 +100,11 @@ DETAILS_SUMMARY = "Run details: tokens, turns, tools, hardware, config"
 RUNS_RANKED_PER_PRESET = 3
 OLDER_RUNS_SUMMARY = f"Older runs of ranked setups (beyond the {RUNS_RANKED_PER_PRESET} most recent of each)"
 CONSISTENCY_SUMMARY = "Consistency of setups with several ranked runs"
+# #256 (owner, 2026-11-19): each model's best run on top, today's formula only, newest bench version first.
+SUMMARY_COLUMNS = ("#", "Score", "Model", "Best setup", "Date", "Correct %", "Judge", "Time", "Cost", "Run")
+SUMMARY_HEADER = ("## Summary: best run per model\n\nOne row per model, today's Score formula: its best run on bench "
+                  "{current} when it has one, else its best ranked run of an older version (marked on the run). "
+                  "Every run is in the ranking below.\n")
 COST_LEGEND = ("Cost: `$x` as the harness reported it, `~$x` estimated from the run's tokens at API list prices, "
                "`$0.00 (local)` a local model, `>=` a lower bound (a step went unmeasured), `n/a` neither. "
                "Tool s: median seconds per tool call, `-` where the harness does not time each call.\n")
@@ -369,6 +374,35 @@ def _consistency(entries: list[RankedBundle]) -> str:
     return f"<details><summary>{CONSISTENCY_SUMMARY}</summary>\n\n" + "\n".join(table) + "\n\n</details>\n"
 
 
+def best_run_per_model(ranked: list[RankedBundle]) -> list[RankedBundle]:
+    """#256: per model, the best-scoring run of its newest ranked bench major.minor, sorted by Score."""
+    newest: dict[str, tuple[tuple[int, ...], RankedBundle]] = {}
+    for entry in ranked:
+        model = preset_key(entry.result)[1]
+        version = _version_key(major_minor(entry.result.get("bench_version")))
+        kept = newest.get(model)
+        if kept is None or version > kept[0] or (version == kept[0] and _by_score(entry) < _by_score(kept[1])):
+            newest[model] = (version, entry)
+    return sorted((entry for _, entry in newest.values()), key=_by_score)
+
+
+def _summary_row(rank: int, entry: RankedBundle) -> str:
+    row = entry.result
+    agent, totals = row["agent"], row["totals"]
+    assert isinstance(agent, dict) and isinstance(totals, dict)
+    harness = f"{agent['name']} {agent.get('version') or ''}".strip()
+    return _cells_line([str(rank), f"**{_fmt(entry.score)}**", str(agent["model"]),
+                        f"{_fmt(agent.get('effort'))}<br>{harness}", str(row.get("date") or "-"),
+                        _fmt(totals.get("correct")), _fmt(totals.get("judge")), time_text(totals.get("time_s")),
+                        run_cost_text(row), _run_cell(entry)])
+
+
+def _summary(ranked: list[RankedBundle]) -> str:
+    best = best_run_per_model(ranked)
+    rows = _header(SUMMARY_COLUMNS) + [_summary_row(rank, entry) for rank, entry in enumerate(best, start=1)]
+    return SUMMARY_HEADER.format(current=major_minor(__version__)) + "\n" + "\n".join(rows) + "\n"
+
+
 def judged_runs(results_dir: Path, version: str) -> list[dict[str, object]]:
     """Complete runs of one bench major.minor that the official judge model voted on."""
     runs = []
@@ -414,9 +448,10 @@ def build_leaderboard(results_dir: Path, link_base: Path) -> Leaderboard:
         else:
             ranked.append(entry)
     ranked.sort(key=_by_score)
+    summary = [_summary(ranked)] if ranked else []
     ranked, older_runs = split_older_runs(ranked)
     note = [RANKED_WITH_NOTE] if RANKED_WITH_CURRENT.get(major_minor(__version__)) else []
-    sections = [LEADERBOARD_HEADER, *note, _table(ranked) if ranked else "No results yet.\n", COST_LEGEND,
+    sections = [LEADERBOARD_HEADER, *summary, "## Ranking\n", *note, _table(ranked) if ranked else "No results yet.\n", COST_LEGEND,
                 *tie_note([entry.result for entry in ranked])]
     if consistency := _consistency(ranked):
         sections.append(consistency)

@@ -9,6 +9,30 @@ judged runs of the current bench version are ranked. A setup (harness, model and
 3 most recent runs ranked; its older runs fold below the table (#210). Older rankings stay below as history:
 their Scores and Speeds use that version's formula and do not compare with the table above.
 
+## Summary: best run per model
+
+One row per model, today's Score formula: its best run on bench 2.8 when it has one, else its best ranked run of an older version (marked on the run). Every run is in the ranking below.
+
+| # | Score | Model | Best setup | Date | Correct % | Judge | Time | Cost | Run |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | **91.0** | gpt-6.1-terra | low<br>codex codex-cli 0.167.0 | 2026-11-13 | 98.0 | 81.0 | 12 min 06 s | ~$1.97 | [run](results/2026-11-13_codex_gpt-6.1-terra_low_7f2ddd31/summary.md) |
+| 2 | **89.4** | claude-fable-5-2 | low<br>claude 2.1.322 (Claude Code) | 2026-11-10 | 99.1 | 84.8 | 19 min 28 s | $14.99 | [run](results/2026-11-10_claude_claude-fable-5-2_low_0f96770c/summary.md) |
+| 3 | **89.0** | claude-sonnet-5-5 | low<br>claude 2.1.317 (Claude Code) | 2026-11-03 | 98.7 | 79.1 | 15 min 49 s | $3.19 | [run](results/2026-11-03_claude_claude-sonnet-5-5_low_cb2cc05a/summary.md) (bench 2.3, rubric 2.5) |
+| 4 | **88.4** | claude-opus-5-5 | low<br>claude 2.1.325 (Claude Code) | 2026-11-13 | 98.2 | 77.3 | 14 min 59 s | $6.83 | [run](results/2026-11-13_claude_claude-opus-5-5_low_ac09a1b3/summary.md) |
+| 5 | **86.9** | gpt-6.1-sol | low<br>codex codex-cli 0.167.0 | 2026-11-14 | 99.4 | 85.7 | 25 min 25 s | ~$4.58 | [run](results/2026-11-14_codex_gpt-6.1-sol_low_7c5e5310/summary.md) |
+| 6 | **86.8** | home/qwen38-flash-next-exl3-605-256k | low<br>opencode opencode v2.2.5 | 2026-11-07 | 99.1 | 84.3 | 24 min 19 s | $0.00 (local) | [run](results/2026-11-07_opencode_home-qwen38-flash-next-exl3-605-256k_low_74b3cbb8/summary.md) |
+| 7 | **85.3** | gemini-4-hydrogen | low<br>agy 1.5.8 | 2026-11-13 | 96.8 | 78.2 | 20 min 17 s | ~$2.34 | [run](results/2026-11-13_agy_gemini-4-hydrogen_low_1d1adfcd/summary.md) |
+| 8 | **85.3** | moonshotai/kimi-k3.1-pro-highspeed | low<br>opencode opencode v2.2.5 | 2026-11-14 | 94.2 | 81.7 | 19 min 39 s | $3.19 | [run](results/2026-11-14_opencode_moonshotai-kimi-k3.1-pro-highspeed_low_a48ff77f/summary.md) |
+| 9 | **71.8** | deepseek/deepseek-flash | max<br>opencode opencode v2.2.5 | 2026-11-06 | 88.8 | 78.3 | 45 min 57 s | >= $0.14 | [run](results/2026-11-06_opencode_deepseek-deepseek-flash_max_460f7936/summary.md) (bench 2.7) |
+| 10 | **69.7** | home/qwen38-27b-exl3-sc6-256k | low<br>opencode opencode v2.2.5 | 2026-11-18 | 85.3 | 70.6 | 34 min 31 s | >= $0.00 | [run](results/2026-11-18_opencode_home-qwen38-27b-exl3-sc6-256k_low_be535ee6/summary.md) |
+| 11 | **63.7** | qwen-cloud/qwen4-max | high<br>opencode opencode v2.2.5 | 2026-11-16 | 79.3 | 68.7 | 61 min 52 s | >= ~$1.25 | [run](results/2026-11-16_opencode_qwen-cloud-qwen4-max_high_b5275a3f/summary.md) |
+| 12 | **63.3** | maritaca/S5 | low<br>opencode opencode v2.2.5 | 2026-11-06 | 80.9 | 61.7 | 36 min 59 s | >= ~$0.15 | [run](results/2026-11-06_opencode_maritaca-S5_low_f64abf0d/summary.md) (bench 2.6) |
+| 13 | **57.8** | gemini-4-carbon | low<br>agy 1.5.5 | 2026-11-10 | 74.8 | 58.4 | 64 min 46 s | >= ~$1.86 | [run](results/2026-11-10_agy_gemini-4-carbon_low_8c355349/summary.md) |
+| 14 | **56.4** | gemini-4-neon | high<br>agy 1.5.12 | 2026-11-19 | 70.8 | 59.9 | 63 min 45 s | >= ~$4.58 | [run](results/2026-11-19_agy_gemini-4-neon_high_30885500/summary.md) |
+| 15 | **48.2** | zai/glm-5.3 | high<br>opencode opencode v2.2.5 | 2026-11-15 | 60.4 | 51.3 | 59 min 22 s | >= $0.90 | [run](results/2026-11-15_opencode_zai-glm-5.3_high_4dfcaeb2/summary.md) |
+
+## Ranking
+
 Bench 2.3 to 2.7 runs stay in this ranking (#153, #161, #164, #185, #187, #210, #218): they ran the 28-task catalog, without web-archery-game (added in 2.8, #218), each row marked with its version, and every Score and Speed here use the 2.7 formula (#210), recomputed from the row's published Correct %, Judge and Time; no run was run or judged again.
 A row marked 2.4 or older was graded without the 2.5 checks (fetched sources, workspace writes and more, #164); a row marked 2.3 also lacks the 2.4 check that cu-social-cycle and cu-webmail
 close the tabs and apps they opened; a row marked "rubric 2.5" keeps its 2.5 judge votes until it is judged again (#185).

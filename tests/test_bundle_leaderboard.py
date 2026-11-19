@@ -150,7 +150,9 @@ def test_leaderboard_ranks_in_a_narrow_table_and_keeps_the_stats_in_details(tmp_
     _write_result(results, "high", 90.0, model="high-model")
     board = leaderboard.build_leaderboard(results, tmp_path)
     assert board.ranked == 2 and board.unranked == []
-    table = board.markdown[board.markdown.index("| # |"):]
+    # #256: the per-model summary sits above; the ranking starts at its own heading.
+    table = board.markdown[board.markdown.index("## Ranking"):]
+    table = table[table.index("| # |"):]
     assert table.splitlines()[0] == ("| # | Score | Setup | Date | Correct % | Solved | Judge | Speed | Time | Cost | "
                                       "Run |")
     assert table.index("high-model") < table.index("low-model")
@@ -166,7 +168,7 @@ def test_leaderboard_ranks_in_a_narrow_table_and_keeps_the_stats_in_details(tmp_
     for cell in ("| 1 | high-model | 1 | 1.75M | 3.4k | - | 12 | - | - |",
                  "AMD Ryzen 9 7950X, NVIDIA GeForce RTX 4090 (24 GB)", "| provider=openai, mcp=none | dquill | 2026-10-19 |"):
         assert cell in detail_row, (cell, detail_row)
-    assert board.markdown.count("| # | Score |") == 1, "one ranking table"
+    assert board.markdown.count("| # | Score | Setup |") == 1, "one ranking table"
 
 
 @pytest.mark.parametrize("task_ids", [[TASK], [TASK, TASK]], ids=["subset", "duplicate"])
@@ -306,14 +308,15 @@ def test_ranked_rows_are_rescored_with_the_2_7_formula_from_published_time_and_h
         result = json.loads((bundle / "result.json").read_text(encoding="utf-8"))
         result["totals"].update(correct=correct, judge=judge, time_s=time_s, speed=speed, score=score)
         (bundle / "result.json").write_text(json.dumps(result), encoding="utf-8")
-    text = leaderboard.build_leaderboard(results, tmp_path).markdown
+    full = leaderboard.build_leaderboard(results, tmp_path).markdown
+    text = full[full.index("## Ranking"):]  # #256: below the per-model summary
     rows = [line for line in text.splitlines() if line.startswith("| 1 |") or line.startswith("| 2 |")]
     assert rows[0].startswith("| 1 | **89.2** | v27-model") and "| 99.2 | " in rows[0] and "| 83.4 | 70.0 | 19 min 00 s |" in rows[0]
     assert rows[1].startswith("| 2 | **89.1** | v26-model") and "| 78.0 | 90.0 | 13 min 00 s |" in rows[1]
     assert "(bench 2.6)" in rows[1]
     history = text[text.index("## Bench 2.2 (history)"):]
     assert "| 1 | **41.0** | v22-model" in history and "| 70.0 | 60.0 | 15 min 00 s |" in history
-    flat = " ".join(text.split())
+    flat = " ".join(full.split())
     assert "0.5 x Correct % + 0.35 x Judge + 0.15 x Speed x Correct % / 100" in flat
     assert "Speed 100 at 10 min of Time or less, 0 at 40 min or more" in flat
     assert "every Score and Speed here use the 2.7 formula (#210), recomputed from the row's published Correct %, Judge and Time" in flat
@@ -480,7 +483,7 @@ def test_a_preset_keeps_its_3_latest_runs_ranked_and_older_ones_fold_below_210(t
         _write_result(results, name, score, model="same-model", date=date, harness_version=harness)
     _write_result(results, "other", 75.0, model="other-model", date="2026-10-05")
     board = leaderboard.build_leaderboard(results, tmp_path)
-    text = board.markdown
+    text = board.markdown[board.markdown.index("## Ranking"):]  # #256: below the per-model summary
     ranking = text[text.index("| # | Score |"):text.index("<details>")]
     assert board.ranked == 4 and "**90.0**" not in ranking, ranking
     assert [line.split(" | ")[1] for line in ranking.splitlines()[2:6]] == ["**80.0**", "**75.0**", "**70.0**", "**60.0**"]
@@ -520,3 +523,36 @@ def test_summary_and_board_agree_on_codex_list_price_195(tmp_path: Path) -> None
     expected = leaderboard.run_cost_text(result)
     assert expected.startswith("~$")
     assert expected in render_summary(result)
+
+
+
+def test_summary_shows_each_models_best_newest_version_run_first_256(tmp_path: Path) -> None:
+    # #256 (owner, 2026-11-19): one row per model on top, today's Score formula only. A model with a 2.8 run shows its
+    # best 2.8 run, even when an older ranked run scored higher; a model without one shows its best 2.3 to 2.7 run,
+    # marked with its version. 2.0 to 2.2 history and bench 1.x stay out.
+    added = leaderboard.TASKS_ADDED_IN_2_2 | leaderboard.TASKS_ADDED_IN_2_3 | leaderboard.TASKS_ADDED_IN_2_8
+    old_ids = [task.id for task in catalog.all_tasks() if task.id not in added]
+    v27_ids = [task.id for task in catalog.all_tasks() if task.id not in leaderboard.TASKS_ADDED_IN_2_8]
+    results = tmp_path / "results"
+    _write_result(results, "same-old", 95.0, model="same-model", bench_version="2.7.0", task_ids=v27_ids,
+                  date="2026-10-01")
+    _write_result(results, "same-best", 80.0, model="same-model", date="2026-10-02")
+    for name, score, date in (("same-b", 70.0, "2026-10-03"), ("same-c", 60.0, "2026-10-04"), ("same-d", 50.0, "2026-10-05")):
+        _write_result(results, name, score, model="same-model", date=date)
+    _write_result(results, "other", 75.0, model="other-model", bench_version="2.7.0", task_ids=v27_ids)
+    _write_result(results, "other-older", 65.0, model="other-model", bench_version="2.3.1")
+    _write_result(results, "old", 99.0, model="old-model", bench_version="2.1.1", task_ids=old_ids)
+    _write_result(results, "v17", 99.0, model="v17-model", bench_version="1.7.3", task_ids=[TASK])
+    text = leaderboard.build_leaderboard(results, tmp_path).markdown
+    summary = text[text.index("## Summary: best run per model"):text.index("| # | Score | Setup |")]
+    lines = summary.splitlines()
+    rows = [line for line in lines if line.startswith("| ") and not line.startswith(("| # ", "| ---"))]
+    assert lines[lines.index(rows[0]) - 2] == (
+        "| # | Score | Model | Best setup | Date | Correct % | Judge | Time | Cost | Run |")
+    assert rows == [
+        "| 1 | **80.0** | same-model | high<br>codex codex-cli 0.162.1 | 2026-10-02 | 80.0 | 80.0 | 10 min 00 s | "
+        "n/a | [run](results/same-best/summary.md) |",
+        "| 2 | **75.0** | other-model | high<br>codex codex-cli 0.162.1 | 2026-10-19 | 75.0 | 75.0 | 10 min 00 s | "
+        "n/a | [run](results/other/summary.md) (bench 2.7) |"]
+    assert "old-model" not in summary and "v17-model" not in summary
+    assert text.index("## Summary: best run per model") < text.index("| # | Score | Setup |")
