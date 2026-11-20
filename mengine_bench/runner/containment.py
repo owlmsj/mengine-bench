@@ -166,6 +166,7 @@ class WindowsJob:
 
     CREATE_SUSPENDED = 0x00000004
     KILL_ON_JOB_CLOSE = 0x00002000
+    JOB_MEMORY = 0x00000200
     EXTENDED_LIMIT_INFORMATION = 9
     BASIC_ACCOUNTING_INFORMATION = 1
 
@@ -207,6 +208,14 @@ class WindowsJob:
 
         limits = Extended()
         limits.Basic.LimitFlags = self.KILL_ON_JOB_CLOSE
+        # MENGINE_BENCH_JOB_MEMORY_MB caps the agent's whole Job: a runaway process from one task (18 GB on a 31 GB
+        # laptop, mengine-qlora#42) then fails its own allocation instead of starving the host.
+        cap_mb = os.environ.get("MENGINE_BENCH_JOB_MEMORY_MB", "").strip()
+        if cap_mb:
+            if not cap_mb.isdigit() or int(cap_mb) <= 0:
+                raise ValueError(f"received MENGINE_BENCH_JOB_MEMORY_MB={cap_mb!r}; expected a positive integer of MiB")
+            limits.Basic.LimitFlags |= self.JOB_MEMORY
+            limits.JobMemoryLimit = int(cap_mb) * 1024 * 1024
         if not self._kernel32.SetInformationJobObject(self._job, self.EXTENDED_LIMIT_INFORMATION,
                                                       ctypes.byref(limits), ctypes.sizeof(limits)):
             raise OSError(ctypes.get_last_error(), "received failure setting KILL_ON_JOB_CLOSE; expected success")
