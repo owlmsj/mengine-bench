@@ -31,8 +31,18 @@ class OrphanSurvived(RuntimeError):
     """A process of this run could not be killed."""
 
 
+def _describe(proc: psutil.Process) -> str:
+    try:
+        return f"pid={proc.pid} name={proc.name()} cmd={' '.join(proc.cmdline())[:240]!r}"
+    except psutil.Error:
+        return f"pid={proc.pid} (gone)"
+
+
 def _settle(procs: list[psutil.Process]) -> None:
     for proc in procs:
+        # Name every kill: parallel runs lost agents to exit=15 (psutil kill) with no trace of who killed them
+        # (mengine-qlora#42, mengine-bench#264).
+        print(f"[containment] kill {_describe(proc)}", flush=True)
         try:
             proc.kill()
         except psutil.NoSuchProcess:
