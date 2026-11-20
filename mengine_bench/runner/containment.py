@@ -136,6 +136,11 @@ class DescendantWatch:
             for pid, parent in rows.items():
                 if pid in self._born or parent not in self._born:
                     continue
+                # A parent pid now held by another process was reused: its children are strangers. Adopting them
+                # here, before the pruning below, killed other runners' agents with exit=15 (mengine-qlora#42).
+                parent_now = self._created(parent)
+                if parent_now is not None and parent_now != self._born[parent]:
+                    continue
                 created = self._created(pid)
                 if created is not None and created >= self._born[parent]:
                     self._born[pid] = created
