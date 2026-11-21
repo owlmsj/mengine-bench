@@ -1,0 +1,55 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [],
+ "diff": "A analyze.py\nA analyze2.py\nA result.json\n\n--- analyze.py ---\nimport csv, statistics, json\n\nrows = []\nwith open('capture/presentmon.csv') as f:\n    for r in csv.DictReader(f):\n        rows.append(r)\n\nmbp = [float(r['MsBetweenPresents']) for r in rows]\n# first row MsBetweenPresents is time since start; use all for mean per owner's formula (1000/mean)\navg_fps = 1000.0 / (sum(mbp) / len(mbp))\nmbp_sorted = sorted(mbp)\ndef pct(p):\n    idx = int(round((len(mbp_sorted)-1) * p/100.0))\n    return mbp_sorted[idx]\np99 = pct(99)\nlow1 = 1000.0 / p99\nprint(f\"frames={len(mbp)} avg_fps={avg_fps:.3f} p99_ms={p99:.3f} low1={low1:.3f}\")\nprint(f\"mean_ms={sum(mbp)/len(mbp):.3f} max_ms={max(mbp):.3f}\")\n\n# find hitch frames: frame time > 3x median\nmed = statistics.median(mbp)\nhitches = [(i, rows[i]['TimeInSeconds'], mbp[i]) for i in range(len(mbp)) if mbp[i] > 3*med]\nprint(f\"median_ms={med:.3f} hitches(>3x med)={len(hitches)}\")\nfor i, t, ms in hitches[:40]:\n    print(f\"  frame {i} t={float(t):.3f}s ms={ms:.2f}\")\n\n# sensor log\nsens = []\nwith open('capture/sensors.csv') as f:\n    for r in csv.DictReader(f):\n        sens.append(r)\nprint(\"\\nsensors:\")\nfor s in sens:\n    flag = ''\n    if s['gpu_pcie_link_state'] != 'L0': flag += ' LINK='+s['gpu_pcie_link_state']\n    if int(s['dpc_latency_us']) > 200: flag += ' DPC='+s['dpc_latency_us']\n    if int(s['disk_active_pct']) > 50: flag += ' DISK='+s['disk_active_pct']\n    if int(s['cpu_clock_mhz']) < 5000: flag += ' CPUCLOCK='+s['cpu_clock_mhz']\n    if s['top_cpu_process'] != 'Arena.exe': flag += ' TOP='+s['top_cpu_process']\n    print(f\"  t={s['time_s']}s cpu={s['cpu_clock_mhz']} util={s['cpu_util_pct']} gpu={s['gpu_clock_mhz']} link={s['gpu_pcie_link_state']} {s['gpu_pcie_link_speed']} dpc={s['dpc_latency_us']} disk={s['disk_active_pct']} top={s['top_cpu_process']}{flag}\")\n\n--- analyze2.py ---\nimport csv\nrows=[]\nwith open('capture/presentmon.csv') as f:\n    for r in csv.DictReader(f):\n        rows.append(r)\n# frame times in 43-45.5s window (Defender)\nprint(\"Defender window t=43.0-45.5s frame times >10ms:\")\nfor r in rows:\n    t=float(r['TimeInSeconds']); ms=float(r['MsBetweenPresents'])\n    if 43.0<=t<=45.5 and ms>10:\n        print(f\"  t={t:.3f} ms={ms:.2f}\")\n# count hitches by whether their second is an L1 second\nl1_seconds={2,6,10,14,18,22,26,30,34,38,42,46,50,54,58}\nmed=6.962\nin_l1=0; not_l1=0\nfor r in rows:\n    ms=float(r['MsBetweenPresents'])\n    if ms>3*med:\n        sec=int(float(r['TimeInSeconds']))\n        if sec in l1_seconds or (sec+1) in l1_seconds: in_l1+=1\n        else: not_l1+=1\nprint(f\"hitch frames in/near L1 second: {in_l1}, other: {not_l1}\")\n# list the 'other' hitch frames\nprint(\"hitch frames NOT near an L1 second:\")\nfor r in rows:\n    ms=float(r['MsBetweenPresents'])\n    if ms>3*med:\n        sec=int(float(r['TimeInSeconds']))\n        if not (sec in l1_seconds or (sec+1) in l1_seconds):\n            print(f\"  t={float(r['TimeInSeconds']):.3f} ms={ms:.2f}\")\n\n--- result.json ---\n{\n  \"avg_fps\": 137.29,\n  \"low_1pct_fps\": 45.35,\n  \"cause\": \"The GPU's PCIe link repeatedly drops into the ASPM L1 low-power state every ~4 seconds (sensors.csv shows gpu_pcie_link_state=L1 at t=2,6,10,14,...,58s). Each L1->L0 wake stalls frame presentation, producing a burst of ~10 frames at ~22ms (t=2.4, 6.4, 10.4s...). All 177 hitch frames (>3x median) fall in/near those L1 seconds, and the Defender (MsMpEng) DPC/disk spike at t=43-45s produced no frame hitches. This periodic L1 wake latency is what drags the 1% low to ~45fps while the average stays ~137fps.\",\n  \"changes\": [\n    {\n      \"setting\": \"pcie_aspm_rp1_gpu\",\n      \"from\": \"L1\",\n      \"to\": \"disabled\"\n    }\n  ]\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\" ok -> \"Read directory <WORKSPACE>, entries 1-4\\ncapture\\\\\\nAGENTS.md\\nNOTES.md\\nsettings.json\"\n[step 1] read \"<HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-j845tw7t\" ok -> \"Read directory <HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-j845tw7t, entries 1-1\\nworkspace\\\\\"\n[step 1] read \"<WORKSPACE>\\\\NOTES.md\" ok -> \"Read file <WORKSPACE>\\\\NOTES.md, lines 1-15\\n1: # Owner notes - rig \\\"arena-01\\\"\\n2: \\n3: The game hitches every few seconds even though the average frame rate looks fine.\\n4: Capture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\n5: taken at the same time (same clock: second 0 of both files is the same i[... 533 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\settings.json\" ok -> \"Read file <WORKSPACE>\\\\settings.json, lines 1-125\\n1: {\\n2:   \\\"rig\\\": \\\"arena-01\\\",\\n3:   \\\"settings\\\": [\\n4:     {\\n5:       \\\"setting\\\": \\\"power_plan\\\",\\n6:       \\\"value\\\": \\\"Balanced\\\",\\n7:       \\\"where\\\": \\\"Windows\\\"\\n8:     },\\n9:     {\\n10:       \\\"setting\\\": \\\"hardware_accelerated_gpu_scheduling\\\",\\n11:       \\\"value\\\": \\\"on\\\",\\n12:       \\\"where\\\": \\\"Windows\\\"\\n13:[... 2660 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\capture\" ok -> \"Read directory <WORKSPACE>\\\\capture, entries 1-2\\npresentmon.csv\\nsensors.csv\"\n[step 1] shell \"cd <WORKSPACE>\\\\capture; Get-ChildItem | Select-Object Name,Length; Get-Content presentmon.csv -TotalCount 5; Write-Host '---'; Get-Content sensors.csv -TotalCount 5; Write-Host '---'; (Get-Content presentmon.csv | Measure-Object -Line).Lines; (Get-Content sensors.csv | Measure-Object -Line).Lines\" ok -> \"---\\r\\n---\\r\\n\\u001b[32;1mName          \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----          \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\npresentmon.csv 715870\\r\\nsensors.csv      2660\\r\\nApplication,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.000000,6.861,6[... 597 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\analyze.py\" ok -> \"Created file successfully: <WORKSPACE>/analyze.py\"\n[step 1] shell \"cd <WORKSPACE>; python analyze.py\" ok -> \"frames=8238 avg_fps=137.286 p99_ms=22.049 low1=45.354\\r\\nmean_ms=7.284 max_ms=23.675\\r\\nmedian_ms=6.962 hitches(>3x med)=177\\r\\n  frame 345 t=2.401s ms=21.86\\r\\n  frame 346 t=2.423s ms=22.85\\r\\n  frame 347 t=2.445s ms=22.08\\r\\n  frame 348 t=2.467s ms=21.61\\r\\n  frame 349 t=2.489s ms=22.67\\r\\n  frame 350 t=2.512s ms=21.02\\r\\n  frame 351 t=2.533s ms=22.12\\r\\n  frame 352 t=2.555s ms=21.90\\r\\n  frame 353 t=2.577s ms=21.97\\r[... 5991 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\analyze2.py\" ok -> \"Created file successfully: <WORKSPACE>/analyze2.py\"\n[step 1] shell \"cd <WORKSPACE>; python analyze2.py\" ok -> \"Defender window t=43.0-45.5s frame times >10ms:\\r\\nhitch frames in/near L1 second: 177, other: 0\\r\\nhitch frames NOT near an L1 second:\"\n[step 1] write \"<WORKSPACE>\\\\result.json\" ok -> \"Created file successfully: <WORKSPACE>/result.json\"\n[step 1] shell \"cd <WORKSPACE>; python -c \\\"import json; d=json.load(open('result.json')); print(d['avg_fps'], d['low_1pct_fps'], d['changes'])\\\"\" ok -> \"137.29 45.35 [{'setting': 'pcie_aspm_rp1_gpu', 'from': 'L1', 'to': 'disabled'}]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 10,
+  "tool_calls": 12,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 3,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 7062,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 3422
+ },
+ "deliverables": [],
+ "render": null
+}
