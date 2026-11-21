@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Balloon Pop '95</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: #1a1c2c;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+    font-family: 'Press Start 2P', monospace;
+  }
+  #wrap { position: relative; }
+  canvas {
+    display: block;
+    image-rendering: pixelated;
+    box-shadow: 0 0 0 4px #1a1c2c, 0 0 0 8px #5c3a21, 0 12px 40px rgba(0,0,0,.6);
+    cursor: crosshair;
+    background: #000;
+  }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c" width="960" height="540"></canvas></div>
+<script>
+(() => {
+'use strict';
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const W = cv.width, H = cv.height;
+
+// ---------- Audio (WebAudio, no assets) ----------
+let AC = null;
+function audio() {
+  if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)();
+  if (AC.state === 'suspended') AC.resume();
+  return AC;
+}
+function tone(freq, dur, type, vol, slideTo) {
+  const ac = audio();
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = type; o.frequency.value = freq;
+  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, ac.currentTime + dur);
+  g.gain.setValueAtTime(vol, ac.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + dur);
+  o.connect(g).connect(ac.destination);
+  o.start(); o.stop(ac.currentTime + dur + 0.02);
+}
+function noiseBurst(dur, vol, hp) {
+  const ac = audio();
+  const len = Math.floor(ac.sampleRate * dur);
+  const buf = ac.createBuffer(1, len, ac.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  const s = ac.createBufferSource(); s.buffer = buf;
+  const f = ac.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = hp;
+  const g = ac.createGain(); g.gain.value = vol;
+  s.connect(f).connect(g).connect(ac.destination);
+  s.start();
+}
+const sfx = {
+  draw()  { tone(180, 0.08, 'sawtooth', 0.05, 120); },
+  shoot() { noiseBurst(0.12, 0.25, 800); tone(300, 0.1, 'square', 0.12, 90); },
+  pop()   { noiseBurst(0.07, 0.5, 1500); tone(600 + Math.random() * 400, 0.09, 'square', 0.25, 150); },
+  miss()  { tone(160, 0.15, 'triangle', 0.1, 80); },
+  win()   { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.18, 'square', 0.2), i * 110)); },
+  lose()  { [392, 330, 262, 196].forEach((f, i) => setTimeout(() => tone(f, 0.25, 'sawtooth', 0.18), i * 160)); },
+  tick()  { tone(880, 0.04, 'square', 0.06); },
+};
+
+// ---------- Game state ----------
+const GROUND = H - 56;
+const ARCHER = { x: 130, y: GROUND };
+const ARMS = 5;
+const TARGET = 15;
+const SHOT_TIME = 20; // seconds to pop TARGET balloons
+
+let state = 'menu'; // menu | play | win | lose
+let balloons = [], arrows = [], parts = [], texts = [];
+let score = 0, popped = 0, shots = 0, timeLeft = SHOT_TIME;
+let mouse = { x: W * 0.6, y: H * 0.4 };
+let draw = 0;          // 0..1 bow pull
+let lastTick = -1;
+let shake = 0;
+let t = 0;
+
+const BALLOON_COLORS = ['#e04040', '#40a0e0', '#50c050', '#e0a030', '#b060d0', '#e060a0'];
+
+function rnd(a, b) { return a + Math.random() * (b - a); }
+
+function spawnBalloon() {
+  const big = Math.random() < 0.25;
+  balloons.push({
+    x: rnd(320, W - 60),
+    y: GROUND + 40,
+    vy: -rnd(26, big ? 40 : 55),
+    r: big ? rnd(30, 36) : rnd(20, 27),
+    color: BALLOON_COLORS[(Math.random() * BALLOON_COLORS.length) | 0],
+    sway: rnd(0, Math.PI * 2),
+    swayAmp: rnd(10, 26),
+    swaySpd: rnd(0.8, 1.6),
+    big,
+  });
+}
+
+function startGame() {
+  audio();
+  state = 'play';
+  balloons = []; arrows = []; parts = []; texts = [];
+  score = 0; popped = 0; shots = 0; timeLeft = SHOT_TIME;
+  lastTick = -1; draw = 0;
+  for (let i = 0; i < 4; i++) spawnBalloon();
+}
+
+function endGame(win) {
+  state = win ? 'win' : 'lose';
+  if (win) sfx.win(); else sfx.lose();
+}
+
+// ---------- Input ----------
+cv.addEventListener('mousemove', e => {
+  const r = cv.getBoundingClientRect();
+  mouse.x = (e.clientX - r.left) * (W / r.width);
+  mouse.y = (e.clientY - r.top) * (H / r.height);
+});
+cv.addEventListener('mousedown', e => {
+  e.preventDefault();
+  if (state === 'play') { draw = 1; sfx.draw(); }
+  else { startGame(); }
+});
+window.addEventListener('mouseup', e => {
+  if (state === 'play' && draw > 0) {
+    shoot();
+    draw = 0;
+  }
+});
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space' || e.code === 'Enter') {
+    if (state !== 'play') startGame();
+  }
+});
+
+// ---------- Shooting ----------
+function shoot() {
+  const ax = ARCHER.x + 18, ay = ARCHER.y - 62;
+  const dx = mouse.x - ax, dy = mouse.y - ay;
+  const d = Math.hypot(dx, dy) || 1;
+  const power = 420 + draw * 640;
+  arrows.push({
+    x: ax, y: ay,
+    vx: dx / d * power, vy: dy / d * power,
+    trail: [],
+  });
+  shots++;
+  sfx.shoot();
+  shake = Math.max(shake, 3);
+}
+
+function popBalloon(b, i) {
+  balloons.splice(i, 1);
+  popped++;
+  const pts = b.big ? 50 : 20;
+  score += pts;
+  sfx.pop();
+  shake = Math.max(shake, 4);
+  // confetti bits
+  for (let k = 0; k < 14; k++) {
+    const a = rnd(0, Math.PI * 2), sp = rnd(60, 260);
+    parts.push({ x: b.x, y: b.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: rnd(0.35, 0.7), max: 0.7, color: b.color, r: rnd(2, 5) });
+  }
+  texts.push({ x: b.x, y: b.y - 10, vy: -50, life: 0.8, text: '+' + pts, color: b.color });
+  if (popped >= TARGET) endGame(true);
+}
+
+// ---------- Update ----------
+function update(dt) {
+  t += dt;
+  if (shake > 0) shake = Math.max(0, shake - dt * 20);
+
+  if (state !== 'play') return;
+
+  timeLeft -= dt;
+  const secs = Math.ceil(timeLeft);
+  if (secs <= 5 && secs !== lastTick && timeLeft > 0) { lastTick = secs; sfx.tick(); }
+  if (timeLeft <= 0) { timeLeft = 0; endGame(false); return; }
+
+  // spawn balloons
+  if (balloons.length < 7 && Math.random() < dt * 1.4) spawnBalloon();
+
+  // balloons
+  for (let i = balloons.length - 1; i >= 0; i--) {
+    const b = balloons[i];
+    b.y += b.vy * dt;
+    b.sway += b.swaySpd * dt;
+    b.x += Math.cos(b.sway) * b.swayAmp * dt;
+    if (b.y < -60) { balloons.splice(i, 1); continue; }
+    // hit by arrow
+    for (let j = arrows.length - 1; j >= 0; j--) {
+      const a = arrows[j];
+      const dx = a.x - b.x, dy = a.y - b.y;
+      if (dx * dx + dy * dy < (b.r + 6) * (b.r + 6)) {
+        arrows.splice(j, 1);
+        popBalloon(b, i);
+        break;
+      }
+    }
+  }
+
+  // arrows
+  for (let i = arrows.length - 1; i >= 0; i--) {
+    const a = arrows[i];
+    a.trail.push({ x: a.x, y: a.y });
+    if (a.trail.length > 6) a.trail.shift();
+    a.x += a.vx * dt;
+    a.y += a.vy * dt;
+    a.vy += 90 * dt; // light gravity for a gentle arc
+    if (a.x < -30 || a.x > W + 30 || a.y > GROUND + 20 || a.y < -80) {
+      arrows.splice(i, 1);
+      sfx.miss();
+    }
+  }
+
+  // particles
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i];
+    p.life -= dt;
+    if (p.life <= 0) { parts.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vy += 300 * dt;
+  }
+  // texts
+  for (let i = texts.length - 1; i >= 0; i--) {
+    const x = texts[i];
+    x.life -= dt; x.y += x.vy * dt;
+    if (x.life <= 0) texts.splice(i, 1);
+  }
+}
+
+// ---------- Drawing ----------
+function px(n) { return Math.round(n); }
+
+function drawSky() {
+  // banded retro sky
+  const bands = ['#7ec8e3', '#8fd0ea', '#a5d9ef', '#bde3f4', '#d3ecf9'];
+  const bh = (GROUND) / bands.length;
+  for (let i = 0; i < bands.length; i++) {
+    ctx.fillStyle = bands[i];
+    ctx.fillRect(0, i * bh, W, bh + 1);
+  }
+  // sun
+  ctx.fillStyle = '#ffe066';
+  ctx.beginPath(); ctx.arc(W - 110, 80, 42, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,224,102,.35)';
+  ctx.beginPath(); ctx.arc(W - 110, 80, 58, 0, Math.PI * 2); ctx.fill();
+  // clouds
+  ctx.fillStyle = 'rgba(255,255,255,.85)';
+  const ct = t * 12;
+  for (let i = 0; i < 3; i++) {
+    const cx = ((ct * (0.6 + i * 0.3) + i * 380) % (W + 200)) - 100;
+    const cy = 70 + i * 55;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 22, 0, Math.PI * 2);
+    ctx.arc(cx + 26, cy - 8, 26, 0, Math.PI * 2);
+    ctx.arc(cx + 54, cy, 20, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // hills
+  ctx.fillStyle = '#4f9e4f';
+  ctx.beginPath();
+  ctx.moveTo(0, GROUND);
+  for (let x = 0; x <= W; x += 8) {
+    ctx.lineTo(x, GROUND - 26 - Math.sin(x * 0.008) * 18 - Math.sin(x * 0.02) * 8);
+  }
+  ctx.lineTo(W, GROUND); ctx.closePath(); ctx.fill();
+  // ground
+  ctx.fillStyle = '#3e7d3e';
+  ctx.fillRect(0, GROUND, W, H - GROUND);
+  ctx.fillStyle = '#2f5f2f';
+  for (let x = 0; x < W; x += 24) ctx.fillRect(x + (Math.floor(x / 24) % 2) * 12, GROUND + 8, 12, 4);
+}
+
+function drawArcher() {
+  const x = ARCHER.x, y = ARCHER.y;
+  const dx = mouse.x - (x + 18), dy = mouse.y - (y - 62);
+  const ang = Math.atan2(dy, dx);
+  ctx.save();
+  ctx.translate(x, y);
+  // legs
+  ctx.strokeStyle = '#3a2a1a'; ctx.lineWidth = 7; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-4, -28); ctx.lineTo(-10, 0); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(4, -28); ctx.lineTo(12, 0); ctx.stroke();
+  // body
+  ctx.strokeStyle = '#7a4a2a'; ctx.lineWidth = 9;
+  ctx.beginPath(); ctx.moveTo(0, -28); ctx.lineTo(2, -58); ctx.stroke();
+  // head
+  ctx.fillStyle = '#e8b88a';
+  ctx.beginPath(); ctx.arc(2, -68, 10, 0, Math.PI * 2); ctx.fill();
+  // hood
+  ctx.fillStyle = '#5a3a1a';
+  ctx.beginPath(); ctx.arc(2, -70, 11, Math.PI * 0.85, Math.PI * 2.15); ctx.fill();
+  // bow arm
+  const bx = 18, by = -62;
+  ctx.strokeStyle = '#e8b88a'; ctx.lineWidth = 6;
+  ctx.beginPath(); ctx.moveTo(2, -56); ctx.lineTo(bx, by); ctx.stroke();
+  // bow
+  ctx.save();
+  ctx.translate(bx, by);
+  ctx.rotate(ang);
+  const pull = draw * 22;
+  ctx.strokeStyle = '#8a5a2a'; ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(0, -30);
+  ctx.quadraticCurveTo(16 - pull, 0, 0, 30);
+  ctx.stroke();
+  // string
+  ctx.strokeStyle = '#ddd'; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(0, -30);
+  ctx.lineTo(-pull, 0);
+  ctx.lineTo(0, 30);
+  ctx.stroke();
+  // nocked arrow
+  if (draw > 0.02 && state === 'play') {
+    ctx.strokeStyle = '#c9a05a'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(-pull - 18, 0); ctx.lineTo(8, 0); ctx.stroke();
+    ctx.fillStyle = '#ddd';
+    ctx.beginPath(); ctx.moveTo(-pull - 24, 0); ctx.lineTo(-pull - 14, -5); ctx.lineTo(-pull - 14, 5); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+  // draw arm
+  ctx.strokeStyle = '#e8b88a'; ctx.lineWidth = 6;
+  ctx.beginPath(); ctx.moveTo(2, -56); ctx.lineTo(bx - Math.cos(ang) * pull * 0.8, by - Math.sin(ang) * pull * 0.8); ctx.stroke();
+  ctx.restore();
+}
+
+function drawBalloon(b) {
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  // string
+  ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(0, b.r * 0.9); ctx.quadraticCurveTo(6, b.r + 14, -2, b.r + 26); ctx.stroke();
+  // body
+  const g = ctx.createRadialGradient(-b.r * 0.35, -b.r * 0.4, b.r * 0.15, 0, 0, b.r);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.25, b.color);
+  g.addColorStop(1, b.color);
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, b.r * 0.88, b.r, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // knot
+  ctx.fillStyle = b.color;
+  ctx.beginPath();
+  ctx.moveTo(-5, b.r * 0.95); ctx.lineTo(5, b.r * 0.95); ctx.lineTo(0, b.r * 1.15);
+  ctx.closePath(); ctx.fill();
+  // shine
+  ctx.fillStyle = 'rgba(255,255,255,.55)';
+  ctx.beginPath();
+  ctx.ellipse(-b.r * 0.3, -b.r * 0.4, b.r * 0.18, b.r * 0.28, -0.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawArrow(a) {
+  // trail
+  for (let i = 0; i < a.trail.length; i++) {
+    const p = a.trail[i];
+    ctx.fillStyle = 'rgba(255,255,255,' + (i / a.trail.length * 0.35) + ')';
+    ctx.beginPath(); ctx.arc(p.x, p.y, 2 + i * 0.3, 0, Math.PI * 2); ctx.fill();
+  }
+  const ang = Math.atan2(a.vy, a.vx);
+  ctx.save();
+  ctx.translate(a.x, a.y);
+  ctx.rotate(ang);
+  ctx.strokeStyle = '#c9a05a'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(-16, 0); ctx.lineTo(10, 0); ctx.stroke();
+  ctx.fillStyle = '#ddd';
+  ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(8, -5); ctx.lineTo(8, 5); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#e04040';
+  ctx.beginPath(); ctx.moveTo(-16, 0); ctx.lineTo(-22, -4); ctx.lineTo(-20, 0); ctx.lineTo(-22, 4); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function drawHUD() {
+  ctx.font = '14px "Press Start 2P", monospace';
+  ctx.textBaseline = 'top';
+  // score
+  ctx.fillStyle = 'rgba(0,0,0,.45)';
+  ctx.fillRect(12, 10, 190, 30);
+  ctx.fillStyle = '#fff';
+  ctx.fillText('SCORE ' + score, 22, 18);
+  // pops
+  ctx.fillStyle = 'rgba(0,0,0,.45)';
+  ctx.fillRect(12, 46, 190, 30);
+  ctx.fillStyle = '#ffe066';
+  ctx.fillText('POPS ' + popped + '/' + TARGET, 22, 54);
+  // time
+  const secs = Math.max(0, Math.ceil(timeLeft));
+  const tw = 120;
+  ctx.fillStyle = 'rgba(0,0,0,.45)';
+  ctx.fillRect(W - tw - 12, 10, tw, 30);
+  ctx.fillStyle = secs <= 5 ? '#ff5050' : '#fff';
+  ctx.fillText('TIME ' + secs, W - tw - 2, 18);
+  // power bar while drawing
+  if (draw > 0.02 && state === 'play') {
+    const bw = 160, bx = W / 2 - bw / 2, by = H - 40;
+    ctx.fillStyle = 'rgba(0,0,0,.5)';
+    ctx.fillRect(bx - 4, by - 4, bw + 8, 22);
+    ctx.fillStyle = '#333';
+    ctx.fillRect(bx, by, bw, 14);
+    const pg = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+    pg.addColorStop(0, '#50c050'); pg.addColorStop(0.6, '#e0d030'); pg.addColorStop(1, '#e04040');
+    ctx.fillStyle = pg;
+    ctx.fillRect(bx, by, bw * draw, 14);
+    ctx.fillStyle = '#fff';
+    ctx.font = '10px "Press Start 2P", monospace';
+    ctx.fillText('POWER', bx + bw / 2 - 24, by + 18);
+  }
+}
+
+function drawCenter(title, sub, color) {
+  ctx.fillStyle = 'rgba(0,0,0,.35)';
+  ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = color;
+  ctx.font = '34px "Press Start 2P", monospace';
+  ctx.fillText(title, W / 2, H / 2 - 60);
+  ctx.fillStyle = '#fff';
+  ctx.font = '14px "Press Start 2P", monospace';
+  sub.forEach((line, i) => ctx.fillText(line, W / 2, H / 2 + i * 30));
+  const blink = Math.sin(t * 6) > 0;
+  if (blink) {
+    ctx.fillStyle = '#ffe066';
+    ctx.font = '16px "Press Start 2P", monospace';
+    ctx.fillText('CLICK OR PRESS SPACE', W / 2, H / 2 + sub.length * 30 + 30);
+  }
+  ctx.textAlign = 'left';
+}
+
+function render() {
+  ctx.save();
+  if (shake > 0) ctx.translate(rnd(-shake, shake), rnd(-shake, shake));
+  drawSky();
+  for (const b of balloons) drawBalloon(b);
+  drawArcher();
+  for (const a of arrows) drawArrow(a);
+  for (const p of parts) {
+    ctx.globalAlpha = Math.max(0, p.life / p.max);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.r / 2, p.y - p.r / 2, p.r, p.r);
+  }
+  ctx.globalAlpha = 1;
+  for (const x of texts) {
+    ctx.globalAlpha = Math.max(0, x.life / 0.8);
+    ctx.font = '12px "Press Start 2P", monospace';
+    ctx.fillStyle = x.color;
+    ctx.fillText(x.text, x.x - 12, x.y);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  if (state === 'play') drawHUD();
+  if (state === 'menu')
+    drawCenter("BALLOON POP '95", ['Aim with the mouse. Hold to draw,', 'release to shoot. Pop 15 balloons', 'in 20 seconds. Big balloons = 50 pts.'], '#ffe066');
+  if (state === 'win')
+    drawCenter('LEVEL CLEAR!', ['Score: ' + score, 'Popped ' + popped + ' with ' + shots + ' arrows'], '#50c050');
+  if (state === 'lose')
+    drawCenter("TIME'S UP!", ['Score: ' + score, 'You popped ' + popped + ' of ' + TARGET], '#e04040');
+}
+
+// ---------- Loop ----------
+let last = performance.now();
+function frame(now) {
+  let dt = (now - last) / 1000;
+  last = now;
+  if (dt > 0.05) dt = 0.05;
+  update(dt);
+  render();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
