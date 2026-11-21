@@ -1,0 +1,53 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [
+  "[goal] Provide an importable async task runner with bounded concurrency and cleanup on Ctrl+C.\n\n[action] Added [run.py](<WORKSPACE>/run.py). It returns results in input order, rejects `max_concurrent < 1`, and on cancellation cancels active workers and waits for them to finish.\n\n[result] Ran a focused check on Python 3.13.14. Output: `bounded/results/cleanup OK 3 [0, 1, 2, 3, 4, 5, 6, 7]` and `cancellation cleanup OK [0, 1]`. This confirms the concurrency limit, result order, and cleanup for active jobs.\n\n[next] Assumption: completed jobs stay completed if another job fails or the run is cancelled; cancellation stops pending work and waits for active jobs’ cleanup."
+ ],
+ "diff": "A run.py\n\n--- run.py ---\n\"\"\"Run asynchronous jobs with a bounded number of workers.\"\"\"\n\nimport asyncio\nfrom collections.abc import Callable, Iterable, Awaitable\nfrom typing import TypeVar\n\nT = TypeVar(\"T\")\n\n\nasync def run_tasks(\n    tasks: Iterable[Callable[[], Awaitable[T]]], max_concurrent: int\n) -> list[T]:\n    \"\"\"Run each zero-argument job, returning results in input order.\n\n    On cancellation (including Ctrl+C in the main task), cancel all worker\n    tasks and wait for them to finish so job-level ``finally`` blocks can run.\n    \"\"\"\n    if max_concurrent < 1:\n        raise ValueError(f\"max_concurrent must be >= 1, got {max_concurrent}\")\n\n    jobs = list(tasks)\n    results: list[T | None] = [None] * len(jobs)\n    next_index = 0\n\n    async def worker() -> None:\n        nonlocal next_index\n        while next_index < len(jobs):\n            index = next_index\n            next_index += 1\n            results[index] = await jobs[index]()\n\n    workers = [asyncio.create_task(worker()) for _ in range(min(max_concurrent, len(jobs)))]\n    try:\n        await asyncio.gather(*workers)\n    except BaseException:\n        for task in workers:\n            task.cancel()\n        await asyncio.gather(*workers, return_exceptions=True)\n        raise\n    return results  # type: ignore[return-value]\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"Get-ChildItem -Force; rg --files -g AGENTS.md -g CLAUDE.md -g '*.py'\\\"\" ok -> \"Directory: <WORKSPACE>\\r\\n\\r\\nMode                 LastWriteTime         Length Name\\r\\n----                 -------------         ------ ----\\r\\n-a---          21/11/2026    09:48            394 AGENTS.md\\r\\nAGENTS.md\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command 'Get-Content AGENTS.md; Get-Location; python --version'\" ok -> \"Use any skill, tool or MCP server you have. Write local files only inside this directory.\\r\\nYou may read installed tools and skills outside it, but not other task workspaces, runs or benchmark answers.\\r\\nOther programs run on this machine: stop only the processes you started, by their id, never by name.\\r\\nDo not print credentials, environment variables or personal data: this session is published.\\r\\n\\r\\n[... 105 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>\\\\run.py\" ok -> \"\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"python -c \\\\\\\"import asyncio; from run import run_tasks; active=0; peak=0; cleaned=[];\\\\\\\\nasync def job(i):\\\\\\\\n global active, peak; active+=1; peak=max(peak,active);\\\\\\\\n try: await asyncio.sleep(.01); return i\\\\\\\\n finally: active-=1; cleaned.append(i)\\\\\\\\nasync def main():\\\\\\\\n out=await run_tasks([lambda i=i: job(i) for i in range(8)], 3); assert out==list(range(8)) and peak==3 and len(cleaned)==8; print('bounded/results/cleanup OK', peak, out)\\\\\\\\nasyncio.run(main())\\\\\\\"\\\"\" failed -> \"File \\\"<string>\\\", line 1\\r\\n    import asyncio; from run import run_tasks; active=0; peak=0; cleaned=[];\\\\nasync def job(i):\\\\n global active, peak; active+=1; peak=max(peak,active);\\\\n try: await asyncio.sleep(.01); return i\\\\n finally: active-=1; cleaned.append(i)\\\\nasync def main():\\\\n out=await run_tasks([lambda i=i: job(i) for i in range(8)], 3); assert out==list(range(8)) and peak==3 and len(cleaned)[... 221 chars cut by the benchmark]\"\n[step 1] shell \"\\\"<HOME>\\\\\\\\AppData\\\\\\\\Local\\\\\\\\Microsoft\\\\\\\\WindowsApps\\\\\\\\Microsoft.PowerShell_8wekyb3d8bbwe\\\\\\\\pwsh.exe\\\" -Command \\\"@'\\nimport asyncio\\nfrom run import run_tasks\\n\\nactive = peak = 0\\ncleaned = []\\nasync def job(i):\\n    global active, peak\\n    active += 1\\n    peak = max(peak, active)\\n    try:\\n        await asyncio.sleep(.01)\\n        return i\\n    finally:\\n        active -= 1\\n        cleaned.append(i)\\n\\nasync def main():\\n    out = await run_tasks([lambda i=i: job(i) for i in range(8)], 3)\\n    assert out == list(range(8)) and peak == 3 and len(cleaned) == 8\\n    print('bounded/results/cleanup OK', peak, out)\\n    cleaned.clear()\\n    async def cancel_case():\\n        async def slow(i):\\n            try:\\n                await asyncio.sleep(30)\\n            finally:\\n                cleaned.append(i)\\n        runner = asyncio.create_task(run_tasks([lambda i=i: slow(i) for i in range(4)], 2))\\n        await asyncio.sleep(.01)\\n        runner.cancel()\\n        try:\\n            await runner\\n        except asyncio.CancelledError:\\n            pass\\n    await cancel_case()\\n    assert len(cleaned) == 2\\n    print('cancellation cleanup OK', sorted(cleaned))\\nasyncio.run(main())\\n'@ | Set-Content -Encoding utf8 .verify_run.py\\npython .verify_run.py\\nRemove-Item .verify_run.py\\\"\" ok -> \"bounded/results/cleanup OK 3 [0, 1, 2, 3, 4, 5, 6, 7]\\r\\ncancellation cleanup OK [0, 1]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 1,
+  "tool_calls": 5,
+  "tool_errors": 1,
+  "shell_commands": 4,
+  "shell_failures": 1,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1405,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1405
+ },
+ "deliverables": [],
+ "render": null
+}
