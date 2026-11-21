@@ -1,0 +1,53 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [
+  "[goal] Helper in ./run.py\n[action] Wrote run.py, tested normal path and cancellation path\n[result] run_tasks runs jobs with a semaphore (max 2 at a time), returns when all done, and on cancellation (Ctrl+C) cancels in-flight workers and awaits them so finally/cleanup code runs (verified: finally ran on cancel)\n[next] None\n\nAssumptions: tasks are zero-arg callables returning awaitables; first failure cancels the rest and re-raises; cleanup relies on jobs' own try/finally."
+ ],
+ "diff": "A run.py\n\n--- run.py ---\nimport asyncio\n\n\nasync def run_tasks(tasks, max_concurrent):\n    if max_concurrent < 1:\n        raise ValueError(\"max_concurrent must be >= 1\")\n\n    sem = asyncio.Semaphore(max_concurrent)\n\n    async def worker(task):\n        async with sem:\n            job = task()\n            await job\n\n    children = [asyncio.ensure_future(worker(t)) for t in tasks]\n    try:\n        await asyncio.gather(*children)\n    except BaseException:\n        for c in children:\n            c.cancel()\n        await asyncio.gather(*children, return_exceptions=True)\n        raise\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"python --version\" ok -> \"Python 3.13.14\"\n[step 1] shell \"mkdir -p . && cat > run.py <<'EOF'\\nimport asyncio\\n\\n\\nasync def run_tasks(tasks, max_concurrent):\\n    if max_concurrent < 1:\\n        raise ValueError(\\\"max_concurrent must be >= 1\\\")\\n\\n    sem = asyncio.Semaphore(max_concurrent)\\n\\n    async def worker(task):\\n        async with sem:\\n            job = task()\\n            await job\\n\\n    children = [asyncio.ensure_future(worker(t)) for t in tasks]\\n    try:\\n        await asyncio.gather(*children)\\n    except BaseException:\\n        for c in children:\\n            c.cancel()\\n        await asyncio.gather(*children, return_exceptions=True)\\n        raise\\nEOF\\ncat > _t.py <<'EOF'\\nimport asyncio, sys\\nfrom run import run_tasks\\n\\nasync def main():\\n    order = []\\n    async def mk(name, delay):\\n        async def job():\\n            try:\\n                await asyncio.sleep(delay)\\n                order.append(name + \\\"-done\\\")\\n            finally:\\n                order.append(name + \\\"-finally\\\")\\n        return job\\n    tasks = [(await mk(f\\\"t{i}\\\", 0.05 * (i % 3))) for i in range(6)]\\n    # wrap: tasks must be zero-arg callables returning awaitable\\n    def mk_fn(i):\\n        async def job():\\n            try:\\n                await asyncio.sleep(0.05 * (i % 3))\\n                order.append(f\\\"t{i}-done\\\")\\n            finally:\\n                order.append(f\\\"t{i}-finally\\\")\\n        return job\\n    tasks = [lambda: mk_fn(i)() for i in range(6)]\\n    # fix: tasks are callables returning awaitable\\n    tasks = []\\n    for i in range(6):\\n        async def job(i=i):\\n            [... 336 chars cut by the benchmark]\" failed -> \"\"\n[step 1] write \"run.py\" ok -> \"Created file successfully: run.py\"\n[step 1] write \"_t.py\" ok -> \"Created file successfully: _t.py\"\n[step 1] shell \"python _t.py\" ok -> \"['t0-done', 't0-finally', 't1-done', 't1-finally', 't3-done', 't3-finally', 't2-done', 't2-finally', 't4-done', 't4-finally', 't5-done', 't5-finally']\\r\\nall done: True\"\n[step 1] shell \"python -c \\\"import asyncio; from run import run_tasks\\n\\nasync def main():\\n    events = []\\n    async def job():\\n        try:\\n            await asyncio.sleep(10)\\n            events.append('done')\\n        finally:\\n            events.append('finally')\\n        return 1\\n    t = asyncio.ensure_future(run_tasks([lambda: job()], 1))\\n    await asyncio.sleep(0.1)\\n    t.cancel()\\n    try:\\n        await t\\n    except asyncio.CancelledError:\\n        pass\\n    print(events)\\n\\nasyncio.run(main())\\\"\" ok -> \"['finally']\"\n[step 1] shell \"rm _t.py\" ok -> \"(no output)\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   false
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 7,
+  "tool_calls": 7,
+  "tool_errors": 1,
+  "shell_commands": 5,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2407,
+  "reasoning_tokens": 790,
+  "largest_turn_tokens": 1425
+ },
+ "deliverables": [],
+ "render": null
+}

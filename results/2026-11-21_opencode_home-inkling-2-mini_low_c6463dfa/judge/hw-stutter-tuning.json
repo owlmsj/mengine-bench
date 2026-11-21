@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "[goal] Find hitch cause, record result.json.\n[action] Analyzed presentmon.csv + sensors.csv + settings.json; identified GPU PCIe ASPM L1 toggling every ~4 s as the hitch source.\n[result] result.json written: avg_fps 137.3, low_1pct_fps 45.4, cause = pcie_aspm_rp1_gpu=L1 (L1 sensor states at 2,6,10...58s match hitch clusters at t+0.4s), one change: pcie_aspm_rp1_gpu L1→disabled (Gen5 x4 link preserved; no BIOS overclock touched).\n[next] Apply the change on the rig.\n\nAssumptions: hitch = clusters of frames >20 ms; Defender/disk spikes are non-hitch since no clusters near 43-45 s; other ASPM RPs left as-is to keep the change minimal."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"avg_fps\": 137.3,\n  \"low_1pct_fps\": 45.4,\n  \"cause\": \"GPU PCIe link idles to L1 (PCIe ASPM, rp1 GPU) every ~4 s, producing ~0.24 s hitch clusters (12 frames at ~22 ms each). Hitch clusters align exactly with gpu_pcie_link_state=L1 in the 1 s sensor log (seconds 2,6,10,14,18,...,58); the MsMpEng/disk spikes at 43-45 s are not hitch-linked.\",\n  \"changes\": [\n    {\"setting\": \"pcie_aspm_rp1_gpu\", \"from\": \"L1\", \"to\": \"disabled\"}\n  ]\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"ls -la ..\" failed -> \"\\u001b[31;1mGet-ChildItem: \\u001b[31;1mA parameter cannot be found that matches parameter name 'la'.\\u001b[0m\"\n[step 1] shell \"Get-ChildItem ..; Get-ChildItem .\" ok -> \"Directory: <HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-t0kimmjh\\r\\n\\r\\n\\u001b[32;1mMode   \\u001b[0m\\u001b[32;1m              LastWriteTime\\u001b[0m \\u001b[32;1;3m        Length\\u001b[0m\\u001b[32;1m Name\\u001b[0m\\r\\n\\u001b[32;1m----   \\u001b[0m \\u001b[32;1m             -------------\\u001b[0m \\u001b[32;1m        ------\\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\nd----          21/11/2026    14:47                \\u001b[44;1mworkspace\\u001b[0m\\r\\n\\r\\n    Directory: <HOME>\\\\AppData[... 510 chars cut by the benchmark]\"\n[step 1] shell \"Get-ChildItem -Recurse .\" ok -> \"Directory: <WORKSPACE>\\r\\n\\r\\n\\u001b[32;1mMode   \\u001b[0m\\u001b[32;1m              LastWriteTime\\u001b[0m \\u001b[32;1;3m        Length\\u001b[0m\\u001b[32;1m Name\\u001b[0m\\r\\n\\u001b[32;1m----   \\u001b[0m \\u001b[32;1m             -------------\\u001b[0m \\u001b[32;1m        ------\\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\nd----          21/11/2026    14:47                \\u001b[44;1mcapture\\u001b[0m\\r\\n-a---          21/11/2026    14:47  [... 585 chars cut by the benchmark]\"\n[step 1] shell \"cat NOTES.md; cat settings.json\" ok -> \"# Owner notes - rig \\\"arena-01\\\"\\r\\n\\r\\nThe game hitches every few seconds even though the average frame rate looks fine.\\r\\nCapture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\r\\ntaken at the same time (same clock: second 0 of both files is the same instant).\\r\\nsettings.json is a dump of the rig's current settings.\\r\\n\\r\\nHow we measure:\\r\\n- Average FPS = frames presented di[... 2941 chars cut by the benchmark]\"\n[step 1] shell \"head -5 capture/presentmon.csv; echo ---; head -5 capture/sensors.csv; wc -l capture/*.csv\" ok -> \"Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.000000,6.861,6.847,0.294,4.901,5.568\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.006861,6.773,6.812,0.387,4.013,6.252\\nArena.exe,7316,0x000001F2A8C40000,DXGI[... 507 chars cut by the benchmark]\"\n[step 1] shell \"python - <<'EOF'\\nimport csv,statistics\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\nms=[float(r['MsBetweenPresents']) for r in rows]\\nprint('frames',len(ms),'avg_fps',1000/statistics.mean(ms))\\np=sorted(ms)\\np99=p[int(0.99*len(p))]\\nprint('p99 ms',p99,'low_1pct',1000/p99)\\n# look at big spikes\\nspikes=[(i,ms[i],rows[i]['TimeInSeconds']) for i in range(len(ms)) if ms[i]>20]\\nprint('spikes>20ms:',len(spikes))\\nfor i,m,t in spikes[:30]: print(t,m)\\nEOF\" failed -> \"\"\n[step 1] shell \"python -c \\\"\\nimport csv,statistics\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\nms=[float(r['MsBetweenPresents']) for r in rows]\\nprint('frames',len(ms),'avg_fps',1000/statistics.mean(ms))\\np=sorted(ms)\\nprint('p99 ms',p[int(0.99*len(p))],'low_1pct',1000/p[int(0.99*len(p))])\\nspikes=[(i,ms[i],rows[i]['TimeInSeconds']) for i in range(len(ms)) if ms[i]>20]\\nprint('spikes>20ms:',len(spikes))\\nfor i,m,t in spikes[:40]: print(t,m)\\n\\\"\" ok -> \"frames 8238 avg_fps 137.28571999702498\\r\\np99 ms 22.049 low_1pct 45.35353077237063\\r\\nspikes>20ms: 180\\r\\n2.400643 21.863\\r\\n2.422506 22.853\\r\\n2.445359 22.078\\r\\n2.467437 21.606\\r\\n2.489043 22.669\\r\\n2.511712 21.025\\r\\n2.532737 22.123\\r\\n2.554860 21.902\\r\\n2.576762 21.966\\r\\n2.598728 22.495\\r\\n2.621223 21.199\\r\\n2.642422 20.636\\r\\n6.405129 21.786\\r\\n6.426915 21.556\\r\\n6.448471 22.54\\r\\n6.471011 21.24\\r\\n6.492251 22.988\\r\\n6.515239 21.7[... 392 chars cut by the benchmark]\"\n[step 1] shell \"cat capture/sensors.csv\" ok -> \"time_s,cpu_clock_mhz,cpu_util_pct,gpu_clock_mhz,gpu_pcie_link_state,gpu_pcie_link_speed,dpc_latency_us,disk_active_pct,top_cpu_process\\r\\n0,5354,35,2724,L0,Gen5 x4,52,1,Arena.exe\\r\\n1,5350,40,2754,L0,Gen5 x4,88,4,Arena.exe\\r\\n2,5270,31,2754,L1,Gen5 x4,40,3,Arena.exe\\r\\n3,5373,31,2720,L0,Gen5 x4,81,2,Arena.exe\\r\\n4,5290,33,2759,L0,Gen5 x4,41,1,Arena.exe\\r\\n5,5344,32,2735,L0,Gen5 x4,49,2,Arena.exe\\r\\n6,5380,35,27[... 2319 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\nms=[(float(r['TimeInSeconds']),float(r['MsBetweenPresents'])) for r in rows]\\ncur=[]; start=None\\nfor t,m in ms:\\n    if m>20 and not cur: start=t; cur=[(t,m)]\\n    elif m>20: cur.append((t,m))\\n    else:\\n        if cur: print('cluster',start,'dur',cur[-1][0]-cur[0][0],'frames',len(cur))\\n        cur=[]\\nif cur: print('cluster',start)\\n\\\"\" ok -> \"cluster 2.400643 dur 0.24177899999999974 frames 12\\r\\ncluster 6.405129 dur 0.24173000000000044 frames 12\\r\\ncluster 10.401473 dur 0.24137800000000098 frames 12\\r\\ncluster 14.401991 dur 0.24100900000000003 frames 12\\r\\ncluster 18.40352 dur 0.2413640000000008 frames 12\\r\\ncluster 22.400937 dur 0.24377700000000146 frames 12\\r\\ncluster 26.403726 dur 0.2406790000000001 frames 12\\r\\ncluster 30.406808 dur 0.2446849999[... 382 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\nfor r in rows:\\n    t=float(r['TimeInSeconds'])\\n    if 42.5<t<46.5: print(t, r['MsBetweenPresents'], r['MsInPresentAPI'])\\n\\\"\" ok -> \"42.51752 22.541 0.243\\r\\n42.540061 21.599 0.300\\r\\n42.56166 22.064 0.154\\r\\n42.583724 21.960 0.265\\r\\n42.605684 22.050 0.204\\r\\n42.627734 21.626 0.342\\r\\n42.64936 22.530 0.239\\r\\n42.67189 6.991 0.277\\r\\n42.678881 6.726 0.396\\r\\n42.685607 6.773 0.228\\r\\n42.69238 6.979 0.358\\r\\n42.699359 7.050 0.310\\r\\n42.706409 7.079 0.218\\r\\n42.713488 7.192 0.178\\r\\n42.72068 6.779 0.158\\r\\n42.727459 6.664 0.281\\r\\n42.734123 7.192 0.346\\r\\n42.74131[... 12149 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv,statistics\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\nms=[float(r['MsBetweenPresents']) for r in rows]\\np=sorted(ms)\\nprint('avg',1000/statistics.mean(ms))\\nprint('low',1000/p[int(0.99*len(p))])\\n\\\"\" ok -> \"avg 137.28571999702498\\r\\nlow 45.35353077237063\"\n[step 1] shell \"cat > result.json <<'EOF'\\n{\\n  \\\"avg_fps\\\": 137.3,\\n  \\\"low_1pct_fps\\\": 45.4,\\n  \\\"cause\\\": \\\"GPU PCIe link idles to L1 (PCIe ASPM, rp1 GPU) every ~4 s, dropping frames for ~0.24 s (12 frames at ~22 ms each) per event. Hitch clusters align exactly with gpu_pcie_link_state=L1 in the 1 s sensor log (seconds 2,6,10,14,...,58); MsMpEng/disk spikes are not hitch-linked.\\\",\\n  \\\"changes\\\": [\\n    {\\\"setting\\\": \\\"pcie_aspm_rp1_gpu\\\", \\\"from\\\": \\\"L1\\\", \\\"to\\\": \\\"disabled\\\"}\\n  ]\\n}\\nEOF\\ncat result.json\" failed -> \"\\u001b[31;1mParserError: \\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1mLine |\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1m\\u001b[36;1m   1 | \\u001b[0m cat > result.json <\\u001b[36;1m<\\u001b[0m'EOF'\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1m\\u001b[36;1m\\u001b[0m\\u001b[36;1m\\u001b[0m\\u001b[36;1m     | \\u001b[31;1m                    ~\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1m\\u001b[36;1m\\u001b[0m\\u001b[36;1m\\u001b[0m\\u001b[36;1m\\u001b[31;1m\\u001b[31;1m\\u001b[36;1m     | \\u001b[31;1mMissing file specification after redirection operator.\\u001b[0m\"\n[step 1] write \"result.json\" ok -> \"Created file successfully: result.json\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 14,
+  "tool_calls": 13,
+  "tool_errors": 1,
+  "shell_commands": 12,
+  "shell_failures": 2,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 3101,
+  "reasoning_tokens": 2058,
+  "largest_turn_tokens": 904
+ },
+ "deliverables": [],
+ "render": null
+}
