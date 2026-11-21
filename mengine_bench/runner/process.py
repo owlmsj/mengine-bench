@@ -41,10 +41,34 @@ class ProcessResult:
     stopped_after_final: bool = False
 
 
+def _family(root: psutil.Process) -> list[psutil.Process]:
+    """root's real descendants, then root. psutil builds children from PPIDs, and on Windows a process whose creator
+    died keeps that PPID: once the pid is reused by one of ours, a stranger looks like our child (mengine-qlora#42:
+    exit=15 kills of parallel agents, whole collection chunks and an AGY reviewer). A real child is born after its
+    parent, so each edge is checked one level at a time."""
+    found: list[psutil.Process] = []
+    stack = [root]
+    while stack:
+        parent = stack.pop()
+        try:
+            born = parent.create_time()
+            kids = parent.children()
+        except psutil.Error:
+            continue
+        for kid in kids:
+            try:
+                if kid.create_time() >= born:
+                    found.append(kid)
+                    stack.append(kid)
+            except psutil.Error:
+                continue
+    return [*found, root]
+
+
 def kill_tree(pid: int) -> None:
     try:
         root = psutil.Process(pid)
-        family = [*root.children(recursive=True), root]
+        family = _family(root)
     except psutil.NoSuchProcess:
         return
     for member in family:
