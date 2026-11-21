@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-ab-playtest",
+ "prompts": [
+  "We playtested two versions of the Pixel Arena tutorial and have to pick one for the next release. The export and its notes are in {WS}/telemetry. Should we ship B instead of A? Give a recommendation a skeptical lead would accept. Record it in {WS}/result.json with ship_b, sessions_a, sessions_b, completion_rate_a, completion_rate_b and p_value."
+ ],
+ "answers": [
+  "**Goal** — Decide whether to ship tutorial variant B over A from the playtest export, and record the verdict in `result.json`.\n\n**Action** — Read `telemetry/README.md` and `playtest_ab.csv`, then computed stats with a Python script (`analyze.py`), cross-checked with an independent PowerShell pass.\n\n**Result** — **Yes, ship B.**\n- Cleaned per the README: `variant` trimmed + lowercased (handles `b`, `B`, ` B`), ETL resends deduped on `session_id` (70 duplicate rows dropped; all consistent).\n- A: 900 sessions, 342 completed → **38.00%**\n- B: 900 sessions, 420 completed → **46.67%**\n- Two-proportion pooled z-test (two-sided): z = 3.72, **p = 0.000198** < 0.05, and B's gain is positive → meets the release rule (significant gain at 5%).\n- `result.json` written: `ship_b: true, sessions_a: 900, sessions_b: 900, completion_rate_a: 0.38, completion_rate_b: 0.4667, p_value: 0.000198`.\n\n**Assumptions** — \"gain\" = B's completion rate minus A's; significance = two-sided 5% test (the rule says \"gain is significant,\" so direction is B>A, which holds); one row per unique session after dedupe.\n\n**How I know it's right** — Two independent implementations (Python and PowerShell) agree exactly: 900/900 sessions, 342/420 completions, 1800 unique sessions total. The p-value (0.0002) is far below 0.05, so the ~8.7-point lift is not noise. No browser tabs, windows, or apps were opened, so nothing to close."
+ ],
+ "diff": "A analyze.py\nA result.json\n\n--- analyze.py ---\nimport csv, math, json\n\npath = r\"<WORKSPACE>\\telemetry\\playtest_ab.csv\"\n\nsessions = {}\ndupes = 0\nbad_variant = 0\nwith open(path, newline=\"\", encoding=\"utf-8\") as f:\n    r = csv.DictReader(f)\n    for row in r:\n        sid = row[\"session_id\"].strip()\n        v = row[\"variant\"].strip().lower()\n        if v not in (\"a\", \"b\"):\n            bad_variant += 1\n            continue\n        comp = int(row[\"completed_tutorial\"])\n        if sid in sessions:\n            # ETL resend: same session; verify consistent then skip\n            prev = sessions[sid]\n            if (prev[0], prev[1]) != (v, comp):\n                print(\"INCONSISTENT DUPE:\", sid, prev, (v, comp))\n            dupes += 1\n            continue\n        sessions[sid] = (v, comp)\n\na = [c for v, c in sessions.values() if v == \"a\"]\nb = [c for v, c in sessions.values() if v == \"b\"]\nna, nb = len(a), len(b)\nxa, xb = sum(a), sum(b)\npa, pb = xa / na, xb / nb\n\n# two-proportion pooled z-test, two-sided\np = (xa + xb) / (na + nb)\nse = math.sqrt(p * (1 - p) * (1 / na + 1 / nb))\nz = (pb - pa) / se\n# two-sided p via normal CDF\np_value = 2 * (1 - 0.5 * (1 + math.erf(abs(z) / math.sqrt(2))))\n\nship_b = p_value < 0.05 and pb > pa\n\nresult = {\n    \"ship_b\": ship_b,\n    \"sessions_a\": na,\n    \"sessions_b\": nb,\n    \"completion_rate_a\": pa,\n    \"completion_rate_b\": pb,\n    \"p_value\": p_value,\n}\nwith open(r\"<WORKSPACE>\\result.json\", \"w\", encoding=\"utf-8\") as f:\n    json.dump(result, f, indent=2)\n\nprint(\"rows parsed, dupes skipped:\", dupes, \"bad variant:\", bad_variant)\nprint(\"A: n=%d completed=%d rate=%.4f\" % (na, xa, pa))\nprint(\"B: n=%d completed=%d rate=%.4f\" % (nb, xb, pb))\nprint(\"z=%.4f p=%.6f ship_b=%s\" % (z, p_value, ship_b))\n\n--- result.json ---\n{\r\n  \"ship_b\": true,\r\n  \"sessions_a\": 900,\r\n  \"sessions_b\": 900,\r\n  \"completion_rate_a\": 0.38,\r\n  \"completion_rate_b\": 0.4666666666666667,\r\n  \"p_value\": 0.00019846895397623854\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\telemetry\" ok -> \"Read directory <WORKSPACE>\\\\telemetry, entries 1-2\\nplaytest_ab.csv\\nREADME.md\"\n[step 1] read \"<WORKSPACE>\\\\telemetry\\\\README.md\" ok -> \"Read file <WORKSPACE>\\\\telemetry\\\\README.md, lines 1-5\\n1: # Playtest A/B - Pixel Arena tutorial\\n2: \\n3: Export from arena-panel. The ETL resends sessions: `session_id` is the unique key (repeated rows are the same session). `variant` may come lowercase or with a leading space. `completed_tutorial` is 0/1.\\n4: \\n5: Release rule: a variant[... 94 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\telemetry\\\\playtest_ab.csv\" ok -> \"Read file <WORKSPACE>\\\\telemetry\\\\playtest_ab.csv, lines 1-1871\\n1: session_id,variant,player_id,completed_tutorial,match_minutes\\n2: s01423,b,p0798,1,12.6\\n3: s01632,a,p0693,1,9.0\\n4: s00612,A,p0098,0,12.2\\n5: s00389, B,p0202,1,16.5\\n6: s00509, B,p0896,0,14.8\\n7: s00206,a,p0059,1,13.0\\n8: s01758,a,p0342,0,20.4\\n9: s01097, B,p0084,1,15.1\\n10: s[... 51433 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\analyze.py\" ok -> \"Created file successfully: <WORKSPACE>/analyze.py\"\n[step 1] shell \"python analyze.py\" ok -> \"rows parsed, dupes skipped: 70 bad variant: 0\\r\\nA: n=900 completed=342 rate=0.3800\\r\\nB: n=900 completed=420 rate=0.4667\\r\\nz=3.7210 p=0.000198 ship_b=True\"\n[step 1] read \"<WORKSPACE>\\\\result.json\" ok -> \"Read file <WORKSPACE>\\\\result.json, lines 1-8\\n1: {\\r\\n2:   \\\"ship_b\\\": true,\\r\\n3:   \\\"sessions_a\\\": 900,\\r\\n4:   \\\"sessions_b\\\": 900,\\r\\n5:   \\\"completion_rate_a\\\": 0.38,\\r\\n6:   \\\"completion_rate_b\\\": 0.4666666666666667,\\r\\n7:   \\\"p_value\\\": 0.00019846895397623854\\r\\n8: }\"\n[step 1] shell \"$lines = Get-Content telemetry\\\\playtest_ab.csv | Select-Object -Skip 1; $seen=@{}; $a=0;$b=0;$ca=0;$cb=0; $lines | ForEach-Object { $p=$_ -split ','; $sid=$p[0].Trim(); $v=$p[1].Trim().ToLower(); $c=[int]$p[3]; if($seen.ContainsKey($sid)){return}; $seen[$sid]=$true; if($v -eq 'a'){$a++; if($c){$ca++}} elseif($v -eq 'b'){$b++; if($c){$cb++}} }; Write-Output (\\\"A n={0} comp={1} rate={2:N4}\\\" -f $a,$ca,($ca/$a)); Write-Output (\\\"B n={0} comp={1} rate={2:N4}\\\" -f $b,$cb,($cb/$b)); Write-Output (\\\"unique sessions={0}\\\" -f $seen.Count)\" ok -> \"A n=900 comp=342 rate=0,3800\\r\\nB n=900 comp=420 rate=0,4667\\r\\nunique sessions=1800\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "deduplicated session counts",
+   true
+  ],
+  [
+   "completion rates",
+   true
+  ],
+  [
+   "the gain is significant",
+   true
+  ],
+  [
+   "ship decision",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1883,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 774
+ },
+ "deliverables": [],
+ "render": null
+}
