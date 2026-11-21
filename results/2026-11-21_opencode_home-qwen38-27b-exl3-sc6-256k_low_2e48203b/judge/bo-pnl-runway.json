@@ -1,0 +1,53 @@
+{
+ "task_id": "bo-pnl-runway",
+ "prompts": [
+  "The investors meet tomorrow and want the first half of 2026 closed. The books and the board's notes are in {WS}/finance. How did each month go, and how many months of cash do we have left at the current burn? Prepare what the CFO needs to present. Record the key figures in {WS}/result.json: revenue, gross_margin_pct and ebitda, each mapping 2026-01 to 2026-06 to its value, plus burn and runway_months."
+ ],
+ "answers": [
+  "All figures verified and result.json is correct. No browser tabs or windows were opened, so nothing to close.\n\n**Goal:** Close H1 2026 and prepare CFO figures in `result.json`.\n\n**Action:** Parsed `finance/ledger.csv` (86 entries, Jan–Jun 2026), mapped each account to its P&L line via `chart_of_accounts.csv`, aggregated monthly, and computed burn/runway per the board's rule in `README.md`.\n\n**Result (R$):**\n\n| Month | Revenue | Gross margin % | EBITDA |\n|-------|---------|----------------|--------|\n| 2026-01 | 200,510.87 | 70.03 | −210,278.96 |\n| 2026-02 | 216,328.06 | 70.29 | −212,300.08 |\n| 2026-03 | 219,066.17 | 68.46 | −204,525.45 |\n| 2026-04 | 238,163.26 | 70.24 | −196,950.65 |\n| 2026-05 | 243,032.89 | 69.56 | −201,945.82 |\n| 2026-06 | 272,391.57 | 72.41 | −192,968.22 |\n\n- **Burn:** 197,288.23 (avg monthly negative EBITDA of Apr/May/Jun, per README)\n- **Runway:** 9.36 months (1,847,350.40 cash at 30/06 ÷ burn)\n\n**Assumptions (stated):**\n- EBITDA = revenue + opex (cogs, sales_marketing, rnd, ga), **excluding** the `financial` line (investment income + interest/IOF), which is below the EBITDA line.\n- Gross margin = (revenue − |COGS|) / revenue.\n- \"Last three closed months\" = Apr, May, Jun 2026 (all closed by 30/06).\n- Latest closing cash balance = 1,847,350.40 (30/06/2026), the most recent in `cash_balance.txt`.\n- Refunds (3.1.09) net against revenue as the CoA maps them to the revenue line.\n\n**How I know it's right:** Computed by script from the raw ledger; gross-margin formula corrected (COGS is stored negative) and re-verified; result.json re-read and matches the printed output exactly. No browser was opened, so nothing to close."
+ ],
+ "diff": "A finance/compute.py\nA result.json\n\n--- finance/compute.py ---\nimport csv, json\nfrom collections import defaultdict\n\n# account -> pnl_line\ncoa = {}\nwith open(r'<WORKSPACE>\\finance\\chart_of_accounts.csv', encoding='utf-8') as f:\n    r = csv.reader(f, delimiter=';')\n    next(r)\n    for row in r:\n        coa[row[0]] = row[2]\n\ndef parse_amt(s):\n    # \"56.661,03\" -> 56661.03 ; \"-56.661,03\" -> -56661.03\n    s = s.strip()\n    neg = s.startswith('-')\n    s = s.replace('-', '').replace('.', '').replace(',', '.')\n    v = float(s)\n    return -v if neg else v\n\nmonths = ['2026-01','2026-02','2026-03','2026-04','2026-05','2026-06']\n# line -> month -> amount\nlines = defaultdict(lambda: defaultdict(float))\nwith open(r'<WORKSPACE>\\finance\\ledger.csv', encoding='utf-8') as f:\n    r = csv.reader(f, delimiter=';')\n    next(r)\n    for row in r:\n        d, acct, desc, amt = row\n        dd, mm, yyyy = d.split('/')\n        m = f'{yyyy}-{mm}'\n        line = coa.get(acct, 'unknown')\n        lines[line][m] += parse_amt(amt)\n\nrevenue = {}\ncogs = {}\nebitda = {}\nfor m in months:\n    rev = lines['revenue'][m]\n    c = lines['cogs'][m]\n    sm = lines['sales_marketing'][m]\n    rnd = lines['rnd'][m]\n    ga = lines['ga'][m]\n    fin = lines['financial'][m]\n    revenue[m] = rev\n    cogs[m] = c\n    ebitda[m] = rev + c + sm + rnd + ga  # exclude financial (interest/investment)\n    print(m, f'rev={rev:.2f} cogs={c:.2f} sm={sm:.2f} rnd={rnd:.2f} ga={ga:.2f} fin={fin:.2f} ebitda={ebitda[m]:.2f}')\n\ngross_margin_pct = {m: (revenue[m] - abs(cogs[m])) / revenue[m] * 100 for m in months}\n\n# burn: average monthly negative EBITDA of last three closed months (Apr, May, Jun)\nlast3 = ['2026-04','2026-05','2026-06']\nburn = -sum(ebitda[m] for m in last3) / 3\n# runway: latest closing cash balance / burn\ncash = 1847350.40\nrunway = cash / burn\n\nprint('burn', burn)\nprint('runway', runway)\n\nresult = {\n    'revenue': {m: round(revenue[m], 2) for m in months},\n    'gross_margin_pct': {m: round(gross_margin_pct[m], 2) for m in months},\n    'ebitda': {m: round(ebitda[m], 2) for m in months},\n    'burn': round(burn, 2),\n    'runway_months': round(runway, 2),\n}\nwith open(r'<WORKSPACE>\\result.json', 'w', encoding='utf-8') as f:\n    json.dump(result, f, indent=2, ensure_ascii=False)\nprint(json.dumps(result, indent=2))\n\n--- result.json ---\n{\r\n  \"revenue\": {\r\n    \"2026-01\": 200510.87,\r\n    \"2026-02\": 216328.06,\r\n    \"2026-03\": 219066.17,\r\n    \"2026-04\": 238163.26,\r\n    \"2026-05\": 243032.89,\r\n    \"2026-06\": 272391.57\r\n  },\r\n  \"gross_margin_pct\": {\r\n    \"2026-01\": 70.03,\r\n    \"2026-02\": 70.29,\r\n    \"2026-03\": 68.46,\r\n    \"2026-04\": 70.24,\r\n    \"2026-05\": 69.56,\r\n    \"2026-06\": 72.41\r\n  },\r\n  \"ebitda\": {\r\n    \"2026-01\": -210278.96,\r\n    \"2026-02\": -212300.08,\r\n    \"2026-03\": -204525.45,\r\n    \"2026-04\": -196950.65,\r\n    \"2026-05\": -201945.82,\r\n    \"2026-06\": -192968.22\r\n  },\r\n  \"burn\": 197288.23,\r\n  \"runway_months\": 9.36\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\finance\" ok -> \"Read directory <WORKSPACE>\\\\finance, entries 1-4\\ncash_balance.txt\\nchart_of_accounts.csv\\nledger.csv\\nREADME.md\"\n[step 1] read \"<WORKSPACE>\\\\finance\\\\README.md\" ok -> \"Read file <WORKSPACE>\\\\finance\\\\README.md, lines 1-3\\n1: # Finance notes\\n2: \\n3: The board reads burn as the average monthly negative EBITDA of the last three closed months. Runway is the latest closing cash balance divided by that burn.\"\n[step 1] read \"<WORKSPACE>\\\\finance\\\\chart_of_accounts.csv\" ok -> \"Read file <WORKSPACE>\\\\finance\\\\chart_of_accounts.csv, lines 1-14\\n1: account;name;pnl_line\\n2: 3.1.01;SaaS subscriptions;revenue\\n3: 3.1.02;Onboarding services;revenue\\n4: 3.1.09;Refunds and cancellations;revenue\\n5: 4.1.01;Production cloud and GPUs;cogs\\n6: 4.1.02;Customer support;cogs\\n7: 5.1.01;Paid media;sales_marketing\\n8: 5.1.02;Sales [... 217 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\finance\\\\cash_balance.txt\" ok -> \"Read file <WORKSPACE>\\\\finance\\\\cash_balance.txt, lines 1-2\\n1: Consolidated balance on 31/05/2026: R$ 2.309.188,00\\n2: Consolidated balance on 30/06/2026: R$ 1.847.350,40\"\n[step 1] read \"<WORKSPACE>\\\\finance\\\\ledger.csv\" ok -> \"Read file <WORKSPACE>\\\\finance\\\\ledger.csv, lines 1-87\\n1: date;account;description;amount\\n2: 08/05/2026;4.1.01;4.1.01 entry 1;-56.661,03\\n3: 23/01/2026;5.3.01;5.3.01 entry 1;-26.741,98\\n4: 27/02/2026;4.1.01;4.1.01 entry 1;-46.068,16\\n5: 21/04/2026;5.2.01;5.2.01 entry 2;-90.393,15\\n6: 12/01/2026;4.1.01;4.1.01 entry 1;-43.885,64\\n7: 16/02/20[... 3862 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\finance\\\\compute.py\" ok -> \"Created file successfully: <WORKSPACE>/finance/compute.py\"\n[step 1] shell \"python finance/compute.py\" ok -> \"2026-01 rev=200510.87 cogs=-60091.92 sm=-143475.23 rnd=-163396.33 ga=-43826.35 fin=6466.77 ebitda=-210278.96\\r\\n2026-02 rev=216328.06 cogs=-64278.71 sm=-138161.28 rnd=-182271.02 ga=-43917.13 fin=7298.39 ebitda=-212300.08\\r\\n2026-03 rev=219066.17 cogs=-69096.05 sm=-135519.34 rnd=-171742.87 ga=-47233.36 fin=6446.51 ebitda=-204525.45\\r\\n2026-04 rev=238163.26 cogs=-70867.73 sm=-139688.11 rnd=-179804.44 ga=-[... 898 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>\\\\finance\\\\compute.py\" ok -> \"Edited <WORKSPACE>/finance/compute.py (1 replacement)\"\n[step 1] shell \"python finance/compute.py\" ok -> \"2026-01 rev=200510.87 cogs=-60091.92 sm=-143475.23 rnd=-163396.33 ga=-43826.35 fin=6466.77 ebitda=-210278.96\\r\\n2026-02 rev=216328.06 cogs=-64278.71 sm=-138161.28 rnd=-182271.02 ga=-43917.13 fin=7298.39 ebitda=-212300.08\\r\\n2026-03 rev=219066.17 cogs=-69096.05 sm=-135519.34 rnd=-171742.87 ga=-47233.36 fin=6446.51 ebitda=-204525.45\\r\\n2026-04 rev=238163.26 cogs=-70867.73 sm=-139688.11 rnd=-179804.44 ga=-[... 892 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\result.json\" ok -> \"Read file <WORKSPACE>\\\\result.json, lines 1-28\\n1: {\\r\\n2:   \\\"revenue\\\": {\\r\\n3:     \\\"2026-01\\\": 200510.87,\\r\\n4:     \\\"2026-02\\\": 216328.06,\\r\\n5:     \\\"2026-03\\\": 219066.17,\\r\\n6:     \\\"2026-04\\\": 238163.26,\\r\\n7:     \\\"2026-05\\\": 243032.89,\\r\\n8:     \\\"2026-06\\\": 272391.57\\r\\n9:   },\\r\\n10:   \\\"gross_margin_pct\\\": {\\r\\n11:     \\\"2026-01\\\": 70.03,\\r\\n12:     \\\"2026-02\\\": [... 405 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "revenue per month",
+   true
+  ],
+  [
+   "gross_margin_pct per month",
+   true
+  ],
+  [
+   "ebitda per month",
+   true
+  ],
+  [
+   "3-month average burn",
+   true
+  ],
+  [
+   "runway in months",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 9,
+  "tool_calls": 10,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 2464,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1020
+ },
+ "deliverables": [],
+ "render": null
+}
