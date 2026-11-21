@@ -1,0 +1,51 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [],
+ "diff": "A recover.py\nA recovered.json\n\n--- recover.py ---\nimport json, struct\n\ndata = open('prices.db','rb').read()\nassert len(data) == 4096\n\ndef varint(buf, i):\n    result = 0\n    for n in range(9):\n        b = buf[i+n]\n        if n == 8:\n            result = (result << 8) | b\n            return result, i+9\n        result = (result << 7) | (b & 0x7F)\n        if not (b & 0x80):\n            return result, i+n+1\n    return result, i+9\n\ndef read_value(buf, body, s):\n    if s == 0:\n        return None, body\n    if s == 1:\n        return struct.unpack('>b', buf[body:body+1])[0], body+1\n    if s in (2,3,4,6,8):\n        n = {2:2,3:3,4:4,6:6,8:8}[s]\n        return int.from_bytes(buf[body:body+n],'big',signed=True), body+n\n    if s == 5:\n        return int.from_bytes(buf[body:body+6],'big',signed=True), body+6\n    if s == 7:\n        return struct.unpack('>d', buf[body:body+8])[0], body+8\n    if s == 8:\n        return 0, body\n    if s == 9:\n        return 1, body\n    if s >= 12 and s % 2 == 0:\n        n = (s-12)//2\n        return buf[body:body+n].decode('utf-8','replace'), body+n\n    if s >= 13 and s % 2 == 1:\n        n = (s-13)//2\n        return buf[body:body+n], body+n\n    return None, body\n\n# Cell pointer array at offsets 12..34 (12 pointers). Validate each:\n# a valid pointer points into the cell content region (>= 0x0C, < 4096),\n# and the payload there must be parseable.\nptrs = [struct.unpack('>H', data[12+2*k:14+2*k])[0] for k in range(12)]\nprint('pointers:', [hex(p) for p in ptrs])\n\nrows = []\nfor off in ptrs:\n    if off < 0x0C or off >= 4096:\n        continue\n    payload_len, i = varint(data, off)\n    if payload_len <= 0 or payload_len > 4096:\n        continue\n    rowid, i = varint(data, i)\n    hdr_start = i\n    hdr_len, i = varint(data, i)\n    if hdr_len <= 0 or hdr_start + hdr_len > 4096:\n        continue\n    hdr_end = hdr_start + hdr_len\n    serials = []\n    j = i\n    ok = True\n    while j < hdr_end:\n        s, j = varint(data, j)\n        serials.append(s)\n    body = hdr_end\n    values = []\n    for s in serials:\n        v, body = read_value(data, body, s)\n        values.append(v)\n    if body > 4096:\n        continue\n    # Layout: (NULL, item TEXT, price NUM); rowid is the table rowid\n    if len(values) == 3 and isinstance(values[1], str) and isinstance(values[2], (int, float)) and not isinstance(values[2], bool):\n        rows.append({'item': values[1], 'price': values[2]})\n        print(f'rowid={rowid} item={values[1]!r} price={values[2]!r}')\n    else:\n        print(f'rowid={rowid} SKIP values={values!r}')\n\nwith open('recovered.json','w',encoding='utf-8') as f:\n    json.dump(rows, f, ensure_ascii=False, indent=2)\nprint('wrote', len(rows), 'rows')\n\n--- recovered.json ---\n[]",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-Item .\\\\prices.db | Select-Object Name,Length; Get-Content .\\\\prices.db -Encoding Byte -TotalCount 16 | ForEach-Object { '{0:X2}' -f $_ }\" failed -> \"\\u001b[32;1mName     \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----     \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\nprices.db   4096\\r\\n\\u001b[31;1mGet-Content: \\u001b[31;1mCannot process argument transformation on parameter 'Encoding'. 'Byte' is not a supported encoding name. For information on defining a custom encoding, see the documentation for the Encoding.RegisterProvider method. (Parameter 'name')\\u001b[0m\"\n[step 1] shell \"$bytes = [System.IO.File]::ReadAllBytes('.\\\\prices.db'); $hex = ($bytes | ForEach-Object { '{0:X2}' -f $_ }) -join ' '; $hex\" ok -> \"0D 00 00 00 0A 0F 3D 00 0F F1 0F E3 0F CB 0F BD 0F AD 0F 93 0F 7F 0F 6D 0F 58 0F 3D 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 0[... 11887 chars cut by the benchmark]\"\n[step 1] shell \"$bytes = [System.IO.File]::ReadAllBytes('.\\\\prices.db'); $n = $bytes.Length; $out = New-Object System.Collections.Generic.List[string]; for($i=0;$i -lt $n;$i++){ $b=$bytes[$i]; if($b -ne 0){ $out.Add(('{0,5:X2} {1}' -f $i, [char]$b)) } }; $out -join \\\"`n\\\"\" ok -> \"00 \\r\\n   04 \\n\\n   05 \\u000f\\n   06 =\\n   08 \\u000f\\n   09 �\\n   0A \\u000f\\n   0B �\\n   0C \\u000f\\n   0D �\\n   0E \\u000f\\n   0F �\\n   10 \\u000f\\n   11 �\\n   12 \\u000f\\n   13 ?\\n   14 \\u000f\\n   15 \\n   16 \\u000f\\n   17 m\\n   18 \\u000f\\n   19 X\\n   1A \\u000f\\n   1B =\\n  F3D \\u0019\\n  F3E \\n\\n  F3F \\u0004\\n  F41 '\\n  F42 \\u0007\\n  F43 f\\n  F44 i\\n  F45 r\\n  F46 s\\n  F47 t\\n  F48  \\n  F49 a\\n  F4A i\\n  F4B d\\n  F4C  \\n  F4D k\\n  F4E i\\n  F4F t\\n  F50 ?\\n  F51 �\\n  F52 �\\n  F53 \\u0014\\n  F54 z\\n  F55 �\\n  F56 G\\n  F57 �\\n  F[... 1164 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\recover.py\" ok -> \"Created file successfully: <WORKSPACE>/recover.py\"\n[step 1] shell \"python recover.py\" ok -> \"page type=0x0D cell_count=0\\r\\ncells: []\\r\\nwrote 0 rows\"\n[step 1] edit \"<WORKSPACE>\\\\recover.py\" ok -> \"Edited <WORKSPACE>/recover.py (1 replacement)\"\n[step 1] shell \"python recover.py\" ok -> \"page type=0x0D cell_count=12 (from pointer array)\\r\\ncells: [(3, [None, b'tent stake', 2.75]), (4, [None, b'lantern', 24]), (5, [None, b'rope coil', 18]), (6, [None, b'water filter', 39.9]), (7, [None, b'sleeping bag', 129]), (8, [None, b'camp stove', 310]), (9, [None, b'compass', 15.5]), (10, [None, b'first aid kit', 0.99]), (0, []), (0, []), (0, []), (0, [])]\\r\\nwrote 0 rows\"\n[step 1] write \"<WORKSPACE>\\\\recover.py\" ok -> \"Wrote file successfully: <WORKSPACE>/recover.py\"\n[step 1] shell \"python recover.py\" ok -> \"pointers: ['0xfcb', '0xfbd', '0xfad', '0xf93', '0xf7f', '0xf6d', '0xf58', '0xf3d', '0x0', '0x0', '0x0', '0x0']\\r\\nrowid=3 SKIP values=[None, b'tent stake', 2.75]\\r\\nrowid=4 SKIP values=[None, b'lantern', 24]\\r\\nrowid=5 SKIP values=[None, b'rope coil', 18]\\r\\nrowid=6 SKIP values=[None, b'water filter', 39.9]\\r\\nrowid=7 SKIP values=[None, b'sleeping bag', 129]\\r\\nrowid=8 SKIP values=[None, b'camp stove', 310]\\r\\n[... 111 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>\\\\recover.py\" ok -> \"Edited <WORKSPACE>/recover.py (1 replacement)\"\n[step 1] shell \"python recover.py\" ok -> \"pointers: ['0xfcb', '0xfbd', '0xfad', '0xf93', '0xf7f', '0xf6d', '0xf58', '0xf3d', '0x0', '0x0', '0x0', '0x0']\\r\\nrowid=3 SKIP values=[None, b'tent stake', 2.75]\\r\\nrowid=4 SKIP values=[None, b'lantern', 24]\\r\\nrowid=5 SKIP values=[None, b'rope coil', 18]\\r\\nrowid=6 SKIP values=[None, b'water filter', 39.9]\\r\\nrowid=7 SKIP values=[None, b'sleeping bag', 129]\\r\\nrowid=8 SKIP values=[None, b'camp stove', 310]\\r\\n[... 111 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\ndata=open('prices.db','rb').read()\\ndef varint(buf,i):\\n    r=0\\n    for n in range(9):\\n        b=buf[i+n]\\n        if n==8: return (r<<8)|b,i+9\\n        r=(r<<7)|(b&0x7f)\\n        if not b&0x80: return r,i+n+1\\n    return r,i+9\\nfor off in [0xfcb,0xfbd,0xfad,0xf93,0xf7f,0xf6d,0xf58,0xf3d]:\\n    pl,i=varint(data,off); rowid,i=varint(data,i); hl,i=varint(data,i)\\n    he=i+hl; j=i; ser=[]\\n    while j<he: s,j=varint(data,j); ser.append(s)\\n    print(hex(off),'rowid',rowid,'serials',ser)\\n\\\"\" ok -> \"0xfcb rowid 3 serials [0, 33, 7, 116]\\r\\n0xfbd rowid 4 serials [0, 27, 1, 108]\\r\\n0xfad rowid 5 serials [0, 31, 1, 114]\\r\\n0xf93 rowid 6 serials [0, 37, 7, 119]\\r\\n0xf7f rowid 7 serials [0, 37, 2, 115]\\r\\n0xf6d rowid 8 serials [0, 33, 2, 99]\\r\\n0xf58 rowid 9 serials [0, 27, 7, 99]\\r\\n0xf3d rowid 10 serials [0, 39, 7, 102]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   false
+  ],
+  [
+   "rows with fractional prices recovered",
+   false
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   false
+  ],
+  [
+   "no row that is not in the table",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 13,
+  "tool_calls": 12,
+  "tool_errors": 0,
+  "shell_commands": 8,
+  "shell_failures": 1,
+  "file_writes": 4,
+  "repeated_tool_calls": 3,
+  "outside_path_uses": 0,
+  "generated_tokens": 3566,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1069
+ },
+ "deliverables": [],
+ "render": null
+}

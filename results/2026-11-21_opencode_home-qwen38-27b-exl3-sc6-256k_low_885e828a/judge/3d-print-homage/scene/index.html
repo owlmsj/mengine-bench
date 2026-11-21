@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Great Wave off Kanagawa — low poly wallpaper</title>
+<style>
+  html, body { margin:0; height:100%; overflow:hidden; background:#e8d5a3; }
+  canvas { display:block; }
+  #label {
+    position:fixed; left:14px; bottom:12px; z-index:2;
+    font-family:"Shippori Mincho", serif; color:#123a5c; opacity:.55;
+    font-size:13px; letter-spacing:.06em; pointer-events:none;
+  }
+</style>
+</head>
+<body>
+<div id="label">The Great Wave off Kanagawa · low poly</div>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+/* ---- palette sampled from the print (public domain, Hokusai) ---- */
+const C = {
+  skyTop:   0xf2e3b6,
+  skyBot:   0xcfc4a0,
+  ink:      0x123a5c,
+  waveDark: 0x14456e,
+  waveMid:  0x2a6ea0,
+  waveLite: 0x7fb2d9,
+  foam:     0xf4efe2,
+  paper:    0xe8d5a3,
+  hull:     0xc98f52,
+  hullDark: 0x8a5a2b,
+  fuji:     0x2f5d8f,
+  fujiSnow: 0xf4efe2,
+};
+
+const renderer = new THREE.WebGLRenderer({ antialias:true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(C.skyTop);
+scene.fog = new THREE.Fog(C.skyBot, 55, 140);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 400);
+camera.position.set(0, 10, 62);
+camera.lookAt(0, 3, 0);
+
+/* flat, print-like lighting */
+scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+const key = new THREE.DirectionalLight(0xfff4dc, 0.85);
+key.position.set(8, 14, 20);
+scene.add(key);
+const rim = new THREE.DirectionalLight(0x9fc4e8, 0.3);
+rim.position.set(-12, 6, -14);
+scene.add(rim);
+
+function mat(color) {
+  return new THREE.MeshLambertMaterial({ color, flatShading:true });
+}
+
+/* ---------- Mt. Fuji: low, small, snow-capped, in the trough, right of centre ---- */
+const fuji = new THREE.Group();
+const mountain = new THREE.Mesh(new THREE.ConeGeometry(10, 12, 6, 1), mat(C.fuji));
+mountain.position.y = 6;
+fuji.add(mountain);
+const cap = new THREE.Mesh(new THREE.ConeGeometry(3.6, 4.6, 6, 1), mat(C.fujiSnow));
+cap.position.y = 9.6;
+fuji.add(cap);
+fuji.position.set(9, -1.5, -40);
+scene.add(fuji);
+
+/* ---------- sea: a big low-poly plane filling the lower half ---------------- */
+/* displaced into rolling waves; the great wave crest is added on top. */
+const seaGeo = new THREE.PlaneGeometry(160, 90, 40, 24);
+seaGeo.rotateX(-Math.PI / 2);
+{
+  const p = seaGeo.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), z = p.getZ(i);
+    /* rolling swell: two sines, stronger toward the front */
+    const front = 1 - Math.min(1, Math.max(0, (z + 45) / 90)); // 0 back, 1 front
+    const y =
+      Math.sin(x * 0.18 + z * 0.25) * 1.6 * (0.4 + front) +
+      Math.sin(x * 0.45 - z * 0.3) * 0.7 * front;
+    p.setY(i, y);
+  }
+  seaGeo.computeVertexNormals();
+}
+const sea = new THREE.Mesh(seaGeo, mat(C.waveMid));
+scene.add(sea);
+
+/* a darker indigo band further back for depth */
+const backGeo = new THREE.PlaneGeometry(160, 30, 30, 6);
+backGeo.rotateX(-Math.PI / 2);
+{
+  const p = backGeo.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), z = p.getZ(i);
+    p.setY(i, Math.sin(x * 0.2 + z * 0.4) * 1.0 + 1.5);
+  }
+  backGeo.computeVertexNormals();
+}
+const backSea = new THREE.Mesh(backGeo, mat(C.waveDark));
+backSea.position.z = -30;
+scene.add(backSea);
+
+/* ---------- the great wave: a curling crest on the left -------------------- */
+/* built from a curling torus + a foam "claw" fan along the crest. */
+const greatWave = new THREE.Group();
+
+/* curling body: a torus arc, indigo, opening toward the viewer */
+const curl = new THREE.Mesh(
+  new THREE.TorusGeometry(8, 3.0, 6, 16, Math.PI * 1.35),
+  mat(C.waveDark)
+);
+curl.rotation.z = Math.PI * 0.12;
+curl.position.set(-18, 6, -14);
+greatWave.add(curl);
+
+/* lighter lip inside the curl */
+const lip = new THREE.Mesh(
+  new THREE.TorusGeometry(8, 1.6, 5, 16, Math.PI * 1.2),
+  mat(C.waveLite)
+);
+lip.rotation.z = Math.PI * 0.12;
+lip.position.set(-18, 6, -14);
+lip.scale.setScalar(0.88);
+greatWave.add(lip);
+
+/* foam claws: cones fanning out ONLY along the top of the crest,
+   like the print's clawed foam, not a full ring. */
+const clawMat = mat(C.foam);
+const clawCount = 16;
+for (let i = 0; i < clawCount; i++) {
+  const t = i / (clawCount - 1);
+  /* sweep across the top of the curl, from upper-left to the right lip */
+  const a = Math.PI * 0.55 + t * Math.PI * 0.75;
+  const r = 8 + 3.0;
+  const cx = Math.cos(a) * r;
+  const cy = Math.sin(a) * r;
+  const claw = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.9, 4), clawMat);
+  claw.position.set(cx * 0.95, cy * 0.95, 0);
+  /* point the claw outward and slightly up, away from the curl centre */
+  claw.lookAt(new THREE.Vector3(cx * 2.0, cy * 2.0 + 1.5, 0));
+  claw.rotateX(Math.PI / 2);
+  greatWave.add(claw);
+}
+scene.add(greatWave);
+
+/* ---------- boats: three, low poly, in the water, tilted to the swell ------ */
+function boat(scale=1) {
+  const g = new THREE.Group();
+  const hull = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.95, 5.0, 4, 1), mat(C.hull));
+  hull.rotation.z = Math.PI / 2;
+  hull.scale.set(1, 1, 0.5);
+  g.add(hull);
+  const rim2 = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, 5.0, 4, 1, true), mat(C.hullDark));
+  rim2.rotation.z = Math.PI / 2;
+  rim2.scale.set(1, 1, 0.5);
+  g.add(rim2);
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.4, 4), mat(C.hullDark));
+  mast.position.set(0.5, 1.2, 0);
+  g.add(mast);
+  const figMat = mat(C.ink);
+  for (let i = 0; i < 4; i++) {
+    const f = new THREE.Mesh(new THREE.SphereGeometry(0.18, 5, 4), figMat);
+    f.position.set(-1.5 + i * 0.75, 0.28, 0);
+    g.add(f);
+  }
+  g.scale.setScalar(scale);
+  return g;
+}
+
+/* boat 1: far left, under the great wave, tilted up */
+const b1 = boat(1.0);
+b1.position.set(-14, 3.5, -10);
+b1.rotation.z = 0.5;
+scene.add(b1);
+/* boat 2: centre, in the trough, small */
+const b2 = boat(0.7);
+b2.position.set(3, 1.2, -6);
+b2.rotation.z = -0.12;
+scene.add(b2);
+/* boat 3: right, climbing the rising swell */
+const b3 = boat(0.85);
+b3.position.set(16, 2.8, -10);
+b3.rotation.z = -0.45;
+scene.add(b3);
+
+/* ---------- gentle motion -------------------------------------------------- */
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+
+  /* great wave: slow breathing + slight rotation */
+  greatWave.position.y = 6 + Math.sin(t * 0.6) * 0.4;
+  greatWave.rotation.z = Math.sin(t * 0.4) * 0.03;
+
+  /* boats bob and rock */
+  b1.position.y = 3.5 + Math.sin(t * 1.1) * 0.3;
+  b1.rotation.z = 0.5 + Math.sin(t * 0.9) * 0.05;
+  b2.position.y = 1.2 + Math.sin(t * 1.3 + 1) * 0.25;
+  b2.rotation.z = -0.12 + Math.sin(t * 1.0 + 2) * 0.04;
+  b3.position.y = 2.8 + Math.sin(t * 1.2 + 2) * 0.3;
+  b3.rotation.z = -0.45 + Math.sin(t * 0.8 + 3) * 0.05;
+
+  /* Fuji drifts almost imperceptibly */
+  fuji.position.x = 9 + Math.sin(t * 0.1) * 0.25;
+
+  renderer.render(scene, camera);
+}
+animate();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>

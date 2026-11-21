@@ -1,0 +1,57 @@
+{
+ "task_id": "ir-server-logs",
+ "prompts": [
+  "The game went down in June and we owe the team an incident report. The logs and their notes are in {WS}/logs. When did it start and end, how long was it, did we keep our monthly availability target, and why did it happen? Record it in {WS}/result.json: start, end, minutes_down, availability_june_pct, slo_999_ok, root_cause."
+ ],
+ "answers": [
+  "Done. result.json is written; no browser tabs or apps were opened, so nothing to close.\n\n**[goal]** June incident report: start, end, duration, availability vs 99.9% SLO, root cause.\n\n**[action]** Read `logs/README.md` (defines down = first save error → \"server ready\" line; June = 30 days; one incident), grepped all 3 log files for errors/ready lines, read the incident window in `gameserver-2026-06-02.log`, and computed the numbers with a Python script.\n\n**[result]**\n- **Start:** 2026-06-02 03:17:42 (first `ERROR SaveGame failed ... No space left on device`, line 251)\n- **End:** 2026-06-02 03:53:31 (`INFO server ready, accepting players`, line 294)\n- **Down:** 35.82 min (35 min 49 s)\n- **June availability:** 99.917% (43200 − 35.817)/43200 → **SLO 99.9% met**\n- **Root cause:** `/data` disk filled up (WARN at 03:10: 97% usage, 3.1 GB free) → save writes failed → server hung → watchdog kill (exit 137) crash-looped for ~34 min until backup rotation freed 38.2 GB at 03:52:10, then it came up.\n\n**[evidence / why right]** The README's definition pins the down window to exactly those two log lines; grep confirms 03:17:42 is the only save error in June and 03:53:31 the only \"server ready\" line (the one other ERROR, 06-01 RCON auth failure, is unrelated and not a save error). Duration and availability come from a script, not mental math.\n\n**[assumptions]** ISO timestamps without timezone (logs carry no TZ); \"June\" = full 30 days per README; the 06-01 RCON auth failure is not part of the incident."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"start\": \"2026-06-02T03:17:42\",\n  \"end\": \"2026-06-02T03:53:31\",\n  \"minutes_down\": 35.82,\n  \"availability_june_pct\": 99.917,\n  \"slo_999_ok\": true,\n  \"root_cause\": \"Disk /data filled up (97% usage at 03:10, then 'No space left on device'), so SaveGame writes failed; the server became unresponsive, the watchdog killed it (exit 137) and every restart crashed the same way until backup rotation freed 38.2 GB at 03:52:10, after which the server came up ready at 03:53:31.\"\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\logs\" ok -> \"Read directory <WORKSPACE>\\\\logs, entries 1-4\\ngameserver-2026-06-01.log\\ngameserver-2026-06-02.log\\ngameserver-2026-06-03.log\\nREADME.md\"\n[step 1] read \"<WORKSPACE>\\\\logs\\\\README.md\" ok -> \"Read file <WORKSPACE>\\\\logs\\\\README.md, lines 1-1\\n1: Dedicated game server. Monthly availability SLO: 99.9%. Down = from the first save error to the 'server ready' line. June has 30 days; there is only one incident.\"\n[step 1] shell \"Get-ChildItem logs | ForEach-Object { \\\"{0}: {1} lines\\\" -f $_.Name, (Get-Content $_.FullName | Measure-Object -Line).Lines }\" ok -> \"gameserver-2026-06-01.log: 1800 lines\\r\\ngameserver-2026-06-02.log: 1794 lines\\r\\ngameserver-2026-06-03.log: 1802 lines\\r\\nREADME.md: 1 lines\"\n[step 1] search \"{\\\"limit\\\": 60, \\\"path\\\": \\\"<WORKSPACE>\\\\\\\\logs\\\", \\\"pattern\\\": \\\"save error|ERROR|server ready|FATAL|CRITICAL\\\"}\" ok -> \"Found 6 <WORKSPACE>\\\\logs\\\\README.md:\\n  Line 1: Dedicated game server. Monthly availability SLO: 99.9%. Down = from the first save error to the 'server ready' line. June has 30 days; there is only one <WORKSPACE>\\\\logs\\\\gameserver-2026-06-02.log:\\n  Lin[... 580 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\logs\\\\gameserver-2026-06-02.log\" ok -> \"Read file <WORKSPACE>\\\\logs\\\\gameserver-2026-06-02.log, lines 240-299\\n240: 2026-06-02 03:09:37 INFO player joined steam_6619460972680713 players=19\\n241: 2026-06-02 03:10:02 WARN disk /data usage 97% (free 3.1 GB)\\n242: 2026-06-02 03:10:44 INFO player joined steam_7879220472709941 players=20\\n243: 2026-06-02 03:11:11 INFO player left pla[... 4420 chars cut by the benchmark]\"\n[step 1] search \"{\\\"limit\\\": 40, \\\"path\\\": \\\"<WORKSPACE>\\\\\\\\logs\\\", \\\"pattern\\\": \\\"WARN|disk|space|disk usage\\\"}\" ok -> \"Found 40 <WORKSPACE>\\\\logs\\\\gameserver-2026-06-02.log:\\n  Line 241: 2026-06-02 03:10:02 WARN disk /data usage 97% (free 3.1 GB)\\n\\n  Line 251: 2026-06-02 03:17:42 ERROR SaveGame failed: write /data/game/Saved/Level.sav: No space left on device\\n\\n  Line 252: 2026-06-02 03:18:00 ERROR SaveGame failed: write /data/game/Saved/Level.sa[... 3383 chars cut by the benchmark]\"\n[step 1] search \"{\\\"path\\\": \\\"<WORKSPACE>\\\\\\\\logs\\\", \\\"pattern\\\": \\\"server ready\\\"}\" ok -> \"Found 2 <WORKSPACE>\\\\logs\\\\README.md:\\n  Line 1: Dedicated game server. Monthly availability SLO: 99.9%. Down = from the first save error to the 'server ready' line. June has 30 days; there is only one <WORKSPACE>\\\\logs\\\\gameserver-2026-06-02.log:\\n  Lin[... 63 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nfrom datetime import datetime\\ns=datetime(2026,6,2,3,17,42); e=datetime(2026,6,2,3,53,31)\\ndown=(e-s).total_seconds()/60\\njune=30*1440\\navail=(june-down)/june*100\\nprint('minutes_down',down)\\nprint('june_minutes',june)\\nprint('availability_pct',avail)\\nprint('slo_ok',avail>=99.9)\\n\\\"\" ok -> \"minutes_down 35.81666666666667\\r\\njune_minutes 43200\\r\\navailability_pct 99.91709104938272\\r\\nslo_ok True\"\n[step 1] write \"<WORKSPACE>\\\\result.json\" ok -> \"Created file successfully: <WORKSPACE>/result.json\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "incident start",
+   true
+  ],
+  [
+   "incident end",
+   true
+  ],
+  [
+   "minutes down",
+   true
+  ],
+  [
+   "June availability",
+   true
+  ],
+  [
+   "SLO 99.9 met",
+   true
+  ],
+  [
+   "root cause = /data disk full",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 7,
+  "tool_calls": 9,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1675,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 514
+ },
+ "deliverables": [],
+ "render": null
+}

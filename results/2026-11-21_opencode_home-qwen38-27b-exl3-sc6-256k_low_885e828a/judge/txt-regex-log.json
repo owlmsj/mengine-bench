@@ -1,0 +1,47 @@
+{
+ "task_id": "txt-regex-log",
+ "prompts": [
+  "We search our server logs with Python regexes; {WS}/server.log shows what a log looks like. We need one regex that gives, for every log line containing an IPv4 address, the last date on that line (YYYY-MM-DD); lines without an address give nothing. Only real calendar dates count, with February allowed up to the 29th in every year. Addresses are dotted decimal, each part 0 to 255 with no leading zeros. A date or an address with a letter or digit right before or after it does not count. Save the regex alone in {WS}/regex.txt: we read the file, strip it, and run re.findall(pattern, log_text, re.MULTILINE) over a whole log, expecting exactly those dates in order."
+ ],
+ "answers": [],
+ "diff": "A check.py\n\n--- check.py ---\nimport re, calendar\n\n# ---- build the regex (will be saved to regex.txt) ----\n# IPv4: dotted decimal, each part 0-255, no leading zeros\nOCT = r\"(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9][0-9]|[0-9])\"\nIP = OCT + r\"(?:\\.\" + OCT + r\"){3}\"\n# Date: YYYY-MM-DD, real calendar dates, Feb up to 29 every year\nY = r\"(?:\\d{3}[2468]|\\d{3}[02468][048]|\\d{3}[13579][26]|\\d{3}[013579][013579]|1900|2100|2200|2300|2400|2500|2600|2700|2800|2900|3000|3100|3200|3300|3400|3500|3600|3700|3800|3900|4000)\"\n# simpler: year = \\d{4} then validate day via alternatives\nLEAP = r\"(?:\\d{3}[2468]|\\d{3}[02468][048]|\\d{3}[13579][26]|(?:19|21|22|23|24|25|26|27|28|29|30|31|32|33|34|35|36|37|38|39|40)00)\"\nNONLEAP = r\"(?:\\d{4}(?!%s)|%s)\" % (LEAP, \"\")  # placeholder\n# month/day\nM = r\"(?:0[1-9]|1[0-2])\"\nD_LEAP = r\"(?:0[1-9]|[12][0-9]|30)\"\nD_NONLEAP = r\"(?:0[1-9]|[12][0-9]|30)\"\n# Feb: 01-28 always, 29 only leap years\n# Build date pattern with leap-year awareness\nDATE = (\n    r\"(?<!\\d)(?<![\\w-])\"\n    r\"(?:\"\n    # non-leap year: Feb up to 28\n    r\"(?:\\d{4})(?:(?<!\\d)0[13578]|(?<!\\d)1[02])-(?:0[1-9]|[12][0-9]|30)\"\n    r\"|(?:\\d{4})(?<!\\d)04-(?:0[1-9]|[12][0-9])\"\n    r\"|(?:\\d{4})(?<!\\d)06-(?:0[1-9]|[12][0-9]|30)\"\n    r\"|(?:\\d{4})(?<!\\d)09-(?:0[1-9]|[12][0-9]|30)\"\n    r\"|(?:\\d{4})(?<!\\d)11-(?:0[1-9]|[12][0-9]|30)\"\n    r\"|(?:\\d{4})(?<!\\d)02-(?:0[1-9]|1[0-9]|2[0-8])\"\n    # leap year: Feb up to 29\n    r\"|(?:\\d{3}[2468]|\\d{3}[02468][048]|\\d{3}[13579][26]|(?:19|21|22|23|24|25|26|27|28|29|30|31|32|33|34|35|36|37|38|39|40)00)(?<!\\d)02-(?:0[1-9]|1[0-9]|29)\"\n    r\")\"\n    r\"(?!\\d)(?![\\w-])\"\n)\n# This is getting complex. Let me use a cleaner approach.\n\n# Cleaner: year with leap check inline\n# Leap year: divisible by 4, not by 100, or by 400\n# \\d{4} = abcd; leap if (cd % 4 == 0 and cd % 100 != 0) or (abcd % 400 == 0)\n# cd % 4 == 0: last two digits divisible by 4\n# cd % 100 != 0: last two digits not 00\n# abcd % 400 == 0: last three digits 000 and first digit even, or last four digits in {0400, 0800, ...}\n# Actually abcd % 400 == 0 iff abcd is in {0400, 0800, 1200, ..., 9600} for 4-digit years\n# i.e. abcd = k*400, k=1..24\n\nLEAP_Y = (\n    r\"(?:\"\n    r\"\\d{3}[2468]\"          # xxx2,xxx4,xxx6,xxx8 -> last digit even, but need last two digits %4==0\n    r\"|\\d{3}[02468][048]\"   # last two digits: 00,04,08,20,24,28,40,44,48,60,64,68,80,84,88\n    r\"|\\d{3}[13579][26]\"    # last two digits: 12,16,32,36,52,56,72,76,92,96\n    r\"|(?:19|21|22|23|24|25|26|27|28|29|30|31|32|33|34|35|36|37|38|39|40)00\"  # k*400\n    r\")\"\n)\n# Wait, \\d{3}[2468] matches years ending in 2,4,6,8 but that's not right for %4.\n# Last two digits % 4 == 0:\n# 00,04,08,12,16,20,24,28,32,36,40,44,48,52,56,60,64,68,72,76,80,84,88,92,96\n# That's: [02468][048] covers 00,04,08,20,24,28,40,44,48,60,64,68,80,84,88\n# [13579][26] covers 12,16,32,36,52,56,72,76,92,96\n# Together: all 25 values. Good.\n# But we also need NOT divisible by 100 (i.e. last two digits != 00) OR divisible by 400.\n# So leap = (last two % 4 == 0 AND last two != 00) OR (year % 400 == 0)\n# year % 400 == 0: last three digits 000 and first digit in {0,4,8} for 4-digit, or more precisely\n# 0400, 0800, 1200, 1600, 2000, 2400, 2800, 3200, 3600, 4000, 4400, 4800, 5200, 5600, 6000, 6400, 6800, 7200, 7600, 8000, 8400, 8800, 9200, 9600\n# i.e. first digit in {0,4,8} and last three 000, OR first digit in {1,2,3,5,6,7,9} and last three 200? No.\n# k*400 for k=1..24: 0400,0800,1200,1600,2000,2400,2800,3200,3600,4000,4400,4800,5200,5600,6000,6400,6800,7200,7600,8000,8400,8800,9200,9600\n# Pattern: (?:04|08|12|16|20|24|28|32|36|40|44|48|52|56|60|64|68|72|76|80|84|88|92|96)00\n\nDIV400 = r\"(?:04|08|12|16|20|24|28|32|36|40|44|48|52|56|60|64|68|72|76|80|84|88|92|96)00\"\n# Leap year (4-digit):\nLEAP_Y = (\n    r\"(?:\"\n    r\"(?:\\d{2}(?:[02468][048]|[13579][26]))(?!00)\"  # last two %4==0 and not 00\n    r\"|\"\n    + DIV400 +\n    r\")\"\n)\n# Hmm, \\d{2}[02468][048] is 4 digits: first two arbitrary, last two in the set. That's correct for \"last two digits %4==0\".\n# But we need the whole 4-digit year. Let me restructure.\n[... 5060 chars cut by the benchmark]",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\server.log\" ok -> \"Read file <WORKSPACE>\\\\server.log, lines 1-5\\n1: 2026-04-02 07:15:09 INFO  gateway accepted 10.12.0.7 for build 2026-04-01\\n2: 2026-04-02 07:15:11 INFO  cache warm, 412 keys, next sweep 2026-04-03\\n3: 2026-04-02 07:16:40 WARN  peer 192.168.40.3 slow, retry window 2026-04-02 to 2026-04-05\\n4: 2026-04-02 07:18:02 INFO  job 7781-20-4410 que[... 84 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\check.py\" ok -> \"Created file successfully: <WORKSPACE>/check.py\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "the last date on each line with an address",
+   false
+  ],
+  [
+   "lines without a valid address match nothing",
+   false
+  ],
+  [
+   "impossible dates match nothing",
+   false
+  ],
+  [
+   "dates glued to letters or digits match nothing",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 3,
+  "tool_calls": 2,
+  "tool_errors": 0,
+  "shell_commands": 0,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 4631,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 4568
+ },
+ "deliverables": [],
+ "render": null
+}
