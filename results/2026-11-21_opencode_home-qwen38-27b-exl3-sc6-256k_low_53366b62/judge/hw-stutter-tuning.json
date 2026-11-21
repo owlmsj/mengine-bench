@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "\n\n**Goal**: Find what causes arena-01's periodic hitches and which setting changes fix them within the owner's constraints (Gen5 x4 link kept, no BIOS overclock changes).\n\n**Action**: Parsed the PresentMon capture (8238 frames) and the 1 Hz sensor log, computed the FPS metrics the owner defines, and correlated every slow frame with the sensor state at the same clock.\n\n**Result** (`./result.json`):\n- `avg_fps`: **137.29** (1000 / mean MsBetweenPresents)\n- `low_1pct_fps`: **45.36** (1000 / p99 = 1000 / 22.048 ms)\n- `cause`: the GPU's PCIe link drops into **ASPM L1** (BIOS `pcie_aspm_rp1_gpu = L1`) every 4 s — sensor log shows L1 at seconds 2, 6, 10, …, 58 — and each entry starts a burst of ~11 frames at ~21–23 ms vs ~7 ms normal. All 177 slow frames (the only frames outside the 5–10 ms bucket) fall inside those 15 bursts, 1:1 with L1 entries. L1 exit latency stalls GPU traffic, so the average looks fine while 1% lows suffer.\n- `changes`: `pcie_aspm_rp1_gpu` from `L1` to `disabled` — keeps Gen5 x4 (constraint 1) and touches no XMP/PBO/ratio (constraint 2).\n\n**How I know it's right**: the correlation is exact — 15 L1 seconds, 15 hitch bursts starting at each one, zero slow frames outside them. Ruled out alternatives from the data: CPU clock steady ~5.3 GHz (power plan not the trigger), disk/DPC spikes (t=27, t=43, MsMpEng.exe) are one-offs inside existing bursts, not periodic. Assumption: \"disabled\" is the valid ASPM value in this schema (same value used by `pcie_aspm_rp2_chipset`). No browser tabs or apps were opened, so nothing to close."
+ ],
+ "diff": "A analyze.py\nA result.json\nA write_result.py\n\n--- analyze.py ---\nimport csv, statistics\n\n# --- PresentMon ---\nrows = list(csv.DictReader(open(r'capture/presentmon.csv')))\nmbp = [float(r['MsBetweenPresents']) for r in rows]\nn = len(mbp)\navg_fps = 1000.0 / (sum(mbp) / n)\nsrt = sorted(mbp)\np99 = srt[int(0.99 * (n - 1))]\nlow1 = 1000.0 / p99\nprint(f\"frames={n} avg_fps={avg_fps:.2f} p99_ms={p99:.3f} low1_fps={low1:.2f}\")\n\n# hitch events: frame time > 3x median\nmed = statistics.median(mbp)\nhitches = [(i, t, f) for i, (t, f) in enumerate(zip([float(r['TimeInSeconds']) for r in rows], mbp)) if f > 3 * med]\nprint(f\"median_ms={med:.2f} hitches(>3x med)={len(hitches)}\")\nfor i, t, f in hitches[:30]:\n    print(f\"  t={t:.3f}s frame={i} ms={f:.1f}\")\n\n# --- Sensors ---\nsrows = list(csv.DictReader(open(r'capture/sensors.csv')))\nprint(f\"sensor rows={len(srows)}\")\nl1 = [(int(r['time_s']), r['gpu_pcie_link_state']) for r in srows if r['gpu_pcie_link_state'] == 'L1']\nprint(f\"L1 seconds={len(l1)}: {[t for t,_ in l1]}\")\n\n# correlation: for each hitch, sensor state at that second\nimport math\nfor i, t, f in hitches:\n    s = int(round(t))\n    if s < len(srows):\n        r = srows[s]\n        print(f\"  hitch t={t:.3f} ms={f:.1f} -> sensor t={s}: link={r['gpu_pcie_link_state']} dpc={r['dpc_latency_us']} disk={r['disk_active_pct']} top={r['top_cpu_process']}\")\n\n# distribution of frame times\nbuckets = {}\nfor f in mbp:\n    b = int(f // 5) * 5\n    buckets[b] = buckets.get(b, 0) + 1\nfor b in sorted(buckets):\n    print(f\"  {b}-{b+5}ms: {buckets[b]}\")\n\n--- result.json ---\n{\r\n  \"avg_fps\": 137.29,\r\n  \"low_1pct_fps\": 45.36,\r\n  \"cause\": \"The GPU's PCIe link periodically drops into the ASPM L1 low-power state (BIOS setting pcie_aspm_rp1_gpu = L1). The sensor log shows the link in L1 at seconds 2, 6, 10, ..., 58 (every 4 s), and each L1 entry starts a burst of ~11 frames at ~21-23 ms (vs ~7 ms normal): the 177 slow frames all fall inside those bursts. L1 exit latency stalls GPU traffic, producing the periodic hitches and the poor 1% lows while the average FPS stays high.\",\r\n  \"changes\": [\r\n    {\r\n      \"setting\": \"pcie_aspm_rp1_gpu\",\r\n      \"from\": \"L1\",\r\n      \"to\": \"disabled\"\r\n    }\r\n  ]\r\n}\n\n--- write_result.py ---\nimport csv, json\n\nrows = list(csv.DictReader(open(r'capture/presentmon.csv')))\nmbp = [float(r['MsBetweenPresents']) for r in rows]\nn = len(mbp)\navg_fps = round(1000.0 / (sum(mbp) / n), 2)\nsrt = sorted(mbp)\np99 = srt[int(0.99 * (n - 1))]\nlow1 = round(1000.0 / p99, 2)\n\nresult = {\n    \"avg_fps\": avg_fps,\n    \"low_1pct_fps\": low1,\n    \"cause\": \"The GPU's PCIe link periodically drops into the ASPM L1 low-power state (BIOS setting pcie_aspm_rp1_gpu = L1). The sensor log shows the link in L1 at seconds 2, 6, 10, ..., 58 (every 4 s), and each L1 entry starts a burst of ~11 frames at ~21-23 ms (vs ~7 ms normal): the 177 slow frames all fall inside those bursts. L1 exit latency stalls GPU traffic, producing the periodic hitches and the poor 1% lows while the average FPS stays high.\",\n    \"changes\": [\n        {\"setting\": \"pcie_aspm_rp1_gpu\", \"from\": \"L1\", \"to\": \"disabled\"}\n    ]\n}\nwith open('result.json', 'w', encoding='utf-8') as f:\n    json.dump(result, f, indent=2, ensure_ascii=False)\nprint(json.dumps(result, indent=2))",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem .. | Select-Object Name,Length; Get-ChildItem . | Select-Object Name\" ok -> \"\\u001b[32;1mName         \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----         \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\nworkspace     \\r\\ncapture       1\\r\\nAGENTS.md     1\\r\\nNOTES.md      1\\r\\nsettings.json 1\"\n[step 1] shell \"Get-ChildItem .. -Force | Format-Table Name,Length,Mode -AutoSize; Write-Host '--- capture ---'; if (Test-Path ..\\\\capture -PathType Container) { Get-ChildItem ..\\\\capture | Format-Table Name,Length } else { Get-Content ..\\\\capture -TotalCount 50 }\" failed -> \"\\u001b[32;1mName     \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\u001b[32;1m Mode\\u001b[0m\\r\\n\\u001b[32;1m----     \\u001b[0m \\u001b[32;1m------\\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\nworkspace        d----\\r\\n\\r\\n--- capture ---\\r\\n\\u001b[31;1mGet-Content: \\u001b[31;1mCannot find path '<HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-jc_q32_1\\\\capture' because it does not exist.\\u001b[0m\"\n[step 1] shell \"Get-ChildItem . -Force | Format-Table Name,Length,Mode -AutoSize; Write-Host '=== NOTES.md ==='; Get-Content ..\\\\NOTES.md; Write-Host '=== settings.json ==='; Get-Content ..\\\\settings.json; Write-Host '=== AGENTS.md ==='; Get-Content ..\\\\AGENTS.md\" failed -> \"\\u001b[32;1mName         \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\u001b[32;1m Mode\\u001b[0m\\r\\n\\u001b[32;1m----         \\u001b[0m \\u001b[32;1m------\\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\ncapture              d----\\r\\nAGENTS.md     394    -a---\\r\\nNOTES.md      774    -a---\\r\\nsettings.json 2429   -a---\\r\\n\\r\\n=== NOTES.md ===\\r\\n\\u001b[31;1mGet-Content: \\u001b[31;1mCannot find path '<HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-jc_q32_1\\\\NOTES.md' because it does not exist[... 363 chars cut by the benchmark]\"\n[step 1] shell \"Get-ChildItem .\\\\capture -Force | Format-Table Name,Length -AutoSize; Write-Host '=== NOTES.md ==='; Get-Content .\\\\NOTES.md; Write-Host '=== settings.json ==='; Get-Content .\\\\settings.json\" ok -> \"\\u001b[32;1mName          \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----          \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\npresentmon.csv 715870\\r\\nsensors.csv      2660\\r\\n\\r\\n=== NOTES.md ===\\r\\n# Owner notes - rig \\\"arena-01\\\"\\r\\n\\r\\nThe game hitches every few seconds even though the average frame rate looks fine.\\r\\nCapture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\r\\ntaken at the same time (same clock: [... 3120 chars cut by the benchmark]\"\n[step 1] shell \"Get-Content .\\\\capture\\\\presentmon.csv -TotalCount 5; Write-Host '---'; Get-Content .\\\\capture\\\\sensors.csv -TotalCount 10; Write-Host '---'; python --version 2>$null; python3 --version 2>$null; py --version 2>$null\" ok -> \"Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.000000,6.861,6.847,0.294,4.901,5.568\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.006861,6.773,6.812,0.387,4.013,6.252\\r\\nArena.exe,7316,0x000001F2A8C40000,D[... 693 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\analyze.py\" ok -> \"Created file successfully: <WORKSPACE>/analyze.py\"\n[step 1] shell \"python analyze.py\" ok -> \"frames=8238 avg_fps=137.29 p99_ms=22.048 low1_fps=45.36\\r\\nmedian_ms=6.96 hitches(>3x med)=177\\r\\n  t=2.401s frame=345 ms=21.9\\r\\n  t=2.423s frame=346 ms=22.9\\r\\n  t=2.445s frame=347 ms=22.1\\r\\n  t=2.467s frame=348 ms=21.6\\r\\n  t=2.489s frame=349 ms=22.7\\r\\n  t=2.512s frame=350 ms=21.0\\r\\n  t=2.533s frame=351 ms=22.1\\r\\n  t=2.555s frame=352 ms=21.9\\r\\n  t=2.577s frame=353 ms=22.0\\r\\n  t=2.599s frame=354 ms=22.5\\r\\n  t=2.[... 14524 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\write_result.py\" ok -> \"Created file successfully: <WORKSPACE>/write_result.py\"\n[step 1] shell \"python write_result.py\" ok -> \"{\\r\\n  \\\"avg_fps\\\": 137.29,\\r\\n  \\\"low_1pct_fps\\\": 45.36,\\r\\n  \\\"cause\\\": \\\"The GPU's PCIe link periodically drops into the ASPM L1 low-power state (BIOS setting pcie_aspm_rp1_gpu = L1). The sensor log shows the link in L1 at seconds 2, 6, 10, ..., 58 (every 4 s), and each L1 entry starts a burst of ~11 frames at ~21-23 ms (vs ~7 ms normal): the 177 slow frames all fall inside those bursts. L1 exit latency sta[... 226 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"import json; d=json.load(open('result.json')); print(sorted(d.keys()), d['avg_fps'], d['low_1pct_fps'], d['changes'])\\\"\" ok -> \"['avg_fps', 'cause', 'changes', 'low_1pct_fps'] 137.29 45.36 [{'setting': 'pcie_aspm_rp1_gpu', 'from': 'L1', 'to': 'disabled'}]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 11,
+  "tool_calls": 10,
+  "tool_errors": 0,
+  "shell_commands": 8,
+  "shell_failures": 2,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 2,
+  "generated_tokens": 4510,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1641
+ },
+ "deliverables": [],
+ "render": null
+}

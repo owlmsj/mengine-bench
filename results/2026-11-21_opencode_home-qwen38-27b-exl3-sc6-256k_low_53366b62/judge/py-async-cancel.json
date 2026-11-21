@@ -1,0 +1,51 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [],
+ "diff": "A run.py\nA test_run.py\n\n--- run.py ---\n\"\"\"Concurrency helper: run awaitable-returning tasks with a bound on concurrency.\n\nUsage:\n    from run import run_tasks\n    await run_tasks([make_job_1, make_job_2, ...], max_concurrent=4)\n\nEach task is a zero-argument callable that returns an awaitable (e.g. a\ncoroutine). At most ``max_concurrent`` jobs run at the same time. The function\nreturns once every job has finished.\n\nCtrl+C behaviour: when the run is interrupted, asyncio cancels the main task,\nwhich cancels every in-flight job. Cancellation is delivered at the next\n``await`` and ``finally`` blocks run on cancellation, so each job's cleanup\ncode executes before the run unwinds.\n\"\"\"\n\nfrom __future__ import annotations\n\nimport asyncio\n\n\nasync def run_tasks(tasks, max_concurrent):\n    \"\"\"Run ``tasks`` with at most ``max_concurrent`` jobs in flight.\n\n    Args:\n        tasks: iterable of zero-argument callables; each returns an awaitable.\n        max_concurrent: maximum number of jobs allowed to run at once (>= 1).\n\n    Returns:\n        The list of job results, in the same order as ``tasks``.\n\n    On cancellation (e.g. Ctrl+C) every in-flight job is cancelled and its\n    cleanup (``finally``) code runs before this returns.\n    \"\"\"\n    if max_concurrent < 1:\n        raise ValueError(f\"max_concurrent must be >= 1, got {max_concurrent!r}\")\n\n    sem = asyncio.Semaphore(max_concurrent)\n\n    async def _run(task):\n        async with sem:\n            return await task()\n\n    return await asyncio.gather(*(_run(t) for t in tasks))\n\n--- test_run.py ---\nimport asyncio\nimport run\n\n\nasync def test_concurrency_bound():\n    running = 0\n    max_seen = 0\n\n    def make_job(i):\n        async def job():\n            nonlocal running, max_seen\n            running += 1\n            max_seen = max(max_seen, running)\n            try:\n                await asyncio.sleep(0.01)\n                return i\n            finally:\n                running -= 1\n        return job\n\n    tasks = [make_job(i) for i in range(10)]\n    out = await run.run_tasks(tasks, max_concurrent=3)\n    assert sorted(out) == list(range(10)), out\n    assert max_seen <= 3, max_seen\n    assert max_seen == 3, max_seen  # should actually hit the bound\n    print(\"concurrency bound OK, max_seen =\", max_seen)\n\n\nasync def test_cleanup_on_cancel():\n    # Simulates Ctrl+C: asyncio.run cancels the main task on KeyboardInterrupt.\n    cleaned = []\n\n    def make_job(i):\n        async def job():\n            try:\n                await asyncio.sleep(10)\n            finally:\n                cleaned.append(i)\n        return job\n\n    async def main():\n        task = asyncio.ensure_future(run.run_tasks([make_job(i) for i in range(4)], 2))\n        await asyncio.sleep(0.05)\n        task.cancel()\n        try:\n            await task\n        except asyncio.CancelledError:\n            pass\n        return cleaned\n\n    cleaned = await main()\n    # 2 jobs were running -> their finally ran. 2 were waiting on the\n    # semaphore and never started -> no cleanup.\n    assert len(cleaned) == 2, cleaned\n    print(\"cleanup on cancel OK, cleaned =\", sorted(cleaned))\n\n\nasync def test_empty():\n    out = await run.run_tasks([], 4)\n    assert out == [], out\n    print(\"empty OK\")\n\n\nasync def test_invalid():\n    try:\n        await run.run_tasks([], 0)\n    except ValueError:\n        print(\"invalid max_concurrent OK\")\n    else:\n        raise AssertionError(\"expected ValueError\")\n\n\nasyncio.run(test_concurrency_bound())\nasyncio.run(test_cleanup_on_cancel())\nasyncio.run(test_empty())\nasyncio.run(test_invalid())\nprint(\"ALL TESTS PASSED\")",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Created file successfully: <WORKSPACE>/run.py\"\n[step 1] write \"<WORKSPACE>\\\\test_run.py\" ok -> \"Created file successfully: <WORKSPACE>/test_run.py\"\n[step 1] shell \"python test_run.py\" ok -> \"concurrency bound OK, max_seen = 3\\r\\ncleanup on cancel OK, cleaned = [0, 1]\\r\\nempty OK\\r\\ninvalid max_concurrent OK\\r\\nALL TESTS PASSED\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 3,
+  "tool_calls": 3,
+  "tool_errors": 0,
+  "shell_commands": 1,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 4282,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 4173
+ },
+ "deliverables": [],
+ "render": null
+}
