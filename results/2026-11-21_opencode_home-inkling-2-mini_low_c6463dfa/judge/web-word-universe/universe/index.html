@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Universo de Palavras — Dicionário Criativo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,300;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#0c0a14; --panel:rgba(18,16,30,.82); --line:rgba(255,255,255,.09); --ink:#ece7f5; --dim:#9b93b3; --accent:#f2b366; --accent2:#7ad0c8; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; overflow:hidden; background:var(--bg); color:var(--ink); font-family:"Fraunces",serif; }
+  #scene { position:fixed; inset:0; }
+  canvas { display:block; }
+  header { position:fixed; top:0; left:0; right:0; padding:22px 28px 0; display:flex; justify-content:space-between; align-items:flex-start; pointer-events:none; z-index:5; }
+  h1 { font-size:clamp(20px,3vw,34px); font-weight:300; letter-spacing:.02em; margin:0; }
+  h1 em { font-style:italic; color:var(--accent); }
+  .sub { font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--dim); margin-top:6px; letter-spacing:.12em; text-transform:uppercase; }
+  .stats { font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--dim); text-align:right; line-height:1.7; text-transform:uppercase; letter-spacing:.1em; }
+  .stats b { color:var(--ink); font-weight:500; }
+  #panel { position:fixed; left:28px; bottom:28px; width:min(340px, calc(100vw - 56px)); background:var(--panel); border:1px solid var(--line); border-radius:14px; backdrop-filter:blur(14px); z-index:6; overflow:hidden; }
+  #searchbox { padding:14px 14px 10px; border-bottom:1px solid var(--line); position:relative; }
+  #q { width:100%; background:rgba(255,255,255,.05); border:1px solid var(--line); border-radius:9px; color:var(--ink); font-family:"IBM Plex Mono",monospace; font-size:14px; padding:10px 12px; outline:none; }
+  #q:focus { border-color:var(--accent); }
+  #suggest { position:absolute; top:100%; left:14px; right:14px; background:#1c1930; border:1px solid var(--line); border-radius:10px; max-height:220px; overflow:auto; display:none; z-index:7; box-shadow:0 14px 40px rgba(0,0,0,.5); }
+  #suggest button { display:block; width:100%; text-align:left; background:none; border:none; color:var(--ink); padding:8px 12px; font-family:"IBM Plex Mono",monospace; font-size:13px; cursor:pointer; }
+  #suggest button:hover { background:rgba(242,179,102,.15); color:var(--accent); }
+  #detail { padding:14px 16px 16px; max-height:44vh; overflow:auto; }
+  #now { font-size:26px; font-weight:600; margin:0 0 2px; color:var(--accent); }
+  #now-meta { font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--dim); letter-spacing:.08em; text-transform:uppercase; margin:0 0 12px; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { font-family:"IBM Plex Mono",monospace; font-size:12px; background:rgba(122,208,200,.1); border:1px solid rgba(122,208,200,.35); color:var(--accent2); border-radius:999px; padding:4px 11px; cursor:pointer; transition:.15s; }
+  .chip:hover { background:rgba(122,208,200,.28); color:#fff; }
+  .empty { color:var(--dim); font-style:italic; font-size:14px; }
+  #hint { position:fixed; right:28px; bottom:28px; font-family:"IBM Plex Mono",monospace; font-size:11px; color:var(--dim); letter-spacing:.08em; z-index:5; }
+  #loader { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:var(--bg); z-index:20; font-style:italic; color:var(--dim); font-size:18px; transition:opacity .6s; }
+</style>
+</head>
+<body>
+<div id="scene"></div>
+<div id="loader">acendendo as palavras…</div>
+<header>
+  <div>
+    <h1>O <em>Universo</em> de Palavras</h1>
+    <div class="sub">Dicionário Criativo · grafo de relações</div>
+  </div>
+  <div class="stats" id="stats"></div>
+</header>
+<div id="panel">
+  <div id="searchbox">
+    <input id="q" type="text" placeholder="buscar palavra…" autocomplete="off" spellcheck="false">
+    <div id="suggest"></div>
+  </div>
+  <div id="detail"><p class="empty">Busque uma palavra para ver como ela se liga às outras.</p></div>
+</div>
+<div id="hint">arraste para girar · scroll para zoom · clique num nó</div>
+<script type="module">
+window.addEventListener("error",e=>{const l=document.getElementById("loader"); l.textContent="ERR: "+(e.message||e.error); l.style.opacity="1";});
+window.addEventListener("unhandledrejection",e=>{const l=document.getElementById("loader"); l.textContent="REJ: "+String(e.reason); l.style.opacity="1";});
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+const DATA = {"words":["acento","açougueiro","açúcar","advogado","afeto","aflição","água","aldeia","alegria","alfaiate","alma","almoço","amanhã","amor","angústia","ano","ansiedade","apelido","areia","arroz","arte","árvore","ator","aurora","avenida","avó","avô","bairro","boca","braço","cabeça","cachoeira","café","campo","canção","capital","carinho","carne","carpinteiro","casa","cena","chá","cidade","cinema","comida","compaixão","contentamento","conto","conversa","coração","corpo","cozinha","crepúsculo","cunhado","dança","dedo","dente","desenho","dia","dicionário","dor","emprego","enfermeira","engenheiro","época","era","escola","escultura","espanto","esperança","esquina","estado","estação","estômago","eternidade","fala","família","farinha","feijão","felicidade","ferreiro","fígado","filha","filho","flor","floresta","folha","fotografia","frase","fruto","futuro","genro","gíria","grito","herança","história","hoje","hora","idioma","igreja","instante","irmã","irmão","janela","jantar","jardim","joelho","juiz","lago","lar","lavrador","leite","letra","linguagem","livro","língua","madrinha","madrugada","mãe","mágoa","mandioca","manhã","manteiga","mar","marinheiro","mata","médico","medo","mel","melancolia","melodia","memória","mercado","milho","minuto","momento","montanha","música","mão","mês","nação","natureza","neta","neto","noite","nome","nora","nostalgia","ofício","olho","ombro","onda","ontem","operário","osso","ovo","padeiro","padrinho","pai","pais","paixão","palavra","pão","parentesco","passado","pastor","pátria","patrão","pavor","país","pé","pedreiro","peito","peixe","pele","pergunta","perna","pescador","pescoço","pétala","piano","pimenta","pintura","poesia","ponte","porta","porto","praça","prado","praia","prazer","prima","primo","professor","profissão","pulmão","quarto","queijo","raiz","refeição","resposta","riacho","rima","rio","ritmo","romance","rosto","rua","sal","salário","samba","sangue","sapateiro","saudade","século","segundo","selva","semana","semente","sentido","serra","significado","sílaba","silêncio","sinônimo","sobrinho","sogra","soldado","sotaque","surpresa","sussurro","susto","tambor","tarde","teatro","tela","tempo","ternura","tia","tio","trabalho","trigo","tristeza","unha","vale","verso","vila","vinho","violão","voz"],"links":{"acento":["fala","pergunta","prazer","sílaba","sotaque"],"açougueiro":["alfaiate","boca","padeiro","pescador","tarde"],"açúcar":["manteiga","mel","pimenta","tempo","unha"],"advogado":["cachoeira","coração","eternidade","fala","hora","juiz","palavra","professor"],"afeto":["amor","angústia","carinho","voz"],"aflição":["água","angústia","ansiedade","escultura","felicidade","pavor"],"água":["aflição","café","comida","ombro","professor","refeição","vinho"],"aldeia":["bairro","capital","trabalho","vila"],"alegria":["felicidade","queijo","surpresa","ternura"],"alfaiate":["açougueiro","boca","emprego","padeiro","profissão","sapateiro","susto"],"alma":["amor","corpo","dente","gíria","pátria","pé"],"almoço":["carne","frase","jantar","patrão","pimenta","refeição"],"amanhã":["eternidade","hoje","hora","perna","porta"],"amor":["afeto","alma","árvore","paixão","susto","tristeza"],"angústia":["afeto","aflição","compaixão","dor","medo","riacho"],"ano":["crepúsculo","mês","música","século"],"ansiedade":["aflição","manteiga","medo","paixão","rua"],"apelido":["acento","idioma","irmã","letra","nome"],"areia":["montanha","natureza","ofício","praia","rima"],"arroz":["chá","feijão","madrugada","trigo"],"arte":["cachoeira","fotografia","música","romance","samba"],"árvore":["amor","mandioca","mata","raiz","selva","serra"],"ator":["canção","cena","poesia","primo"],"aurora":["crepúsculo","instante","madrugada","prazer","professor"],"avenida":["casa","feijão","praça","quarto","rua"],"avó":["avô","genro","idioma","mãe","neto"],"avô":["avó","coração","irmã","pais","semana"],"bairro":["aldeia","igreja","porta","refeição","rua"],"boca":["açougueiro","alfaiate","língua","livro","olho","ombro","rosto"],"braço":["janela","língua","mão","ombro","surpresa"],"cabeça":["corpo","enfermeira","mão","rosto"],"cachoeira":["advogado","lago","linguagem","pétala","riacho","semente"],"café":["água","chá","momento","pimenta","trabalho"],"campo":["jardim","milho","onda","ponte","prado","selva"],"canção":["ator","cena","idioma","melodia","música","pai","tela"],"capital":["aldeia","cidade","estação","riacho","tempo","vila","voz"],"carinho":["afeto","compaixão","esperança","melancolia","saudade","ternura"],"carne":["arroz","filho","mandioca","nação","ovo","peixe","salário"],"carpinteiro":["ferreiro","patrão","pedreiro","trabalho","vila"],"casa":["avenida","escola","igreja","lar","poesia"],"cena":["ator","canção","livro","melodia","ponte","teatro"],"chá":["café","dente","peixe","queijo","vinho"],"cidade":["capital","estação","estado","jardim","prima"],"cinema":["escultura","fotografia","pergunta","tela"],"comida":["água","farinha","história","peito","refeição"],"compaixão":["angústia","carinho","contentamento","esperança","ovo","sílaba","ternura"],"contentamento":["felicidade","pais","prazer"],"conto":["folha","herança","lar","livro","palavra","romance","verso"],"conversa":["fala","felicidade","grito","silêncio"],"coração":["advogado","avô","jantar","joelho","peito","pulmão","rosto"],"corpo":["alma","cabeça","peixe","pescoço"],"cozinha":["capital","fígado","janela","pai","quarto","voz"],"crepúsculo":["ano","aurora","cunhado","época","gíria","hoje","ontem","segundo"],"cunhado":["crepúsculo","pais","sobrinho","sogra"],"dança":["desenho","piano","rima","tambor","teatro","voz"],"dedo":["mão","pé","sapateiro","unha"],"dente":["hoje","língua","pescoço","pulmão"],"desenho":["dança","escultura","noite","prima","tela"],"dia":["casa","letra","manhã","semana","tarde"],"dicionário":["arte","significado","sinônimo","voz"],"dor":["almoço","angústia","mágoa","saudade"],"emprego":["alfaiate","esperança","eternidade","jantar","mercado","profissão","salário"],"enfermeira":["açougueiro","época","médico","professor","violão"],"engenheiro":["irmão","juiz","lavrador","marinheiro","ternura","trabalho"],"época":["enfermeira","era","leite","momento"],"era":["época","mês","palavra","século","teatro"],"escola":["casa","esperança","esquina","igreja"],"escultura":["cinema","desenho","jardim","olho","sobrinho","violão"],"espanto":["esperança","país","surpresa","susto"],"esperança":["carinho","compaixão","emprego","escola","espanto","nostalgia","saudade"],"esquina":["cozinha","escola","pescador","ponte","praça"],"estado":["cidade","mão","médico","pátria","poesia","praça"],"estação":["capital","cidade","mercado","porto","susto","tia"],"estômago":["fígado","irmão","língua","pulmão"],"eternidade":["advogado","amanhã","emprego","instante","madrugada","passado","peixe"],"fala":["acento","advogado","conversa","voz"],"família":["herança","nora","parentesco","susto"],"farinha":["pão","pescador","trigo","vinho"],"feijão":["arroz","avenida","mandioca","milho","palavra","vinho"],"felicidade":["aflição","alegria","compaixão","contentamento","conversa","trigo"],"ferreiro":["carpinteiro","onda","pastor","sapateiro","segundo"],"fígado":["alma","cozinha","estômago","futuro","pele"],"filha":["filho","irmão","manteiga","nora","parentesco","primo","tia"],"filho":["carne","filha","genro","pai"],"flor":["folha","mar","pétala","samba","semente"],"floresta":["mar","mata","medo","natureza","tempo"],"folha":["conto","flor","raiz","semente","silêncio","tio"],"fotografia":["arte","cinema","refeição","rima","soldado","teatro"],"frase":["almoço","gíria","letra","linguagem","sentido","sussurro","tristeza"],"fruto":["jardim","natureza","piano","semente"],"futuro":["fígado","minuto","passado","século","tempo"],"genro":["avó","madrinha","nora","sogra"],"gíria":["alma","crepúsculo","frase","idioma","sinônimo","sotaque"],"grito":["conversa","pergunta","silêncio","sobrinho","sussurro"],"herança":["conto","família","madrinha","marinheiro","neta","pimenta","sinônimo","tio"],"história":["apelido","comida","memória","resposta","surpresa","tempo"],"hoje":["amanhã","crepúsculo","dente","ontem","tristeza"],"hora":["advogado","época","minuto","tempo"],"idioma":["apelido","canção","gíria","linguagem","madrinha","palavra"],"igreja":["bairro","escola","mercado","operário"],"instante":["almoço","aurora","eternidade","momento","segundo"],"irmã":["apelido","avô","irmão","pintura","sal","tia"],"irmão":["engenheiro","filha","irmã","pais","ponte","tia"],"janela":["braço","cozinha","igreja","nação","porta","profissão"],"jantar":["almoço","coração","emprego","mel","pão"],"jardim":["campo","escultura","fruto","montanha","pétala","praia"],"joelho":["coração","pé","pedreiro","perna","tambor"],"juiz":["advogado","engenheiro","mão","patrão","porto","soldado"],"lago":["acento","cachoeira","mar","natureza"],"lar":["casa","conto","ponte","praça","quarto","rua"],"lavrador":["engenheiro","ofício","padeiro","pastor","pescador","selva"],"leite":["época","mandioca","manteiga","pão","pele","queijo"],"letra":["apelido","dia","significado","sílaba"],"linguagem":["cachoeira","frase","grito","idioma","riacho"],"livro":["boca","cena","conto","pintura"],"língua":["boca","dente","osso","tarde"],"madrinha":["genro","herança","idioma","neta","padrinho"],"madrugada":["arroz","aurora","eternidade","manhã","médico","noite","nome","passado","vila"],"mãe":["avó","cena","neto","pai","pais"],"mágoa":["dor","melancolia","nostalgia","tristeza"],"mandioca":["árvore","carne","feijão","leite","milho","pimenta","sentido"],"manhã":["ano","dia","profissão","tarde"],"manteiga":["açúcar","almoço","ansiedade","leite","milho","queijo"],"mar":["flor","lago","medo","onda","vale"],"marinheiro":["advogado","engenheiro","herança","médico","pedreiro","soldado"],"mata":["árvore","floresta","fruto","mercado","selva"],"médico":["enfermeira","estado","madrugada","marinheiro","pastor"],"medo":["angústia","ansiedade","pavor","ternura"],"mel":["açúcar","jantar","melancolia","pimenta","sal"],"melancolia":["carinho","mágoa","médico","nostalgia","tristeza"],"melodia":["canção","cena","piano","ritmo","verso"],"memória":["alma","história","palavra","sílaba"],"mercado":["emprego","estação","igreja","mata","porta"],"milho":["campo","feijão","mandioca","manteiga","refeição","tela","trigo"],"minuto":["futuro","hora","noite","segundo","tambor"],"momento":["café","época","instante","noite"],"montanha":["areia","jardim","lavrador","prado","serra"],"música":["ano","arte","canção","nora","pintura","samba","verso"],"mão":["braço","dedo","estado","pele"],"mês":["ano","era","ferreiro","momento","semana","sinônimo"],"nação":["instante","país","pátria","rua","vila"],"natureza":["areia","floresta","raiz","romance"],"neta":["arroz","madrinha","neto","pais","quarto","tio"],"neto":["avó","filho","mãe","neta","romance","sílaba"],"noite":["desenho","madrugada","minuto","momento","tarde"],"nome":["apelido","madrugada","ritmo","sussurro","voz"],"nora":["família","filha","genro","música","padrinho","patrão","peixe"],"nostalgia":["esperança","mágoa","melancolia","saudade","sílaba"],"ofício":["areia","lavrador","livro","padeiro","profissão","trabalho"],"olho":["boca","escultura","pulmão","rosto"],"ombro":["água","boca","braço","pescoço"],"onda":["campo","ferreiro","mar","prado","praia","riacho","tempo"],"ontem":["crepúsculo","hoje","pavor"],"operário":["igreja","lavrador","passado","patrão","pedreiro","profissão","soldado"],"osso":["farinha","língua","pele","pescoço","sangue"],"ovo":["carne","compaixão","palavra","peixe","queijo"],"padeiro":["açougueiro","alfaiate","capital","lavrador","ofício"],"padrinho":["madrinha","nora","sotaque","tio"],"pai":["avó","canção","cozinha","filho","mãe"],"pais":["contentamento","irmão","mãe","neta","parentesco","pavor","tia"],"paixão":["amor","ansiedade","conto","prazer","unha"],"palavra":["advogado","alma","cabeça","conto","dedo","era","feijão","idioma","mágoa","memória","montanha","ovo","patrão","pintura","professor","tia"],"pão":["farinha","jantar","leite","verso"],"parentesco":["família","filha","médico","pais"],"passado":["eternidade","futuro","madrugada","operário"],"pastor":["ferreiro","lavrador","médico","mel","profissão"],"pátria":["alma","estado","nação","porto","praça","tempo"],"patrão":["almoço","carpinteiro","juiz","nora","operário","palavra","salário"],"pavor":["aflição","medo","melancolia","ontem","pais","ritmo","susto"],"país":["cidade","espanto","nação","porta","violão"],"pé":["alma","joelho","rosto","tela"],"pedreiro":["carpinteiro","joelho","marinheiro","operário","osso"],"peito":["comida","coração","pulmão","unha"],"peixe":["carne","chá","eternidade","nora","ovo"],"pele":["fígado","leite","mão","osso","pulmão"],"pergunta":["acento","grito","olho","resposta"],"perna":["amanhã","joelho","sangue"],"pescador":["açougueiro","amanhã","lavrador","pedreiro","verso"],"pescoço":["avô","corpo","dente","ombro","sangue"],"pétala":["cachoeira","flor","mar","semente","susto"],"piano":["dança","fruto","melodia","prado","sobrinho","tambor","violão"],"pimenta":["açúcar","almoço","café","herança","mandioca","mel","sal"],"pintura":["irmã","janela","livro","música","palavra","tela"],"poesia":["ator","casa","estado","verso","violão"],"ponte":["campo","esquina","irmão","lar","porto","vale"],"porta":["amanhã","bairro","janela","país"],"porto":["estação","juiz","pátria","ponte","vila"],"praça":["avenida","esquina","lar","pátria","ternura","vale"],"prado":["campo","carinho","montanha","onda","piano"],"praia":["areia","jardim","onda","pescador","rio"],"prazer":["acento","aurora","contentamento","paixão","ternura"],"prima":["cidade","herança","primo","sobrinho"],"primo":["ator","filha","prima","professor","sobrinho","tia"],"professor":["advogado","água","enfermeira","palavra","primo","salário","sapateiro"],"profissão":["alfaiate","emprego","janela","ofício","operário","serra"],"pulmão":["avô","coração","estômago","olho","peito","pele","pescoço","unha"],"quarto":["avenida","cozinha","lar","neta"],"queijo":["alegria","chá","leite","manteiga","ovo","poesia"],"raiz":["árvore","folha","natureza","serra","vale"],"refeição":["água","almoço","bairro","comida","fotografia","milho"],"resposta":["história","letra","pergunta","semana"],"riacho":["angústia","cachoeira","capital","linguagem","onda","rio"],"rima":["areia","fotografia","romance","significado","verso","violão"],"rio":["pedreiro","praia","riacho","vale"],"ritmo":["melodia","nome","pavor","samba","teatro"],"romance":["arte","conto","natureza","rima","sotaque","teatro"],"rosto":["boca","cabeça","nora","olho","pé"],"rua":["alfaiate","avenida","bairro","lar","nação"],"sal":["irmã","mel","pimenta"],"salário":["carne","emprego","patrão","professor"],"samba":["arte","flor","música","ritmo","romance","violão"],"sangue":["osso","perna","pescoço","sentido"],"sapateiro":["alfaiate","dedo","ferreiro","professor"],"saudade":["ansiedade","carinho","dor","esperança","nostalgia"],"século":["ano","era","minuto"],"segundo":["crepúsculo","ferreiro","instante","minuto"],"selva":["árvore","campo","igreja","mata"],"semana":["avô","dia","futuro","mês"],"semente":["cachoeira","flor","folha","fruto","mercado","pétala"],"sentido":["frase","história","mandioca","sangue","significado","trabalho"],"serra":["árvore","montanha","profissão","vale"],"significado":["dicionário","letra","rima","sentido"],"sílaba":["acento","compaixão","frase","letra","memória","neto","nostalgia"],"silêncio":["conversa","folha","grito","sussurro"],"sinônimo":["dicionário","gíria","herança","mês","sílaba"],"sobrinho":["cunhado","grito","piano","prima","primo","sotaque"],"sogra":["cunhado","dente","genro","tempo","tia"],"soldado":["fotografia","juiz","marinheiro","operário"],"sotaque":["acento","gíria","sobrinho","vinho","voz"],"surpresa":["alegria","braço","espanto","história"],"sussurro":["folha","frase","grito","nome","silêncio"],"susto":["alfaiate","amor","espanto","estação","pavor","pétala","tempo"],"tambor":["dança","joelho","minuto","piano","verso"],"tarde":["açougueiro","dia","língua","manhã","noite"],"teatro":["cena","dança","era","fotografia","pai","ritmo","romance","tempo"],"tela":["cinema","desenho","milho","pé","pintura"],"tempo":["açúcar","capital","floresta","futuro","história","hora","idioma","onda","pátria","pescador","prado","rua","sogra","susto","teatro","tio"],"ternura":["alegria","carinho","compaixão","engenheiro","medo","praça"],"tia":["estação","filha","irmão","pais","primo","sogra","tio"],"tio":["folha","herança","neta","tempo","tia"],"trabalho":["aldeia","carpinteiro","engenheiro","ofício","sentido"],"trigo":["arroz","farinha","milho","unha"],"tristeza":["amor","frase","hoje","mágoa","melancolia"],"unha":["açúcar","dedo","paixão","peito","pulmão","trigo"],"vale":["mar","ponte","raiz","rio","serra"],"verso":["melodia","pão","pescador","poesia","rima","tambor"],"vila":["aldeia","capital","carpinteiro","madrugada","nação","porto"],"vinho":["água","chá","farinha","feijão","sotaque"],"violão":["enfermeira","escultura","país","piano","poesia","praça","rima","samba"],"voz":["afeto","capital","cozinha","fala","nome","sotaque"]}};
+const NAMES = DATA.words;
+const LINKS = DATA.links;
+const idx = {}; NAMES.forEach((n,i)=>idx[n]=i);
+const N = NAMES.length;
+
+// --- edges
+const edges = []; const seen = new Set();
+for (const w of NAMES) for (const l of (LINKS[w]||[])) {
+  const a=idx[w], b=idx[l]; if(a===undefined||b===undefined) continue;
+  const k=a<b?a+'-'+b:b+'-'+a;
+  if(!seen.has(k)){seen.add(k);edges.push([a,b]);}
+}
+
+// --- deterministic layout (force simulation, no randomness)
+const nodes=[];
+for(let i=0;i<N;i++){
+  const t=i/N*Math.PI*2;
+  nodes.push({x:Math.cos(t)*(1+ (i%7)*0.35), y:Math.sin(t*1.7)*1.6, z:(i%5-2)*0.8});
+}
+const degree=new Array(N).fill(0);
+for(const [a,b] of edges){degree[a]++;degree[b]++;}
+const K = 26;
+const idealDist = i => 5.5 + degree[i]*0.22;
+for(let iter=0;iter<380;iter++){
+  const fx=new Float64Array(N), fy=new Float64Array(N), fz=new Float64Array(N);
+  for(let i=0;i<N;i++){
+    for(let j=i+1;j<N;j++){
+      let dx=nodes[i].x-nodes[j].x, dy=nodes[i].y-nodes[j].y, dz=nodes[i].z-nodes[j].z;
+      let d2=dx*dx+dy*dy+dz*dz; if(d2<1e-4){dx=(i%3-1)*0.1;dy=0.1;dz=0.1;d2=dx*dx+dy*dy+dz*dz;}
+      const d=Math.sqrt(d2), f=K*K/d2;
+      dx/=d;dy/=d;dz/=d;
+      fx[i]+=dx*f; fy[i]+=dy*f; fz[i]+=dz*f; fx[j]-=dx*f; fy[j]-=dy*f; fz[j]-=dz*f;
+    }
+  }
+  for(const [a,b] of edges){
+    let dx=nodes[b].x-nodes[a].x, dy=nodes[b].y-nodes[a].y, dz=nodes[b].z-nodes[a].z;
+    let d=Math.sqrt(dx*dx+dy*dy+dz*dz)||0.001;
+    const ideal=idealDist(a)*0.9+idealDist(b)*0.9+2.2;
+    const f=(d-ideal)*0.02*4;
+    dx/=d;dy/=d;dz/=d;
+    fx[a]+=dx*f; fy[a]+=dy*f; fz[a]+=dz*f; fx[b]-=dx*f; fy[b]-=dy*f; fz[b]-=dz*f;
+  }
+  // center gravity
+  for(let i=0;i<N;i++){ fx[i]-=nodes[i].x*0.06; fy[i]-=nodes[i].y*0.06; fz[i]-=nodes[i].z*0.06; }
+  const damp=0.82;
+  for(let i=0;i<N;i++){
+    nodes[i].x+=fx[i]*0.045*damp; nodes[i].y+=fy[i]*0.045*damp; nodes[i].z+=fz[i]*0.045*damp;
+  }
+}
+// normalize scale
+let maxR=0; for(const n of nodes){const r=Math.hypot(n.x,n.y,n.z); if(r>maxR)maxR=r;}
+const SCALE=30/maxR; for(const n of nodes){n.x*=SCALE;n.y*=SCALE;n.z*=SCALE;}
+
+// --- scene
+const container=document.getElementById('scene');
+const scene=new THREE.Scene();
+scene.fog=new THREE.FogExp2(0x0c0a14,0.010);
+const camera=new THREE.PerspectiveCamera(55,innerWidth/innerHeight,0.1,500);
+camera.position.set(0,18,66);
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+container.appendChild(renderer.domElement);
+const amb=new THREE.AmbientLight(0xddccff,0.85); scene.add(amb);
+const dir=new THREE.DirectionalLight(0xfff0dd,1.1); dir.position.set(40,60,30); scene.add(dir);
+const pt=new THREE.PointLight(0x7ad0c8,900,0,2); pt.position.set(0,0,0); scene.add(pt);
+
+// stars
+const starGeo=new THREE.BufferGeometry(); const sp=[];
+for(let i=0;i<1200;i++){const r=140+Math.random()*200, th=Math.random()*Math.PI*2, ph=Math.acos(2*Math.random()-1);
+  sp.push(r*Math.sin(ph)*Math.cos(th),r*Math.cos(ph),r*Math.sin(ph)*Math.sin(th));}
+starGeo.setAttribute('position',new THREE.Float32BufferAttribute(sp,3));
+scene.add(new THREE.Points(starGeo,new THREE.PointsMaterial({color:0x8f86b8,size:0.55,sizeAttenuation:true})));
+
+// nodes
+const nodeGeo=new THREE.SphereGeometry(1,14,14);
+const nodeMat=new THREE.MeshStandardMaterial({color:0xe9e2f7,roughness:0.35,metalness:0.15,emissive:0x241d3a,emissiveIntensity:0.6});
+const inst=new THREE.InstancedMesh(nodeGeo,nodeMat,N);
+const dummy=new THREE.Object3D();
+const baseScale=i=>1.05+Math.sqrt(degree[i])*0.55;
+for(let i=0;i<N;i++){dummy.position.set(nodes[i].x,nodes[i].y,nodes[i].z);dummy.scale.setScalar(baseScale(i));dummy.updateMatrix();inst.setMatrixAt(i,dummy.matrix);}
+scene.add(inst);
+
+// edges (two line sets: normal dim, highlight bright)
+const edgeGeo=new THREE.BufferGeometry();
+const ep=new Float32Array(edges.length*2*3);
+edges.forEach(([a,b],i)=>{
+  ep[i*6]=nodes[a].x; ep[i*6+1]=nodes[a].y; ep[i*6+2]=nodes[a].z;
+  ep[i*6+3]=nodes[b].x; ep[i*6+4]=nodes[b].y; ep[i*6+5]=nodes[b].z;
+});
+edgeGeo.setAttribute('position',new THREE.BufferAttribute(ep,3));
+const edgeMat=new THREE.LineBasicMaterial({color:0x5a517a,transparent:true,opacity:0.38});
+const edgeLines=new THREE.LineSegments(edgeGeo,edgeMat); scene.add(edgeLines);
+
+// labels via sprites only for selection/hover
+function makeLabel(text){
+  const c=document.createElement('canvas'); c.width=512;c.height=128;
+  const g=c.getContext('2d'); g.font='600 58px Fraunces, serif'; g.textAlign='center'; g.textBaseline='middle';
+  g.fillStyle='rgba(10,8,18,0.78)'; g.beginPath(); g.roundRect(6,6,500,116,24); g.fill();
+  g.strokeStyle='rgba(242,179,102,0.6)'; g.lineWidth=3; g.stroke();
+  g.fillStyle='#f2e9ff'; g.fillText(text,256,66);
+  const tex=new THREE.CanvasTexture(c); tex.anisotropy=4;
+  const sp2=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,transparent:true,depthTest:false}));
+  sp2.scale.set(14,3.5,1); return sp2;
+}
+
+// --- interaction
+let selected=-1, hovered=-1;
+let rotY=0.35, rotX=0.22, dist=78;
+let dragging=false, px=0, py=0;
+
+const ray=new THREE.Raycaster(); const ptr=new THREE.Vector2();
+const q=document.getElementById('q'), suggest=document.getElementById('suggest'), detail=document.getElementById('detail');
+
+function setSelected(name, updateURL=true){
+  selected=idx[name];
+  if(updateURL){const u=new URL(location.href);u.search='?word='+encodeURIComponent(name);history.replaceState(null,'',u);}
+  renderDetail(name);
+  document.querySelectorAll('.chip').forEach(c=>c.classList.remove('on'));
+  inst.instanceColor && null;
+  // color selected node + neighbors
+  const nbr = selected>=0 ? (LINKS[NAMES[selected]]||[]).map(n=>idx[n]).filter(i=>i!==undefined) : [];
+  for(let i=0;i<N;i++){
+    const col = i===selected ? new THREE.Color(0xf2b366) : (nbr.includes(i) ? new THREE.Color(0x7ad0c8) : new THREE.Color(0xe9e2f7));
+    inst.setColorAt(i,col);
+    const s = i===selected ? baseScale(i)*1.7 : (nbr.includes(i) ? baseScale(i)*1.35 : baseScale(i));
+    dummy.position.set(nodes[i].x,nodes[i].y,nodes[i].z); dummy.scale.setScalar(s); dummy.updateMatrix(); inst.setMatrixAt(i,dummy.matrix);
+  }
+  inst.instanceMatrix.needsUpdate=true; if(inst.instanceColor) inst.instanceColor.needsUpdate=true;
+  document.getElementById('stats').innerHTML = `<b>${N}</b> palavras · <b>${edges.length}</b> relações`;
+}
+
+function renderDetail(name){
+  if(selected<0){detail.innerHTML='<p class="empty">Busque uma palavra para ver como ela se liga às outras.</p>';return;}
+  const links=LINKS[name]||[];
+  detail.innerHTML=`<h2 id="now">${name}</h2><p id="now-meta">${links.length} ligação${links.length===1?'':'s'} direta${links.length===1?'':'s'}</p>`+
+    (links.length?`<div class="chips">${links.map(l=>`<button class="chip" data-w="${l}">${l}</button>`).join('')}</div>`:'<p class="empty">Nenhuma ligação direta.</p>');
+  detail.querySelectorAll('.chip').forEach(c=>c.onclick=()=>{const n=c.dataset.w; setSelected(n); q.value=n;});
+}
+
+function suggestList(s){
+  if(!s){suggest.style.display='none';return;}
+  const m=NAMES.filter(n=>n.toLowerCase().includes(s.toLowerCase())).slice(0,8);
+  if(!m.length){suggest.style.display='none';return;}
+  suggest.innerHTML=m.map(n=>`<button data-w="${n}">${n}</button>`).join('');
+  suggest.style.display='block';
+  suggest.querySelectorAll('button').forEach(b=>b.onmousedown=()=>{setSelected(b.dataset.w);q.value=b.dataset.w;suggest.style.display='none';});
+}
+q.addEventListener('input',()=>suggestList(q.value.trim()));
+q.addEventListener('keydown',e=>{
+  if(e.key==='Enter'){
+    const v=q.value.trim().toLowerCase();
+    const exact=NAMES.find(n=>n.toLowerCase()===v);
+    const m=exact||NAMES.find(n=>n.toLowerCase().includes(v));
+    if(m){setSelected(m);suggest.style.display='none';}
+  } else if(e.key==='Escape'){suggest.style.display='none';}
+});
+document.addEventListener('click',e=>{if(!e.target.closest('#searchbox'))suggest.style.display='none';});
+
+// --- camera controls
+function onDown(x,y){dragging=true;px=x;py=y;}
+function onMove(x,y){if(!dragging)return;rotY+=(x-px)*0.005;rotX-=(y-py)*0.005;rotX=Math.max(-1.2,Math.min(1.2,rotX));px=x;py=y;}
+function onUp(){dragging=false;}
+renderer.domElement.addEventListener('pointerdown',e=>{onDown(e.clientX,e.clientY);renderer.domElement.setPointerCapture(e.pointerId);});
+renderer.domElement.addEventListener('pointermove',e=>{
+  if(dragging){onMove(e.clientX,e.clientY);return;}
+  ptr.x=(e.clientX/innerWidth)*2-1; ptr.y=-(e.clientY/innerHeight)*2+1;
+  ray.setFromCamera(ptr,camera);
+  const hit=ray.intersectObject(inst)[0];
+  const h=hit?hit.instanceId:-1;
+  if(h!==hovered){hovered=h; renderer.domElement.style.cursor=h>=0?'pointer':'grab';}
+});
+renderer.domElement.addEventListener('pointerup',e=>{
+  onUp();
+  ptr.x=(e.clientX/innerWidth)*2-1; ptr.y=-(e.clientY/innerHeight)*2+1;
+  ray.setFromCamera(ptr,camera);
+  const hit=ray.intersectObject(inst)[0];
+  if(hit){const n=NAMES[hit.instanceId]; setSelected(n); q.value=n;}
+});
+renderer.domElement.addEventListener('wheel',e=>{e.preventDefault(); dist=Math.max(28,Math.min(150,dist+e.deltaY*0.05));},{passive:false});
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+
+// labels: show selected node label
+let labelSprite=null;
+const group=new THREE.Group(); scene.add(group);
+// put everything (stars excluded) into group for rotation
+// -- simpler: rotate camera around origin
+function updateLabel(){
+  if(labelSprite){scene.remove(labelSprite);labelSprite=null;}
+  if(selected>=0){
+    labelSprite=makeLabel(NAMES[selected]);
+    labelSprite.position.set(nodes[selected].x,nodes[selected].y+baseScale(selected)+3.2,nodes[selected].z);
+    scene.add(labelSprite);
+  }
+}
+new MutationObserver(updateLabel).observe(document.getElementById('detail'),{childList:true});
+
+const clock=new THREE.Clock();
+let auto=true;
+renderer.domElement.addEventListener('pointerdown',()=>{auto=false;},true);
+function animate(){
+  requestAnimationFrame(animate);
+  if(auto)rotY+=0.0016;
+  const cy=Math.cos(rotX), sy=Math.sin(rotX);
+  camera.position.set(Math.sin(rotY)*dist*cy, Math.sin(rotX)*dist+10, Math.cos(rotY)*dist*cy);
+  camera.lookAt(0,0,0);
+  renderer.render(scene,camera);
+}
+document.getElementById('stats').innerHTML=`<b>${N}</b> palavras · <b>${edges.length}</b> relações`;
+animate();
+// initial selection from URL
+const param=new URL(location.href).searchParams.get('word');
+if(param && idx[param]!==undefined) setSelected(param,false);
+else if(param){const m=NAMES.find(n=>n.toLowerCase()===param.toLowerCase()); if(m) setSelected(m,false);}
+document.getElementById('loader').style.opacity='0';
+setTimeout(()=>document.getElementById('loader').remove(),700);
+updateLabel();
+</script>
+</body>
+</html>

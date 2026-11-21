@@ -1,0 +1,61 @@
+{
+ "task_id": "ts-plugin-bug",
+ "prompts": [
+  "Users of our harness plugins report that tool.after hooks run out of order, that sometimes a hook never runs, and that a failing hook is silently ignored. The hook bus and the plugin are in {WS}; the README there says how the bus must behave. Fix the bus. Its public API stays as it is, the tests in {WS}/test stay as they are, and package.json takes no dependencies."
+ ],
+ "answers": [
+  "[goal] Fix hook bus ordering/await/error/snapshot behavior. [action] Rewrote `src/bus.ts`. [result] Tests pass; plugin verified live (notice once, redaction, audit log order). [next] none.\n\nAssumptions: public API unchanged; plugin code itself was correct once the bus is fixed, so left as-is.\n\nFound: `emit` used `list.forEach(async ...)` — handlers ran concurrently, un-awaited, errors swallowed, and live list meant mid-emit unsubscribe/subscribe leaked in. Fixed by snapshotting the handler list at emit start and awaiting sequentially in subscription order; a throwing handler rejects `emit` and skips the rest; unsubscribe during emit only affects later emits. Also made the unsubscribe function idempotent and safe to call from within a handler."
+ ],
+ "diff": "M src/bus.ts\n\n--- src/bus.ts ---\n/**\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\n * handlers run one after another in subscription order, emit resolves after all of them,\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\n */\n\nexport type Handler<T> = (payload: T) => void | Promise<void>;\n\nexport class HookBus {\n  private handlers: Map<string, Handler<unknown>[]> = new Map();\n\n  /** Subscribes a handler to an event; returns the function that unsubscribes it. */\n  on<T>(event: string, handler: Handler<T>): () => void {\n    const list = this.handlers.get(event) ?? [];\n    list.push(handler as Handler<unknown>);\n    this.handlers.set(event, list);\n    let active = true;\n    return () => {\n      if (!active) return;\n      active = false;\n      const index = list.indexOf(handler as Handler<unknown>);\n      if (index >= 0) {\n        list.splice(index, 1);\n      }\n    };\n  }\n\n  /** Runs the handlers of an event with the payload. */\n  async emit<T>(event: string, payload: T): Promise<void> {\n    const snapshot = [...(this.handlers.get(event) ?? [])];\n    for (const handler of snapshot) {\n      await handler(payload);\n    }\n  }\n\n  /** How many handlers an event has. */\n  count(event: string): number {\n    return (this.handlers.get(event) ?? []).length;\n  }\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem -Recurse -Force | Select-Object FullName\" ok -> \"\\u001b[32;1mFullName\\u001b[0m\\r\\n\\u001b[32;<WORKSPACE><WORKSPACE><WORKSPACE><WORKSPACE>\\\\package.json\\r\\nC:\\\\Users\\\\m[... 356 chars cut by the benchmark]\"\n[step 1] shell \"Get-Content README.md, package.json, src/bus.ts, src/plugin.ts, test/bus.test.ts\" ok -> \"# harness-hooks\\r\\n\\r\\nThe hook bus our harness plugins use (OpenCode-style hooks such as `tool.before` and `tool.after`).\\r\\nPlain TypeScript run by Node 24 directly (`npm test` runs `node --test`); no dependencies.\\r\\n\\r\\n## How the bus behaves\\r\\n\\r\\n- `bus.on(event, handler)` subscribes a handler and returns a function that unsubscribes it.\\r\\n- `await bus.emit(event, payload)` runs the handlers of that event[... 3753 chars cut by the benchmark]\"\n[step 1] shell \"cat > src/bus.ts << 'EOF'\\n/**\\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\\n * handlers run one after another in subscription order, emit resolves after all of them,\\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\\n */\\n\\nexport type Handler<T> = (payload: T) => void | Promise<void>;\\n\\nexport class HookBus {\\n  private handlers: Map<string, Handler<unknown>[]> = new Map();\\n\\n  /** Subscribes a handler to an event; returns the function that unsubscribes it. */\\n  on<T>(event: string, handler: Handler<T>): () => void {\\n    const list = this.handlers.get(event) ?? [];\\n    list.push(handler as Handler<unknown>);\\n    this.handlers.set(event, list);\\n    let active = true;\\n    return () => {\\n      if (!active) return;\\n      active = false;\\n      const index = list.indexOf(handler as Handler<unknown>);\\n      if (index >= 0) {\\n        list.splice(index, 1);\\n      }\\n    };\\n  }\\n\\n  /** Runs the handlers of an event with the payload. */\\n  async emit<T>(event: string, payload: T): Promise<void> {\\n    const snapshot = [...(this.handlers.get(event) ?? [])];\\n    for (const handler of snapshot) {\\n      await handler(payload);\\n    }\\n  }\\n\\n  /** How many handlers an event has. */\\n  count(event: string): number {\\n    return (this.handlers.get(event) ?? []).length;\\n  }\\n}\\nEOF\\nnpm test\" failed -> \"\"\n[step 1] shell \"Remove-Item src/bus.ts -ErrorAction SilentlyContinue; Get-ChildItem src\" ok -> \"Directory: <WORKSPACE>\\\\src\\r\\n\\r\\n\\u001b[32;1mMode   \\u001b[0m\\u001b[32;1m              LastWriteTime\\u001b[0m\\u001b[32;1m         Length\\u001b[0m\\u001b[32;1m Name\\u001b[0m\\r\\n\\u001b[32;1m----   \\u001b[0m \\u001b[32;1m             -------------\\u001b[0m \\u001b[32;1m        ------\\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\n-a---          21/11/2026    14:47            955 plugin.ts\"\n[step 1] write \"src/bus.ts\" ok -> \"Created file successfully: src/bus.ts\"\n[step 1] shell \"npm test\" ok -> \"> harness-hooks@0.3.0 test\\n> node --test\\n\\n✔ emit calls a subscribed handler with the payload (0.9095ms)\\n✔ unsubscribe removes the handler (0.1471ms)\\nℹ tests 2\\nℹ suites 0\\nℹ pass 2\\nℹ fail 0\\nℹ cancelled 0\\nℹ skipped 0\\nℹ todo 0\\nℹ duration_ms 95.189\"\n[step 1] shell \"node -e \\\"import('./src/bus.ts').then(async ({HookBus}) => { const {registerAuditPlugin} = await import('./src/plugin.ts'); const bus = new HookBus(); const audit = []; registerAuditPlugin(bus, audit); await bus.emit('tool.after', {tool:'x', output:'password=hunter2 token=abc'}); await bus.emit('tool.after', {tool:'y', output:'password=other'}); console.log(JSON.stringify(audit)); })\\\"\" ok -> \"[\\\"notice: tool output is audited\\\",\\\"x: password=[redacted] token=abc\\\",\\\"y: password=[redacted]\\\"]\"",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "package.json takes no dependencies",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hidden handlers run in subscription order",
+   true
+  ],
+  [
+   "hidden emit resolves after every handler",
+   true
+  ],
+  [
+   "hidden a failing handler rejects emit",
+   true
+  ],
+  [
+   "hidden a handler that unsubscribes itself does not stop the others",
+   true
+  ],
+  [
+   "hidden the audit plugin redacts before it logs",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 7,
+  "tool_errors": 1,
+  "shell_commands": 6,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2029,
+  "reasoning_tokens": 541,
+  "largest_turn_tokens": 790
+ },
+ "deliverables": [],
+ "render": null
+}
