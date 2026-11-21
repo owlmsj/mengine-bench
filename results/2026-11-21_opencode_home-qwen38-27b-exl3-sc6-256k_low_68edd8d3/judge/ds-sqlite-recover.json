@@ -1,0 +1,51 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [],
+ "diff": "A recover.py\n\n--- recover.py ---\nimport json, struct\n\ndata = open('prices.db', 'rb').read()\n\ndef varint(buf, off):\n    result = 0\n    for i in range(9):\n        b = buf[off + i]\n        if i == 8:\n            result = (result << 8) | b\n            return result, off + 9\n        result = (result << 7) | (b & 0x7F)\n        if not (b & 0x80):\n            return result, off + i + 1\n    return result, off + 9\n\ndef read_serial(buf, off, st):\n    if st == 0:\n        return None, off\n    if st == 1:\n        return buf[off], off + 1\n    if st == 2:\n        return int.from_bytes(buf[off:off+2], 'big', signed=True), off + 2\n    if st == 3:\n        return int.from_bytes(buf[off:off+3], 'big', signed=True), off + 3\n    if st == 4:\n        return int.from_bytes(buf[off:off+4], 'big', signed=True), off + 4\n    if st == 5:\n        return int.from_bytes(buf[off:off+6], 'big', signed=True), off + 6\n    if st == 6:\n        return int.from_bytes(buf[off:off+8], 'big', signed=True), off + 8\n    if st in (7, 8):\n        return struct.unpack('>d', buf[off:off+8])[0], off + 8\n    if st >= 12 and st % 2 == 0:\n        n = (st - 12) // 2\n        return buf[off:off+n].decode('utf-8', errors='replace'), off + n\n    if st >= 13 and st % 2 == 1:\n        n = (st - 13) // 2\n        return buf[off:off+n], off + n\n    raise ValueError('bad serial type %r at %d' % (st, off))\n\n# page header at offset 0 (no db header present)\nptype = data[0]\nncells = struct.unpack('>H', data[3:5])[0]\nprint('page type', ptype, 'ncells', ncells)\n\nrows = []\nfor i in range(ncells):\n    off = struct.unpack('>H', data[8 + 2*i: 10 + 2*i])[0]\n    payload_len, o = varint(data, off)\n    rowid, o = varint(data, o)\n    hdr_len, o2 = varint(data, o)\n    serials = []\n    o3 = o2\n    while o3 < o2 + hdr_len:\n        st, o3 = varint(data, o3)\n        serials.append(st)\n    vals = []\n    ov = o2 + hdr_len\n    for st in serials:\n        v, ov = read_serial(data, ov, st)\n        vals.append(v)\n    rows.append({'rowid': rowid, 'payload_len': payload_len, 'values': vals})\n    print(rowid, vals)\n\n# assume schema (item TEXT, price REAL/INT): first col item, second price\nout = []\nfor r in rows:\n    v = r['values']\n    if len(v) >= 2 and isinstance(v[0], str):\n        price = v[1]\n        if isinstance(price, float) and price.is_integer():\n            price = int(price)\n        out.append({'item': v[0], 'price': price})\n\njson.dump(out, open('recovered.json', 'w', encoding='utf-8'), ensure_ascii=False, indent=2)\nprint('wrote', len(out), 'rows')",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-Item .\\\\prices.db | Select-Object Length; Get-Content .\\\\prices.db -Encoding Byte -TotalCount 100 | ForEach-Object { '{0:X2}' -f $_ }\" failed -> \"\\u001b[32;1mLength\\u001b[0m\\r\\n\\u001b[32;1m------\\u001b[0m\\r\\n  4096\\r\\n\\u001b[31;1mGet-Content: \\u001b[31;1mCannot process argument transformation on parameter 'Encoding'. 'Byte' is not a supported encoding name. For information on defining a custom encoding, see the documentation for the Encoding.RegisterProvider method. (Parameter 'name')\\u001b[0m\"\n[step 1] shell \"python -c \\\"\\ndata = open('prices.db','rb').read()\\nprint(len(data))\\nprint(data[:100])\\nprint(data[:16].hex())\\n\\\"\" ok -> \"4096\\r\\nb'\\\\r\\\\x00\\\\x00\\\\x00\\\\n\\\\x0f=\\\\x00\\\\x0f\\\\xf1\\\\x0f\\\\xe3\\\\x0f\\\\xcb\\\\x0f\\\\xbd\\\\x0f\\\\xad\\\\x0f\\\\x93\\\\x0f\\\\x7f\\\\x0fm\\\\x0fX\\\\x0f=\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00'\\r\\n0d000[... 27 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\recover.py\" ok -> \"Created file successfully: <WORKSPACE>/recover.py\"\n[step 1] shell \"python recover.py\" failed -> \"page type 13 ncells 10\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\recover.py\\\", line 61, in <module>\\r\\n    v, ov = read_serial(data, ov, st)\\r\\n            ~~~~~~~~~~~^^^^^^^^^^^^^^\\r\\n  File \\\"<WORKSPACE>\\\\recover.py\\\", line 40, in read_serial\\r\\n    raise ValueEr[... 82 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>\\\\recover.py\" ok -> \"Edited <WORKSPACE>/recover.py (1 replacement)\"\n[step 1] shell \"python recover.py\" failed -> \"page type 13 ncells 10\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\recover.py\\\", line 61, in <module>\\r\\n    v, ov = read_serial(data, ov, st)\\r\\n            ~~~~~~~~~~~^^^^^^^^^^^^^^\\r\\n  File \\\"<WORKSPACE>\\\\recover.py\\\", line 33, in read_serial\\r\\n    return struct[... 140 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\ndata = open('prices.db','rb').read()\\nfor off in (4081, 4067, 4043):\\n    print(off, data[off:off+40].hex())\\n\\\"\" ok -> \"4081 0d0104001f08747261696c206d6170\\r\\n4067 0c0204001d096d61746368626f780d0104001f08747261696c206d6170\\r\\n4043 16030400210774656e74207374616b6540060000000000000c0204001d096d61746368626f780d01\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   false
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   false
+  ],
+  [
+   "rows with fractional prices recovered",
+   false
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   false
+  ],
+  [
+   "no row that is not in the table",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 5,
+  "shell_failures": 3,
+  "file_writes": 2,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 2869,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1874
+ },
+ "deliverables": [],
+ "render": null
+}

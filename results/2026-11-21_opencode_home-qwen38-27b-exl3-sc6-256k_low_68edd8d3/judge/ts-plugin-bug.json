@@ -1,0 +1,61 @@
+{
+ "task_id": "ts-plugin-bug",
+ "prompts": [
+  "Users of our harness plugins report that tool.after hooks run out of order, that sometimes a hook never runs, and that a failing hook is silently ignored. The hook bus and the plugin are in {WS}; the README there says how the bus must behave. Fix the bus. Its public API stays as it is, the tests in {WS}/test stay as they are, and package.json takes no dependencies."
+ ],
+ "answers": [
+  "\n\n[goal] Fix the hook bus so `tool.after` hooks run in order, always run, and propagate failures, per the README contract.\n\n[action] Rewrote `HookBus.emit` in `src/bus.ts`. The old code was:\n\n```ts\nlist.forEach(async (handler) => { await handler(payload); });\n```\n\n`forEach` does not await async callbacks, so all handlers started at once (out of order), `emit` resolved immediately (before any handler settled), and handler rejections became unhandled promise rejections (silently ignored). The fix:\n\n```ts\nconst list = [...(this.handlers.get(event) ?? [])];\nfor (const handler of list) {\n  await handler(payload);\n}\n```\n\nThe snapshot copy implements the README rule that an emit runs the handlers subscribed when it started, so a mid-emit unsubscribe (like the plugin's one-time notice handler) doesn't disturb the in-flight emit.\n\n[result]\n- `npm test`: 2 pass, 0 fail (existing tests untouched).\n- A temporary script (removed after) verified the full README contract against the fixed bus: sequential start/finish order across an async handler; `emit` not resolving before handlers settle; a rejecting handler rejecting `emit` with the same error and skipping later handlers; mid-emit self-unsubscribe not stopping other handlers in that emit; and the audit plugin end-to-end — notice exactly once, redaction applied before the audit log entry, log showing `password=[redacted]`. All passed.\n- Public API unchanged (`on`, `emit`, `count`), no dependencies added, no files touched outside `src/bus.ts`. No browser tabs or apps were opened.\n\n[assumptions] The README is the contract (it says \"how the bus must behave\"); the plugin was correct and only needed a correct bus; the two existing tests are the only required tests, so I verified the rest with a throwaway script rather than adding tests to `./test`.\n\n[how I know it is right] Each reported symptom maps to a verified check: out-of-order → check 1 (sequential), never runs → the plugin's audit entry now appears with redacted output (check 5), silently ignored failure → check 3 (emit rejects with the same error, later handlers skipped)."
+ ],
+ "diff": "M src/bus.ts\n\n--- src/bus.ts ---\n/**\n * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\n * handlers run one after another in subscription order, emit resolves after all of them,\n * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\n */\n\nexport type Handler<T> = (payload: T) => void | Promise<void>;\n\nexport class HookBus {\n  private handlers: Map<string, Handler<unknown>[]> = new Map();\n\n  /** Subscribes a handler to an event; returns the function that unsubscribes it. */\n  on<T>(event: string, handler: Handler<T>): () => void {\n    const list = this.handlers.get(event) ?? [];\n    list.push(handler as Handler<unknown>);\n    this.handlers.set(event, list);\n    return () => {\n      const index = list.indexOf(handler as Handler<unknown>);\n      if (index >= 0) {\n        list.splice(index, 1);\n      }\n    };\n  }\n\n  /** Runs the handlers of an event with the payload. */\n  async emit<T>(event: string, payload: T): Promise<void> {\n    // Snapshot the list at the start of the emit: handlers added or removed\n    // during the emit take effect from the next emit on (README contract).\n    const list = [...(this.handlers.get(event) ?? [])];\n    for (const handler of list) {\n      // Sequential: each handler settles before the next starts, and a\n      // throwing/rejecting handler rejects this emit, stopping the rest.\n      await handler(payload);\n    }\n  }\n\n  /** How many handlers an event has. */\n  count(event: string): number {\n    return (this.handlers.get(event) ?? []).length;\n  }\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\" ok -> \"Read directory <WORKSPACE>, entries 1-5\\nsrc\\\\\\ntest\\\\\\nAGENTS.md\\npackage.json\\nREADME.md\"\n[step 1] read \"<WORKSPACE>\\\\README.md\" ok -> \"Read file <WORKSPACE>\\\\README.md, lines 1-19\\n1: # harness-hooks\\n2: \\n3: The hook bus our harness plugins use (OpenCode-style hooks such as `tool.before` and `tool.after`).\\n4: Plain TypeScript run by Node 24 directly (`npm test` runs `node --test`); no dependencies.\\n5: \\n6: ## How the bus behaves\\n7: \\n8: - `bus.on(event, handler)` subscrib[... 851 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\package.json\" ok -> \"Read file <WORKSPACE>\\\\package.json, lines 1-9\\n1: {\\n2:   \\\"name\\\": \\\"harness-hooks\\\",\\n3:   \\\"version\\\": \\\"0.3.0\\\",\\n4:   \\\"private\\\": true,\\n5:   \\\"type\\\": \\\"module\\\",\\n6:   \\\"scripts\\\": {\\n7:     \\\"test\\\": \\\"node --test\\\"\\n8:   }\\n9: }\"\n[step 1] read \"<WORKSPACE>\\\\src\" ok -> \"Read directory <WORKSPACE>\\\\src, entries 1-2\\nbus.ts\\nplugin.ts\"\n[step 1] read \"<WORKSPACE>\\\\test\" ok -> \"Read directory <WORKSPACE>\\\\test, entries 1-1\\nbus.test.ts\"\n[step 1] read \"<WORKSPACE>\\\\src\\\\bus.ts\" ok -> \"Read file <WORKSPACE>\\\\src\\\\bus.ts, lines 1-37\\n1: /**\\n2:  * Hook bus for harness plugins (OpenCode-style hooks). The README states the contract:\\n3:  * handlers run one after another in subscription order, emit resolves after all of them,\\n4:  * a handler error rejects emit, and unsubscribing during an emit does not stop the others.\\n5:  *[... 1088 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\src\\\\plugin.ts\" ok -> \"Read file <WORKSPACE>\\\\src\\\\plugin.ts, lines 1-26\\n1: import type { HookBus } from \\\"./bus.ts\\\";\\n2: \\n3: export type ToolResult = { tool: string; output: string };\\n4: \\n5: const PASSWORD = /password=\\\\S+/g;\\n6: \\n7: /** The redaction rules load asynchronously in production (from the workspace settings). */\\n8: async function loadRules(): Promise[... 761 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\test\\\\bus.test.ts\" ok -> \"Read file <WORKSPACE>\\\\test\\\\bus.test.ts, lines 1-21\\n1: import { test } from \\\"node:test\\\";\\n2: import assert from \\\"node:assert/strict\\\";\\n3: import { HookBus } from \\\"../src/bus.ts\\\";\\n4: \\n5: test(\\\"emit calls a subscribed handler with the payload\\\", async () => {\\n6:   const bus = new HookBus();\\n7:   const seen: string[] = [];\\n8:   bus.on<string[... 422 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>\\\\src\\\\bus.ts\" ok -> \"Edited src/bus.ts (1 replacement)\"\n[step 1] shell \"npm test\" ok -> \"> harness-hooks@0.3.0 test\\n> node --test\\n\\n✔ emit calls a subscribed handler with the payload (1.0923ms)\\n✔ unsubscribe removes the handler (0.1659ms)\\nℹ tests 2\\nℹ suites 0\\nℹ pass 2\\nℹ fail 0\\nℹ cancelled 0\\nℹ skipped 0\\nℹ todo 0\\nℹ duration_ms 97.6369\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\verify.mts\" ok -> \"Created file successfully: tmp/verify.mts\"\n[step 1] shell \"node tmp/verify.mts\" ok -> \"ok 1: sequential order\\nok 2: emit awaits all handlers\\nok 3: error propagates, later handlers skipped\\nok 4: mid-emit unsubscribe does not stop others\\nok 5: plugin order + one-time notice + redaction before audit\\nall checks passed\"\n[step 1] shell \"Remove-Item -Recurse -Force tmp\" ok -> \"(no output)\"",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "package.json takes no dependencies",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hidden handlers run in subscription order",
+   true
+  ],
+  [
+   "hidden emit resolves after every handler",
+   true
+  ],
+  [
+   "hidden a failing handler rejects emit",
+   true
+  ],
+  [
+   "hidden a handler that unsubscribes itself does not stop the others",
+   true
+  ],
+  [
+   "hidden the audit plugin redacts before it logs",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 9,
+  "tool_calls": 13,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 3483,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1237
+ },
+ "deliverables": [],
+ "render": null
+}

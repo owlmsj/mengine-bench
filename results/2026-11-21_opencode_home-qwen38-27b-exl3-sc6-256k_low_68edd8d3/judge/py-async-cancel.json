@@ -1,0 +1,53 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [
+  "\n\n[goal] `./run.py` with `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, bounded concurrency, cancel-safe cleanup.\n\n[action] Implemented with `asyncio.Semaphore` gating each job inside `asyncio.gather`. On cancellation, `gather` cancels all in-flight children and awaits them, so job `finally` blocks run before `CancelledError` propagates (this is what happens under Ctrl+C via `asyncio.run`, which cancels the main task and waits).\n\n[result] `run.py` created; `test_run.py` run, output:\n- `cap ok, peak = 3` (10 jobs, limit 3: peak active = 3, results in input order)\n- `cleanup ok: [1, 1]` (2 in-flight jobs cancelled; both cleanups ran)\n- `empty ok` (empty list returns `[]`)\n\n[assumptions] `max_concurrent >= 1` (ValueError otherwise); returns list of job results in input order; first job exception propagates (standard `gather` behavior). Stdlib only, works on 3.11+.\n\n[evidence] Test output above, all asserts passed. No browser tabs or windows were opened, nothing to close."
+ ],
+ "diff": "A run.py\nA test_run.py\n\n--- run.py ---\n\"\"\"Bounded-concurrency runner for awaitable jobs.\"\"\"\n\nimport asyncio\n\n\nasync def run_tasks(tasks, max_concurrent):\n    \"\"\"Run each task's job with at most ``max_concurrent`` running at once.\n\n    Each element of ``tasks`` is a zero-argument callable that returns an\n    awaitable job. Returns the list of job results in input order.\n\n    If this coroutine is cancelled (e.g. Ctrl+C under ``asyncio.run``),\n    every in-flight job is cancelled and awaited, so each job's cleanup\n    code (``finally`` blocks) runs before the cancellation propagates.\n\n    Assumptions: ``max_concurrent >= 1``; if a job raises, the first\n    exception propagates (standard ``asyncio.gather`` behavior).\n    \"\"\"\n    if max_concurrent < 1:\n        raise ValueError(f\"max_concurrent must be >= 1, got {max_concurrent!r}\")\n    sem = asyncio.Semaphore(max_concurrent)\n\n    async def run_one(task):\n        async with sem:\n            return await task()\n\n    return await asyncio.gather(*(run_one(t) for t in tasks))\n\n--- test_run.py ---\nimport asyncio\n\nfrom run import run_tasks\n\n\nasync def main():\n    # 1) concurrency cap + results in order\n    active = 0\n    peak = 0\n\n    def make(i):\n        async def job():\n            nonlocal active, peak\n            active += 1\n            peak = max(peak, active)\n            await asyncio.sleep(0.05)\n            active -= 1\n            return i\n\n        return job\n\n    results = await run_tasks([make(i) for i in range(10)], 3)\n    assert results == list(range(10)), results\n    assert peak <= 3, peak\n    print(\"cap ok, peak =\", peak)\n\n    # 2) cancellation: in-flight jobs' cleanup still runs\n    cleaned = []\n\n    async def slow():\n        try:\n            await asyncio.sleep(10)\n        finally:\n            cleaned.append(1)\n\n    t = asyncio.create_task(run_tasks([lambda: slow() for _ in range(4)], 2))\n    await asyncio.sleep(0.1)\n    t.cancel()\n    try:\n        await t\n    except asyncio.CancelledError:\n        pass\n    assert cleaned == [1, 1], cleaned\n    print(\"cleanup ok:\", cleaned)\n\n    # 3) empty task list\n    assert await run_tasks([], 5) == []\n    print(\"empty ok\")\n\n\nasyncio.run(main())\nprint(\"ALL OK\")",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Created file successfully: <WORKSPACE>/run.py\"\n[step 1] write \"<WORKSPACE>\\\\test_run.py\" ok -> \"Created file successfully: <WORKSPACE>/test_run.py\"\n[step 1] shell \"python test_run.py\" ok -> \"cap ok, peak = 3\\r\\ncleanup ok: [1, 1]\\r\\nempty ok\\r\\nALL OK\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   false
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 3,
+  "tool_calls": 3,
+  "tool_errors": 0,
+  "shell_commands": 1,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2707,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 2300
+ },
+ "deliverables": [],
+ "render": null
+}
