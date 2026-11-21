@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>universo das palavras</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#07050c; --ink:#efe9dc; --dim:#8d849c; --line:#2a2438;
+  --gold:#e8c47c; --rose:#e07a9a; --teal:#6fd3c7;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:"Cormorant Garamond",Georgia,serif;
+  overflow:hidden;
+}
+#scene{position:fixed;inset:0}
+canvas{display:block}
+#hud{position:fixed;inset:0;pointer-events:none;display:flex;flex-direction:column}
+#top{
+  display:flex;align-items:baseline;gap:14px;padding:18px 22px 0;
+  background:linear-gradient(180deg,rgba(7,5,12,.9),rgba(7,5,12,0));
+}
+#top h1{font-size:22px;font-weight:600;letter-spacing:.04em}
+#top h1 em{color:var(--gold);font-style:italic}
+#top .sub{font-family:"Space Mono",monospace;font-size:10px;color:var(--dim);letter-spacing:.18em;text-transform:uppercase}
+#search{
+  pointer-events:auto;margin:12px 22px 0;position:relative;width:min(420px,60vw);
+}
+#search input{
+  width:100%;background:rgba(20,15,30,.75);border:1px solid var(--line);
+  color:var(--ink);font-family:"Space Mono",monospace;font-size:13px;
+  padding:10px 14px;border-radius:2px;outline:none;
+}
+#search input:focus{border-color:var(--gold)}
+#suggest{
+  position:absolute;top:100%;left:0;right:0;background:#120d1e;
+  border:1px solid var(--line);border-top:none;max-height:260px;overflow:auto;
+  font-family:"Space Mono",monospace;font-size:12px;display:none;
+}
+#suggest div{padding:7px 14px;cursor:pointer;color:var(--dim)}
+#suggest div:hover{background:#1d1530;color:var(--ink)}
+#panel{
+  pointer-events:auto;position:fixed;right:22px;top:70px;width:300px;
+  max-height:calc(100vh - 100px);overflow:auto;
+  background:rgba(13,9,20,.88);border:1px solid var(--line);border-radius:3px;
+  padding:20px 20px 16px;backdrop-filter:blur(6px);
+  display:none;
+}
+#panel.open{display:block}
+#panel .word{font-size:34px;font-weight:600;line-height:1.05}
+#panel .tema{
+  font-family:"Space Mono",monospace;font-size:10px;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--gold);margin:6px 0 14px;
+}
+#panel h3{
+  font-family:"Space Mono",monospace;font-size:10px;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--dim);margin:14px 0 8px;
+  border-top:1px solid var(--line);padding-top:12px;
+}
+#panel h3:first-of-type{border-top:none;padding-top:0;margin-top:0}
+#panel ul{list-style:none}
+#panel li{margin:2px 0}
+#panel li button{
+  background:none;border:none;color:var(--ink);cursor:pointer;
+  font-family:"Cormorant Garamond",serif;font-size:17px;text-align:left;
+  padding:2px 0;
+}
+#panel li button:hover{color:var(--gold)}
+#panel .count{font-family:"Space Mono",monospace;font-size:10px;color:var(--dim)}
+#panel .close{
+  position:absolute;top:10px;right:12px;background:none;border:none;
+  color:var(--dim);font-size:18px;cursor:pointer;font-family:"Space Mono",monospace;
+}
+#panel .close:hover{color:var(--ink)}
+#stats{
+  position:fixed;left:22px;bottom:18px;font-family:"Space Mono",monospace;
+  font-size:10px;color:var(--dim);letter-spacing:.12em;line-height:1.9;
+}
+#stats b{color:var(--ink);font-weight:400}
+#hint{
+  position:fixed;right:22px;bottom:18px;font-family:"Space Mono",monospace;
+  font-size:10px;color:var(--dim);letter-spacing:.12em;text-align:right;
+}
+@media (max-width:700px){
+  #panel{left:12px;right:12px;width:auto;top:auto;bottom:12px;max-height:45vh}
+  #hint{display:none}
+}
+</style>
+</head>
+<body>
+<div id="scene"></div>
+<div id="hud">
+  <div id="top">
+    <h1>universo das <em>palavras</em></h1>
+    <span class="sub">dicionário criativo · 253 palavras</span>
+  </div>
+  <div id="search">
+    <input id="q" type="text" placeholder="buscar uma palavra…" autocomplete="off" spellcheck="false">
+    <div id="suggest"></div>
+  </div>
+</div>
+<div id="panel">
+  <button class="close" id="close">×</button>
+  <div class="word" id="p-word"></div>
+  <div class="tema" id="p-tema"></div>
+  <h3>sinônimos</h3><ul id="p-sin"></ul>
+  <h3>palavras análogas</h3><ul id="p-an"></ul>
+  <div class="count" id="p-count"></div>
+</div>
+<div id="stats"></div>
+<div id="hint">arraste para girar · role para aproximar<br>clique numa palavra</div>
+<script type="module">
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js";
+
+const DATA = {"acento": ["fala", "pergunta", "prazer", "sotaque", "sílaba"], "advogado": ["cachoeira", "eternidade", "fala", "hora", "juiz", "palavra", "professor"], "afeto": ["amor", "angústia", "carinho", "voz"], "aflição": ["angústia", "ansiedade", "escultura", "felicidade", "pavor", "água"], "aldeia": ["bairro", "capital", "trabalho", "vila"], "alegria": ["felicidade", "queijo", "surpresa", "ternura"], "alfaiate": ["açougueiro", "boca", "emprego", "padeiro", "profissão", "sapateiro", "susto"], "alma": ["amor", "corpo", "dente", "gíria", "pátria", "pé"], "almoço": ["carne", "frase", "jantar", "patrão", "pimenta", "refeição"], "amanhã": ["eternidade", "hoje", "hora", "perna", "porta"], "amor": ["afeto", "alma", "susto", "tristeza", "árvore"], "angústia": ["afeto", "aflição", "compaixão", "dor", "medo", "riacho"], "ano": ["crepúsculo", "mês", "música", "século"], "ansiedade": ["aflição", "manteiga", "medo", "rua"], "apelido": ["acento", "idioma", "irmã", "letra", "nome"], "areia": ["montanha", "natureza", "ofício", "praia", "rima"], "arroz": ["chá", "feijão", "madrugada", "trigo"], "arte": ["cachoeira", "fotografia", "música", "romance", "samba"], "ator": ["canção", "cena", "poesia", "primo"], "aurora": ["crepúsculo", "instante", "madrugada", "prazer", "professor"], "avenida": ["casa", "feijão", "praça", "quarto", "rua"], "avó": ["avô", "genro", "idioma", "mãe", "neto"], "avô": ["avó", "irmã", "pais", "semana"], "açougueiro": ["alfaiate", "boca", "padeiro", "pescador", "tarde"], "açúcar": ["manteiga", "mel", "pimenta", "tempo", "unha"], "bairro": ["aldeia", "igreja", "porta", "refeição", "rua"], "boca": ["alfaiate", "açougueiro", "livro", "língua", "olho", "ombro", "rosto"], "braço": ["janela", "língua", "mão", "ombro", "surpresa"], "cabeça": ["corpo", "enfermeira", "mão", "rosto"], "cachoeira": ["advogado", "lago", "linguagem", "pétala", "riacho", "semente"], "café": ["chá", "momento", "pimenta", "trabalho", "água"], "campo": ["jardim", "milho", "onda", "ponte", "prado", "selva"], "canção": ["ator", "cena", "idioma", "melodia", "música", "pai", "tela"], "capital": ["aldeia", "cidade", "estação", "riacho", "tempo", "vila", "voz"], "carinho": ["afeto", "compaixão", "esperança", "melancolia", "ternura"], "carne": ["arroz", "filho", "mandioca", "nação", "ovo", "peixe", "salário"], "carpinteiro": ["ferreiro", "patrão", "pedreiro", "trabalho", "vila"], "casa": ["avenida", "escola", "igreja", "lar", "poesia"], "cena": ["ator", "canção", "livro", "melodia", "ponte", "teatro"], "chá": ["café", "dente", "peixe", "queijo", "vinho"], "cidade": ["capital", "estado", "estação", "jardim", "prima"], "cinema": ["escultura", "fotografia", "pergunta", "tela"], "comida": ["farinha", "história", "peito", "refeição", "água"], "compaixão": ["angústia", "carinho", "contentamento", "esperança", "ovo", "sílaba", "ternura"], "contato": [], "contentamento": ["felicidade", "pais", "prazer"], "conto": ["folha", "herança", "lar", "livro", "palavra", "romance", "verso"], "conversa": ["fala", "felicidade", "grito", "silêncio"], "coração": ["advogado", "avô", "jantar", "joelho", "peito", "pulmão", "rosto"], "corpo": ["alma", "cabeça", "peixe", "pescoço"], "cozinha": ["capital", "fígado", "janela", "pai", "quarto", "voz"], "crepúsculo": ["ano", "aurora", "cunhado", "gíria", "hoje", "ontem", "segundo", "época"], "cunhado": ["crepúsculo", "pais", "sobrinho", "sogra"], "dança": ["desenho", "piano", "rima", "tambor", "teatro", "voz"], "dedo": ["mão", "pé", "sapateiro", "unha"], "dente": ["hoje", "língua", "pescoço", "pulmão"], "desenho": ["dança", "escultura", "noite", "prima", "tela"], "dia": ["casa", "letra", "manhã", "semana", "tarde"], "dicionário": ["arte", "significado", "sinônimo", "voz"], "dicionário criativo": [], "dor": ["almoço", "angústia", "mágoa"], "emprego": ["alfaiate", "esperança", "eternidade", "jantar", "mercado", "profissão", "salário"], "enfermeira": ["açougueiro", "médico", "professor", "violão", "época"], "engenheiro": ["irmão", "juiz", "lavrador", "marinheiro", "ternura", "trabalho"], "era": ["mês", "palavra", "século", "teatro", "época"], "escola": ["casa", "esperança", "esquina", "igreja"], "escultura": ["cinema", "desenho", "jardim", "olho", "sobrinho", "violão"], "espanto": ["esperança", "país", "surpresa", "susto"], "esperança": ["carinho", "compaixão", "emprego", "escola", "espanto", "nostalgia"], "esquina": ["cozinha", "escola", "pescador", "ponte", "praça"], "estado": ["cidade", "mão", "médico", "poesia", "praça", "pátria"], "estação": ["capital", "cidade", "mercado", "porto", "susto", "tia"], "estômago": ["fígado", "irmão", "língua", "pulmão"], "eternidade": ["advogado", "amanhã", "emprego", "instante", "madrugada", "passado", "peixe"], "fala": ["acento", "advogado", "conversa", "voz"], "família": ["herança", "nora", "parentesco", "susto"], "farinha": ["pescador", "pão", "trigo", "vinho"], "feijão": ["arroz", "avenida", "mandioca", "milho", "palavra", "vinho"], "felicidade": ["aflição", "alegria", "compaixão", "contentamento", "conversa", "trigo"], "ferreiro": ["carpinteiro", "onda", "pastor", "sapateiro", "segundo"], "filha": ["filho", "irmão", "manteiga", "nora", "parentesco", "primo", "tia"], "filho": ["carne", "filha", "genro", "pai"], "flor": ["folha", "mar", "pétala", "samba", "semente"], "floresta": ["mar", "mata", "medo", "natureza", "tempo"], "folha": ["conto", "flor", "raiz", "semente", "silêncio", "tio"], "fotografia": ["arte", "cinema", "refeição", "rima", "soldado", "teatro"], "frase": ["almoço", "gíria", "letra", "linguagem", "sentido", "sussurro", "tristeza"], "fruto": ["jardim", "natureza", "piano", "semente"], "futuro": ["fígado", "minuto", "passado", "século", "tempo"], "fígado": ["alma", "cozinha", "estômago", "futuro", "pele"], "genro": ["avó", "madrinha", "nora", "sogra"], "grito": ["conversa", "pergunta", "silêncio", "sobrinho", "sussurro"], "gíria": ["alma", "crepúsculo", "frase", "idioma", "sinônimo", "sotaque"], "herança": ["conto", "família", "madrinha", "marinheiro", "neta", "pimenta", "sinônimo", "tio"], "história": ["apelido", "comida", "memória", "resposta", "surpresa", "tempo"], "hoje": ["amanhã", "crepúsculo", "dente", "ontem", "tristeza"], "hora": ["advogado", "minuto", "tempo", "época"], "idioma": ["apelido", "canção", "gíria", "linguagem", "madrinha", "palavra"], "igreja": ["bairro", "escola", "mercado", "operário"], "instante": ["almoço", "aurora", "eternidade", "momento", "segundo"], "irmã": ["apelido", "avô", "irmão", "pintura", "sal", "tia"], "irmão": ["engenheiro", "filha", "irmã", "pais", "ponte", "tia"], "janela": ["braço", "cozinha", "igreja", "nação", "porta", "profissão"], "jantar": ["almoço", "emprego", "mel", "pão"], "jardim": ["campo", "escultura", "fruto", "montanha", "praia", "pétala"], "joelho": ["pedreiro", "perna", "pé", "tambor"], "juiz": ["advogado", "engenheiro", "mão", "patrão", "porto", "soldado"], "lago": ["acento", "cachoeira", "mar", "natureza"], "lar": ["casa", "conto", "ponte", "praça", "quarto", "rua"], "lavrador": ["engenheiro", "ofício", "padeiro", "pastor", "pescador", "selva"], "leite": ["mandioca", "manteiga", "pele", "pão", "queijo", "época"], "letra": ["apelido", "dia", "significado", "sílaba"], "linguagem": ["cachoeira", "frase", "grito", "idioma", "riacho"], "livro": ["boca", "cena", "conto", "pintura"], "língua": ["boca", "dente", "osso", "tarde"], "madrinha": ["genro", "herança", "idioma", "neta", "padrinho"], "madrugada": ["arroz", "aurora", "eternidade", "manhã", "médico", "noite", "nome", "passado", "vila"], "mandioca": ["carne", "feijão", "leite", "milho", "pimenta", "sentido", "árvore"], "manhã": ["ano", "dia", "profissão", "tarde"], "manteiga": ["almoço", "ansiedade", "açúcar", "leite", "milho", "queijo"], "mar": ["flor", "lago", "medo", "onda", "vale"], "marinheiro": ["advogado", "engenheiro", "herança", "médico", "pedreiro", "soldado"], "mata": ["floresta", "fruto", "mercado", "selva", "árvore"], "medo": ["angústia", "ansiedade", "pavor", "ternura"], "mel": ["açúcar", "jantar", "melancolia", "pimenta", "sal"], "melancolia": ["carinho", "mágoa", "médico", "nostalgia", "tristeza"], "melodia": ["canção", "cena", "piano", "ritmo", "verso"], "memória": ["alma", "história", "palavra", "sílaba"], "mercado": ["emprego", "estação", "igreja", "mata", "porta"], "milho": ["campo", "feijão", "mandioca", "manteiga", "refeição", "tela", "trigo"], "minuto": ["futuro", "hora", "noite", "segundo", "tambor"], "momento": ["café", "instante", "noite", "época"], "montanha": ["areia", "jardim", "lavrador", "prado", "serra"], "mágoa": ["dor", "melancolia", "nostalgia", "tristeza"], "mãe": ["avó", "cena", "neto", "pai", "pais"], "mão": ["braço", "dedo", "estado", "pele"], "médico": ["enfermeira", "estado", "madrugada", "marinheiro", "pastor"], "mês": ["ano", "era", "ferreiro", "momento", "semana", "sinônimo"], "música": ["ano", "arte", "canção", "nora", "pintura", "samba", "verso"], "natureza": ["areia", "floresta", "raiz", "romance"], "nação": ["instante", "país", "pátria", "rua", "vila"], "neta": ["arroz", "madrinha", "neto", "pais", "quarto", "tio"], "neto": ["avó", "filho", "mãe", "neta", "romance", "sílaba"], "noite": ["desenho", "madrugada", "minuto", "momento", "tarde"], "nome": ["apelido", "madrugada", "ritmo", "sussurro", "voz"], "nora": ["família", "filha", "genro", "música", "padrinho", "patrão", "peixe"], "nostalgia": ["esperança", "melancolia", "mágoa", "sílaba"], "ofício": ["areia", "lavrador", "livro", "padeiro", "profissão", "trabalho"], "olho": ["boca", "escultura", "pulmão", "rosto"], "ombro": ["boca", "braço", "pescoço", "água"], "onda": ["campo", "ferreiro", "mar", "prado", "praia", "riacho", "tempo"], "ontem": ["crepúsculo", "hoje", "pavor"], "operário": ["igreja", "lavrador", "passado", "patrão", "pedreiro", "profissão", "soldado"], "osso": ["farinha", "língua", "pele", "pescoço", "sangue"], "ovo": ["carne", "compaixão", "palavra", "peixe", "queijo"], "padeiro": ["alfaiate", "açougueiro", "capital", "lavrador", "ofício"], "padrinho": ["madrinha", "nora", "sotaque", "tio"], "pai": ["avó", "canção", "cozinha", "filho", "mãe"], "pais": ["contentamento", "irmão", "mãe", "neta", "parentesco", "pavor", "tia"], "paixão": ["amor", "ansiedade", "conto", "prazer", "unha"], "palavra": ["advogado", "alma", "cabeça", "conto", "dedo", "era", "feijão", "idioma", "memória", "montanha", "mágoa", "ovo", "patrão", "pintura", "professor", "tia"], "parentesco": ["família", "filha", "médico", "pais"], "passado": ["eternidade", "futuro", "madrugada", "operário"], "pastor": ["ferreiro", "lavrador", "mel", "médico", "profissão"], "patrão": ["almoço", "carpinteiro", "juiz", "nora", "operário", "palavra", "salário"], "pavor": ["aflição", "medo", "melancolia", "ontem", "pais", "ritmo", "susto"], "país": ["cidade", "espanto", "nação", "porta", "violão"], "pedreiro": ["carpinteiro", "joelho", "marinheiro", "operário", "osso"], "peito": ["comida", "pulmão", "unha"], "peixe": ["carne", "chá", "eternidade", "nora", "ovo"], "pele": ["fígado", "leite", "mão", "osso", "pulmão"], "pergunta": ["acento", "grito", "olho", "resposta"], "perna": ["amanhã", "joelho", "sangue"], "pescador": ["amanhã", "açougueiro", "lavrador", "pedreiro", "verso"], "pescoço": ["avô", "corpo", "dente", "ombro", "sangue"], "piano": ["dança", "fruto", "melodia", "prado", "sobrinho", "tambor", "violão"], "pimenta": ["almoço", "açúcar", "café", "herança", "mandioca", "mel", "sal"], "pintura": ["irmã", "janela", "livro", "música", "palavra", "tela"], "poesia": ["ator", "casa", "estado", "verso", "violão"], "ponte": ["campo", "esquina", "irmão", "lar", "porto", "vale"], "porta": ["amanhã", "bairro", "janela", "país"], "porto": ["estação", "juiz", "ponte", "pátria", "vila"], "prado": ["campo", "carinho", "montanha", "onda", "piano"], "praia": ["areia", "jardim", "onda", "pescador", "rio"], "prazer": ["acento", "aurora", "contentamento", "ternura"], "praça": ["avenida", "esquina", "lar", "pátria", "ternura", "vale"], "prima": ["cidade", "herança", "primo", "sobrinho"], "primo": ["ator", "filha", "prima", "professor", "sobrinho", "tia"], "professor": ["advogado", "enfermeira", "palavra", "primo", "salário", "sapateiro", "água"], "profissão": ["alfaiate", "emprego", "janela", "ofício", "operário", "serra"], "pulmão": ["avô", "estômago", "olho", "peito", "pele", "pescoço", "unha"], "pátria": ["alma", "estado", "nação", "porto", "praça", "tempo"], "pão": ["farinha", "jantar", "leite", "verso"], "pé": ["alma", "joelho", "rosto", "tela"], "pétala": ["cachoeira", "flor", "mar", "semente", "susto"], "quarto": ["avenida", "cozinha", "lar", "neta"], "queijo": ["alegria", "chá", "leite", "manteiga", "ovo", "poesia"], "raiz": ["folha", "natureza", "serra", "vale", "árvore"], "refeição": ["almoço", "bairro", "comida", "fotografia", "milho", "água"], "resposta": ["história", "letra", "pergunta", "semana"], "riacho": ["angústia", "cachoeira", "capital", "linguagem", "onda", "rio"], "rima": ["areia", "fotografia", "romance", "significado", "verso", "violão"], "rio": ["pedreiro", "praia", "riacho", "vale"], "ritmo": ["melodia", "nome", "pavor", "samba", "teatro"], "romance": ["arte", "conto", "natureza", "rima", "sotaque", "teatro"], "rosto": ["boca", "cabeça", "nora", "olho", "pé"], "rua": ["alfaiate", "avenida", "bairro", "lar", "nação"], "sal": ["irmã", "mel", "pimenta"], "salário": ["carne", "emprego", "patrão", "professor"], "samba": ["arte", "flor", "música", "ritmo", "romance", "violão"], "sangue": ["osso", "perna", "pescoço", "sentido"], "sapateiro": ["alfaiate", "dedo", "ferreiro", "professor"], "saudade": ["ansiedade", "carinho", "dor", "esperança", "nostalgia"], "segundo": ["crepúsculo", "ferreiro", "instante", "minuto"], "selva": ["campo", "igreja", "mata", "árvore"], "semana": ["avô", "dia", "futuro", "mês"], "semente": ["cachoeira", "flor", "folha", "fruto", "mercado", "pétala"], "sentido": ["frase", "história", "mandioca", "sangue", "significado", "trabalho"], "serra": ["montanha", "profissão", "vale", "árvore"], "significado": ["dicionário", "letra", "rima", "sentido"], "silêncio": ["conversa", "folha", "grito", "sussurro"], "sinônimo": ["dicionário", "gíria", "herança", "mês", "sílaba"], "sobre": [], "sobrinho": ["cunhado", "grito", "piano", "prima", "primo", "sotaque"], "sogra": ["cunhado", "dente", "genro", "tempo", "tia"], "soldado": ["fotografia", "juiz", "marinheiro", "operário"], "sotaque": ["acento", "gíria", "sobrinho", "vinho", "voz"], "surpresa": ["alegria", "braço", "espanto", "história"], "sussurro": ["folha", "frase", "grito", "nome", "silêncio"], "susto": ["alfaiate", "amor", "espanto", "estação", "pavor", "pétala", "tempo"], "século": ["ano", "era", "minuto"], "sílaba": ["acento", "compaixão", "frase", "letra", "memória", "neto", "nostalgia"], "tambor": ["dança", "joelho", "minuto", "piano", "verso"], "tarde": ["açougueiro", "dia", "língua", "manhã", "noite"], "teatro": ["cena", "dança", "era", "fotografia", "pai", "ritmo", "romance", "tempo"], "tela": ["cinema", "desenho", "milho", "pintura", "pé"], "tempo": ["açúcar", "capital", "floresta", "futuro", "história", "hora", "idioma", "onda", "pescador", "prado", "pátria", "rua", "sogra", "susto", "teatro", "tio"], "ternura": ["alegria", "carinho", "compaixão", "engenheiro", "medo", "praça"], "tia": ["estação", "filha", "irmão", "pais", "primo", "sogra", "tio"], "tio": ["folha", "herança", "neta", "tempo", "tia"], "trabalho": ["aldeia", "carpinteiro", "engenheiro", "ofício", "sentido"], "trigo": ["arroz", "farinha", "milho", "unha"], "tristeza": ["amor", "frase", "hoje", "melancolia", "mágoa"], "unha": ["açúcar", "dedo", "peito", "pulmão", "trigo"], "vale": ["mar", "ponte", "raiz", "rio", "serra"], "verso": ["melodia", "pescador", "poesia", "pão", "rima", "tambor"], "vila": ["aldeia", "capital", "carpinteiro", "madrugada", "nação", "porto"], "vinho": ["chá", "farinha", "feijão", "sotaque", "água"], "violão": ["enfermeira", "escultura", "país", "piano", "poesia", "praça", "rima", "samba"], "voz": ["afeto", "capital", "cozinha", "fala", "nome", "sotaque"], "água": ["aflição", "café", "comida", "ombro", "professor", "refeição", "vinho"], "árvore": ["amor", "mandioca", "mata", "raiz", "selva", "serra"], "época": ["enfermeira", "era", "leite", "momento"]};
+const META = {"acento": {"word": "acento", "tema": "linguagem"}, "açougueiro": {"word": "açougueiro", "tema": "ofícios"}, "açúcar": {"word": "açúcar", "tema": "comida"}, "advogado": {"word": "advogado", "tema": "ofícios"}, "afeto": {"word": "afeto", "tema": "sentimentos"}, "aflição": {"word": "aflição", "tema": "sentimentos"}, "água": {"word": "água", "tema": "comida"}, "aldeia": {"word": "aldeia", "tema": "lugares"}, "alegria": {"word": "alegria", "tema": "sentimentos"}, "alfaiate": {"word": "alfaiate", "tema": "ofícios"}, "alma": {"word": "alma", "tema": "corpo"}, "almoço": {"word": "almoço", "tema": "comida"}, "amanhã": {"word": "amanhã", "tema": "tempo"}, "amor": {"word": "amor", "tema": "sentimentos"}, "angústia": {"word": "angústia", "tema": "sentimentos"}, "ano": {"word": "ano", "tema": "tempo"}, "ansiedade": {"word": "ansiedade", "tema": "sentimentos"}, "apelido": {"word": "apelido", "tema": "linguagem"}, "areia": {"word": "areia", "tema": "natureza"}, "arroz": {"word": "arroz", "tema": "comida"}, "arte": {"word": "arte", "tema": "artes"}, "árvore": {"word": "árvore", "tema": "natureza"}, "ator": {"word": "ator", "tema": "artes"}, "aurora": {"word": "aurora", "tema": "tempo"}, "avenida": {"word": "avenida", "tema": "lugares"}, "avó": {"word": "avó", "tema": "família"}, "avô": {"word": "avô", "tema": "família"}, "bairro": {"word": "bairro", "tema": "lugares"}, "boca": {"word": "boca", "tema": "corpo"}, "braço": {"word": "braço", "tema": "corpo"}, "cabeça": {"word": "cabeça", "tema": "corpo"}, "cachoeira": {"word": "cachoeira", "tema": "natureza"}, "café": {"word": "café", "tema": "comida"}, "campo": {"word": "campo", "tema": "natureza"}, "canção": {"word": "canção", "tema": "artes"}, "capital": {"word": "capital", "tema": "lugares"}, "carinho": {"word": "carinho", "tema": "sentimentos"}, "carne": {"word": "carne", "tema": "comida"}, "carpinteiro": {"word": "carpinteiro", "tema": "ofícios"}, "casa": {"word": "casa", "tema": "lugares"}, "cena": {"word": "cena", "tema": "artes"}, "chá": {"word": "chá", "tema": "comida"}, "cidade": {"word": "cidade", "tema": "lugares"}, "cinema": {"word": "cinema", "tema": "artes"}, "comida": {"word": "comida", "tema": "comida"}, "compaixão": {"word": "compaixão", "tema": "sentimentos"}, "contato": {"word": "Contato", "tema": null}, "contentamento": {"word": "contentamento", "tema": "sentimentos"}, "conto": {"word": "conto", "tema": "artes"}, "conversa": {"word": "conversa", "tema": "linguagem"}, "coração": {"word": "coração", "tema": "corpo"}, "corpo": {"word": "corpo", "tema": "corpo"}, "cozinha": {"word": "cozinha", "tema": "lugares"}, "crepúsculo": {"word": "crepúsculo", "tema": "tempo"}, "cunhado": {"word": "cunhado", "tema": "família"}, "dança": {"word": "dança", "tema": "artes"}, "dedo": {"word": "dedo", "tema": "corpo"}, "dente": {"word": "dente", "tema": "corpo"}, "desenho": {"word": "desenho", "tema": "artes"}, "dia": {"word": "dia", "tema": "tempo"}, "dicionário": {"word": "dicionário", "tema": "linguagem"}, "dor": {"word": "dor", "tema": "sentimentos"}, "emprego": {"word": "emprego", "tema": "ofícios"}, "enfermeira": {"word": "enfermeira", "tema": "ofícios"}, "engenheiro": {"word": "engenheiro", "tema": "ofícios"}, "época": {"word": "época", "tema": "tempo"}, "era": {"word": "era", "tema": "tempo"}, "escola": {"word": "escola", "tema": "lugares"}, "escultura": {"word": "escultura", "tema": "artes"}, "espanto": {"word": "espanto", "tema": "sentimentos"}, "esperança": {"word": "esperança", "tema": "sentimentos"}, "esquina": {"word": "esquina", "tema": "lugares"}, "estado": {"word": "estado", "tema": "lugares"}, "estação": {"word": "estação", "tema": "lugares"}, "estômago": {"word": "estômago", "tema": "corpo"}, "eternidade": {"word": "eternidade", "tema": "tempo"}, "fala": {"word": "fala", "tema": "linguagem"}, "família": {"word": "família", "tema": "família"}, "farinha": {"word": "farinha", "tema": "comida"}, "feijão": {"word": "feijão", "tema": "comida"}, "felicidade": {"word": "felicidade", "tema": "sentimentos"}, "ferreiro": {"word": "ferreiro", "tema": "ofícios"}, "fígado": {"word": "fígado", "tema": "corpo"}, "filha": {"word": "filha", "tema": "família"}, "filho": {"word": "filho", "tema": "família"}, "flor": {"word": "flor", "tema": "natureza"}, "floresta": {"word": "floresta", "tema": "natureza"}, "folha": {"word": "folha", "tema": "natureza"}, "fotografia": {"word": "fotografia", "tema": "artes"}, "frase": {"word": "frase", "tema": "linguagem"}, "fruto": {"word": "fruto", "tema": "natureza"}, "futuro": {"word": "futuro", "tema": "tempo"}, "genro": {"word": "genro", "tema": "família"}, "gíria": {"word": "gíria", "tema": "linguagem"}, "grito": {"word": "grito", "tema": "linguagem"}, "herança": {"word": "herança", "tema": "família"}, "história": {"word": "história", "tema": "linguagem"}, "hoje": {"word": "hoje", "tema": "tempo"}, "hora": {"word": "hora", "tema": "tempo"}, "idioma": {"word": "idioma", "tema": "linguagem"}, "igreja": {"word": "igreja", "tema": "lugares"}, "dicionário criativo": {"word": "Dicionário Criativo", "tema": null}, "instante": {"word": "instante", "tema": "tempo"}, "irmã": {"word": "irmã", "tema": "família"}, "irmão": {"word": "irmão", "tema": "família"}, "janela": {"word": "janela", "tema": "lugares"}, "jantar": {"word": "jantar", "tema": "comida"}, "jardim": {"word": "jardim", "tema": "natureza"}, "joelho": {"word": "joelho", "tema": "corpo"}, "juiz": {"word": "juiz", "tema": "ofícios"}, "lago": {"word": "lago", "tema": "natureza"}, "lar": {"word": "lar", "tema": "lugares"}, "lavrador": {"word": "lavrador", "tema": "ofícios"}, "leite": {"word": "leite", "tema": "comida"}, "letra": {"word": "letra", "tema": "linguagem"}, "linguagem": {"word": "linguagem", "tema": "linguagem"}, "livro": {"word": "livro", "tema": "artes"}, "língua": {"word": "língua", "tema": "corpo"}, "madrinha": {"word": "madrinha", "tema": "família"}, "madrugada": {"word": "madrugada", "tema": "tempo"}, "mãe": {"word": "mãe", "tema": "família"}, "mágoa": {"word": "mágoa", "tema": "sentimentos"}, "mandioca": {"word": "mandioca", "tema": "comida"}, "manhã": {"word": "manhã", "tema": "tempo"}, "manteiga": {"word": "manteiga", "tema": "comida"}, "mar": {"word": "mar", "tema": "natureza"}, "marinheiro": {"word": "marinheiro", "tema": "ofícios"}, "mata": {"word": "mata", "tema": "natureza"}, "médico": {"word": "médico", "tema": "ofícios"}, "medo": {"word": "medo", "tema": "sentimentos"}, "mel": {"word": "mel", "tema": "comida"}, "melancolia": {"word": "melancolia", "tema": "sentimentos"}, "melodia": {"word": "melodia", "tema": "artes"}, "memória": {"word": "memória", "tema": "linguagem"}, "mercado": {"word": "mercado", "tema": "lugares"}, "milho": {"word": "milho", "tema": "comida"}, "minuto": {"word": "minuto", "tema": "tempo"}, "momento": {"word": "momento", "tema": "tempo"}, "montanha": {"word": "montanha", "tema": "natureza"}, "música": {"word": "música", "tema": "artes"}, "mão": {"word": "mão", "tema": "corpo"}, "mês": {"word": "mês", "tema": "tempo"}, "nação": {"word": "nação", "tema": "lugares"}, "natureza": {"word": "natureza", "tema": "natureza"}, "neta": {"word": "neta", "tema": "família"}, "neto": {"word": "neto", "tema": "família"}, "noite": {"word": "noite", "tema": "tempo"}, "nome": {"word": "nome", "tema": "linguagem"}, "nora": {"word": "nora", "tema": "família"}, "nostalgia": {"word": "nostalgia", "tema": "sentimentos"}, "ofício": {"word": "ofício", "tema": "ofícios"}, "olho": {"word": "olho", "tema": "corpo"}, "ombro": {"word": "ombro", "tema": "corpo"}, "onda": {"word": "onda", "tema": "natureza"}, "ontem": {"word": "ontem", "tema": "tempo"}, "operário": {"word": "operário", "tema": "ofícios"}, "osso": {"word": "osso", "tema": "corpo"}, "ovo": {"word": "ovo", "tema": "comida"}, "padeiro": {"word": "padeiro", "tema": "ofícios"}, "padrinho": {"word": "padrinho", "tema": "família"}, "pai": {"word": "pai", "tema": "família"}, "pais": {"word": "pais", "tema": "família"}, "paixão": {"word": "paixão", "tema": "sentimentos"}, "palavra": {"word": "palavra", "tema": "linguagem"}, "pão": {"word": "pão", "tema": "comida"}, "parentesco": {"word": "parentesco", "tema": "família"}, "passado": {"word": "passado", "tema": "tempo"}, "pastor": {"word": "pastor", "tema": "ofícios"}, "pátria": {"word": "pátria", "tema": "lugares"}, "patrão": {"word": "patrão", "tema": "ofícios"}, "pavor": {"word": "pavor", "tema": "sentimentos"}, "país": {"word": "país", "tema": "lugares"}, "pé": {"word": "pé", "tema": "corpo"}, "pedreiro": {"word": "pedreiro", "tema": "ofícios"}, "peito": {"word": "peito", "tema": "corpo"}, "peixe": {"word": "peixe", "tema": "comida"}, "pele": {"word": "pele", "tema": "corpo"}, "pergunta": {"word": "pergunta", "tema": "linguagem"}, "perna": {"word": "perna", "tema": "corpo"}, "pescador": {"word": "pescador", "tema": "ofícios"}, "pescoço": {"word": "pescoço", "tema": "corpo"}, "pétala": {"word": "pétala", "tema": "natureza"}, "piano": {"word": "piano", "tema": "artes"}, "pimenta": {"word": "pimenta", "tema": "comida"}, "pintura": {"word": "pintura", "tema": "artes"}, "poesia": {"word": "poesia", "tema": "artes"}, "ponte": {"word": "ponte", "tema": "lugares"}, "porta": {"word": "porta", "tema": "lugares"}, "porto": {"word": "porto", "tema": "lugares"}, "praça": {"word": "praça", "tema": "lugares"}, "prado": {"word": "prado", "tema": "natureza"}, "praia": {"word": "praia", "tema": "natureza"}, "prazer": {"word": "prazer", "tema": "sentimentos"}, "prima": {"word": "prima", "tema": "família"}, "primo": {"word": "primo", "tema": "família"}, "professor": {"word": "professor", "tema": "ofícios"}, "profissão": {"word": "profissão", "tema": "ofícios"}, "pulmão": {"word": "pulmão", "tema": "corpo"}, "quarto": {"word": "quarto", "tema": "lugares"}, "queijo": {"word": "queijo", "tema": "comida"}, "raiz": {"word": "raiz", "tema": "natureza"}, "refeição": {"word": "refeição", "tema": "comida"}, "resposta": {"word": "resposta", "tema": "linguagem"}, "riacho": {"word": "riacho", "tema": "natureza"}, "rima": {"word": "rima", "tema": "artes"}, "rio": {"word": "rio", "tema": "natureza"}, "ritmo": {"word": "ritmo", "tema": "artes"}, "romance": {"word": "romance", "tema": "artes"}, "rosto": {"word": "rosto", "tema": "corpo"}, "rua": {"word": "rua", "tema": "lugares"}, "sal": {"word": "sal", "tema": "comida"}, "salário": {"word": "salário", "tema": "ofícios"}, "samba": {"word": "samba", "tema": "artes"}, "sangue": {"word": "sangue", "tema": "corpo"}, "sapateiro": {"word": "sapateiro", "tema": "ofícios"}, "saudade": {"word": "saudade", "tema": "sentimentos"}, "século": {"word": "século", "tema": "tempo"}, "segundo": {"word": "segundo", "tema": "tempo"}, "selva": {"word": "selva", "tema": "natureza"}, "semana": {"word": "semana", "tema": "tempo"}, "semente": {"word": "semente", "tema": "natureza"}, "sentido": {"word": "sentido", "tema": "linguagem"}, "serra": {"word": "serra", "tema": "natureza"}, "significado": {"word": "significado", "tema": "linguagem"}, "sílaba": {"word": "sílaba", "tema": "linguagem"}, "silêncio": {"word": "silêncio", "tema": "linguagem"}, "sinônimo": {"word": "sinônimo", "tema": "linguagem"}, "sobre": {"word": "Sobre", "tema": null}, "sobrinho": {"word": "sobrinho", "tema": "família"}, "sogra": {"word": "sogra", "tema": "família"}, "soldado": {"word": "soldado", "tema": "ofícios"}, "sotaque": {"word": "sotaque", "tema": "linguagem"}, "surpresa": {"word": "surpresa", "tema": "sentimentos"}, "sussurro": {"word": "sussurro", "tema": "linguagem"}, "susto": {"word": "susto", "tema": "sentimentos"}, "tambor": {"word": "tambor", "tema": "artes"}, "tarde": {"word": "tarde", "tema": "tempo"}, "teatro": {"word": "teatro", "tema": "artes"}, "tela": {"word": "tela", "tema": "artes"}, "tempo": {"word": "tempo", "tema": "tempo"}, "ternura": {"word": "ternura", "tema": "sentimentos"}, "tia": {"word": "tia", "tema": "família"}, "tio": {"word": "tio", "tema": "família"}, "trabalho": {"word": "trabalho", "tema": "ofícios"}, "trigo": {"word": "trigo", "tema": "comida"}, "tristeza": {"word": "tristeza", "tema": "sentimentos"}, "unha": {"word": "unha", "tema": "corpo"}, "vale": {"word": "vale", "tema": "natureza"}, "verso": {"word": "verso", "tema": "artes"}, "vila": {"word": "vila", "tema": "lugares"}, "vinho": {"word": "vinho", "tema": "comida"}, "violão": {"word": "violão", "tema": "artes"}, "voz": {"word": "voz", "tema": "linguagem"}};
+const WORDS = Object.keys(DATA).sort();
+const IDX = new Map(WORDS.map((w,i)=>[w,i]));
+const deg = {};
+for (const w of WORDS){ deg[w]=DATA[w].length; }
+const maxDeg = Math.max(...WORDS.map(w=>deg[w]));
+const pairs = new Set();
+for (const w of WORDS) for (const l of DATA[w]){
+  pairs.add(w<l? w+"\u0000"+l : l+"\u0000"+w);
+}
+
+// ---- layout: golden spiral sphere, radius by degree ----
+const N = WORDS.length;
+const R = 150;
+const pos = [];
+for (let i=0;i<N;i++){
+  const t = i/(N-1);
+  const phi = Math.acos(1-2*t);
+  const theta = Math.PI*(1+Math.sqrt(5))*i;
+  const r = R*(0.55+0.45*(deg[WORDS[i]]/maxDeg));
+  pos.push(new THREE.Vector3(
+    r*Math.sin(phi)*Math.cos(theta),
+    r*Math.cos(phi),
+    r*Math.sin(phi)*Math.sin(theta)
+  ));
+}
+
+// ---- scene ----
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x07050c, 0.0016);
+const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 1, 3000);
+camera.position.set(0,0,420);
+camera.lookAt(0,0,0);
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth, innerHeight);
+document.getElementById("scene").appendChild(renderer.domElement);
+
+// node points
+const geo = new THREE.BufferGeometry();
+const parr = new Float32Array(N*3);
+const carr = new Float32Array(N*3);
+const gold = new THREE.Color(0xe8c47c), dim = new THREE.Color(0x5a5170);
+for (let i=0;i<N;i++){
+  parr.set([pos[i].x,pos[i].y,pos[i].z], i*3);
+  const c = dim.clone().lerp(gold, 0.25+0.75*(deg[WORDS[i]]/maxDeg));
+  carr.set([c.r,c.g,c.b], i*3);
+}
+geo.setAttribute("position", new THREE.BufferAttribute(parr,3));
+geo.setAttribute("color", new THREE.BufferAttribute(carr,3));
+const pts = new THREE.Points(geo, new THREE.PointsMaterial({
+  size:4.5, vertexColors:true, sizeAttenuation:true, transparent:true, opacity:0.95
+}));
+scene.add(pts);
+
+// edges
+const epos = [];
+const ekeys = [];
+for (const k of pairs){
+  const [a,b] = k.split("\u0000");
+  const A = pos[IDX.get(a)], B = pos[IDX.get(b)];
+  epos.push(A.x,A.y,A.z, B.x,B.y,B.z);
+  ekeys.push([a,b]);
+}
+const egeo = new THREE.BufferGeometry();
+egeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(epos),3));
+const lines = new THREE.LineSegments(egeo, new THREE.LineBasicMaterial({
+  color:0x2a2438, transparent:true, opacity:0.5
+}));
+scene.add(lines);
+
+// halo for selected word
+const halo = new THREE.Mesh(
+  new THREE.SphereGeometry(9,24,24),
+  new THREE.MeshBasicMaterial({color:0xe8c47c, transparent:true, opacity:0.25, wireframe:true})
+);
+halo.visible = false;
+scene.add(halo);
+
+// ---- picking ----
+const ray = new THREE.Raycaster();
+ray.params.Points.threshold = 8;
+const mouse = new THREE.Vector2();
+function pick(e){
+  mouse.x = (e.clientX/innerWidth)*2-1;
+  mouse.y = -(e.clientY/innerHeight)*2+1;
+  ray.setFromCamera(mouse, camera);
+  const hit = ray.intersectObject(pts);
+  return hit.length ? hit[0].index : -1;
+}
+let dragging=false, moved=0, px=0, py=0;
+let rotY=0, rotX=0, vY=0.0006;
+renderer.domElement.addEventListener("pointerdown", e=>{
+  dragging=true; moved=0; px=e.clientX; py=e.clientY;
+});
+addEventListener("pointermove", e=>{
+  if(!dragging) return;
+  const dx=e.clientX-px, dy=e.clientY-py;
+  moved += Math.abs(dx)+Math.abs(dy);
+  px=e.clientX; py=e.clientY;
+  rotY += dx*0.004; rotX += dy*0.004;
+});
+addEventListener("pointerup", e=>{
+  if(dragging && moved<5){
+    const i = pick(e);
+    if(i>=0) select(WORDS[i]);
+  }
+  dragging=false;
+});
+renderer.domElement.addEventListener("wheel", e=>{
+  camera.position.z = Math.min(900, Math.max(120, camera.position.z + e.deltaY*0.4));
+},{passive:true});
+
+// ---- selection ----
+let selected = null;
+const panel = document.getElementById("panel");
+function select(w, focus=true){
+  selected = w;
+  const i = IDX.get(w);
+  halo.visible = true;
+  halo.position.copy(pos[i]);
+  document.getElementById("p-word").textContent = META[w].word;
+  document.getElementById("p-tema").textContent = META[w].tema ? "tema: "+META[w].tema : "";
+  const sin = DATA[w].filter(x=>META[x].tema===META[w].tema);
+  const an = DATA[w].filter(x=>!sin.includes(x));
+  fill("p-sin", sin); fill("p-an", an);
+  document.getElementById("p-count").textContent = DATA[w].length+" ligações";
+  panel.classList.add("open");
+  if(focus){
+    const dist = Math.max(camera.position.length(), 300);
+    camera.position.copy(pos[i].clone().normalize().multiplyScalar(dist));
+    camera.lookAt(0,0,0);
+  }
+  history.replaceState(null,"","?word="+encodeURIComponent(w));
+}
+function fill(id, arr){
+  const ul = document.getElementById(id);
+  ul.innerHTML = "";
+  for (const x of arr){
+    const li = document.createElement("li");
+    const b = document.createElement("button");
+    b.textContent = META[x].word;
+    b.onclick = ()=>select(x);
+    li.appendChild(b); ul.appendChild(li);
+  }
+  if(!arr.length){
+    const li = document.createElement("li");
+    li.textContent = "—"; li.style.color = "var(--dim)";
+    ul.appendChild(li);
+  }
+}
+document.getElementById("close").onclick = ()=>{
+  panel.classList.remove("open");
+  halo.visible = false;
+  selected = null;
+  history.replaceState(null,"",location.pathname);
+};
+
+// ---- search ----
+const q = document.getElementById("q");
+const sug = document.getElementById("suggest");
+q.addEventListener("input", ()=>{
+  const v = q.value.trim().toLowerCase();
+  sug.innerHTML = "";
+  if(!v){ sug.style.display="none"; return; }
+  const hits = WORDS.filter(w=>w.startsWith(v)).slice(0,12);
+  if(!hits.length){ sug.style.display="none"; return; }
+  for (const w of hits){
+    const d = document.createElement("div");
+    d.textContent = META[w].word;
+    d.onclick = ()=>{ select(w); q.value=""; sug.style.display="none"; };
+    sug.appendChild(d);
+  }
+  sug.style.display = "block";
+});
+q.addEventListener("keydown", e=>{
+  if(e.key==="Enter"){
+    const v = q.value.trim().toLowerCase();
+    const hit = WORDS.find(w=>w===v) || WORDS.find(w=>w.startsWith(v));
+    if(hit){ select(hit); q.value=""; sug.style.display="none"; }
+  }
+});
+document.addEventListener("click", e=>{
+  if(!e.target.closest("#search")) sug.style.display="none";
+});
+
+// ---- stats ----
+document.getElementById("stats").innerHTML =
+  "<b>"+N+"</b> palavras · <b>"+pairs.size+"</b> laços<br>mais ligada: <b>"+
+  WORDS.reduce((a,b)=>deg[b]>deg[a]?b:a, WORDS[0])+"</b>";
+
+// ---- deep link ?word= ----
+const urlWord = new URLSearchParams(location.search).get("word");
+if (urlWord){
+  const w = WORDS.find(x=>x===urlWord.toLowerCase()) ||
+            WORDS.find(x=>x===urlWord.toLowerCase().normalize("NFC"));
+  if (w) select(w);
+}
+
+
+// ---- loop ----
+function tick(){
+  requestAnimationFrame(tick);
+  if(!dragging) rotY += vY;
+  const e = new THREE.Euler(rotX, rotY, 0);
+  pts.rotation.copy(e); lines.rotation.copy(e); halo.rotation.copy(e);
+  renderer.render(scene, camera);
+}
+tick();
+addEventListener("resize", ()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
