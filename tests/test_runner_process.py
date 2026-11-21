@@ -117,3 +117,32 @@ def test_adapter_clock_stops_at_recorded_result(agent: ClaudeAgent | AgyAgent, t
                          final_event=call.final_event)
     assert result.exit_code == 0
     assert result.wall_s < 1.5
+
+
+class _Proc:
+    """A psutil.Process stand-in: pid, create_time and direct children by PPID (Windows semantics)."""
+
+    def __init__(self, pid: int, created: float, kids: list["_Proc"] | None = None) -> None:
+        self.pid, self._created, self._kids, self.killed = pid, created, kids or [], False
+
+    def create_time(self) -> float:
+        return self._created
+
+    def children(self, recursive: bool = False) -> list["_Proc"]:
+        assert not recursive, "kill_tree must walk one level at a time to check each parent edge"
+        return self._kids
+
+
+def test_kill_tree_family_skips_strangers_whose_parent_pid_was_reused() -> None:
+    # mengine-qlora#42, 2026-11-20: psutil builds children from PPIDs. On Windows a process whose creator died keeps
+    # that PPID, and when the pid is reused by our agent the stranger looks like our child: kill_tree killed other
+    # runs' agents (exit=15), whole collection chunks and an AGY reviewer. A real child is born after its parent.
+    from mengine_bench.runner.process import _family
+
+    grandchild = _Proc(30, 120.0)
+    stranger = _Proc(40, 50.0)                    # older than the agent: its creator held the agent's pid before
+    stranger_kid = _Proc(41, 130.0)               # spawned later by the stranger: not ours either
+    stranger._kids = [stranger_kid]
+    child = _Proc(20, 110.0, [grandchild])
+    root = _Proc(10, 100.0, [child, stranger])
+    assert [p.pid for p in _family(root)] == [20, 30, 10]
