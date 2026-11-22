@@ -1,0 +1,69 @@
+{
+ "task_id": "file-media-edit",
+ "prompts": [
+  "Tidewater Studio is announcing its balloon launch. Two small jobs before the post goes out:\n\n1. `launch.jpg` becomes the feed picture: a 1080x1350 JPEG at `out/feed-photo.jpg`. The magenta balloon is the\n   subject, so it has to be fully in the picture and still look like itself.\n2. The park's permit form `permit-form.pdf` filled in with the details Ines sent in `event-details.txt`, saved at\n   `out/permit-filled.pdf` and flattened, so the answers can no longer be edited.\n\nKeep the originals as they are."
+ ],
+ "answers": [
+  "\n\n[goal] Two artifacts before the balloon-launch post: `out/feed-photo.jpg` (1080x1350, magenta balloon fully visible, undistorted) and `out/permit-filled.pdf` (form filled from Ines's details, flattened so answers are not editable), originals untouched.\n\n[action]\n- Photo: detected the magenta balloon by color mask (126,215 px, bbox x 2350–2750, y 500–900 in the 3000x2000 source), cropped a 4:5 region (1400,0)-(3000,2000) containing it, resized exactly to 1080x1350 with LANCZOS — no aspect distortion.\n- Permit: read the four AcroForm fields (`organizer`, `event_date`, `location`, `attendees`), filled Organizer = \"Tidewater Studio\", Event date = \"2026-12-05\" (Saturday 5 December 2026, matching the form's YYYY-MM-DD label), Location = \"North Cove Lawn\", Expected attendees = \"about 40\". This PyMuPDF build has no `page.flatten()`, so I rendered each value as static text inside its field rect (Helvetica 11pt, fits width) and deleted all widgets, saving with deflate/garbage/clean.\n- Closed nothing: I opened no browser tabs, windows or apps.\n\n[result]\n- `out/feed-photo.jpg`: verified 1080x1350 JPEG; balloon bbox inside the crop at (950,500)-(1350,900) of 1600x2000, fully in frame.\n- `out/permit-filled.pdf`: 1 page, 0 remaining widgets (nothing editable); all four values confirmed present in the page text.\n- Originals intact: `launch.jpg` still 3000x2000, `permit-form.pdf` still has its 4 empty fields.\n\n[assumptions] \"about 40\" kept verbatim rather than a bare \"40\" since the field is free text and the brief's source said \"about 40\"; the balloon centered on the right third of the crop, kept in a pure 4:5 crop so it looks like itself (no stretch or pad).\n\n[next] None — both deliverables are complete and verified; no browser or app was opened, so nothing to close."
+ ],
+ "diff": "A run.py\nA run_pdf.py\n\n--- run.py ---\nfrom PIL import Image\nimport numpy as np\nimport pymupdf\nimport os\n\nws = r\"<WORKSPACE>\"\nos.makedirs(os.path.join(ws, \"out\"), exist_ok=True)\n\n# --- 1. Feed photo: crop 4:5 containing the magenta balloon, resize 1080x1350 ---\nim = Image.open(os.path.join(ws, \"launch.jpg\")).convert(\"RGB\")\narr = np.asarray(im)\nH, W, _ = arr.shape\nr, g, b = arr[..., 0].astype(int), arr[..., 1].astype(int), arr[..., 2].astype(int)\n# magenta: red and blue high, green low\nmask = (r > 150) & (b > 150) & (g < 120) & (r > g + 60) & (b > g + 60)\nys, xs = np.where(mask)\nprint(\"magenta pixels:\", mask.sum())\nx0, x1 = xs.min(), xs.max()\ny0, y1 = ys.min(), ys.max()\nprint(\"balloon bbox:\", x0, y0, x1, y1, \"center:\", (x0+x1)//2, (y0+y1)//2)\n\n# 4:5 crop from 3000x2000 -> crop 1600 x 2000\ncw, ch = 1600, 2000\ncx = (x0 + x1) // 2\nleft = min(max(cx - cw // 2, 0), W - cw)\ntop = 0\nbox = (left, top, left + cw, top + ch)\nprint(\"crop box:\", box)\ncrop = im.crop(box)\nout_im = crop.resize((1080, 1350), Image.LANCZOS)\nout_im.save(os.path.join(ws, \"out\", \"feed-photo.jpg\"), quality=90)\nprint(\"saved feed-photo.jpg\", out_im.size)\n\n# verify balloon fully inside: bbox relative to crop\nbx0, by0, bx1, by1 = x0 - left, y0 - top, x1 - left, y1 - top\nassert 0 <= bx0 and by0 >= 0 and bx1 <= cw and by1 <= ch, \"balloon outside crop!\"\nprint(\"balloon inside crop:\", (bx0, by0, bx1, by1))\n\n# --- 2. Fill permit form and flatten ---\ndoc = pymupdf.open(os.path.join(ws, \"permit-form.pdf\"))\npage = doc[0]\nvalues = {\n    \"organizer\": \"Tidewater Studio\",\n    \"event_date\": \"2026-12-05\",\n    \"location\": \"North Cove Lawn\",\n    \"attendees\": \"about 40\",\n}\nfor w in page.widgets():\n    if w.field_name in values:\n        w.field_value = values[w.field_name]\n        w.update()\n    print(\"field:\", w.field_name, \"->\", w.field_value)\npage.flatten()\ndoc.save(os.path.join(ws, \"out\", \"permit-filled.pdf\"), deflate=True, garbage=3, clean=True)\ndoc.close()\nprint(\"saved permit-filled.pdf\")\n\n# verify: reopen, check no editable widgets and values rendered as text\nd2 = pymupdf.open(os.path.join(ws, \"out\", \"permit-filled.pdf\"))\np2 = d2[0]\nwidgets = list(p2.widgets()) if p2.widgets() else []\nprint(\"remaining widgets:\", len(widgets))\ntxt = p2.get_text()\nfor k, v in values.items():\n    print(k, \"present in text:\", v in txt)\nprint(txt)\n\n\n--- run_pdf.py ---\nimport pymupdf\nimport os\n\nws = r\"<WORKSPACE>\"\ndoc = pymupdf.open(os.path.join(ws, \"permit-form.pdf\"))\npage = doc[0]\nvalues = {\n    \"organizer\": \"Tidewater Studio\",\n    \"event_date\": \"2026-12-05\",\n    \"location\": \"North Cove Lawn\",\n    \"attendees\": \"about 40\",\n}\nwidgets = list(page.widgets())\nfor w in widgets:\n    v = values.get(w.field_name)\n    if v is None:\n        continue\n    r = w.rect\n    # fit font size to rect\n    fs = 11\n    while fs > 4:\n        tw = pymupdf.get_text_length(v, fontname=\"helv\", fontsize=fs)\n        if tw <= r.width - 6:\n            break\n        fs -= 1\n    page.insert_text((r.x0 + 3, r.y1 - 4), v, fontname=\"helv\", fontsize=fs, color=(0, 0, 0))\n    print(\"drew\", w.field_name, \"in\", r, \"fs\", fs)\n    page.delete_widget(w)\ndoc.save(os.path.join(ws, \"out\", \"permit-filled.pdf\"), deflate=True, garbage=3, clean=True)\ndoc.close()\n\nd2 = pymupdf.open(os.path.join(ws, \"out\", \"permit-filled.pdf\"))\np2 = d2[0]\nws2 = list(p2.widgets()) if p2.widgets() else []\nprint(\"remaining widgets:\", len(ws2))\nxref = d2.xref_length()\n# ensure no AcroForm\nimport re\ndata = p2.read_contents().decode(\"latin1\") if hasattr(p2, \"read_contents\") else \"\"\ntxt = p2.get_text()\nprint(\"fields present in text:\")\nfor v in values.values():\n    print(repr(v), v in txt)\nprint(txt)\n# check AcroForm key in doc catalog\ncat = d2.pdf_catalog()\nprint(\"catalog xref:\", cat)\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem -Recurse | Select-Object FullName, Length\" ok -> \"\\u001b[32;1mFullName                                                                                       \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m--------                                                                                       \\u001b[0m \\u001b[32;<WORKSPACE>\\\\AGENTS.md            394\\r\\nC:\\\\Users\\\\<USER>\\\\AppData\\\\Local\\\\Temp\\\\mengi[... 266 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\event-details.txt\" ok -> \"Read file <WORKSPACE>\\\\event-details.txt, lines 1-9\\n1: From: Ines Varga\\n2: Subject: balloon launch permit\\n3: \\n4: Details for the park permit:\\n5: \\n6: Organizer: Tidewater Studio\\n7: Date: Saturday 5 December 2026\\n8: Where: North Cove Lawn\\n9: People: about 40\"\n[step 1] shell \"python -c \\\"import PIL; print('PIL', PIL.__version__)\\\"; python -c \\\"import pypdf; print('pypdf', pypdf.__version__)\\\"; python -c \\\"import pdfrw; print('pdfrw', pdfrw.__version__)\\\"; python -c \\\"import fitz; print('pymupdf', fitz.__doc__)\\\"; python -c \\\"import pikepdf; print('pikepdf', pikepdf.__version__)\\\"\" failed -> \"PIL 13.0.0\\r\\npypdf 6.21.4\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<string>\\\", line 1, in <module>\\r\\n    import pdfrw; print('pdfrw', pdfrw.__version__)\\r\\n    ^^^^^^^^^^^^\\r\\nModuleNotFoundError: No module named 'pdfrw'\\r\\nC:\\\\Users\\\\<USER>\\\\Code\\\\mengine-bench-ctl\\\\.venv\\\\Lib\\\\site-packages\\\\fitz\\\\__init__.py:17: FutureWarning: The `fitz` API is deprecated and will be removed in future. Use `import pymupd[... 342 chars cut by the benchmark]\"\n[step 1] shell \"python - <<'EOF'\\nimport pymupdf\\ndoc = pymupdf.open(r\\\"<WORKSPACE>\\\\permit-form.pdf\\\")\\nprint(\\\"pages:\\\", doc.page_count)\\nfor pno in range(doc.page_count):\\n    page = doc[pno]\\n    print(\\\"page\\\", pno, \\\"rect:\\\", page.rect)\\n    for w in page.widgets() or []:\\n        print(repr(w.field_name), w.field_type_string, repr(w.field_value))\\n    print(\\\"text:\\\")\\n    print(page.get_text())\\nfrom PIL import Image\\nim = Image.open(r\\\"<WORKSPACE>\\\\launch.jpg\\\")\\nprint(\\\"image:\\\", im.size, im.mode)\\nEOF\" ok -> \"pages: 1\\r\\npage 0 rect: Rect(0.0, 0.0, 595.0, 842.0)\\r\\n'organizer' Text ''\\r\\n'event_date' Text ''\\r\\n'location' Text ''\\r\\n'attendees' Text ''\\r\\ntext:\\r\\nPort Wrenfield Parks - Event Permit Application\\r\\nFill in every field. Applications are reviewed within 10 working days.\\r\\nOrganizer\\r\\nEvent date (YYYY-MM-DD)\\r\\nLocation in the park\\r\\nExpected attendees\\r\\nPort Wrenfield Parks Department, 2 Harbour Row. Form EP-3[... 28 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Created file successfully: <WORKSPACE>/run.py\"\n[step 1] shell \"python run.py\" failed -> \"magenta pixels: 126215\\r\\nballoon bbox: 2350 500 2750 900 center: 2550 700\\r\\ncrop box: (1400, 0, 3000, 2000)\\r\\nsaved feed-photo.jpg (1080, 1350)\\r\\nballoon inside crop: (np.int64(950), np.int64(500), np.int64(1350), np.int64(900))\\r\\nfield: organizer -> Tidewater Studio\\r\\nfield: event_date -> 2026-12-05\\r\\nfield: location -> North Cove Lawn\\r\\nfield: attendees -> about 40\\r\\nTraceback (most recent call last):\\r\\n [... 210 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\run_pdf.py\" ok -> \"Created file successfully: <WORKSPACE>/run_pdf.py\"\n[step 1] shell \"python run_pdf.py\" ok -> \"drew organizer in Rect(200.0, 178.0, 520.0, 202.0) fs 11\\r\\ndrew event_date in Rect(200.0, 218.0, 520.0, 242.0) fs 11\\r\\ndrew location in Rect(200.0, 258.0, 520.0, 282.0) fs 11\\r\\ndrew attendees in Rect(200.0, 298.0, 520.0, 322.0) fs 11\\r\\nremaining widgets: 0\\r\\nfields present in text:\\r\\n'Tidewater Studio' True\\r\\n'2026-12-05' True\\r\\n'North Cove Lawn' True\\r\\n'about 40' True\\r\\nPort Wrenfield Parks - Event Permit [... 297 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nfrom PIL import Image\\nim = Image.open(r'<WORKSPACE>\\\\out\\\\feed-photo.jpg')\\nprint('feed-photo:', im.size, im.format)\\nim2 = Image.open(r'<WORKSPACE>\\\\launch.jpg')\\nprint('original launch.jpg still:', im2.size)\\nimport pymupdf\\nd = pymupdf.open(r'<WORKSPACE>\\\\out\\\\permit-filled.pdf')\\nprint('filled pdf pages:', d.page_count, 'widgets:', len(list(d[0].widgets()) or []))\\nd2 = pymupdf.open(r'<WORKSPACE>\\\\permit-form.pdf')\\nprint('original form still has widgets:', [w.field_name for w in d2[0].widgets()])\\n\\\"\" ok -> \"feed-photo: (1080, 1350) JPEG\\r\\noriginal launch.jpg still: (3000, 2000)\\r\\nfilled pdf pages: 1 widgets: 0\\r\\noriginal form still has widgets: ['organizer', 'event_date', 'location', 'attendees']\"",
+ "checks": [
+  [
+   "the original photo and form left as they were",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "photo is a JPEG",
+   true
+  ],
+  [
+   "photo is exactly 1080x1350",
+   true
+  ],
+  [
+   "balloon fully in frame and undistorted",
+   true
+  ],
+  [
+   "permit organizer filled",
+   true
+  ],
+  [
+   "permit event_date filled",
+   true
+  ],
+  [
+   "permit location filled",
+   true
+  ],
+  [
+   "permit attendees filled",
+   true
+  ],
+  [
+   "permit flattened",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 10,
+  "tool_calls": 9,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 2,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 5218,
+  "reasoning_tokens": 2079,
+  "largest_turn_tokens": 1643
+ },
+ "deliverables": [],
+ "render": null
+}
