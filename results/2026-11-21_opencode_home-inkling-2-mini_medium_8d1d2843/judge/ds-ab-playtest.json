@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-ab-playtest",
+ "prompts": [
+  "We playtested two versions of the Pixel Arena tutorial and have to pick one for the next release. The export and its notes are in {WS}/telemetry. Should we ship B instead of A? Give a recommendation a skeptical lead would accept. Record it in {WS}/result.json with ship_b, sessions_a, sessions_b, completion_rate_a, completion_rate_b and p_value."
+ ],
+ "answers": [
+  "[goal] Pick A or B for the tutorial release, backed by the playtest export.\n[action] Parsed `telemetry/playtest_ab.csv`, deduped by `session_id` (70 duplicated resends, all identical rows), normalized variant casing/whitespace, computed completion rates and a two-proportion z-test.\n[result] 1,800 unique sessions (900 per variant); A: 342/900 = 38.0%; B: 420/900 = 46.7%; gain +8.7 pts; z = 3.72, p = 0.00020 (two-sided). Ship B, significant at 5%. Assumptions: dedupe keeps one row per session (all duplicate rows identical); two-proportion z-test as the 5% significance check; no other confounders (e.g., match_minutes) explored, but no reason to expect them to flip the result.\n[next] Ship B per the release rule. Note: result.json records `ship_b: true`; the 5% rule is met either way, so the gain direction and p-value agree."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\r\n  \"ship_b\": true,\r\n  \"sessions_a\": 900,\r\n  \"sessions_b\": 900,\r\n  \"completion_rate_a\": 0.38,\r\n  \"completion_rate_b\": 0.466667,\r\n  \"p_value\": 0.00019846895397623854\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem -Recurse .\\\\telemetry\" ok -> \"Directory: <WORKSPACE>\\\\telemetry\\r\\n\\r\\n\\u001b[32;1mMode   \\u001b[0m\\u001b[32;1m              LastWriteTime\\u001b[0m\\u001b[32;1m         Length\\u001b[0m\\u001b[32;1m Name\\u001b[0m\\r\\n\\u001b[32;1m----   \\u001b[0m \\u001b[32;1m             -------------\\u001b[0m \\u001b[32;1m        ------\\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\n-a---          21/11/2026    13:14          41587 playtest_ab.csv\\r\\n-a---          21/11/2026    13[... 28 chars cut by the benchmark]\"\n[step 1] shell \"cat .\\\\telemetry\\\\README.md; Write-Host ---; Get-Content .\\\\telemetry\\\\playtest_ab.csv -TotalCount 10\" ok -> \"# Playtest A/B - Pixel Arena tutorial\\r\\n\\r\\nExport from arena-panel. The ETL resends sessions: `session_id` is the unique key (repeated rows are the same session). `variant` may come lowercase or with a leading space. `completed_tutorial` is 0/1.\\r\\n\\r\\nRelease rule: a variant ships only when its gain in tutorial completion is statistically significant at the 5% level.\\r\\n---\\r\\nsession_id,variant,player_id,[... 242 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nfrom collections import Counter\\nrows=list(csv.DictReader(open('telemetry/playtest_ab.csv')))\\nprint(len(rows))\\nprint(Counter(r['variant'] for r in rows))\\nprint(Counter((r['session_id']) for r in rows))\\n\\\" 2>&1 | Select-Object -First 40\" ok -> \"1870\\r\\nCounter({'b': 323, 'B': 322, 'A': 318, ' A': 316, 'a': 304, ' B': 287})\\r\\nCounter({'s01716': 2, 's01180': 2, 's01415': 2, 's01522': 2, 's00653': 2, 's01579': 2, 's01328': 2, 's00114': 2, 's01249': 2, 's00200': 2, 's01543': 2, 's00541': 2, 's00672': 2, 's01229': 2, 's00284': 2, 's00006': 2, 's00184': 2, 's01655': 2, 's00235': 2, 's01419': 2, 's00640': 2, 's01786': 2, 's01508': 2, 's00038': 2, [... 23088 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nfrom collections import defaultdict\\nrows=list(csv.DictReader(open('telemetry/playtest_ab.csv')))\\nby=defaultdict(list)\\nfor r in rows: by[r['session_id']].append(r)\\nconf=0\\nfor s,rs in by.items():\\n    if len(rs)>1:\\n        vals=set((r['variant'],r['completed_tutorial'],r['player_id']) for r in rs)\\n        if len(vals)>1:\\n            conf+=1\\n            print(s, rs)\\nprint('conflicting dup sessions:', conf, 'total dup sessions:', sum(1 for v in by.values() if len(v)>1))\\n\\\"\" ok -> \"conflicting dup sessions: 0 total dup sessions: 70\"\n[step 1] shell \"python -c \\\"\\nimport csv, math\\nfrom collections import OrderedDict\\nrows=list(csv.DictReader(open('telemetry/playtest_ab.csv')))\\nby={}\\nfor r in rows:\\n    s=r['session_id']\\n    if s not in by: by[s]=r\\nprint('sessions', len(by))\\nfrom collections import Counter\\nvar=Counter(); comp=Counter()\\nfor r in by.values():\\n    v=r['variant'].strip().lower()\\n    var[v]+=1\\n    comp[(v,r['completed_tutorial'])]+=1\\nprint(var)\\nnc={v: comp[(v,'1')] for v in ['a','b']}\\nprint('completions', nc)\\na_n=var['a']; b_n=var['b']; a_c=nc['a']; b_c=nc['b']\\npA=a_c/a_n; pB=b_c/b_n\\nprint('rate A', pA, 'rate B', pB, 'diff B-A', pB-pA)\\np=(a_c+b_c)/(a_n+b_n)\\nse=math.sqrt(p*(1-p)*(1/a_n+1/b_n))\\nz=(pB-pA)/se\\nfrom math import erf\\ndef Phi(x): return 0.5*(1+erf(x/math.sqrt(2)))\\npval=2*(1-Phi(abs(z)))\\nprint('z', z, 'p', pval)\\n\\\"\" ok -> \"sessions 1800\\r\\nCounter({'b': 900, 'a': 900})\\r\\ncompletions {'a': 342, 'b': 420}\\r\\nrate A 0.38 rate B 0.4666666666666667 diff B-A 0.08666666666666667\\r\\nz 3.7209573559508202 p 0.00019846895397623854\"\n[step 1] shell \"python -c \\\"\\nimport json\\nres={'ship_b': True, 'sessions_a': 900, 'sessions_b': 900, 'completion_rate_a': 0.38, 'completion_rate_b': round(420/900,6), 'p_value': 0.00019846895397623854}\\nopen('result.json','w').write(json.dumps(res, indent=2))\\nprint(open('result.json').read())\\n\\\"\" ok -> \"{\\r\\n  \\\"ship_b\\\": true,\\r\\n  \\\"sessions_a\\\": 900,\\r\\n  \\\"sessions_b\\\": 900,\\r\\n  \\\"completion_rate_a\\\": 0.38,\\r\\n  \\\"completion_rate_b\\\": 0.466667,\\r\\n  \\\"p_value\\\": 0.00019846895397623854\\r\\n}\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "deduplicated session counts",
+   true
+  ],
+  [
+   "completion rates",
+   true
+  ],
+  [
+   "the gain is significant",
+   true
+  ],
+  [
+   "ship decision",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 7,
+  "tool_calls": 6,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 0,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1638,
+  "reasoning_tokens": 323,
+  "largest_turn_tokens": 524
+ },
+ "deliverables": [],
+ "render": null
+}
