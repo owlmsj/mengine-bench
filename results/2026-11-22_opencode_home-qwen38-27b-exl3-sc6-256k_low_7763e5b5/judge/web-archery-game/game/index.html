@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Balloon Pop Archery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e; }
+  body { font-family: 'VT323', monospace; }
+  #wrap { position: relative; width: 100vw; height: 100vh; }
+  canvas { display: block; width: 100%; height: 100%; cursor: crosshair; image-rendering: pixelated; }
+  .overlay {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 24px;
+    background: rgba(10, 10, 30, 0.82); z-index: 10;
+  }
+  .hidden { display: none; }
+  h1 {
+    font-family: 'Press Start 2P', monospace; font-size: clamp(20px, 5vw, 44px);
+    color: #ffd93d; text-shadow: 4px 4px 0 #c0392b, 8px 8px 0 rgba(0,0,0,.4);
+    text-align: center; line-height: 1.4;
+  }
+  .sub { font-size: clamp(18px, 3vw, 28px); color: #a8d8ff; text-align: center; line-height: 1.5; }
+  .btn {
+    font-family: 'Press Start 2P', monospace; font-size: clamp(12px, 2vw, 18px);
+    padding: 16px 32px; color: #fff; background: #e74c3c; border: 4px solid #fff;
+    box-shadow: 0 6px 0 #922b21; cursor: pointer; transition: transform .08s, box-shadow .08s;
+  }
+  .btn:hover { background: #ff6b5b; }
+  .btn:active { transform: translateY(6px); box-shadow: 0 0 0 #922b21; }
+  .score-big { font-family: 'Press Start 2P', monospace; font-size: clamp(24px, 6vw, 56px); color: #7bed9f; text-shadow: 3px 3px 0 #145a32; }
+  .hud {
+    position: absolute; top: 12px; left: 0; right: 0; display: flex;
+    justify-content: space-between; padding: 0 20px; z-index: 5; pointer-events: none;
+  }
+  .hud span {
+    font-family: 'Press Start 2P', monospace; font-size: clamp(10px, 1.6vw, 16px);
+    color: #fff; text-shadow: 2px 2px 0 rgba(0,0,0,.6);
+  }
+  #timer { color: #ffd93d; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv"></canvas>
+  <div class="hud hidden" id="hud">
+    <span id="score">SCORE 0</span>
+    <span id="timer">60</span>
+    <span id="lives">&#127938;&#127938;&#127938;</span>
+  </div>
+  <div class="overlay" id="startScreen">
+    <h1>BALLOON POP<br>ARCHERY</h1>
+    <div class="sub">Aim with the mouse &middot; hold to draw the bow &middot; release to fire<br>Pop balloons before time runs out &middot; 3 misses and you lose</div>
+    <button class="btn" id="startBtn">START</button>
+  </div>
+  <div class="overlay hidden" id="endScreen">
+    <h1 id="endTitle">TIME UP!</h1>
+    <div class="score-big" id="finalScore">0</div>
+    <div class="sub" id="endMsg"></div>
+    <button class="btn" id="retryBtn">PLAY AGAIN</button>
+  </div>
+</div>
+<script>
+(() => {
+'use strict';
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+let W = 0, H = 0, DPR = 1;
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ---------- audio ----------
+let AC = null;
+function audio() { if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)(); return AC; }
+function sfxPop() {
+  const ac = audio(); const t = ac.currentTime;
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = 'square'; o.frequency.setValueAtTime(880, t); o.frequency.exponentialRampToValueAtTime(220, t + 0.12);
+  g.gain.setValueAtTime(0.25, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+  o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.16);
+  const n = ac.createBufferSource();
+  const buf = ac.createBuffer(1, ac.sampleRate * 0.08, ac.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+  n.buffer = buf;
+  const ng = ac.createGain(); ng.gain.setValueAtTime(0.18, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+  n.connect(ng).connect(ac.destination); n.start(t);
+}
+function sfxShoot() {
+  const ac = audio(); const t = ac.currentTime;
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = 'sawtooth'; o.frequency.setValueAtTime(160, t); o.frequency.exponentialRampToValueAtTime(60, t + 0.18);
+  g.gain.setValueAtTime(0.15, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+  o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.22);
+}
+function sfxMiss() {
+  const ac = audio(); const t = ac.currentTime;
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = 'triangle'; o.frequency.setValueAtTime(220, t); o.frequency.linearRampToValueAtTime(110, t + 0.3);
+  g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
+  o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.34);
+}
+function sfxWin() {
+  const ac = audio(); const t = ac.currentTime;
+  [523, 659, 784, 1047].forEach((f, i) => {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = 'square'; o.frequency.value = f;
+    g.gain.setValueAtTime(0.12, t + i * 0.12); g.gain.exponentialRampToValueAtTime(0.001, t + i * 0.12 + 0.25);
+    o.connect(g).connect(ac.destination); o.start(t + i * 0.12); o.stop(t + i * 0.12 + 0.3);
+  });
+}
+
+// ---------- game state ----------
+const STATE = { MENU: 0, PLAY: 1, OVER: 2 };
+let state = STATE.MENU;
+let score = 0, timeLeft = 60, lives = 3;
+let balloons = [], arrows = [], particles = [], floaters = [];
+let mouse = { x: 0, y: 0, down: false };
+let drawStart = 0, lastTime = 0, spawnTimer = 0, spawnInterval = 1.6;
+
+const BALLOON_COLORS = ['#e74c3c', '#f39c12', '#2ecc71', '#3498db', '#9b59b6', '#e91e8c', '#1abc9c'];
+
+function balloonY() { return H * 0.12 + Math.random() * H * 0.45; }
+
+function spawnBalloon() {
+  const r = 26 + Math.random() * 22;
+  const fromLeft = Math.random() < 0.5;
+  balloons.push({
+    x: fromLeft ? -r * 2 : W + r * 2,
+    y: balloonY(),
+    r,
+    vx: (fromLeft ? 1 : -1) * (60 + Math.random() * 90),
+    wobble: Math.random() * Math.PI * 2,
+    wobbleSpeed: 1.5 + Math.random() * 2,
+    color: BALLOON_COLORS[(Math.random() * BALLOON_COLORS.length) | 0],
+    popped: false,
+    popT: 0,
+  });
+}
+
+function reset() {
+  score = 0; timeLeft = 60; lives = 3;
+  balloons = []; arrows = []; particles = []; floaters = [];
+  spawnTimer = 0; spawnInterval = 1.6;
+  updateHud();
+}
+
+function updateHud() {
+  document.getElementById('score').textContent = 'SCORE ' + score;
+  document.getElementById('timer').textContent = Math.max(0, Math.ceil(timeLeft));
+  document.getElementById('lives').textContent = '\uD83C\uDFA8'.repeat(Math.max(0, lives));
+}
+
+function startGame() {
+  audio(); // unlock audio on user gesture
+  reset();
+  state = STATE.PLAY;
+  document.getElementById('startScreen').classList.add('hidden');
+  document.getElementById('endScreen').classList.add('hidden');
+  document.getElementById('hud').classList.remove('hidden');
+}
+
+function endGame(won) {
+  state = STATE.OVER;
+  document.getElementById('hud').classList.add('hidden');
+  document.getElementById('endTitle').textContent = won ? 'YOU WIN!' : 'GAME OVER';
+  document.getElementById('finalScore').textContent = score;
+  document.getElementById('endMsg').textContent = won
+    ? 'All balloons cleared. Sharpshooter!'
+    : (lives <= 0 ? 'Too many missed shots!' : 'Time ran out!');
+  document.getElementById('endScreen').classList.remove('hidden');
+  if (won) sfxWin();
+}
+
+// ---------- input ----------
+cv.addEventListener('mousemove', e => {
+  const rect = cv.getBoundingClientRect();
+  mouse.x = e.clientX - rect.left; mouse.y = e.clientY - rect.top;
+});
+cv.addEventListener('mousedown', e => {
+  if (state !== STATE.PLAY) return;
+  mouse.down = true; drawStart = performance.now();
+});
+window.addEventListener('mouseup', e => {
+  if (state !== STATE.PLAY || !mouse.down) return;
+  mouse.down = false;
+  const power = Math.min(1, (performance.now() - drawStart) / 900);
+  if (power > 0.08) fireArrow(power);
+});
+
+function fireArrow(power) {
+  const ax = W * 0.5, ay = H * 0.92;
+  const ang = Math.atan2(mouse.y - ay, mouse.x - ax);
+  const speed = 500 + power * 900;
+  arrows.push({ x: ax, y: ay, vx: Math.cos(ang) * speed, vy: Math.sin(ang) * speed, power });
+  sfxShoot();
+}
+
+// ---------- particles ----------
+function burst(x, y, color, n) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, s = 80 + Math.random() * 260;
+    particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 60, life: 0.5 + Math.random() * 0.4, t: 0, color, size: 3 + Math.random() * 4 });
+  }
+}
+function floater(x, y, text, color) {
+  floaters.push({ x, y, text, color, t: 0, life: 0.9 });
+}
+
+// ---------- update ----------
+function update(dt) {
+  if (state !== STATE.PLAY) return;
+  timeLeft -= dt;
+  if (timeLeft <= 0) { timeLeft = 0; endGame(true); return; }
+
+  spawnTimer += dt;
+  if (spawnTimer >= spawnInterval) {
+    spawnTimer = 0;
+    spawnBalloon();
+    spawnInterval = Math.max(0.7, spawnInterval - 0.02);
+  }
+
+  for (let i = balloons.length - 1; i >= 0; i--) {
+    const b = balloons[i];
+    if (b.popped) {
+      b.popT += dt;
+      if (b.popT > 0.3) balloons.splice(i, 1);
+      continue;
+    }
+    b.x += b.vx * dt;
+    b.wobble += b.wobbleSpeed * dt;
+    b.y += Math.sin(b.wobble) * 20 * dt;
+    if ((b.vx > 0 && b.x > W + b.r * 2) || (b.vx < 0 && b.x < -b.r * 2)) {
+      balloons.splice(i, 1);
+      continue;
+    }
+  }
+
+  for (let i = arrows.length - 1; i >= 0; i--) {
+    const a = arrows[i];
+    a.x += a.vx * dt; a.y += a.vy * dt;
+    let hit = false;
+    for (let j = balloons.length - 1; j >= 0; j--) {
+      const b = balloons[j];
+      if (b.popped) continue;
+      const dx = a.x - b.x, dy = a.y - b.y;
+      if (dx * dx + dy * dy < (b.r + 6) * (b.r + 6)) {
+        b.popped = true; b.popT = 0;
+        const pts = 10 + Math.round(a.power * 20);
+        score += pts;
+        burst(b.x, b.y, b.color, 22);
+        floater(b.x, b.y - b.r, '+' + pts, '#ffd93d');
+        sfxPop();
+        updateHud();
+        hit = true;
+        break;
+      }
+    }
+    if (hit || a.x < -40 || a.x > W + 40 || a.y < -40 || a.y > H + 40) {
+      if (!hit) {
+        lives--;
+        sfxMiss();
+        floater(Math.min(W - 60, Math.max(60, a.x)), Math.max(40, a.y), 'MISS', '#ff6b6b');
+        updateHud();
+        if (lives <= 0) { endGame(false); return; }
+      }
+      arrows.splice(i, 1);
+    }
+  }
+
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.t += dt;
+    if (p.t >= p.life) { particles.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.vy += 500 * dt;
+  }
+  for (let i = floaters.length - 1; i >= 0; i--) {
+    const f = floaters[i];
+    f.t += dt;
+    if (f.t >= f.life) { floaters.splice(i, 1); continue; }
+    f.y -= 50 * dt;
+  }
+}
+
+// ---------- draw ----------
+function drawBackground() {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#2c3e70');
+  g.addColorStop(0.55, '#5a7fc2');
+  g.addColorStop(0.8, '#a8c8e8');
+  g.addColorStop(1, '#88b04a');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  // sun
+  ctx.fillStyle = '#fff3b0';
+  ctx.beginPath(); ctx.arc(W * 0.82, H * 0.14, 38, 0, Math.PI * 2); ctx.fill();
+  // clouds (deterministic)
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  [[0.15, 0.18, 46], [0.4, 0.1, 34], [0.65, 0.22, 40], [0.3, 0.3, 28]].forEach(([fx, fy, r]) => {
+    const cx = fx * W, cy = fy * H;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.arc(cx + r * 0.9, cy + r * 0.2, r * 0.75, 0, Math.PI * 2);
+    ctx.arc(cx - r * 0.9, cy + r * 0.25, r * 0.7, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  // hills
+  ctx.fillStyle = '#6a9a3a';
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  ctx.lineTo(0, H * 0.82);
+  ctx.quadraticCurveTo(W * 0.25, H * 0.72, W * 0.5, H * 0.82);
+  ctx.quadraticCurveTo(W * 0.75, H * 0.9, W, H * 0.8);
+  ctx.lineTo(W, H);
+  ctx.closePath(); ctx.fill();
+}
+
+function drawBalloon(b) {
+  if (b.popped) {
+    const s = 1 + b.popT * 2;
+    ctx.globalAlpha = Math.max(0, 1 - b.popT / 0.3);
+    ctx.strokeStyle = b.color; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(b.x, b.y, b.r * s, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 1;
+    return;
+  }
+  const wob = Math.sin(b.wobble) * 3;
+  // string
+  ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(b.x, b.y + b.r);
+  ctx.quadraticCurveTo(b.x + wob, b.y + b.r + 18, b.x - wob, b.y + b.r + 34);
+  ctx.stroke();
+  // body
+  const g = ctx.createRadialGradient(b.x - b.r * 0.35, b.y - b.r * 0.4, b.r * 0.15, b.x, b.y, b.r);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.25, b.color);
+  g.addColorStop(1, shade(b.color, -40));
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.ellipse(b.x, b.y, b.r * 0.92, b.r, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // knot
+  ctx.fillStyle = shade(b.color, -50);
+  ctx.beginPath();
+  ctx.moveTo(b.x, b.y + b.r * 0.92);
+  ctx.lineTo(b.x - 6, b.y + b.r + 8);
+  ctx.lineTo(b.x + 6, b.y + b.r + 8);
+  ctx.closePath(); ctx.fill();
+  // shine
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  ctx.beginPath();
+  ctx.ellipse(b.x - b.r * 0.35, b.y - b.r * 0.4, b.r * 0.22, b.r * 0.32, -0.5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function shade(hex, amt) {
+  const n = parseInt(hex.slice(1), 16);
+  let r = (n >> 16) + amt, g = ((n >> 8) & 255) + amt, b = (n & 255) + amt;
+  r = Math.max(0, Math.min(255, r)); g = Math.max(0, Math.min(255, g)); b = Math.max(0, Math.min(255, b));
+  return 'rgb(' + r + ',' + g + ',' + b + ')';
+}
+
+function drawArcher() {
+  const ax = W * 0.5, ay = H * 0.92;
+  const ang = Math.atan2(mouse.y - ay, mouse.x - ax);
+  const draw = mouse.down ? Math.min(1, (performance.now() - drawStart) / 900) : 0;
+  ctx.save();
+  ctx.translate(ax, ay);
+  ctx.rotate(ang);
+  // body
+  ctx.fillStyle = '#5d4037';
+  ctx.fillRect(-8, -14, 16, 28);
+  // head
+  ctx.fillStyle = '#ffcc80';
+  ctx.beginPath(); ctx.arc(0, -22, 10, 0, Math.PI * 2); ctx.fill();
+  // bow
+  ctx.strokeStyle = '#8d6e63'; ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.arc(18, 0, 26, -Math.PI / 2.4, Math.PI / 2.4);
+  ctx.stroke();
+  // string
+  const pull = draw * 20;
+  ctx.strokeStyle = '#eee'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(18 + 26 * Math.cos(-Math.PI / 2.4), 26 * Math.sin(-Math.PI / 2.4));
+  ctx.lineTo(18 - pull, 0);
+  ctx.lineTo(18 + 26 * Math.cos(Math.PI / 2.4), 26 * Math.sin(Math.PI / 2.4));
+  ctx.stroke();
+  // arrow nocked
+  if (draw > 0) {
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(18 - pull, 0); ctx.lineTo(44, 0); ctx.stroke();
+    ctx.fillStyle = '#333';
+    ctx.beginPath(); ctx.moveTo(44, 0); ctx.lineTo(38, -4); ctx.lineTo(38, 4); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+  // power meter
+  if (draw > 0) {
+    const mx = ax - 70, my = ay - 10, mw = 12, mh = 60;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(mx, my, mw, mh);
+    const ph = mh * draw;
+    ctx.fillStyle = draw < 0.5 ? '#7bed9f' : draw < 0.8 ? '#ffd93d' : '#ff6b6b';
+    ctx.fillRect(mx, my + mh - ph, mw, ph);
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+    ctx.strokeRect(mx, my, mw, mh);
+  }
+}
+
+function drawArrow(a) {
+  const ang = Math.atan2(a.vy, a.vx);
+  ctx.save();
+  ctx.translate(a.x, a.y);
+  ctx.rotate(ang);
+  ctx.strokeStyle = '#333'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(-18, 0); ctx.lineTo(10, 0); ctx.stroke();
+  ctx.fillStyle = '#555';
+  ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(6, -4); ctx.lineTo(6, 4); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#e74c3c';
+  ctx.beginPath(); ctx.moveTo(-18, 0); ctx.lineTo(-24, -4); ctx.lineTo(-22, 0); ctx.lineTo(-24, 4); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function draw() {
+  drawBackground();
+  for (const b of balloons) drawBalloon(b);
+  for (const a of arrows) drawArrow(a);
+  if (state === STATE.PLAY || state === STATE.OVER) drawArcher();
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, 1 - p.t / p.life);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+  }
+  ctx.globalAlpha = 1;
+  for (const f of floaters) {
+    ctx.globalAlpha = Math.max(0, 1 - f.t / f.life);
+    ctx.font = 'bold 28px "Press Start 2P", monospace';
+    ctx.fillStyle = f.color;
+    ctx.textAlign = 'center';
+    ctx.fillText(f.text, f.x, f.y);
+  }
+  ctx.globalAlpha = 1;
+  ctx.textAlign = 'left';
+}
+
+// ---------- loop ----------
+function loop(t) {
+  const dt = Math.min(0.05, (t - lastTime) / 1000 || 0);
+  lastTime = t;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('retryBtn').addEventListener('click', startGame);
+})();
+</script>
+</body>
+</html>
