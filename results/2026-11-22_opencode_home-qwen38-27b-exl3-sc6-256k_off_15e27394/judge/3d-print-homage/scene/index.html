@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Great Wave off Kanagawa - Low Poly 3D</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@600&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#f3e9d2}
+  #label{position:fixed;left:14px;bottom:12px;font-family:"Noto Serif JP",serif;font-size:13px;color:#1d4e79;letter-spacing:.05em;opacity:.85;user-select:none}
+</style>
+</head>
+<body>
+<div id="label">富嶽三十六景 · 神奈川沖浪裏</div>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from 'three';
+
+// ---- palette taken from the print (Hokusai's blues, washi cream, vermilion hulls) ----
+const C = {
+  paper:    0xf3e9d2,  // washi background
+  waveDeep: 0x17395c,  // darkest wave body
+  wave:     0x2b6a9e,  // main wave body
+  waveLite: 0x7fb6d9,  // lighter wave face
+  foam:     0xf6f1e3,  // foam crests
+  ink:      0x22303c,  // dark ink outlines / rigging
+  hull:     0xd98d5f,  // vermilion/terracotta boat hulls
+  hullDk:   0x8a4a2e,  // hull shading
+  fuji:     0xf6f4ee,  // snow cap
+  fujiBase: 0x8fa9c0,  // misty lower mountain
+  cloud:    0xe9dfc6,
+};
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(C.paper);
+scene.fog = new THREE.Fog(C.paper, 26, 60);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, .1, 100);
+camera.position.set(0, 4.5, 17);
+camera.lookAt(0, 2.2, 0);
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0xfff6e0, .55));
+const sun = new THREE.DirectionalLight(0xfff2d8, 1.1);
+sun.position.set(6, 10, 8);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024,1024);
+scene.add(sun);
+scene.add(new THREE.HemisphereLight(0xf3e9d2, 0x2b6a9e, .5));
+
+const flat = (color, o={}) => new THREE.MeshLambertMaterial({color, flatShading:true, ...o});
+function mesh(geo, mat, x=0,y=0,z=0, rx=0,ry=0,rz=0){
+  const m = new THREE.Mesh(geo, mat);
+  m.position.set(x,y,z); m.rotation.set(rx,ry,rz);
+  m.castShadow = m.receiveShadow = true;
+  return m;
+}
+
+// ---------------- WAVE ----------------
+// The great curling wave: a swept, concave wall of deep blue arcing from lower-left
+// up over the top, with a claw of foam at its peak - matching the print's silhouette.
+function waveBody(geo, mat){ return mesh(geo, mat); }
+
+// Build the wave as a lathe-ish profile extruded sideways for low-poly depth.
+{
+  // profile of the breaking wave in the XZ->XY plane (x = across, y = height)
+  const pts = [];
+  // from far left base, up the back, over the crest curl, down into the trough
+  const prof = [
+    [-9, 0.0],[-8.6, 1.2],[-8.2, 2.6],[-7.4, 4.2],[-6.2, 5.6],[-4.6, 6.4],
+    [-2.8, 6.9],[-0.8, 6.6],[0.8, 5.6],[1.8, 4.2],[2.3, 2.6],[2.4, 1.2],[2.2, 0.2]
+  ];
+  // make a ribbon: extrude along Z with slight taper, keep it flat-shaded (no subdivision)
+  const shape = new THREE.Shape();
+  prof.forEach((p,i)=> i? shape.lineTo(p[0],p[1]) : shape.moveTo(p[0],p[1]));
+  shape.lineTo(2.2,0); shape.lineTo(-9,0); shape.closePath();
+  const geo = new THREE.ExtrudeGeometry(shape, {depth: 7, bevelEnabled:false});
+  geo.translate(0,0,-3.5);
+  const g = waveBody(geo, flat(C.wave, {side:THREE.DoubleSide}));
+  scene.add(g);
+
+  // deeper blue back face (the shadowed side of the wave in the print)
+  const geo2 = new THREE.ExtrudeGeometry(shape, {depth: .4, bevelEnabled:false});
+  geo2.translate(0,0,-3.5);
+  scene.add(mesh(geo2, flat(C.waveDeep,{side:THREE.DoubleSide})));
+
+  // foam claw: follow the wave lip, curling forward over the trough like the print's claws
+  const foamMat = flat(C.foam);
+  const lipCurve = t => {
+    // t: 0 (crest peak) -> 1 (lip falling into trough), matches profile above
+    const x = -1.0 + t*3.4;
+    const y = 6.75 - t*2.6 + Math.sin(t*Math.PI)*.15;
+    return {x, y};
+  };
+  // foam band: stacked flattened icosahedra hugging the lip
+  for(let i=0;i<9;i++){
+    const t = i/8;
+    const {x,y} = lipCurve(t);
+    const s = .45 + Math.sin(t*Math.PI)*.35;
+    const f = new THREE.Mesh(new THREE.IcosahedronGeometry(s,0), foamMat);
+    f.scale.set(1.25, .75, .9);
+    f.position.set(x, y, 3.5 + t*.6);
+    f.rotation.set(.3*t, 0, .5 + t*.7);
+    f.castShadow = true;
+    scene.add(f);
+  }
+  // white wave-lip tube along the crest
+  const lipPts=[];
+  for(let i=0;i<=14;i++){const t=i/14; const {x,y}=lipCurve(t); lipPts.push(new THREE.Vector3(x, y+.12, 3.5+t*.6));}
+  const lip = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(lipPts), 20, .18, 5), foamMat);
+  lip.castShadow=true; scene.add(lip);
+}
+
+// smaller secondary waves rolling in the trough (print's mid-ground swells)
+const waveGroup = new THREE.Group();
+function swell(x, z, scale, hueShift=0){
+  const s = new THREE.Shape();
+  s.moveTo(-2.2,0); s.lineTo(-2.0, .9); s.lineTo(-1.2,1.5); s.lineTo(-.1,1.7); s.lineTo(1.0,1.3); s.lineTo(1.8,.4); s.lineTo(2.0,0); s.closePath();
+  const g = new THREE.ExtrudeGeometry(s,{depth:1.6,bevelEnabled:false});
+  const m = new THREE.Mesh(g, flat(hueShift? C.waveLite : C.wave,{side:THREE.DoubleSide}));
+  m.position.set(x, 0, z); m.rotation.y = Math.PI; m.scale.setScalar(scale);
+  m.castShadow=m.receiveShadow=true;
+  // foam crest on the small swell
+  for(let i=0;i<3;i++){
+    scene; 
+    const c = new THREE.Mesh(new THREE.ConeGeometry(.3*scale,.9*scale,5), flat(C.foam));
+    c.position.set(x-1.0+i*1.1*scale, 1.6*scale, z-.4); c.castShadow=true; waveGroup.add(c);
+  }
+  waveGroup.add(m);
+}
+swell(-5.5, 4.5, 1.1);
+swell( 4.5, 5.0, 1.3, true);
+swell( 0.5, 7.5, .9, true);
+scene.add(waveGroup);
+
+// whitecap speckles drifting across the water (foam flecks like the print)
+const capGroup = new THREE.Group();
+const capMat = flat(C.foam);
+for(let i=0;i<26;i++){
+  const c = new THREE.Mesh(new THREE.IcosahedronGeometry(.12+Math.random()*.14, 0), capMat);
+  c.position.set(-9+Math.random()*18, .15+Math.random()*.5, 2+Math.random()*6);
+  capGroup.add(c);
+}
+scene.add(capGroup);
+
+// ---------------- BOATS (the print shows three) ----------------
+function boat(x,y,z,ry=0){
+  const g = new THREE.Group();
+  const hullMat = flat(C.hull);
+  // hull: an elongated pentagonal prism (low poly), pointed bow
+  const h = new THREE.Shape();
+  h.moveTo(-1.6,0); h.lineTo(-1.4,.5); h.lineTo(1.4,.5); h.lineTo(1.9,0); h.lineTo(1.4,-.4); h.lineTo(-1.4,-.4); h.closePath();
+  const hg = new THREE.ExtrudeGeometry(h,{depth:.7,bevelEnabled:false});
+  hg.rotateX(Math.PI/2); hg.translate(0,0,-.35);
+  const hull = new THREE.Mesh(hg, hullMat); hull.castShadow=hull.receiveShadow=true;
+  g.add(hull);
+  // darker gunwale stripe
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(3.0,.12,.8), flat(C.hullDk));
+  stripe.position.y=.45; g.add(stripe);
+  // mast + billowing square sail (foam-white)
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(.05,.07,2.2,5), flat(C.ink));
+  mast.position.set(-.2,1.1,0); g.add(mast);
+  const sail = new THREE.Mesh(new THREE.PlaneGeometry(1.5,1.1,2,1), flat(C.foam,{side:THREE.DoubleSide}));
+  sail.position.set(.45,1.5,0); sail.rotation.y=.35; g.add(sail);
+  // a few crew dots (the print's bundled sailors)
+  for(let i=0;i<4;i++){
+    const p = new THREE.Mesh(new THREE.SphereGeometry(.09,5,4), flat(0x4a3b2a));
+    p.position.set(-1.0+i*.55,.55,0); g.add(p);
+  }
+  g.position.set(x,y,z); g.rotation.y=ry;
+  scene.add(g); return g;
+}
+// left cluster: two junks in the troughs (print shows a pair on the left)
+const boatA = boat(-4.6, .5,  2.2,  .5);   // tucked under the wave
+const boatB = boat(-6.8, .35, 4.6, -.35);  // farther left, lower
+// center-right boat riding the mid swell, bow to the right like the print
+const boatC = boat( 3.6, .9, 3.8,  .15);
+
+// ---------------- MOUNTAIN (Mt. Fuji, snow-capped, small in the distance) ----------------
+{
+  const m = new THREE.Group();
+  const lower = new THREE.Mesh(new THREE.ConeGeometry(3.2, 2.2, 6), flat(C.fujiBase));
+  lower.position.y = 1.1; m.add(lower);
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(1.7, 1.3, 6), flat(C.fuji));
+  cap.position.y = 2.4; m.add(cap);
+  // sits in the gap right of the wave peak, as in the print
+  m.position.set(7.5, .2, -12);
+  scene.add(m);
+}
+
+// ---------------- SKY: flat cream + a couple of low-poly clouds ----------------
+function cloud(x,y,z,s=1){
+  const g=new THREE.Group(); const m=flat(C.cloud);
+  [[0,0,0,1.6],[1.3,.3,.2,1.1],[-1.2,.2,-.2,1.0]].forEach(([a,b,c,d])=>{
+    const s2=new THREE.Mesh(new THREE.IcosahedronGeometry(d*s*.5,0), m);
+    s2.position.set(a*s,b*s,c*s); s2.scale.y=.6; g.add(s2);
+  });
+  g.position.set(x,y,z); scene.add(g); return g;
+}
+const cloudA = cloud(-4,8,-18,1.2);
+const cloudB = cloud(6,7,-20,1.5);
+
+// ---------------- GENTLE MOTION ----------------
+const clock = new THREE.Clock();
+const boats=[boatA,boatB,boatC];
+function tick(){
+  const t = clock.getElapsedTime();
+  // boats bob and sway in the swell
+  boats.forEach((b,i)=>{
+    b.position.y += Math.sin(t*1.3 + i*1.7)*.004;
+    b.rotation.z = Math.sin(t*1.1 + i)*0.06;
+    b.rotation.x = Math.cos(t*.9 + i)*0.04;
+  });
+  // foam caps drift
+  capGroup.children.forEach((c,i)=>{ c.position.x += Math.sin(t*.5+i)*.002; c.rotation.y += .001; });
+  // clouds creep
+  cloudA.position.x = -4 + Math.sin(t*.05)*1.2;
+  cloudB.position.x =  6 + Math.cos(t*.04)*1.0;
+  renderer.render(scene, camera);
+  requestAnimationFrame(tick);
+}
+tick();
+
+addEventListener('resize', ()=>{
+  camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
