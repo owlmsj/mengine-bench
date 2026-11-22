@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-ab-playtest",
+ "prompts": [
+  "We playtested two versions of the Pixel Arena tutorial and have to pick one for the next release. The export and its notes are in {WS}/telemetry. Should we ship B instead of A? Give a recommendation a skeptical lead would accept. Record it in {WS}/result.json with ship_b, sessions_a, sessions_b, completion_rate_a, completion_rate_b and p_value."
+ ],
+ "answers": [
+  "\n\nDone — result.json is written and verified by the script's own output.\n\n[goal] Decide whether to ship tutorial variant B over A based on the playtest export, with a recommendation that survives skeptical review.\n\n[action] Cleaned and tested the data with `analyze.py`:\n- 1870 raw rows → **1800 unique sessions** after dedupe on `session_id` (70 ETL resends; all duplicates consistent, 0 conflicts).\n- Normalized `variant` (mixed case and leading spaces) → A: n=900, B: n=900.\n- Completion: A 342/900 = **38.00%**, B 420/900 = **46.67%** → B is +8.67 pts higher.\n- Two-proportion z-test (pooled): z = 3.72, **two-sided p = 0.000198** (one-sided p = 0.000099); Yates chi-square = 13.49 vs 3.84 critical. Significance holds under every standard a lead could apply.\n\n[result] **Ship B.** `result.json` contains: ship_b=true, sessions_a=900, sessions_b=900, completion_rate_a=0.38, completion_rate_b=0.4667, p_value=0.000198.\n\n[next] Assumptions stated: dedupe keeps first row per session_id (README says repeats are the same session, and I verified zero field conflicts); test is two-sided at the 5% level required by the release rule (one-sided also passes). No browser tabs or apps were opened, so nothing to close."
+ ],
+ "diff": "A analyze.py\nA result.json\n\n--- analyze.py ---\nimport csv, json, math\n\nrows = []\nwith open(r\"telemetry\\playtest_ab.csv\", newline=\"\") as f:\n    for r in csv.DictReader(f):\n        rows.append(r)\n\nprint(\"raw rows:\", len(rows))\n\n# validate duplicate consistency\nseen = {}\ndup_conflict = 0\nfor r in rows:\n    sid = r[\"session_id\"].strip()\n    key = (r[\"variant\"].strip().lower(), r[\"completed_tutorial\"].strip())\n    if sid in seen and seen[sid] != key:\n        dup_conflict += 1\n    seen.setdefault(sid, key)\nprint(\"unique sessions:\", len(seen), \"conflicting duplicates:\", dup_conflict)\n\n# normalize + dedupe (first occurrence)\nsessions = {}\nfor r in rows:\n    sid = r[\"session_id\"].strip()\n    if sid not in sessions:\n        v = r[\"variant\"].strip().lower()\n        assert v in (\"a\", \"b\"), v\n        c = int(r[\"completed_tutorial\"].strip())\n        assert c in (0, 1)\n        sessions[sid] = (v, c)\n\nna = sum(1 for v, c in sessions.values() if v == \"a\")\nnb = sum(1 for v, c in sessions.values() if v == \"b\")\nxa = sum(c for v, c in sessions.values() if v == \"a\")\nxb = sum(c for v, c in sessions.values() if v == \"b\")\npa, pb = xa / na, xb / nb\nprint(f\"A: n={na} completed={xa} rate={pa:.4f}\")\nprint(f\"B: n={nb} completed={xb} rate={pb:.4f}\")\nprint(f\"diff (B-A) = {pb-pa:+.4f}\")\n\n# two-proportion z-test, pooled\np_pool = (xa + xb) / (na + nb)\nse = math.sqrt(p_pool * (1 - p_pool) * (1/na + 1/nb))\nz = (pb - pa) / se\n# two-sided p via erfc\np_two = math.erfc(abs(z) / math.sqrt(2))\np_one = 0.5 * math.erfc(z / math.sqrt(2)) if z > 0 else 1 - 0.5 * math.erfc(-z / math.sqrt(2))\nprint(f\"z = {z:.4f}\")\nprint(f\"p two-sided = {p_two:.6f}\")\nprint(f\"p one-sided (B>A) = {p_one:.6f}\")\n\n# continuity-corrected chi-square sanity check (4x4 table, Yates)\nimport statistics\nn_total = na + nb\nx11, x12 = xb, nb - xb\nx21, x22 = xa, na - xa\nexpected_risk = p_pool\nchi_yates = 0\nfor oi, ei in [(x11, expected_risk * nb), (x12, (1-expected_risk) * nb),\n               (x21, expected_risk * na), (x22, (1-expected_risk) * na)]:\n    chi_yates += (abs(oi - ei) - 0.5) ** 2 / ei\nprint(f\"chi2 Yates = {chi_yates:.4f} (df=1, crit 3.841, 5%)\")\n\nship_b = p_two < 0.05\nresult = {\n    \"ship_b\": ship_b,\n    \"sessions_a\": na,\n    \"sessions_b\": nb,\n    \"completion_rate_a\": round(pa, 4),\n    \"completion_rate_b\": round(pb, 4),\n    \"p_value\": round(p_two, 6),\n}\nwith open(r\"result.json\", \"w\") as f:\n    json.dump(result, f, indent=2)\nprint(json.dumps(result))\n\n\n--- result.json ---\n{\r\n  \"ship_b\": true,\r\n  \"sessions_a\": 900,\r\n  \"sessions_b\": 900,\r\n  \"completion_rate_a\": 0.38,\r\n  \"completion_rate_b\": 0.4667,\r\n  \"p_value\": 0.000198\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] search \"{\\\"pattern\\\": \\\"telemetry/**\\\"}\" ok -> \"<WORKSPACE><WORKSPACE>\\\\telemetry\\\\playtest_ab.csv\"\n[step 1] read \"<WORKSPACE>\\\\telemetry\\\\README.md\" ok -> \"Read file <WORKSPACE>\\\\telemetry\\\\README.md, lines 1-5\\n1: # Playtest A/B - Pixel Arena tutorial\\n2: \\n3: Export from arena-panel. The ETL resends sessions: `session_id` is the unique key (repeated rows are the same session). `variant` may come lowercase or with a leading space. `completed_tutorial` is 0/1.\\n4: \\n5: Release rule: a variant s[... 92 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\telemetry\\\\playtest_ab.csv\" ok -> \"Read file <WORKSPACE>\\\\telemetry\\\\playtest_ab.csv, lines 1-1871\\n1: session_id,variant,player_id,completed_tutorial,match_minutes\\n2: s01423,b,p0798,1,12.6\\n3: s01632,a,p0693,1,9.0\\n4: s00612,A,p0098,0,12.2\\n5: s00389, B,p0202,1,16.5\\n6: s00509, B,p0896,0,14.8\\n7: s00206,a,p0059,1,13.0\\n8: s01758,a,p0342,0,20.4\\n9: s01097, B,p0084,1,15.1\\n10: s01[... 51431 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\analyze.py\" ok -> \"Created file successfully: analyze.py\"\n[step 1] shell \"python analyze.py\" ok -> \"raw rows: 1870\\r\\nunique sessions: 1800 conflicting duplicates: 0\\r\\nA: n=900 completed=342 rate=0.3800\\r\\nB: n=900 completed=420 rate=0.4667\\r\\ndiff (B-A) = +0.0867\\r\\nz = 3.7210\\r\\np two-sided = 0.000198\\r\\np one-sided (B>A) = 0.000099\\r\\nchi2 Yates = 13.4928 (df=1, crit 3.841, 5%)\\r\\n{\\\"ship_b\\\": true, \\\"sessions_a\\\": 900, \\\"sessions_b\\\": 900, \\\"completion_rate_a\\\": 0.38, \\\"completion_rate_b\\\": 0.4667, \\\"p_value\\\": 0.000198[... 1 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "deduplicated session counts",
+   true
+  ],
+  [
+   "completion rates",
+   true
+  ],
+  [
+   "the gain is significant",
+   true
+  ],
+  [
+   "ship decision",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 5,
+  "tool_errors": 0,
+  "shell_commands": 1,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2540,
+  "reasoning_tokens": 905,
+  "largest_turn_tokens": 1456
+ },
+ "deliverables": [],
+ "render": null
+}

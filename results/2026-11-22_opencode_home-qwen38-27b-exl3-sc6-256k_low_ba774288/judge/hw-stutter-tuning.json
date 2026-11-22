@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "\n\n**[goal]** Find what causes arena-01's periodic hitches and which setting changes fix it, per owner constraints; record in result.json.\n\n**[action]** Parsed presentmon.csv (8238 frames, 60 s) and the 1 s sensor log with a Python script; correlated frame-time spikes against sensors; ruled out alternatives column by column.\n\n**[result]**\n- **avg_fps: 137.3** (1000 / mean 7.284 ms, per the owner's formula in NOTES.md)\n- **low_1pct_fps: 45.4** (1000 / p99 of MsBetweenPresents = 22.05 ms)\n- **cause:** The GPU PCIe link drops into **ASPM L1 every 4 s** (sensor log: `gpu_pcie_link_state=L1` at seconds 2, 6, 10 … 58). Each L1 wake produces a ~0.25 s burst of ~22 ms frame times starting ~0.4 s into that second — 15 bursts, 180 slow frames, a 1:1 alignment with L1 transitions. On hitch frames only `MsBetweenDisplayChange` stretches (22.0 ms vs 7.0 ms); `MsInPresentAPI`, render-complete and displayed times are unchanged — the stall is the link waking, not rendering. Ruled out: DPC latency (<100 µs), CPU (5.2–5.45 GHz, 31–42%), GPU clocks (2710–2759 MHz, stable), disk activity (spikes at s13/27/43–45/52 don't align with the hitches), Defender/USB (no sensor evidence).\n- **change:** `pcie_aspm_rp1_gpu`: **L1 → disabled** (BIOS). This is a power-management setting, not an overclock — the constraints only protect XMP, PBO and core ratio, and the link stays Gen5 x4 (validated for the shared AI workload), so it fits the owner's constraints. The NVMe root port's L1 (`pcie_aspm_rp0_nvme`) was left alone: its disk activity doesn't cause the hitches, so no change is justified.\n\n**How I know it's right:** the only sensor variable that toggles exactly on the hitch cadence is the GPU PCIe L1 state, with a 15/15 one-to-one match to the 15 slow-frame bursts; within the PresentMon data the delay sits on the display side (`MsBetweenDisplayChange`) with render/present costs unchanged — consistent with link wake latency and inconsistent with CPU, GPU, DPC or disk causes, all of which were numerically checked against their thresholds. Assumption: the sensor's per-second L1 sample marks the moment the link entered L1 (hitch onset ~0.4 s later = wake latency), which is the natural reading of a 1 s-resolution log.\n\nNo browser tabs, windows or apps were opened; scratch script removed, workspace holds only the input files and result.json."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"avg_fps\": 137.3,\n  \"low_1pct_fps\": 45.4,\n  \"cause\": \"The GPU's PCIe root port has ASPM L1 enabled (pcie_aspm_rp1_gpu = L1). The 1 s sensor log shows the GPU PCIe link dropping to L1 at seconds 2, 6, 10, ..., 58 - exactly every 4 s - and the PresentMon capture shows a burst of ~22 ms frame times (vs ~7.3 ms average) starting ~0.4 s into each of those 15 L1 seconds: 180 slow frames total, all 15 bursts aligning 1:1 with L1 transitions. Present/render/complete times on hitch frames are unchanged (only MsBetweenDisplayChange stretches to ~22 ms), so the stall is the link waking from L1, not rendering. DPC latency (<100 us), CPU clocks (5.2-5.45 GHz, 31-42% util), GPU clocks (2710-2759 MHz) and disk activity do not correlate with the hitches and are ruled out.\",\n  \"changes\": [\n    {\n      \"setting\": \"pcie_aspm_rp1_gpu\",\n      \"from\": \"L1\",\n      \"to\": \"disabled\"\n    }\n  ]\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem -Force \\\"<HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-xlctnzok\\\" | Select-Object Name, Length; Get-ChildItem -Recurse \\\"<HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-xlctnzok\\\" -File | Select-Object FullName, Length\" ok -> \"\\u001b[32;1mName     \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----     \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\nworkspace \\r\\n          394\\r\\n          774\\r\\n          2429\\r\\n          715870\\r\\n          2660\"\n[step 1] shell \"Get-ChildItem \\\"<WORKSPACE>\\\" | Select-Object Name, Length\" ok -> \"\\u001b[32;1mName         \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----         \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\ncapture       \\r\\nAGENTS.md     394\\r\\nNOTES.md      774\\r\\nsettings.json 2429\"\n[step 1] read \"<WORKSPACE>\\\\NOTES.md\" ok -> \"Read file <WORKSPACE>\\\\NOTES.md, lines 1-15\\n1: # Owner notes - rig \\\"arena-01\\\"\\n2: \\n3: The game hitches every few seconds even though the average frame rate looks fine.\\n4: Capture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\n5: taken at the same time (same clock: second 0 of both files is the same i[... 533 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\settings.json\" ok -> \"Read file <WORKSPACE>\\\\settings.json, lines 1-125\\n1: {\\n2:   \\\"rig\\\": \\\"arena-01\\\",\\n3:   \\\"settings\\\": [\\n4:     {\\n5:       \\\"setting\\\": \\\"power_plan\\\",\\n6:       \\\"value\\\": \\\"Balanced\\\",\\n7:       \\\"where\\\": \\\"Windows\\\"\\n8:     },\\n9:     {\\n10:       \\\"setting\\\": \\\"hardware_accelerated_gpu_scheduling\\\",\\n11:       \\\"value\\\": \\\"on\\\",\\n12:       \\\"where\\\": \\\"Windows\\\"\\n13:[... 2660 chars cut by the benchmark]\"\n[step 1] shell \"Get-ChildItem -Recurse \\\"<WORKSPACE>\\\\capture\\\" | Select-Object FullName, Length\" ok -> \"\\u001b[32;1mFullName                                                                                            \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m--------                                                                                            \\u001b[0m \\u001b[32;<WORKSPACE>\\\\capture\\\\presentmon.csv 715870\\r\\nC:\\\\Users\\\\<USER>\\\\AppData\\\\L[... 78 chars cut by the benchmark]\"\n[step 1] shell \"Get-Content \\\"<WORKSPACE>\\\\capture\\\\presentmon.csv\\\" -TotalCount 5; \\\"---\\\"; Get-Content \\\"<WORKSPACE>\\\\capture\\\\sensors.csv\\\" -TotalCount 20\" ok -> \"Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.000000,6.861,6.847,0.294,4.901,5.568\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.006861,6.773,6.812,0.387,4.013,6.252\\r\\nArena.exe,7316,0x000001F2A8C40000,D[... 1086 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\analyze.py\" ok -> \"Created file successfully: <WORKSPACE>/analyze.py\"\n[step 1] shell \"python \\\"<WORKSPACE>\\\\analyze.py\\\"\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\analyze.py\\\", line 9, in <module>\\r\\n    rows.append({k: float(v) for k, v in r.items() if k != \\\"Application\\\"})\\r\\n                    ~~~~~^^^\\r\\nValueError: could not convert string to float: '0x000001F2A8C40000'\"\n[step 1] edit \"<WORKSPACE>\\\\analyze.py\" ok -> \"Edited <WORKSPACE>/analyze.py (1 replacement)\"\n[step 1] shell \"python \\\"<WORKSPACE>\\\\analyze.py\\\"\" ok -> \"frames=8238 span=59.999s\\r\\navg_ms=7.284  avg_fps=137.29\\r\\np99_ms=22.049  low1pct=45.35\\r\\nmax_ms=23.675\\r\\nhitches>10.9ms: 180\\r\\n  t=   2.401 ms=  21.863\\r\\n  t=   2.423 ms=  22.853\\r\\n  t=   2.445 ms=  22.078\\r\\n  t=   2.467 ms=  21.606\\r\\n  t=   2.489 ms=  22.669\\r\\n  t=   2.512 ms=  21.025\\r\\n  t=   2.533 ms=  22.123\\r\\n  t=   2.555 ms=  21.902\\r\\n  t=   2.577 ms=  21.966\\r\\n  t=   2.599 ms=  22.495\\r\\n  t=   2.621 ms=  [... 4590 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv, statistics\\nrows=list(csv.DictReader(open(r'<WORKSPACE>\\\\capture\\\\presentmon.csv')))\\nmbp=[float(r['MsBetweenPresents']) for r in rows]\\nhit=[r for r in rows if float(r['MsBetweenPresents'])>15]\\nnorm=[r for r in rows if float(r['MsBetweenPresents'])<10]\\nfor col in ('MsInPresentAPI','MsUntilRenderComplete','MsUntilDisplayed','MsBetweenDisplayChange'):\\n    print(col, 'hitch=%.3f'%statistics.mean(float(r[col]) for r in hit), 'normal=%.3f'%statistics.mean(float(r[col]) for r in norm))\\n\\\"\" ok -> \"MsInPresentAPI hitch=0.274 normal=0.276\\r\\nMsUntilRenderComplete hitch=4.720 normal=4.753\\r\\nMsUntilDisplayed hitch=5.749 normal=5.751\\r\\nMsBetweenDisplayChange hitch=22.038 normal=6.955\"\n[step 1] write \"<WORKSPACE>\\\\result.json\" ok -> \"Created file successfully: <WORKSPACE>/result.json\"\n[step 1] shell \"Remove-Item \\\"<WORKSPACE>\\\\analyze.py\\\"; Get-ChildItem \\\"<WORKSPACE>\\\" | Select-Object Name\" ok -> \"\\u001b[32;1mName\\u001b[0m\\r\\n\\u001b[32;1m----\\u001b[0m\\r\\ncapture\\r\\nAGENTS.md\\r\\nNOTES.md\\r\\nresult.json\\r\\nsettings.json\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 12,
+  "tool_calls": 13,
+  "tool_errors": 0,
+  "shell_commands": 8,
+  "shell_failures": 1,
+  "file_writes": 3,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 6425,
+  "reasoning_tokens": 3235,
+  "largest_turn_tokens": 2870
+ },
+ "deliverables": [],
+ "render": null
+}
