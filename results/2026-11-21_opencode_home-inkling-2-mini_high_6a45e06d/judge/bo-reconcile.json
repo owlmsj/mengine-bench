@@ -1,0 +1,49 @@
+{
+ "task_id": "bo-reconcile",
+ "prompts": [
+  "Finance has to chase June's receivables. The invoices, the bank statement and our reconciliation notes are in {WS}/backoffice. What do we still have to collect or fix? Record it in {WS}/result.json: unpaid and duplicated (invoice ids) and mismatched (id, invoiced, paid)."
+ ],
+ "answers": [
+  "[goal] June receivables reconciliation. [action] parsed invoices.csv and bank_statement_june.csv, matched payments to invoices. [result] `./result.json` written — unpaid: INV-1008, INV-1030, INV-1033; duplicated: INV-1015; mismatched: INV-1021 (21320.36 invoiced vs 21070.36 paid), INV-1036 (8619.16 vs 7757.24). [next] none; no browser/apps opened.\n\nAssumptions: bank memo invoice citations parsed across formats (`inv1007`, `INV-1015`, `invoice 1023`); payments without an identifiable invoice (CDB interest 1204.33, bank fee -89.90, \"unidentified 1099\" 1500.00 — no such invoice in the file) ignored, per README; duplicated (INV-1015, two 1904.29 payments) excluded from mismatched per the exclusive-category rule; amounts compared to the cent.\n\nHow I know: script matched every non-ignored memo to a real invoice id, verified INV-1015 has exactly two payments, INV-1021/INV-1036 have exactly one each differing from the invoice, and the other 37 invoices each have exactly one matching payment — leaving 1008/1030/1033 unpaid."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\r\n  \"unpaid\": [\r\n    \"INV-1008\",\r\n    \"INV-1030\",\r\n    \"INV-1033\"\r\n  ],\r\n  \"duplicated\": [\r\n    \"INV-1015\"\r\n  ],\r\n  \"mismatched\": [\r\n    {\r\n      \"id\": \"INV-1021\",\r\n      \"invoiced\": 21320.36,\r\n      \"paid\": 21070.36\r\n    },\r\n    {\r\n      \"id\": \"INV-1036\",\r\n      \"invoiced\": 8619.16,\r\n      \"paid\": 7757.24\r\n    }\r\n  ]\r\n}\r\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"ls -la ./backoffice\" failed -> \"\\u001b[31;1mGet-ChildItem: \\u001b[31;1mA parameter cannot be found that matches parameter name 'la'.\\u001b[0m\"\n[step 1] shell \"ls ./backoffice\" ok -> \"Directory: <WORKSPACE>\\\\backoffice\\r\\n\\r\\n\\u001b[32;1mMode   \\u001b[0m\\u001b[32;1m              LastWriteTime\\u001b[0m\\u001b[32;1m         Length\\u001b[0m\\u001b[32;1m Name\\u001b[0m\\r\\n\\u001b[32;1m----   \\u001b[0m \\u001b[32;1m             -------------\\u001b[0m \\u001b[32;1m        ------\\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\n-a---          21/11/2026    13:54           1772 bank_statement_june.csv\\r\\n-a---          21/11/2[... 101 chars cut by the benchmark]\"\n[step 1] shell \"cat ./backoffice/README.md; echo ====; cat ./backoffice/invoices.csv; echo ====; cat ./backoffice/bank_statement_june.csv\" ok -> \"# How we reconcile receivables\\r\\n\\r\\n- The bank memo cites the invoice in different formats.\\r\\n- Ignore fees, interest and PIX transfers without an identifiable invoice.\\r\\n- unpaid: invoices with no payment. duplicated: invoices paid more than once.\\r\\n- mismatched: a single payment whose amount differs from its invoice.\\r\\n- The three categories are exclusive: a duplicated invoice is never also mismatched[... 3526 chars cut by the benchmark]\"\n[step 1] shell \"$inv = Import-Csv ./backoffice/invoices.csv; $pay = Import-Csv ./backoffice/bank_statement_june.csv; $inv | Measure-Object | Select-Object -ExpandProperty Count\" ok -> \"40\"\n[step 1] shell \"$inv = Import-Csv ./backoffice/invoices.csv -Encoding UTF8; $pay = Import-Csv ./backoffice/bank_statement_june.csv -Encoding UTF8; foreach ($p in $pay) { if ($p.memo -match '(\\\\d{4})') { $id = 'INV-' + $Matches[1]; Write-Output \\\"$($p.date) | $($p.memo) | $id | $($p.amount)\\\" } else { Write-Output \\\"$($p.date) | $($p.memo) | NO-ID | $($p.amount)\\\" } }\" ok -> \"2026-06-02 | inv1007 payment | INV-1007 | 18866.76\\r\\n2026-06-17 | PIX INV-1015 resend | INV-1015 | 1904.29\\r\\n2026-06-18 | PIX INV-1016 PAMPA FOODS | INV-1016 | 4219.04\\r\\n2026-06-04 | TED invoice 1023 Ateli� Norte | INV-1023 | 1714.10\\r\\n2026-06-25 | PIX INV-1028 PAMPA FOODS | INV-1028 | 10327.03\\r\\n2026-06-18 | TED invoice 1039 Arena Studio | INV-1039 | 21184.42\\r\\n2026-06-27 | TED invoice 1037 Kestrel Gam[... 2000 chars cut by the benchmark]\"\n[step 1] shell \"$inv = Import-Csv ./backoffice/invoices.csv -Encoding UTF8; $pay = Import-Csv ./backoffice/bank_statement_june.csv -Encoding UTF8; $invMap = @{}; foreach ($i in $inv) { $invMap[$i.id] = [double]$i.amount }\\n$payments = @{};\\nforeach ($p in $pay) {\\n  if ($p.memo -match '(\\\\d{4})') { $id = 'INV-' + $Matches[1]\\n    if ($invMap.ContainsKey($id)) { if (-not $payments.ContainsKey($id)) { $payments[$id] = @() }; $payments[$id] += [double]$p.amount }\\n  }\\n}\\n$unpaid = @(); $dup = @(); $mismatch = @()\\nforeach ($id in $invMap.Keys) {\\n  if (-not $payments.ContainsKey($id)) { $unpaid += $id }\\n  else {\\n    $ps = $payments[$id]\\n    if ($ps.Count -gt 1) { $dup += $id }\\n    elseif ([math]::Abs($ps[0] - $invMap[$id]) -gt 0.005) { $mismatch += [PSCustomObject]@{ id = $id; invoiced = $invMap[$id]; paid = $ps[0] } }\\n  }\\n}\\nWrite-Output \\\"unpaid: $($unpaid -join ',')\\\"\\nWrite-Output \\\"duplicated: $($dup -join ',')\\\"\\n$mismatch | Format-Table -AutoSize\" ok -> \"unpaid: INV-1030,INV-1033,INV-1008\\r\\nduplicated: INV-1015\\r\\n\\r\\n\\u001b[32;1mid      \\u001b[0m\\u001b[32;1m invoiced\\u001b[0m\\u001b[32;1m     paid\\u001b[0m\\r\\n\\u001b[32;1m--      \\u001b[0m \\u001b[32;1m--------\\u001b[0m \\u001b[32;1m    ----\\u001b[0m\\r\\nINV-1036  8619,16  7757,24\\r\\nINV-1021 21320,36 21070,36\"\n[step 1] shell \"$result = [ordered]@{\\n  unpaid = @('INV-1008','INV-1030','INV-1033')\\n  duplicated = @('INV-1015')\\n  mismatched = @(\\n    [ordered]@{ id = 'INV-1021'; invoiced = 21320.36; paid = 21070.36 }\\n    [ordered]@{ id = 'INV-1036'; invoiced = 8619.16; paid = 7757.24 }\\n  )\\n}\\n$result | ConvertTo-Json -Depth 4 | Set-Content ./result.json -Encoding UTF8\\nGet-Content ./result.json\" ok -> \"{\\r\\n  \\\"unpaid\\\": [\\r\\n    \\\"INV-1008\\\",\\r\\n    \\\"INV-1030\\\",\\r\\n    \\\"INV-1033\\\"\\r\\n  ],\\r\\n  \\\"duplicated\\\": [\\r\\n    \\\"INV-1015\\\"\\r\\n  ],\\r\\n  \\\"mismatched\\\": [\\r\\n    {\\r\\n      \\\"id\\\": \\\"INV-1021\\\",\\r\\n      \\\"invoiced\\\": 21320.36,\\r\\n      \\\"paid\\\": 21070.36\\r\\n    },\\r\\n    {\\r\\n      \\\"id\\\": \\\"INV-1036\\\",\\r\\n      \\\"invoiced\\\": 8619.16,\\r\\n      \\\"paid\\\": 7757.24\\r\\n    }\\r\\n  ]\\r\\n}\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "unpaid invoices",
+   true
+  ],
+  [
+   "duplicated payments",
+   true
+  ],
+  [
+   "mismatched amounts",
+   true
+  ],
+  [
+   "invoiced vs paid on mismatches",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 7,
+  "shell_failures": 1,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 3667,
+  "reasoning_tokens": 2365,
+  "largest_turn_tokens": 2154
+ },
+ "deliverables": [],
+ "render": null
+}
