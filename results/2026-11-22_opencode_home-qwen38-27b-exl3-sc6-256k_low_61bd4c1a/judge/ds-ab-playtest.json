@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-ab-playtest",
+ "prompts": [
+  "We playtested two versions of the Pixel Arena tutorial and have to pick one for the next release. The export and its notes are in {WS}/telemetry. Should we ship B instead of A? Give a recommendation a skeptical lead would accept. Record it in {WS}/result.json with ship_b, sessions_a, sessions_b, completion_rate_a, completion_rate_b and p_value."
+ ],
+ "answers": [
+  "\n\nDone — the stray file is gone (parent dir lists only `workspace`) and `result.json` is in place with verified contents. No browser tabs or apps were opened, so nothing to close.\n\n**Goal**\nPick A or B for the Pixel Arena tutorial release per the 5% significance rule, record in `result.json`.\n\n**Action**\n- Parsed `telemetry/playtest_ab.csv` (1870 rows), normalized `variant` (raw values were `A`, `a`, `B`, `b`, `' A'`, `' B'`), deduped on `session_id` per the README's ETL-resend note, and verified all 70 duplicate session groups were internally consistent (0 conflicts) and that unique full rows = unique sessions (1800 both).\n- Computed per-variant completion and ran a pooled two-proportion z-test; cross-checked by hand: p_pool = 762/1800 = 0.4222, SE = 0.02328, z = 0.08667/0.02328 = 3.72.\n\n**Result**\n- **Ship B: yes.** A: 900 sessions, 342 completed = **38.00%**. B: 900 sessions, 420 completed = **46.67%**.\n- B's gain: **+8.67 pp**, 95% CI [4.1, 13.2] pp — CI excludes 0.\n- One-sided p (H₀: p_B ≤ p_A, matching the release rule's \"gain … significant at 5%\") = **9.9×10⁻⁵**; two-sided p = 1.98×10⁻⁴. Both are far below 0.05, so the call is robust to the sidedness choice.\n- `result.json` written with ship_b=true, sessions_a=900, sessions_b=900, completion_rate_a=0.38, completion_rate_b=0.466667, p_value=0.000099 (the one-sided value, the rule's framing).\n\n**Assumptions (brief left these open)**\n1. `session_id` is the unit of analysis; first row wins after verifying duplicates carry identical variant/outcome.\n2. \"Statistically significant at 5%\" = one-sided test of B's gain over A (the rule says \"its gain\"); two-sided noted as a sensitivity check.\n3. Independent Bernoulli outcomes; the 900/900 split shows no sample-ratio bias.\n\n**Next**\nNone — record is complete and verified against the raw export."
+ ],
+ "diff": "A result.json\nA tmp/analyze.py\n\n--- result.json ---\n{\n  \"ship_b\": true,\n  \"sessions_a\": 900,\n  \"sessions_b\": 900,\n  \"completion_rate_a\": 0.38,\n  \"completion_rate_b\": 0.466667,\n  \"p_value\": 0.000099\n}\n\n\n--- tmp/analyze.py ---\nimport csv, math, json\n\nrows = []\nwith open(r\"telemetry\\playtest_ab.csv\", newline=\"\") as f:\n    for r in csv.DictReader(f):\n        rows.append(r)\n\nprint(\"total rows:\", len(rows))\n\n# sanity: field values\nvariants = sorted({r[\"variant\"] for r in rows})\nprint(\"raw variant values:\", variants)\ncompleted = sorted({r[\"completed_tutorial\"] for r in rows})\nprint(\"completed values:\", completed)\n\n# normalize\nfor r in rows:\n    r[\"v\"] = r[\"variant\"].strip().lower()\n    r[\"c\"] = int(r[\"completed_tutorial\"])\n\nbad = [r for r in rows if r[\"v\"] not in (\"a\", \"b\")]\nprint(\"unparseable variant rows:\", len(bad))\n\n# group by session_id\nby_sid = {}\nfor r in rows:\n    by_sid.setdefault(r[\"session_id\"], []).append(r)\n\ninconsistent = []\nfor sid, rs in by_sid.items():\n    vs = {x[\"v\"] for x in rs}\n    cs = {x[\"c\"] for x in rs}\n    if len(vs) > 1 or len(cs) > 1:\n        inconsistent.append((sid, vs, cs))\nprint(\"sessions with conflicting variant/completed across duplicate rows:\", len(inconsistent))\nfor x in inconsistent[:10]:\n    print(\"  \", x)\n\ndup_counts = {sid: len(rs) for sid, rs in by_sid.items() if len(rs) > 1}\nprint(\"duplicate session count:\", len(dup_counts))\n\n# one record per session: use first row (dedupe)\nsess = {sid: rs[0] for sid, rs in by_sid.items()}\nna = sum(1 for s in sess.values() if s[\"v\"] == \"a\")\nnb = sum(1 for s in sess.values() if s[\"v\"] == \"b\")\nca = sum(1 for s in sess.values() if s[\"v\"] == \"a\" and s[\"c\"] == 1)\ncb = sum(1 for s in sess.values() if s[\"v\"] == \"b\" and s[\"c\"] == 1)\nprint(\"unique sessions:\", len(sess), \"A:\", na, \"B:\", nb)\nprint(\"completed A:\", ca, \"completed B:\", cb)\npa, pb = ca / na, cb / nb\nprint(\"rate A:\", pa, \"rate B:\", pb, \"diff B-A:\", pb - pa)\n\n# two-proportion z-test, pooled\np_pool = (ca + cb) / (na + nb)\nse = math.sqrt(p_pool * (1 - p_pool) * (1 / na + 1 / nb))\nz = (pb - pa) / se\n# one-sided p for H1: p_B > p_A\np_one = 0.5 * math.erfc(z / math.sqrt(2))\np_two = 2 * (0.5 * math.erfc(abs(z) / math.sqrt(2)))\nprint(\"z:\", z, \"p_one_sided(B>A):\", p_one, \"p_two_sided:\", p_two)\n\n# un-pooled SE for CI (Wald) on the difference\nse_diff = math.sqrt(pa * (1 - pa) / na + pb * (1 - pb) / nb)\nprint(\"95% CI for diff B-A:\", (pb - pa - 1.959964 * se_diff, pb - pa + 1.959964 * se_diff))\n\n# chi-squared (no continuity correction) as cross-check\ntotal = na + nb\nexp = [[ca, cb], [na - ca, nb - cb]]\nchi2 = 0.0\nfor i in range(2):\n    for j in range(2):\n        e = exp[i][j]\n        o = (ca if j == 0 else cb) if i == 0 else ((na - ca) if j == 0 else (nb - cb))\n        chi2 += (o - e) ** 2 / e\nprint(\"chi2:\", chi2, \"(df=1)\")\n\n# cross-check: dedupe by exact row identity (count unique rows)\nuniq_rows = {tuple(sorted(r.items())) for r in rows}\nprint(\"unique full rows:\", len(uniq_rows))\n\nresult = {\n    \"ship_b\": (p_one < 0.05) and (pb > pa),\n    \"sessions_a\": na,\n    \"sessions_b\": nb,\n    \"completion_rate_a\": round(pa, 6),\n    \"completion_rate_b\": round(pb, 6),\n    \"p_value\": round(p_one, 6),\n}\nwith open(r\"..\\result.json\", \"w\") as f:\n    json.dump(result, f, indent=2)\nprint(json.dumps(result, indent=2))\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\telemetry\" ok -> \"Read directory <WORKSPACE>\\\\telemetry, entries 1-2\\nplaytest_ab.csv\\nREADME.md\"\n[step 1] read \"<WORKSPACE>\\\\telemetry\\\\playtest_ab.csv\" ok -> \"Read file <WORKSPACE>\\\\telemetry\\\\playtest_ab.csv, lines 1-1871\\n1: session_id,variant,player_id,completed_tutorial,match_minutes\\n2: s01423,b,p0798,1,12.6\\n3: s01632,a,p0693,1,9.0\\n4: s00612,A,p0098,0,12.2\\n5: s00389, B,p0202,1,16.5\\n6: s00509, B,p0896,0,14.8\\n7: s00206,a,p0059,1,13.0\\n8: s01758,a,p0342,0,20.4\\n9: s01097, B,p0084,1,15.1\\n10: s[... 51433 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\telemetry\\\\README.md\" ok -> \"Read file <WORKSPACE>\\\\telemetry\\\\README.md, lines 1-5\\n1: # Playtest A/B - Pixel Arena tutorial\\n2: \\n3: Export from arena-panel. The ETL resends sessions: `session_id` is the unique key (repeated rows are the same session). `variant` may come lowercase or with a leading space. `completed_tutorial` is 0/1.\\n4: \\n5: Release rule: a variant[... 94 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\analyze.py\" ok -> \"Created file successfully: <WORKSPACE>/tmp/analyze.py\"\n[step 1] shell \"python tmp\\\\analyze.py\" ok -> \"total rows: 1870\\r\\nraw variant values: [' A', ' B', 'A', 'B', 'a', 'b']\\r\\ncompleted values: ['0', '1']\\r\\nunparseable variant rows: 0\\r\\nsessions with conflicting variant/completed across duplicate rows: 0\\r\\nduplicate session count: 70\\r\\nunique sessions: 1800 A: 900 B: 900\\r\\ncompleted A: 342 completed B: 420\\r\\nrate A: 0.38 rate B: 0.4666666666666667 diff B-A: 0.08666666666666667\\r\\nz: 3.7209573559508202 p_one[... 331 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\result.json\" ok -> \"Created file successfully: <WORKSPACE>/result.json\"\n[step 1] shell \"Remove-Item ..\\\\result.json -ErrorAction SilentlyContinue; Get-ChildItem .. | Select-Object Name; Get-Content .\\\\result.json\" ok -> \"\\u001b[32;1mName\\u001b[0m\\r\\n\\u001b[32;1m----\\u001b[0m\\r\\nworkspace\\r\\n{\\r\\n  \\\"ship_b\\\": true,\\r\\n  \\\"sessions_a\\\": 900,\\r\\n  \\\"sessions_b\\\": 900,\\r\\n  \\\"completion_rate_a\\\": 0.38,\\r\\n  \\\"completion_rate_b\\\": 0.466667,\\r\\n  \\\"p_value\\\": 0.000099\\r\\n}\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "deduplicated session counts",
+   true
+  ],
+  [
+   "completion rates",
+   true
+  ],
+  [
+   "the gain is significant",
+   true
+  ],
+  [
+   "ship decision",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 1,
+  "generated_tokens": 4906,
+  "reasoning_tokens": 2468,
+  "largest_turn_tokens": 2303
+ },
+ "deliverables": [],
+ "render": null
+}

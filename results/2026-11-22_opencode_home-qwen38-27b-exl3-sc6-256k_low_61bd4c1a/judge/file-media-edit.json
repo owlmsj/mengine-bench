@@ -1,0 +1,67 @@
+{
+ "task_id": "file-media-edit",
+ "prompts": [
+  "Tidewater Studio is announcing its balloon launch. Two small jobs before the post goes out:\n\n1. `launch.jpg` becomes the feed picture: a 1080x1350 JPEG at `out/feed-photo.jpg`. The magenta balloon is the\n   subject, so it has to be fully in the picture and still look like itself.\n2. The park's permit form `permit-form.pdf` filled in with the details Ines sent in `event-details.txt`, saved at\n   `out/permit-filled.pdf` and flattened, so the answers can no longer be edited.\n\nKeep the originals as they are."
+ ],
+ "answers": [],
+ "diff": "A tmp/analyze.py\nA tmp/dbg.py\nA tmp/fill.py\nA tmp/permit-staged.pdf\nA tmp/staged2.pdf\nA tmp/verify.py\n\n--- tmp/analyze.py ---\nimport os, json\nimport numpy as np\nfrom PIL import Image\n\nos.makedirs('out', exist_ok=True)\nos.makedirs('tmp', exist_ok=True)\n\n# ---- Job 1: find magenta balloon ----\nim = Image.open('launch.jpg').convert('RGB')\nW, H = im.size\na = np.asarray(im, dtype=np.int16)\nr, g, b = a[..., 0], a[..., 1], a[..., 2]\n# magenta: high R, high B, low G\nmask = (r > 130) & (b > 90) & (r - g > 50) & (b - g > 30) & (r > b * 0.75)\nys, xs = np.nonzero(mask)\nprint('size', W, H)\nprint('magenta px', len(xs))\nif len(xs):\n    print('bbox x', xs.min(), xs.max(), 'y', ys.min(), ys.max())\n    # 4:5 crop from 3:2 source: full height 2000 -> width 1600... no:\n    # crop must be 4:5 (w:h). h=2000 -> w=1600? that's narrow. w: h = 1080:1350 = 4:5.\n    # crop w = 1600, h = 2000 keeps full height; horizontal slack = 1400.\n    cw, ch = 1600, 2000\n    ccx, ccy = (xs.min() + xs.max()) / 2, (ys.min() + ys.max()) / 2\n    x0 = int(round(ccx - cw / 2)); y0 = int(round(ccy - ch / 2))\n    x0 = max(0, min(x0, W - cw)); y0 = max(0, min(y0, H - ch))\n    print('crop', x0, y0, x0 + cw, y0 + ch)\n    inside = (x0 <= xs.min()) and (xs.max() <= x0 + cw) and (y0 <= ys.min()) and (ys.max() <= y0 + ch)\n    print('balloon fully inside', inside)\n    crop = im.crop((x0, y0, x0 + cw, y0 + ch)).resize((1080, 1350), Image.LANCZOS)\n    crop.save('out/feed-photo.jpg', quality=92)\n    print('feed photo saved', crop.size)\n\n# ---- Job 2: dump permit widgets ----\nimport fitz\ndoc = fitz.open('permit-form.pdf')\nfor pno, page in enumerate(doc):\n    print('page', pno, 'rect', page.rect)\n    for w in page.widgets() or []:\n        print('widget', repr(w.field_name), w.field_type_string, 'value', repr(w.field_value), 'rect', w.rect)\n# verify date is a Saturday\nimport datetime\nprint('2026-12-05 weekday:', datetime.date(2026, 12, 5).strftime('%A'))\n\n\n--- tmp/dbg.py ---\nimport fitz\ndoc = fitz.open('permit-form.pdf')\npage = doc[0]\nprint('original annots:', [(a.type, a.xref) for a in page.annots() or []])\nprint('original widgets:', [(w.field_name, w.field_value) for w in page.widgets() or []])\n\nvals = {'organizer':'Tidewater Studio','event_date':'2026-12-05','location':'North Cove Lawn','attendees':'about 40'}\nfor w in page.widgets():\n    w.field_value = vals[w.field_name]\n    try:\n        w.update()\n        print('updated', w.field_name, 'has update()')\n    except Exception as e:\n        print('update err', w.field_name, e)\n\ndoc.save('tmp/staged2.pdf', garbage=3, deflate=True)\ndoc.close()\n\ndoc = fitz.open('tmp/staged2.pdf')\npage = doc[0]\nprint('staged annots:', [(a.type, a.xref) for a in page.annots() or []])\nprint('staged widgets:', [(w.field_name, w.field_value) for w in page.widgets() or []])\ncat = doc.pdf_catalog()\nprint('staged AcroForm:', doc.xref_get_key(cat, 'AcroForm'))\n# inspect one widget xref object\nfor a in page.annots() or []:\n    print('annot obj:', doc.xref_object(a.xref)[:400])\n    break\n\n\n--- tmp/fill.py ---\nimport fitz\n\nVALS = {'organizer': 'Tidewater Studio',\n        'event_date': '2026-12-05',\n        'location': 'North Cove Lawn',\n        'attendees': 'about 40'}\n\n# pass 1: fill fields, save (PyMuPDF writes appearance streams on save)\ndoc = fitz.open('permit-form.pdf')\npage = doc[0]\nfor w in page.widgets():\n    if w.field_name in VALS:\n        w.field_value = VALS[w.field_name]\n        print('filled', w.field_name, '=', w.field_value)\ndoc.save('tmp/permit-staged.pdf', garbage=3, deflate=True)\ndoc.close()\n\n# pass 2: flatten - move each widget appearance into page content, delete widgets, drop AcroForm\ndoc = fitz.open('tmp/permit-staged.pdf')\npage = doc[0]\ncontents = page.get_contents()\nbase = doc.xref_stream(contents[0])\nextra = b''\nfallback = []\nfor annot in list(page.annots() or []):\n    if annot.type[1].lower() != 'widget':\n        continue\n    xref = annot.xref\n    data = None\n    k = doc.xref_get_key(xref, 'AP N')\n    if isinstance(k, tuple) and len(k) == 2 and isinstance(k[1], int):\n        data = doc.xref_stream(k[1])\n    if data is None:\n        data = doc.xref_stream(xref)\n    name = doc.xref_get_key(xref, 'T')[1]\n    print('widget', repr(name), 'xref', xref, 'ap bytes', len(data) if data else None)\n    if data:\n        extra += b'\\n' + data\n    else:\n        fallback.append((name, annot.rect))\n    page.delete_annot(annot)\n\nfor name, rect in fallback:\n    page.insert_text((rect.x0 + 2, rect.y1 - 6), VALS[name], fontsize=11, fontname='helv')\n    print('insert_text fallback for', name)\n\ndoc.update_stream(contents[0], base + extra)\ncat = doc.pdf_catalog()\ndoc.xref_set_key(cat, 'AcroForm', 'null')\ndoc.save('out/permit-filled.pdf', garbage=4, deflate=True)\ndoc.close()\nprint('done')\n\n\n--- tmp/permit-staged.pdf --- (binary, 2614 bytes)\n\n--- tmp/staged2.pdf --- (binary, 3351 bytes)\n\n--- tmp/verify.py ---\nimport fitz\ndoc = fitz.open('out/permit-filled.pdf')\nprint('pages', doc.page_count)\nfor pno, page in enumerate(doc):\n    print('--- page', pno, 'text ---')\n    print(page.get_text())\n    print('widgets:', [ (w.field_name, w.field_value) for w in page.widgets() or [] ])\n    print('annots:', list(page.annots() or []))\ncat = doc.pdf_catalog()\nprint('AcroForm key:', doc.xref_get_key(cat, 'AcroForm'))\n# check image too\nfrom PIL import Image\nim = Image.open('out/feed-photo.jpg')\nprint('feed photo', im.size, im.format)\nimport hashlib, os\nfor f in ['launch.jpg','permit-form.pdf','event-details.txt']:\n    print(f, os.path.getsize(f))\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] search \"{\\\"pattern\\\": \\\"**/*\\\"}\" ok -> \"<WORKSPACE><WORKSPACE><WORKSPACE><WORKSPACE>\\\\AGENTS.md\"\n[step 1] read \"<WORKSPACE>\\\\event-details.txt\" ok -> \"Read file <WORKSPACE>\\\\event-details.txt, lines 1-9\\n1: From: Ines Varga\\n2: Subject: balloon launch permit\\n3: \\n4: Details for the park permit:\\n5: \\n6: Organizer: Tidewater Studio\\n7: Date: Saturday 5 December 2026\\n8: Where: North Cove Lawn\\n9: People: about 40\"\n[step 1] shell \"python -c \\\"from PIL import Image; im=Image.open('launch.jpg'); print(im.size, im.mode)\\\"; python -c \\\"import fitz; d=fitz.open('permit-form.pdf'); [print(p.get_text()) for p in d]\\\" 2>&1 | head -50\" ok -> \"(3000, 2000) RGB\\r\\nC:\\\\Users\\\\<USER>\\\\Code\\\\mengine-bench-ctl\\\\.venv\\\\Lib\\\\site-packages\\\\fitz\\\\__init__.py:17: FutureWarning: The `fitz` API is deprecated and will be removed in future. Use `import pymupdf` instead.\\r\\n  warnings.warn(\\r\\nPort Wrenfield Parks - Event Permit Application\\r\\nFill in every field. Applications are reviewed within 10 working days.\\r\\nOrganizer\\r\\nEvent date (YYYY-MM-DD)\\r\\nLocation in t[... 87 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\analyze.py\" ok -> \"Created file successfully: tmp/analyze.py\"\n[step 1] shell \"python tmp\\\\analyze.py 2>&1\" ok -> \"size 3000 2000\\r\\nmagenta px 126675\\r\\nbbox x 2350 2751 y 500 901\\r\\ncrop 1400 0 3000 2000\\r\\nballoon fully inside True\\r\\nfeed photo saved (1080, 1350)\\r\\npage 0 rect Rect(0.0, 0.0, 595.0, 842.0)\\r\\nwidget 'organizer' Text value '' rect Rect(200.0, 178.0, 520.0, 202.0)\\r\\nwidget 'event_date' Text value '' rect Rect(200.0, 218.0, 520.0, 242.0)\\r\\nwidget 'location' Text value '' rect Rect(200.0, 258.0, 520.0, 282.0)[... 336 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\fill.py\" ok -> \"Created file successfully: tmp/fill.py\"\n[step 1] shell \"python tmp\\\\fill.py 2>&1\" ok -> \"filled organizer = Tidewater Studio\\r\\nfilled event_date = 2026-12-05\\r\\nfilled location = North Cove Lawn\\r\\nfilled attendees = about 40\\r\\ndone\\r\\n\\u001b[31;1mC:\\\\Users\\\\<USER>\\\\Code\\\\mengine-bench-ctl\\\\.venv\\\\Lib\\\\site-packages\\\\fitz\\\\__init__.py:17: FutureWarning: The `fitz` API is deprecated and will be removed in future. Use `import pymupdf` instead.\\u001b[0m\\r\\n\\u001b[31;1m  warnings.warn(\\u001b[0m\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\verify.py\" ok -> \"Created file successfully: tmp/verify.py\"\n[step 1] shell \"python tmp\\\\verify.py 2>&1\" ok -> \"pages 1\\r\\n--- page 0 text ---\\r\\nPort Wrenfield Parks - Event Permit Application\\r\\nFill in every field. Applications are reviewed within 10 working days.\\r\\nOrganizer\\r\\nEvent date (YYYY-MM-DD)\\r\\nLocation in the park\\r\\nExpected attendees\\r\\nPort Wrenfield Parks Department, 2 Harbour Row. Form EP-3.\\r\\n\\r\\nwidgets: [('organizer', ''), ('event_date', ''), ('location', ''), ('attendees', '')]\\r\\nannots: []\\r\\nAcroForm k[... 348 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\dbg.py\" ok -> \"Created file successfully: tmp/dbg.py\"\n[step 1] shell \"python tmp\\\\dbg.py 2>&1\" ok -> \"original annots: []\\r\\noriginal widgets: [('organizer', ''), ('event_date', ''), ('location', ''), ('attendees', '')]\\r\\nupdated organizer has update()\\r\\nupdated event_date has update()\\r\\nupdated location has update()\\r\\nupdated attendees has update()\\r\\nstaged annots: []\\r\\nstaged widgets: [('organizer', 'Tidewater Studio'), ('event_date', '2026-12-05'), ('location', 'North Cove Lawn'), ('attendees', 'about [... 275 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "the original photo and form left as they were",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "photo is a JPEG",
+   true
+  ],
+  [
+   "photo is exactly 1080x1350",
+   true
+  ],
+  [
+   "balloon fully in frame and undistorted",
+   true
+  ],
+  [
+   "permit organizer filled",
+   false
+  ],
+  [
+   "permit event_date filled",
+   false
+  ],
+  [
+   "permit location filled",
+   false
+  ],
+  [
+   "permit attendees filled",
+   false
+  ],
+  [
+   "permit flattened",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 11,
+  "tool_calls": 11,
+  "tool_errors": 0,
+  "shell_commands": 5,
+  "shell_failures": 0,
+  "file_writes": 4,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 11481,
+  "reasoning_tokens": 8718,
+  "largest_turn_tokens": 5213
+ },
+ "deliverables": [],
+ "render": null
+}

@@ -1,0 +1,57 @@
+{
+ "task_id": "git-merge-conflict",
+ "prompts": [
+  "Our dungeon game's repo is {WS}/dropgame. The weekend-event branch has to go into main before the event starts, without losing anything main shipped while the branch was open. Commit the merge. The tests in tests/ stay as they are."
+ ],
+ "answers": [
+  "\n\nAll 4 tests pass (event, base loot, pity). Merge is committed, tree clean. No browser tabs or windows were opened.\n\n**Goal:** merge weekend-event into main before the event, without losing main's shipped work; tests in tests/ unchanged.\n\n**Action:**\n- `git merge weekend-event` from main → content conflict in `loot.py` only (both sides rewrote `__init__` and `drop`); test files merged cleanly (test_event.py added, test_pity.py untouched).\n- Resolved by combining both features: `LootTable.__init__(event_multiplier=1.0)` keeps both `event_multiplier` and `misses`; `drop` uses `chance = min(1.0, RARE_CHANCE * event_multiplier)` plus the pity rule `misses >= PITY_LIMIT or roll < chance` → rare and reset, else `misses += 1` → common.\n- Committed as merge commit `c5f932d` (message \"Merge branch 'weekend-event'\", author matching repo history); did not touch tests/.\n\n**Result / how I know it's right:**\n- `python -m unittest discover -s dropgame/tests -t dropgame -v` → `Ran 4 tests ... OK`: event rare-chance, base low/high roll, pity timer all pass, proving neither feature was lost and tests stayed as they are.\n- Graph confirms history: `c5f932d` (merge) ← `b24e86b` (event) + `1fd1a05` (pity, main's shipped work) ← `dc7d96d`.\n- `git status --short` after merge: clean.\n\n**Assumptions:** both features must coexist (the event multiplier scales the base chance, pity counts commons in a row regardless of source); the default `event_multiplier=1.0` makes pre-existing `LootTable()` call sites behave as before; a rare from pity counts as a rare that resets the pity counter, matching main's documented behavior."
+ ],
+ "diff": "M dropgame/loot.py\nA dropgame/tests/test_event.py\n\n--- dropgame/loot.py ---\n\"\"\"Loot drops for the dungeon crawler.\"\"\"\n\nRARE_CHANCE = 0.05\nPITY_LIMIT = 10\n\n\nclass LootTable:\n    \"\"\"Decides what one defeated monster drops.\"\"\"\n\n    def __init__(self, event_multiplier: float = 1.0) -> None:\n        self.event_multiplier = event_multiplier\n        self.misses = 0\n\n    def drop(self, roll: float) -> str:\n        \"\"\"Return \"rare\" or \"common\" for a roll in [0, 1).\n\n        A roll below the rare chance drops a rare.\n        During an event the rare chance is RARE_CHANCE times event_multiplier, capped at 1.\n        Pity timer: after PITY_LIMIT common drops in a row, the next drop is rare whatever the roll.\n        Any rare drop, however it came, resets the count of commons in a row to zero.\n        \"\"\"\n        chance = min(1.0, RARE_CHANCE * self.event_multiplier)\n        if self.misses >= PITY_LIMIT or roll < chance:\n            self.misses = 0\n            return \"rare\"\n        self.misses += 1\n        return \"common\"\n\n\n--- dropgame/tests/test_event.py ---\nimport unittest\n\nfrom loot import LootTable\n\n\nclass EventTest(unittest.TestCase):\n    def test_the_event_raises_the_rare_chance(self) -> None:\n        self.assertEqual(LootTable(event_multiplier=2.0).drop(0.08), \"rare\")\n        self.assertEqual(LootTable().drop(0.08), \"common\")\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"git -C dropgame status; git -C dropgame branch -a; git -C dropgame log --oneline --graph --all -20\" ok -> \"On branch main\\nnothing to commit, working tree clean\\n* main\\n  weekend-event\\n* 1fd1a05 Pity timer: a rare after 10 misses in a row\\n| * b24e86b Weekend event: multiply the rare chance\\n|/  \\n* dc7d96d Add loot drops\"\n[step 1] shell \"git -C dropgame diff main weekend-event --stat; git -C dropgame show weekend-event --stat --oneline\" ok -> \"loot.py             | 14 ++++++--------\\n tests/test_event.py |  9 +++++++++\\n tests/test_pity.py  | 10 ----------\\n 3 files changed, 15 insertions(+), 18 deletions(-)\\nb24e86b Weekend event: multiply the rare chance\\n loot.py             | 9 ++++++---\\n tests/test_event.py | 9 +++++++++\\n 2 files changed, 15 insertions(+), 3 deletions(-)\"\n[step 1] shell \"git -C dropgame show 1fd1a05; git -C dropgame show b24e86b\" ok -> \"commit 1fd1a0574f6f43fdb28ac67cbaf7f8aa7e874fb8\\nAuthor: Drop Game Dev <[REDACTED:email]>\\nDate:   Wed Mar 4 12:00:00 2026 +0000\\n\\n    Pity timer: a rare after 10 misses in a row\\n\\ndiff --git a/loot.py b/loot.py\\nindex a0c99ca..6f7f0e1 100644\\n--- a/loot.py\\n+++ b/loot.py\\n@@ -1,19 +1,24 @@\\n \\\"\\\"\\\"Loot drops for the dungeon crawler.\\\"\\\"\\\"\\n \\n RARE_CHANCE = 0.05\\n+PITY_LIMIT = 10\\n \\n \\n class LootTable:\\n     \\\"\\\"\\\"[... 2648 chars cut by the benchmark]\"\n[step 1] shell \"git -C dropgame merge weekend-event --no-edit; git -C dropgame status --short\" ok -> \"Auto-merging loot.py\\nCONFLICT (content): Merge conflict in loot.py\\nAutomatic merge failed; fix conflicts and then commit the result.\\nUU loot.py\\nA  tests/test_event.py\"\n[step 1] write \"dropgame/loot.py\" ok -> \"Wrote file successfully: dropgame/loot.py\"\n[step 1] shell \"git -C dropgame add loot.py; git -C dropgame -c user.name=\\\"Drop Game Dev\\\" -c user.email=\\\"[REDACTED:email]\\\" commit --no-edit; python -m unittest discover -s dropgame/tests -v; git -C dropgame log --oneline --graph -5; git -C dropgame status --short\" ok -> \"[main c5f932d] Merge branch 'weekend-event'\\ntest_event (unittest.loader._FailedTest.test_event) ... ERROR\\r\\ntest_loot (unittest.loader._FailedTest.test_loot) ... ERROR\\r\\ntest_pity (unittest.loader._FailedTest.test_pity) ... ERROR\\r\\n\\r\\n======================================================================\\r\\nERROR: test_event (unittest.loader._FailedTest.test_event)\\r\\n-------------------------------------[... 2837 chars cut by the benchmark]\"\n[step 1] shell \"python -m unittest discover -s dropgame/tests -t dropgame -v\" ok -> \"test_the_event_raises_the_rare_chance (tests.test_event.EventTest.test_the_event_raises_the_rare_chance) ... ok\\r\\ntest_a_high_roll_drops_a_common (tests.test_loot.DropTest.test_a_high_roll_drops_a_common) ... ok\\r\\ntest_a_low_roll_drops_a_rare (tests.test_loot.DropTest.test_a_low_roll_drops_a_rare) ... ok\\r\\ntest_the_drop_after_the_limit_is_rare (tests.test_pity.PityTest.test_the_drop_after_the_limit_i[... 117 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "visible tests left untouched",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "main is a merge commit of the old main and the branch",
+   true
+  ],
+  [
+   "no conflict markers in tracked files",
+   true
+  ],
+  [
+   "hidden pity timer tests pass",
+   true
+  ],
+  [
+   "hidden event multiplier tests pass",
+   true
+  ],
+  [
+   "hidden test with both together passes",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2473,
+  "reasoning_tokens": 1180,
+  "largest_turn_tokens": 702
+ },
+ "deliverables": [],
+ "render": null
+}
