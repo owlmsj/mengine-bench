@@ -1,0 +1,53 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [
+  "\n\n**[goal]** Batch helper `run_tasks(tasks, max_concurrent)` in `./run.py`, stdlib, 3.11+.\n\n**[action]** Implemented with `asyncio.TaskGroup` + `asyncio.Semaphore`: each zero-arg callable is invoked inside a slot, so at most `max_concurrent` jobs run; TaskGroup cancels and awaits every job on failure or cancellation, so `finally`/`async with` cleanup always runs. Assumptions stated in the docstring: `max_concurrent` clamped to ≥1 (no deadlock), fail-fast on job failure (first failure raised as `ExceptionGroup`, siblings cancelled+awaited). Verified with `test_run.py`: cap check (peak=3 of 10 jobs), full completion, cleanup-on-cancel, fail-fast sibling cleanup, empty batch.\n\n**[result]** All checks pass:\n```\ncap OK: peak=3, finished=10\ncompletion OK\ncleanup-on-cancel OK\nfail-fast + sibling cleanup OK\nempty batch OK\nALL OK\n```\nArtifacts: `run.py` (helper), `test_run.py` (regression test). No browser tabs, windows or apps were opened, so nothing to close.\n\n**[next]** None; if you prefer non-fail-fast semantics (all jobs keep running after one failure), say so and I'll swap TaskGroup for gather."
+ ],
+ "diff": "A run.py\nA test_run.py\n\n--- run.py ---\n\"\"\"Batch job runner with a bound on concurrent jobs.\n\n    from run import run_tasks\n    await run_tasks([make_job_a, make_job_b], max_concurrent=4)\n\nEach entry of ``tasks`` is a zero-argument callable that returns an\nawaitable job; the callable is invoked after a concurrency slot is\nacquired, so at most ``max_concurrent`` jobs ever run at once.\n\nAssumptions (the brief leaves these open):\n- ``max_concurrent`` is a positive int; values below 1 are clamped to 1\n  so the batch cannot deadlock.\n- If any job raises, the run is fail-fast: remaining jobs are cancelled\n  and the first failure is raised (as an ``ExceptionGroup``, per\n  ``asyncio.TaskGroup`` semantics).\n- On Ctrl+C (or any cancellation of the caller) every in-flight and\n  queued job is cancelled and awaited before the error propagates, so\n  job ``finally`` blocks and ``async with`` cleanup always run.\n\"\"\"\n\nimport asyncio\n\n\nasync def run_tasks(tasks, max_concurrent):\n    \"\"\"Run the jobs from *tasks*, at most *max_concurrent* at once.\n\n    Returns when every job has completed (or after all jobs have been\n    cancelled and awaited, if the run is cancelled or a job fails).\n    \"\"\"\n    sem = asyncio.Semaphore(max(1, int(max_concurrent)))\n\n    async def run_one(task):\n        async with sem:\n            await task()\n\n    async with asyncio.TaskGroup() as group:\n        for task in tasks:\n            group.create_task(run_one(task))\n\n\n--- test_run.py ---\nimport asyncio\n\nfrom run import run_tasks\n\n\nasync def main():\n    # 1. At most max_concurrent jobs run at once, all 10 complete.\n    active = 0\n    peak = 0\n    finished = 0\n\n    def make_job():\n        async def job():\n            nonlocal active, peak, finished\n            active += 1\n            peak = max(peak, active)\n            await asyncio.sleep(0.05)\n            active -= 1\n            finished += 1\n        return job\n\n    await run_tasks([make_job() for _ in range(10)], 3)\n    assert peak <= 3, f\"peak={peak} exceeded max_concurrent=3\"\n    assert peak == 3, f\"peak={peak}, expected to reach the cap of 3\"\n    assert finished == 10, f\"finished={finished}\"\n    print(f\"cap OK: peak={peak}, finished={finished}\")\n\n    # 2. All jobs complete when nothing fails.\n    done = []\n\n    def make_i(i):\n        async def job():\n            await asyncio.sleep(0.01)\n            done.append(i)\n        return job\n\n    await run_tasks([make_i(i) for i in range(5)], 2)\n    assert sorted(done) == [0, 1, 2, 3, 4], done\n    print(\"completion OK\")\n\n    # 3. Cancellation (Ctrl+C simulation): job cleanup (finally) must run.\n    cleaned = []\n\n    async def long_job():\n        try:\n            await asyncio.sleep(30)\n        finally:\n            cleaned.append(1)\n\n    outer = asyncio.create_task(run_tasks([lambda: long_job()], 4))\n    await asyncio.sleep(0.1)\n    outer.cancel()\n    try:\n        await outer\n    except asyncio.CancelledError:\n        pass\n    assert cleaned == [1], f\"cleanup did not run: cleaned={cleaned}\"\n    print(\"cleanup-on-cancel OK\")\n\n    # 4. A failing job cancels siblings; cleanup of siblings still runs.\n    sib_cleaned = []\n\n    async def failing():\n        raise ValueError(\"boom\")\n\n    async def sibling():\n        try:\n            await asyncio.sleep(30)\n        finally:\n            sib_cleaned.append(1)\n\n    try:\n        await run_tasks([lambda: failing(), lambda: sibling()], 2)\n        raise AssertionError(\"expected ExceptionGroup\")\n    except* ValueError as eg:\n        assert len(eg.exceptions) == 1\n    assert sib_cleaned == [1], f\"sibling cleanup did not run: {sib_cleaned}\"\n    print(\"fail-fast + sibling cleanup OK\")\n\n    # 5. Empty batch returns immediately.\n    await run_tasks([], 3)\n    print(\"empty batch OK\")\n\n\nasyncio.run(main())\nprint(\"ALL OK\")\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Created file successfully: <WORKSPACE>/run.py\"\n[step 1] write \"<WORKSPACE>\\\\test_run.py\" ok -> \"Created file successfully: <WORKSPACE>/test_run.py\"\n[step 1] shell \"python test_run.py\" ok -> \"cap OK: peak=3, finished=10\\r\\ncompletion OK\\r\\ncleanup-on-cancel OK\\r\\nfail-fast + sibling cleanup OK\\r\\nempty batch OK\\r\\nALL OK\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 4,
+  "tool_calls": 3,
+  "tool_errors": 0,
+  "shell_commands": 1,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 6712,
+  "reasoning_tokens": 5108,
+  "largest_turn_tokens": 5466
+ },
+ "deliverables": [],
+ "render": null
+}
