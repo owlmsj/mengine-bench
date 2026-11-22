@@ -1,0 +1,79 @@
+{
+ "task_id": "cmp-handoff",
+ "prompts": [
+  "You are handing this debugging work to a colleague who will never see {WS}/session/transcript.md. Write {WS}/HANDOFF.md, at most 1000 characters, so they can carry on from where it really stands.",
+  "You just took over this work, and {WS}/HANDOFF.md is all you have. Where was the recipe applied, what are the final decode speed and VRAM, which quantization was discarded, what is still pending, and which command measures it again? Record it in {WS}/result.json: file_line, final_decode, final_vram_mib, discarded_quant, pending, measure_command."
+ ],
+ "answers": [
+  "\n\n[goal] Write `./HANDOFF.md` (≤1000 chars) so a colleague who never sees `./session/transcript.md` can carry on from the real state of the debug work.\n\n[action] Read the transcript to extract the actual state (not the boilerplate tool lines), checked the workspace to ground my assumptions, wrote the file, and measured its length twice.\n\n[result] `HANDOFF.md` is **989 characters** — within the 1000 limit (measured: `chars: 989`). It captures:\n- Baseline: decode 37.8 t/s, VRAM 7881 MiB at 128k.\n- Root cause: 7881 MiB = WDDM ceiling; Shared Usage showed 1494 MiB spilled, so \"all on GPU\" was false.\n- Fix: `--no-mmproj-offload -ub 512` → VRAM 7697 MiB, decode 38.0 t/s (median of 3); quant survey (Q6_K discarded, Q4_K_M fallback); applied at `scripts/start_server.ps1:165` and `profiles/local/local-9b.json`.\n- Open item: evals README still cites the removed `check_vision.ps1`.\n- Verify + assumptions, including that this workspace holds only `session/` and `AGENTS.md`.\n\n[what I found and how I know it's right] The transcript's only non-boilerplate content is the measurement narrative (lines 30, 44, 124, 132, 185, 222). I built the handoff strictly from those concrete numbers and file references, and I know the length is right because I measured it with a script (`Get-Content -Raw ... .Length` → 989) rather than estimating, and re-verified after the tightening pass that cut it from 1048 to 989. I opened no browser tabs, windows, or apps, so there was nothing to close.\n\n[next] The colleague's next action is the one open item: fix the `check_vision.ps1` reference in the evals README, then re-run the measure command to confirm no spill.",
+  "\n\n**[goal]** Extract from `HANDOFF.md` the five requested facts into `./result.json`.\n\n**[action]** Read `HANDOFF.md` (lines 1–15), checked the workspace (only `AGENTS.md` + `HANDOFF.md` — no `session/`, no repo checkout), wrote `result.json`, validated it parses with all six keys.\n\n**[result]** `result.json` contents (all sourced from `HANDOFF.md`):\n- **file_line**: `scripts/start_server.ps1:165` (local9 block) + profile `profiles/local/local-9b.json` (handoff line 8)\n- **final_decode**: `38.0 t/s` (median of 3; handoff line 6)\n- **final_vram_mib**: `7697` (handoff line 6)\n- **discarded_quant**: `Q6_K` — 7.03 GiB doesn't fit at 128k; Q4_K_M kept only as fallback (handoff line 7)\n- **pending**: evals README still cites `check_vision.ps1`, which no longer exists; update or remove the reference (handoff lines 10–11)\n- **measure_command**: `scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024 --no-mmproj-offload -ub 512` (baseline command from line 4 + the new flags from line 6, per \"rerun the measure command with the new flags\", line 13)\n\n**[next]** No open items in this task; no browser tabs or windows were opened, so nothing to close.\n\n**Assumptions stated:**\n1. \"The recipe\" = the `--no-mmproj-offload -ub 512` fix; \"where applied\" = the two locations the handoff names, with the line number only available for `start_server.ps1`.\n2. The workspace holds no repo checkout (contrary to the handoff's line-15 note about a `session/` folder), so `start_server.ps1:165` is trusted as written in the handoff and could not be re-verified on disk — per the handoff's own assumption that transcript numbers are trusted as measured.\n3. `measure_command` is the baseline measure command *with* the new flags, since the handoff says to rerun \"with the new flags\"; without them it would measure the pre-fix state.\n\n**How I know it's right:** every value maps to a specific numbered line in `HANDOFF.md` (cited above); `result.json` was written, then parsed with Python — all six keys present, `final_vram_mib` = 7697 as expected. The only unverifiable detail is the file/line on disk, which the handoff asserts and the workspace cannot contradict."
+ ],
+ "diff": "A HANDOFF.md\nA result.json\nD session/transcript.md\n\n--- HANDOFF.md ---\n# HANDOFF — local-9b 128k\n\nDone:\n- Baseline (`scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`): decode 37.8 t/s, VRAM 7881 MiB.\n- Root cause: 7881 MiB is the WDDM ceiling; Shared Usage showed 1494 MiB spilled to shared memory, so 'all on GPU' was false.\n- Fix: `--no-mmproj-offload -ub 512` removes the spill: VRAM 7697 MiB, decode 38.0 t/s (median of 3).\n- Quants: Q6_K (7.03 GiB) does not fit at 128k, discarded; Q4_K_M fits at 7305 MiB / 40.4 t/s, fallback only.\n- Applied in the local9 block of `scripts/start_server.ps1:165` and in profile `profiles/local/local-9b.json`.\n\nLeft to do (only open item):\n- The evals README still cites `check_vision.ps1`, which no longer exists. Update or remove that reference.\n\nVerify: rerun the measure command with the new flags; expect ≤7697 MiB, no Shared Usage spill, decode ≈38 t/s.\n\nAssumptions: transcript numbers trusted as measured; this workspace holds only `session/` and `AGENTS.md`, so those repo files live in the real checkout.\n\n\n--- result.json ---\n{\n  \"file_line\": \"scripts/start_server.ps1:165 (local9 block); also profile profiles/local/local-9b.json\",\n  \"final_decode\": \"38.0 t/s (median of 3)\",\n  \"final_vram_mib\": 7697,\n  \"discarded_quant\": \"Q6_K (7.03 GiB, does not fit at 128k; Q4_K_M kept as fallback at 7305 MiB / 40.4 t/s)\",\n  \"pending\": \"The evals README still cites check_vision.ps1, which no longer exists; update or remove that reference.\",\n  \"measure_command\": \"scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024 --no-mmproj-offload -ub 512\"\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\" ok -> \"Read directory <WORKSPACE>, entries 1-2\\nsession\\\\\\nAGENTS.md\"\n[step 1] read \"<WORKSPACE>\\\\session\\\\transcript.md\" ok -> \"Read file <WORKSPACE>\\\\session\\\\transcript.md, lines 1-225\\n1: [agent] Opened the GPU panel; the graphs say nothing the counter does not already say. (step 0)\\n2: [tool] ok, 764 lines of output omitted\\n3: \\n4: [user] The local model needs 128k. Measure local-9b Q5 at that context.\\n5: \\n6: [agent] Checked the flag documentation in --help; th[... 10691 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\AGENTS.md\" ok -> \"Read file <WORKSPACE>\\\\AGENTS.md, lines 1-4\\n1: Use any skill, tool or MCP server you have. Write local files only inside this directory.\\n2: You may read installed tools and skills outside it, but not other task workspaces, runs or benchmark answers.\\n3: Other programs run on this machine: stop only the processes you started, by their id[... 112 chars cut by the benchmark]\"\n[step 1] search \"{\\\"pattern\\\": \\\"**/*\\\"}\" ok -> \"<WORKSPACE><WORKSPACE>\\\\AGENTS.md\"\n[step 1] write \"<WORKSPACE>\\\\HANDOFF.md\" ok -> \"Created file successfully: HANDOFF.md\"\n[step 1] shell \"powershell -NoProfile -Command \\\"$c = Get-Content -Raw '<WORKSPACE>\\\\HANDOFF.md'; Write-Output ('chars: ' + $c.Length); Write-Output ('lines: ' + ($c -split \\\\\\\"`n\\\\\\\").Count)\\\"\" failed -> \"At line:1 char:138\\r\\n+ ... esh-4dne32fo\\\\workspace\\\\HANDOFF.md'; Write-Output ('chars: ' + .Length ...\\r\\n+                                                                  ~\\r\\nYou must provide a value expression following the '+' operator.\\r\\nAt line:1 char:139\\r\\n+ ... 32fo\\\\workspace\\\\HANDOFF.md'; Write-Output ('chars: ' + .Length); Write ...\\r\\n+                                                           ~~~[... 1467 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\count.ps1\" ok -> \"Created file successfully: count.ps1\"\n[step 1] shell \"pwsh -NoProfile -File \\\"<WORKSPACE>\\\\count.ps1\\\"\" ok -> \"chars: 1048\"\n[step 1] write \"<WORKSPACE>\\\\HANDOFF.md\" ok -> \"Wrote file successfully: HANDOFF.md\"\n[step 1] shell \"pwsh -NoProfile -File \\\"<WORKSPACE>\\\\count.ps1\\\"\" ok -> \"chars: 989\"\n[step 1] read \"<WORKSPACE>\\\\HANDOFF.md\" ok -> \"Read file <WORKSPACE>\\\\HANDOFF.md, lines 1-15\\n1: # HANDOFF — local-9b 128k\\n2: \\n3: Done:\\n4: - Baseline (`scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`): decode 37.8 t/s, VRAM 7881 MiB.\\n5: - Root cause: 7881 MiB is the WDDM ceiling; Shared Usage showed 1494 MiB spilled to shared memory, so 'all on GPU' was false.\\n6: - Fix: `--no[... 748 chars cut by the benchmark]\"\n[step 1] shell \"Remove-Item \\\"<WORKSPACE>\\\\count.ps1\\\"\" ok -> \"(no output)\"\n[step 2] read \"<WORKSPACE>\\\\HANDOFF.md\" ok -> \"Read file <WORKSPACE>\\\\HANDOFF.md, lines 1-15\\n1: # HANDOFF — local-9b 128k\\n2: \\n3: Done:\\n4: - Baseline (`scripts/measure_decode.ps1 -Ctx 131072 -NPredict 1024`): decode 37.8 t/s, VRAM 7881 MiB.\\n5: - Root cause: 7881 MiB is the WDDM ceiling; Shared Usage showed 1494 MiB spilled to shared memory, so 'all on GPU' was false.\\n6: - Fix: `--[... 750 chars cut by the benchmark]\"\n[step 2] read \"<WORKSPACE>\" ok -> \"Read directory <WORKSPACE>, entries 1-2\\nAGENTS.md\\nHANDOFF.md\"\n[step 2] write \"<WORKSPACE>\\\\result.json\" ok -> \"Created file successfully: <WORKSPACE>/result.json\"\n[step 2] shell \"pwsh -NoProfile -Command \\\"$j = Get-Content .\\\\result.json -Raw | ConvertFrom-Json; $j.PSObject.Properties.Name -join ', '\\\"\" failed -> \"\\u001b[31;1m=: \\u001b[31;1mThe term '=' is not recognized as a name of a cmdlet, function, script file, or executable program.\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[31;1mCheck the spelling of the name, or if a path was included, verify that the path is correct and try again.\\u001b[0m\\r\\n\\u001b[31;1m.PSObject.Properties.Name: \\u001b[31;1mThe term '.PSObject.Properties.Name' is not recognized as a name of a cmdlet, function, script file, or executab[... 140 chars cut by the benchmark]\"\n[step 2] shell \"python -c \\\"import json;d=json.load(open('result.json',encoding='utf-8'));print(list(d.keys()));print(d['final_vram_mib'])\\\"\" ok -> \"['file_line', 'final_decode', 'final_vram_mib', 'discarded_quant', 'pending', 'measure_command']\\r\\n7697\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "summary exists and fits in 1000 characters",
+   true
+  ],
+  [
+   "summary keeps `--no-mmproj-offload`",
+   true
+  ],
+  [
+   "summary keeps `-ub 512`",
+   true
+  ],
+  [
+   "summary keeps `7697`",
+   true
+  ],
+  [
+   "answer file_line",
+   true
+  ],
+  [
+   "answer final_decode",
+   true
+  ],
+  [
+   "answer final_vram_mib",
+   true
+  ],
+  [
+   "answer discarded_quant",
+   true
+  ],
+  [
+   "answer pending",
+   true
+  ],
+  [
+   "answer measure_command",
+   true
+  ],
+  [
+   "does not repeat the spilled VRAM as final",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 17,
+  "tool_calls": 17,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 2,
+  "file_writes": 4,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 10507,
+  "reasoning_tokens": 6881,
+  "largest_turn_tokens": 2794
+ },
+ "deliverables": [],
+ "render": null
+}
