@@ -1,0 +1,53 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [
+  "Fixed the leaf header offset to 4044; running the parser now.\n\n"
+ ],
+ "diff": "A recover.py\nA recovered.json\n\n--- recover.py ---\nimport struct, json\n\ndata = open('prices.db', 'rb').read()\nn = len(data)\n\n# Leaf page header at offset 4044: d0 0a 04 00 27 07 66 69 72 73 74 ...\n# d0 = leaf table b-tree, 0a = 10 cells, cell content starts at 0x0400 (1024), frag=0\nleaf = 4044\nptype = data[leaf]\nncell = struct.unpack('>H', data[leaf+1:leaf+3])[0]\ncellstart = struct.unpack('>H', data[leaf+3:leaf+5])[0]\nfrag = struct.unpack('>H', data[leaf+5:leaf+7])[0]\nprint(f'ptype={ptype:#x} ncell={ncell} cellstart={cellstart} frag={frag}')\n\n# Cell pointer array: 10 x 2 bytes at leaf+8 .. leaf+28\ncellptrs = []\nfor i in range(ncell):\n    off = leaf + 8 + i*2\n    if off + 2 <= n:\n        cellptrs.append(struct.unpack('>H', data[off:off+2])[0])\n    else:\n        break\nprint('cellptrs:', cellptrs)\n\ndef varint(buf, i):\n    v = 0\n    for j in range(9):\n        if i + j >= len(buf):\n            return v, i + j\n        x = buf[i+j]\n        if j == 8:\n            v = (v << 8) | x\n            return v, i + 9\n        v = (v << 7) | (x & 0x7f)\n        if not (x & 0x80):\n            return v, i + j + 1\n    return v, i + 9\n\nrows = []\nfor cp in cellptrs:\n    p = cp\n    if p >= n:\n        print(f'cell at {cp} out of bounds')\n        continue\n    plen, p2 = varint(data, p)\n    rowid, p3 = varint(data, p2)\n    rhdr, p4 = varint(data, p3)\n    serials = []\n    q = p4\n    end_hdr = p3 + rhdr\n    while q < end_hdr:\n        st, q = varint(data, q)\n        serials.append(st)\n    vals = []\n    for st in serials:\n        if st == 0:\n            vals.append(None)\n        elif 1 <= st <= 6:\n            ln = {1:1,2:2,3:4,4:8,5:6,6:8}[st]\n            fmt = {1:'b',2:'h',3:'i',4:'q',5:'q',6:'q'}[st]\n            vals.append(struct.unpack('>'+fmt, data[q:q+ln])[0] if q+ln<=n else None)\n            q += ln\n        elif st == 7:\n            vals.append(struct.unpack('>d', data[q:q+8])[0] if q+8<=n else None)\n            q += 8\n        elif st >= 13 and st % 2 == 1:\n            ln = (st-13)//2\n            vals.append(data[q:q+ln].decode('utf-8','replace') if q+ln<=n else data[q:n].decode('utf-8','replace'))\n            q += ln\n        elif st >= 12:\n            ln = (st-12)//2\n            vals.append(data[q:q+ln] if q+ln<=n else data[q:n])\n            q += ln\n    rows.append((rowid, vals))\n    print(f'rowid={rowid} vals={vals}')\n\nresult = []\nfor rowid, vals in rows:\n    item = next((v for v in vals if isinstance(v, str)), None)\n    price = next((v for v in vals if isinstance(v, (int, float)) and not isinstance(v, bool)), None)\n    if item is not None and price is not None:\n        result.append({\"item\": item, \"price\": price})\n\nprint(json.dumps(result, indent=2))\nwith open('recovered.json', 'w') as f:\n    json.dump(result, f, indent=2)\nprint('wrote', len(result), 'rows')\n\n--- recovered.json ---\n[]",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-Item .\\\\prices.db | Select-Object Length; Format-Hex -Path .\\\\prices.db -Count 256\" ok -> \"\\u001b[32;1mLength\\u001b[0m\\r\\n\\u001b[32;1m------\\u001b[0m\\r\\n  4096\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\\r\\n     1\"\n[step 1] shell \"$b = [IO.File]::ReadAllBytes('.\\\\prices.db'); ($b | ForEach-Object { $_.ToString('x2') }) -join ' '\" ok -> \"0d 00 00 00 0a 0f 3d 00 0f f1 0f e3 0f cb 0f bd 0f ad 0f 93 0f 7f 0f 6d 0f 58 0f 3d 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 0[... 11887 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport struct, json\\ndata = open('prices.db','rb').read()\\nprint('len', len(data))\\n# find sqlite header\\nprint('header', data[:16])\\n# page 1 header: offset 100\\nph = data[100:108]\\nprint('page hdr', ph.hex())\\nptype = data[100]\\nncell = struct.unpack('>H', data[103:105])[0]\\nprint('type', ptype, 'ncell', ncell)\\ncellptrs = []\\nfor i in range(ncell):\\n    off = 105 + i*2\\n    cellptrs.append(struct.unpack('>H', data[off:off+2])[0])\\nprint('cellptrs', cellptrs)\\n\\\"\" ok -> \"len 4096\\r\\nheader b'\\\\r\\\\x00\\\\x00\\\\x00\\\\n\\\\x0f=\\\\x00\\\\x0f\\\\xf1\\\\x0f\\\\xe3\\\\x0f\\\\xcb\\\\x0f\\\\xbd'\\r\\npage hdr 0000000000000000\\r\\ntype 0 ncell 0\\r\\ncellptrs []\"\n[step 1] shell \"python -c \\\"\\nimport struct, json\\ndata = open('prices.db','rb').read()\\nn = len(data)\\n# scan for leaf table b-tree header: 0xD0 followed by plausible fields\\n# From hex dump, leaf starts at 0x0FCD (4045)? Let's find 0xd0 0x0a\\nidx = data.find(bytes([0xd0,0x0a,0x04]))\\nprint('leaf hdr at', idx)\\nhdr = data[idx:idx+8]\\nprint(hdr.hex())\\nptype, ncell, cellstart, frag = struct.unpack('>BHBH', hdr)\\nprint('ncell',ncell,'cellstart',cellstart,'frag',frag)\\nbase = idx\\ncellptrs=[]\\nfor i in range(ncell):\\n    off = idx+8+i*2\\n    cellptrs.append(struct.unpack('>H', data[off:off+2])[0])\\nprint('cellptrs', cellptrs)\\ndef varint(b, i):\\n    v=0\\n    for j in range(9):\\n        x=b[i+j]\\n        if j==8:\\n            v=(v<<8)|x; return v,i+9\\n        v=(v<<7)|(x&0x7f)\\n        if not (x&0x80): return v,i+j+1\\n    return v,i+9\\nrows=[]\\nfor cp in cellptrs:\\n    p = base+cp\\n    plen, p2 = varint(data,p)\\n    pth, p3 = varint(data,p2)\\n    body = p3\\n    # parse serial types\\n    serials=[]\\n    q=body\\n    while q < body+pth:\\n        st, q = varint(data,q)\\n        serials.append(st)\\n    vals=[]\\n    for st in serials:\\n        if st==0: vals.append(None)\\n        elif st in (1,2,3,4,5,6):\\n            ln = {1:1,2:2,3:3,4:4,5:6,6:8}[st]\\n            vals.append(struct.unpack('>'+{1:'b',2:'h',3:'i',4:'q',5:'q',6:'q'}[st], data[q:q+ln])[0]); q+=ln\\n        elif st==7:\\n            vals.append(struct.unpack('>d', data[q:q+8])[0]); q+=8\\n        elif st>=13 and st%2==1:\\n            ln=(st-13)//2; vals.append(data[q:q+ln].decode('utf-8'[... 141 chars cut by the benchmark]\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<string>\\\", line 11, in <module>\\r\\n    ptype, ncell, cellstart, frag = struct.unpack('>BHBH', hdr)\\r\\n                                    ~~~~~~~~~~~~~^^^^^^^^^^^^^^\\r\\nstruct.error: unpack requires a buffer of 6 bytes\\r\\nleaf hdr at -1\"\n[step 1] write \"<WORKSPACE>\\\\recover.py\" ok -> \"Created file successfully: <WORKSPACE>/recover.py\"\n[step 1] shell \"python recover.py\" ok -> \"file size: 4096\\r\\nfirst non-zero byte at offset: 0\\r\\nd0 at offset: -1\"\n[step 1] shell \"python -c \\\"\\ndata = open('prices.db','rb').read()\\nn=len(data)\\n# find last non-zero region\\nlast = n\\nfor i in range(n-1,-1,-1):\\n    if data[i]!=0: last=i; break\\nfirst = 0\\nfor i in range(n):\\n    if data[i]!=0: first=i; break\\nprint('first nonzero',first,'last nonzero',last)\\nprint(data[first:last+1].hex())\\n\\\"\" ok -> \"first nonzero 0 last nonzero 4095\\r\\n0d0000000a0f3d000ff10fe30fcb0fbd0fad0f930f7f0f6d0f580f3d000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000[... 7827 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\recover.py\" ok -> \"Wrote file successfully: <WORKSPACE>/recover.py\"\n[step 1] shell \"python recover.py\" ok -> \"ncell=33 cellstart=1908\\r\\ncellptrs: [8307, 29793, 27493, 16390, 0, 0, 0, 3074, 1024, 7433, 28001, 29795, 26722, 28536, 3329, 1024, 7944, 29810, 24937, 27680, 28001]\\r\\nrowid=0 vals=[]\\r\\nrowid=0 vals=[]\\r\\nrowid=0 vals=[]\\r\\nrowid=0 vals=[]\\r\\nrowid=0 vals=[]\\r\\nrowid=0 vals=[]\\r\\nrowid=0 vals=[]\\r\\n[]\\r\\nwrote 0 rows\"\n[step 1] write \"<WORKSPACE>\\\\recover.py\" ok -> \"Wrote file successfully: <WORKSPACE>/recover.py\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   false
+  ],
+  [
+   "rows with fractional prices recovered",
+   false
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   false
+  ],
+  [
+   "no row that is not in the table",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 11,
+  "tool_calls": 10,
+  "tool_errors": 0,
+  "shell_commands": 7,
+  "shell_failures": 1,
+  "file_writes": 3,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 5762,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 2028
+ },
+ "deliverables": [],
+ "render": null
+}

@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-ab-playtest",
+ "prompts": [
+  "We playtested two versions of the Pixel Arena tutorial and have to pick one for the next release. The export and its notes are in {WS}/telemetry. Should we ship B instead of A? Give a recommendation a skeptical lead would accept. Record it in {WS}/result.json with ship_b, sessions_a, sessions_b, completion_rate_a, completion_rate_b and p_value."
+ ],
+ "answers": [
+  "**[goal]** Decide whether to ship tutorial variant B over A, based on the playtest export, and record the verdict in `./result.json`.\n\n**[action]**\n- Read `telemetry/README.md` + `playtest_ab.csv` (1870 rows).\n- Wrote `analyze.py`: deduped by `session_id` (the README says the ETL resends sessions, so repeated rows are the same session), normalized `variant` (strip + lowercase), counted completions, and ran a two-proportion z-test (two-sided, α = 0.05).\n- Ran it, then re-read `result.json` to confirm the written values.\n\n**[result]**\n- 1870 rows → **1800 unique sessions** (70 duplicate rows removed; no conflicts found in `completed_tutorial` or `variant` across duplicates).\n- Balanced: **900 sessions each** for A and B.\n- Completion: **A = 342/900 = 0.3800**, **B = 420/900 = 0.4667** → B is +8.7 pts.\n- Two-proportion z-test: pooled p = 0.4233, z = 3.721, **two-sided p = 0.000198** (< 0.05).\n- Per the README release rule (ship only on a statistically significant gain at the 5% level), B's gain is significant → **ship B**.\n- `result.json` written: `ship_b: true, sessions_a: 900, sessions_b: 900, completion_rate_a: 0.38, completion_rate_b: 0.466667, p_value: 0.000198`.\n\n**Assumptions I made (the brief left these open):**\n1. **Dedup = keep first occurrence.** README says repeated rows are the same session; I verified no duplicate row ever disagreed on `completed_tutorial` or `variant`, so first-occurrence is safe.\n2. **Variant normalization = strip + lowercase**, per the README's note that `variant` may come lowercase or with a leading space. After normalization only `a`/`b` remain.\n3. **Two-sided two-proportion z-test** at α = 0.05, matching the README's \"statistically significant at the 5% level\" rule. With n = 900/arm and proportions near 0.4, the normal approximation is well within validity (all expected counts ≫ 5).\n4. **`completed_tutorial` is the only outcome** the release rule references, so I did not model `match_minutes` or `player_id` (no evidence a player played both arms; even if so, the rule is defined on completion, not on player-level pairing).\n\n**How I know it's right:** I ran the script and read its stdout (counts, z, p) and then re-read the written `result.json` — the file's values match the computed output exactly. The dedup consistency check printed no conflicts, so the 1800-session figure is trustworthy.\n\n**[next]** None — the brief is a single-turn decision and the artifact is in place. No browser tabs or apps were opened, so nothing to close."
+ ],
+ "diff": "A analyze.py\nA result.json\n\n--- analyze.py ---\nimport csv, json, math\nfrom collections import Counter\n\npath = r\"<WORKSPACE>\\telemetry\\playtest_ab.csv\"\n\nrows = []\nwith open(path, newline=\"\", encoding=\"utf-8\") as f:\n    for r in csv.DictReader(f):\n        rows.append(r)\n\ntotal_rows = len(rows)\n\n# Normalize variant: strip whitespace, lowercase\ndef norm_variant(v):\n    return v.strip().lower()\n\n# Dedupe by session_id (keep first occurrence)\nseen = {}\ndup_count = 0\nfor r in rows:\n    sid = r[\"session_id\"].strip()\n    if sid in seen:\n        dup_count += 1\n        # verify consistency\n        prev = seen[sid]\n        if prev[\"completed\"] != int(r[\"completed_tutorial\"]):\n            print(f\"CONFLICT: {sid} completed differs\")\n        if norm_variant(prev[\"variant\"]) != norm_variant(r[\"variant\"]):\n            print(f\"CONFLICT: {sid} variant differs: {prev['variant']!r} vs {r['variant']!r}\")\n    else:\n        seen[sid] = {\n            \"variant\": norm_variant(r[\"variant\"]),\n            \"completed\": int(r[\"completed_tutorial\"]),\n        }\n\nsessions = list(seen.values())\nn_sessions = len(sessions)\n\n# Count variants\nvariant_counts = Counter(s[\"variant\"] for s in sessions)\nprint(f\"Total rows: {total_rows}\")\nprint(f\"Unique sessions: {n_sessions}\")\nprint(f\"Duplicate rows removed: {dup_count}\")\nprint(f\"Variant counts (normalized): {dict(variant_counts)}\")\n\n# Check for unexpected variant values\nunexpected = [v for v in variant_counts if v not in (\"a\", \"b\")]\nif unexpected:\n    print(f\"WARNING: unexpected variant values: {unexpected}\")\n\na = [s for s in sessions if s[\"variant\"] == \"a\"]\nb = [s for s in sessions if s[\"variant\"] == \"b\"]\n\nn_a, n_b = len(a), len(b)\nc_a = sum(s[\"completed\"] for s in a)\nc_b = sum(s[\"completed\"] for s in b)\np_a = c_a / n_a\np_b = c_b / n_b\n\nprint(f\"\\nA: n={n_a}, completed={c_a}, rate={p_a:.6f}\")\nprint(f\"B: n={n_b}, completed={c_b}, rate={p_b:.6f}\")\n\n# Two-proportion z-test (two-sided, alpha=0.05)\np_pool = (c_a + c_b) / (n_a + n_b)\nse = math.sqrt(p_pool * (1 - p_pool) * (1/n_a + 1/n_b))\nz = (p_b - p_a) / se\n# two-sided p-value\np_value = 2 * (1 - 0.5 * (1 + math.erf(abs(z) / math.sqrt(2))))\n\nprint(f\"\\nPooled p: {p_pool:.6f}\")\nprint(f\"SE: {se:.6f}\")\nprint(f\"z: {z:.6f}\")\nprint(f\"p-value (two-sided): {p_value:.6f}\")\n\nsignificant = p_value < 0.05\nb_wins = p_b > p_a\nship_b = significant and b_wins\n\nprint(f\"\\nB > A: {b_wins}\")\nprint(f\"Significant at 5%: {significant}\")\nprint(f\"Ship B: {ship_b}\")\n\nresult = {\n    \"ship_b\": ship_b,\n    \"sessions_a\": n_a,\n    \"sessions_b\": n_b,\n    \"completion_rate_a\": round(p_a, 6),\n    \"completion_rate_b\": round(p_b, 6),\n    \"p_value\": round(p_value, 6),\n}\n\nout = r\"<WORKSPACE>\\result.json\"\nwith open(out, \"w\", encoding=\"utf-8\") as f:\n    json.dump(result, f, indent=2)\nprint(f\"\\nWrote {out}\")\nprint(json.dumps(result, indent=2))\n\n--- result.json ---\n{\r\n  \"ship_b\": true,\r\n  \"sessions_a\": 900,\r\n  \"sessions_b\": 900,\r\n  \"completion_rate_a\": 0.38,\r\n  \"completion_rate_b\": 0.466667,\r\n  \"p_value\": 0.000198\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\telemetry\" ok -> \"Read directory <WORKSPACE>\\\\telemetry, entries 1-2\\nplaytest_ab.csv\\nREADME.md\"\n[step 1] read \"<WORKSPACE>\\\\telemetry\\\\playtest_ab.csv\" ok -> \"Read file <WORKSPACE>\\\\telemetry\\\\playtest_ab.csv, lines 1-1871\\n1: session_id,variant,player_id,completed_tutorial,match_minutes\\n2: s01423,b,p0798,1,12.6\\n3: s01632,a,p0693,1,9.0\\n4: s00612,A,p0098,0,12.2\\n5: s00389, B,p0202,1,16.5\\n6: s00509, B,p0896,0,14.8\\n7: s00206,a,p0059,1,13.0\\n8: s01758,a,p0342,0,20.4\\n9: s01097, B,p0084,1,15.1\\n10: s[... 51433 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\telemetry\\\\README.md\" ok -> \"Read file <WORKSPACE>\\\\telemetry\\\\README.md, lines 1-5\\n1: # Playtest A/B - Pixel Arena tutorial\\n2: \\n3: Export from arena-panel. The ETL resends sessions: `session_id` is the unique key (repeated rows are the same session). `variant` may come lowercase or with a leading space. `completed_tutorial` is 0/1.\\n4: \\n5: Release rule: a variant[... 94 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\analyze.py\" ok -> \"Created file successfully: <WORKSPACE>/analyze.py\"\n[step 1] shell \"python \\\"<WORKSPACE>\\\\analyze.py\\\"\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\analyze.py\\\", line 26, in <module>\\r\\n    if prev[\\\"completed_tutorial\\\"] != r[\\\"completed_tutorial\\\"]:\\r\\n       ~~~~^^^^^^^^^^^^^^^^^^^^^^\\r\\nKeyError: 'completed_tutorial'\"\n[step 1] edit \"<WORKSPACE>\\\\analyze.py\" ok -> \"Edited <WORKSPACE>/analyze.py (1 replacement)\"\n[step 1] shell \"python \\\"<WORKSPACE>\\\\analyze.py\\\"\" ok -> \"Total rows: 1870\\r\\nUnique sessions: 1800\\r\\nDuplicate rows removed: 70\\r\\nVariant counts (normalized): {'b': 900, 'a': 900}\\r\\n\\r\\nA: n=900, completed=342, rate=0.380000\\r\\nB: n=900, completed=420, rate=0.466667\\r\\n\\r\\nPooled p: 0.423333\\r\\nSE: 0.023291\\r\\nz: 3.720957\\r\\np-value (two-sided): 0.000198\\r\\n\\r\\nB > A: True\\r\\nSignificant at 5%: True\\r\\nShip B: True\\r\\n\\r\\nWrote <HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fre[... 189 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\result.json\" ok -> \"Read file <WORKSPACE>\\\\result.json, lines 1-8\\n1: {\\r\\n2:   \\\"ship_b\\\": true,\\r\\n3:   \\\"sessions_a\\\": 900,\\r\\n4:   \\\"sessions_b\\\": 900,\\r\\n5:   \\\"completion_rate_a\\\": 0.38,\\r\\n6:   \\\"completion_rate_b\\\": 0.466667,\\r\\n7:   \\\"p_value\\\": 0.000198\\r\\n8: }\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "deduplicated session counts",
+   true
+  ],
+  [
+   "completion rates",
+   true
+  ],
+  [
+   "the gain is significant",
+   true
+  ],
+  [
+   "ship decision",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 8,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 1,
+  "file_writes": 2,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 2373,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1088
+ },
+ "deliverables": [],
+ "render": null
+}
