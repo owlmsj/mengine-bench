@@ -1,0 +1,57 @@
+{
+ "task_id": "infra-gpu-fit",
+ "prompts": [
+  "We want to serve the model described in {WS}/MODEL.md on rented GPUs. Today's offers are in {WS}/offers.csv and our rental rules in {WS}/POLICY.md. Pick the cheapest way to serve it under the policy and justify the choice. Record it in {WS}/result.json with weights_gb, kv_cache_gb, total_gb, offer_id, usd_per_hour and usd_per_month."
+ ],
+ "answers": [
+  "**Goal:** cheapest policy-compliant offer to serve arena-coder-70b; record in result.json.\n\n**Memory math (from MODEL.md, GB = 10⁹ bytes):**\n- weights: 70B params × 1 byte (FP8) = **70 GB**\n- KV cache: 327,680 B/token × 32,768 tokens × 4 seqs = 42,949,672,960 B = **42.9497 GB**\n- runtime overhead: **8 GB**\n- total: **120.9497 GB** → any offer needs ≥ 120.9497 GB usable.\n\n**Filtering (POLICY.md):** in_stock=yes; region ∈ {us-east, us-central, eu-west}; ≤ $4/h; memory ≥ 120.9497 GB.\n- of-101 (96 GB), of-104 (80 GB), of-113 (96 GB): too little memory\n- of-108: out of stock; of-111 (ap-southeast), of-137 (sa-east): region not allowed\n- of-129 ($4.89/h), of-133 ($7.10/h): over hourly cap\n- Pass: **of-117** $3.58/h (160 GB), of-120 $3.79/h (141 GB), of-124 $3.92/h (192 GB)\n\n**Choice:** of-117 (voltbay, us-central, 2× H100 80GB) — cheapest of the three at $3.58/h = $2,613.40/mo (730 h).\n\n**Result (result.json):** weights_gb 70, kv_cache_gb 42.9497, total_gb 120.9497, offer_id of-117, usd_per_hour 3.58, usd_per_month 2613.4.\n\n**Assumptions:** weights = params × bytes/param (FP8 = 1 B); KV cache sized for full context on all 4 sequences simultaneously (per MODEL.md line 12); memory check is total ≥ sum with no extra headroom (policy doesn't require any); monthly = hourly × 730 per policy.\n\n**How I know it's right:** computed in compute.py (ran, output above); every offer's skip/OK reason is printed; best = min price among the 3 passing offers; result.json re-read and matches. No browser tabs or apps were opened, so nothing to close."
+ ],
+ "diff": "A compute.py\nA result.json\n\n--- compute.py ---\nimport csv\n\n# MODEL.md\nweights_gb = 70  # 70e9 params * 1 byte (FP8) = 70 GB\nkv_per_token = 327_680  # bytes\nctx = 32_768\nseqs = 4\nkv_gb = kv_per_token * ctx * seqs / 1e9  # 42.94967296 GB\noverhead_gb = 8\ntotal_gb = weights_gb + kv_gb + overhead_gb  # 120.94967296\n\nprint(f\"weights_gb={weights_gb}\")\nprint(f\"kv_cache_gb={kv_gb}\")\nprint(f\"total_gb={total_gb}\")\n\n# POLICY.md\nHOUR_CAP = 4.0\nREGIONS = {\"us-east\", \"us-central\", \"eu-west\"}\nHOURS = 730\n\nrows = list(csv.DictReader(open(\"offers.csv\")))\ncands = []\nfor r in rows:\n    if r[\"in_stock\"] != \"yes\":\n        print(f\"skip {r['offer_id']}: out of stock\")\n        continue\n    if r[\"region\"] not in REGIONS:\n        print(f\"skip {r['offer_id']}: region {r['region']}\")\n        continue\n    price = float(r[\"usd_per_hour\"])\n    if price > HOUR_CAP:\n        print(f\"skip {r['offer_id']}: ${price}/h over cap\")\n        continue\n    mem = int(r[\"gpu_count\"]) * float(r[\"vram_gb_per_gpu\"])\n    if mem < total_gb:\n        print(f\"skip {r['offer_id']}: {mem} GB < {total_gb:.4f} GB\")\n        continue\n    cands.append((price, r[\"offer_id\"], mem))\n    print(f\"OK   {r['offer_id']}: {mem} GB, ${price}/h, ${price*HOURS:.2f}/mo\")\n\ncands.sort()\nbest = cands[0]\nprint(f\"\\nBEST: {best[1]} ${best[0]}/h ${best[0]*HOURS:.2f}/mo\")\n\nimport json\nout = {\n    \"weights_gb\": weights_gb,\n    \"kv_cache_gb\": round(kv_gb, 4),\n    \"total_gb\": round(total_gb, 4),\n    \"offer_id\": best[1],\n    \"usd_per_hour\": best[0],\n    \"usd_per_month\": round(best[0] * HOURS, 2),\n}\njson.dump(out, open(\"result.json\", \"w\"), indent=2)\nprint(json.dumps(out, indent=2))\n\n--- result.json ---\n{\r\n  \"weights_gb\": 70,\r\n  \"kv_cache_gb\": 42.9497,\r\n  \"total_gb\": 120.9497,\r\n  \"offer_id\": \"of-117\",\r\n  \"usd_per_hour\": 3.58,\r\n  \"usd_per_month\": 2613.4\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\MODEL.md\" ok -> \"Read file <WORKSPACE>\\\\MODEL.md, lines 1-16\\n1: # Model to serve: arena-coder-70b\\n2: \\n3: | property | value |\\n4: | --- | --- |\\n5: | parameters | 70 billion |\\n6: | weight precision | 8-bit (FP8) |\\n7: | KV cache | 327,680 bytes per token (FP16, all layers, K and V) |\\n8: | context we want per sequence | 32,768 tokens |\\n9: | concurrent se[... 434 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\offers.csv\" ok -> \"Read file <WORKSPACE>\\\\offers.csv, lines 1-12\\n1: offer_id,provider,region,gpu,gpu_count,vram_gb_per_gpu,usd_per_hour,in_stock\\n2: of-101,cloudnine,us-east,RTX PRO 6000,1,96,1.79,yes\\n3: of-104,cloudnine,us-east,A100 80GB,1,80,1.29,yes\\n4: of-108,gridrent,eu-west,H100 80GB,2,80,3.1,no\\n5: of-111,gridrent,ap-southeast,RTX PRO 6000,2,96,2.9[... 349 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\POLICY.md\" ok -> \"Read file <WORKSPACE>\\\\POLICY.md, lines 1-8\\n1: # Rental policy\\n2: \\n3: - Hourly cap: US$ 4 per hour for the whole deployment. Nothing above it is rented.\\n4: - Rent only offers that are in stock now (`in_stock` = yes).\\n5: - Allowed regions: us-east, us-central, eu-west.\\n6: - `usd_per_hour` in offers.csv is the price of the whole offer [... 131 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\compute.py\" ok -> \"Created file successfully: <WORKSPACE>/compute.py\"\n[step 1] shell \"python compute.py\" ok -> \"weights_gb=70\\r\\nkv_cache_gb=42.94967296\\r\\ntotal_gb=120.94967296\\r\\nskip of-101: 96.0 GB < 120.9497 GB\\r\\nskip of-104: 80.0 GB < 120.9497 GB\\r\\nskip of-108: out of stock\\r\\nskip of-111: region ap-southeast\\r\\nskip of-113: 96.0 GB < 120.9497 GB\\r\\nOK   of-117: 160.0 GB, $3.58/h, $2613.40/mo\\r\\nOK   of-120: 141.0 GB, $3.79/h, $2766.70/mo\\r\\nOK   of-124: 192.0 GB, $3.92/h, $2861.60/mo\\r\\nskip of-129: $4.89/h over cap\\r\\nsk[... 247 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\result.json\" ok -> \"Read file <WORKSPACE>\\\\result.json, lines 1-8\\n1: {\\r\\n2:   \\\"weights_gb\\\": 70,\\r\\n3:   \\\"kv_cache_gb\\\": 42.9497,\\r\\n4:   \\\"total_gb\\\": 120.9497,\\r\\n5:   \\\"offer_id\\\": \\\"of-117\\\",\\r\\n6:   \\\"usd_per_hour\\\": 3.58,\\r\\n7:   \\\"usd_per_month\\\": 2613.4\\r\\n8: }\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "weights size",
+   true
+  ],
+  [
+   "KV cache size",
+   true
+  ],
+  [
+   "total memory needed",
+   true
+  ],
+  [
+   "cheapest feasible offer",
+   true
+  ],
+  [
+   "hourly price",
+   true
+  ],
+  [
+   "monthly price",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 6,
+  "tool_errors": 0,
+  "shell_commands": 1,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1690,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 692
+ },
+ "deliverables": [],
+ "render": null
+}

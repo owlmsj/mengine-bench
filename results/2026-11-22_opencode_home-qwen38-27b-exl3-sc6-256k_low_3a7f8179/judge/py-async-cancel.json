@@ -1,0 +1,53 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [
+  "The return type is now `list`, but the function doesn't actually return the results list — it returns `None` on the success path. Fixing that.\n\n"
+ ],
+ "diff": "A run.py\n\n--- run.py ---\n\"\"\"Batch task runner.\n\nProvides ``run_tasks``: run zero-argument callables that return awaitable\njobs, with a bound on how many jobs run at once.\n\nAssumptions (the brief leaves these open):\n- A \"job\" is the awaitable returned by the task callable; the callable is\n  invoked immediately (it is cheap), and the returned awaitable is what is\n  awaited under the concurrency limit.\n- ``max_concurrent`` is the maximum number of jobs awaiting simultaneously;\n  it must be >= 1.\n- Ctrl+C: ``KeyboardInterrupt`` is a BaseException, so a naive\n  ``asyncio.gather`` would leave in-flight jobs' ``finally`` blocks (cleanup\n  code) unrun. We catch the interrupt, cancel the in-flight jobs, and await\n  them so their cleanup runs, then re-raise the interrupt.\n- Exceptions from jobs are not swallowed: if any job raises, the first\n  exception propagates after all jobs have finished (gather semantics).\n- Standard library only, Python 3.11+.\n\"\"\"\n\nimport asyncio\nfrom typing import Awaitable, Callable, Sequence\n\n\nasync def run_tasks(tasks: Sequence[Callable[[], Awaitable[object]]],\n                    max_concurrent: int) -> list:\n    \"\"\"Run ``tasks`` with at most ``max_concurrent`` jobs in flight.\n\n    Each task is a zero-argument callable returning an awaitable job.\n    Returns when every job is done. If any job raises, the first exception\n    propagates once all jobs have finished. On Ctrl+C (KeyboardInterrupt),\n    in-flight jobs are cancelled and awaited so their cleanup code runs,\n    and the interrupt is then re-raised.\n    \"\"\"\n    if max_concurrent < 1:\n        raise ValueError(f\"max_concurrent must be >= 1, got {max_concurrent!r}\")\n\n    semaphore = asyncio.Semaphore(max_concurrent)\n\n    async def _run(task: Callable[[], Awaitable[object]]) -> object:\n        async with semaphore:\n            return await task()\n\n    children = [asyncio.ensure_future(_run(t)) for t in tasks]\n    try:\n        results = await asyncio.gather(*children, return_exceptions=True)\n    except BaseException:\n        # Ctrl+C (KeyboardInterrupt) or cancellation of run_tasks itself:\n        # cancel every in-flight job and await it so its finally/cleanup\n        # blocks run, then propagate the original exception.\n        for child in children:\n            if not child.done():\n                child.cancel()\n        await asyncio.gather(*children, return_exceptions=True)\n        raise\n    # Propagate the first job exception (if any) after all jobs finished.\n    for r in results:\n        if isinstance(r, BaseException):\n            raise r\n    return results",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Created file successfully: <WORKSPACE>/run.py\"\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Wrote file successfully: <WORKSPACE>/run.py\"\n[step 1] write \"<WORKSPACE>\\\\test_run.py\" ok -> \"Created file successfully: <WORKSPACE>/test_run.py\"\n[step 1] write \"<WORKSPACE>\\\\test_run.py\" ok -> \"Wrote file successfully: <WORKSPACE>/test_run.py\"\n[step 1] shell \"python <WORKSPACE>\\\\test_run.py\" failed -> \"PASS limit: peak = 3\\r\\nPASS done: all 5 finished\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\test_run.py\\\", line 86, in <module>\\r\\n    asyncio.run(main())\\r\\n    ~~~~~~~~~~~^^^^^^^^\\r\\n  File \\\"<HOME>\\\\AppData\\\\Roaming\\\\uv\\\\python\\\\cpython-3.13.14-windows-x86_64-none\\\\Lib\\\\asyncio\\\\runners.py\\\", line 196, in run\\r\\n    return[... 1238 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>\\\\test_run.py\" ok -> \"Edited <WORKSPACE>/test_run.py (1 replacement)\"\n[step 1] shell \"python <WORKSPACE>\\\\test_run.py\" failed -> \"PASS limit: peak = 3\\r\\nPASS done: all 5 finished\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\test_run.py\\\", line 86, in <module>\\r\\n    asyncio.run(main())\\r\\n    ~~~~~~~~~~~^^^^^^^^\\r\\n  File \\\"<HOME>\\\\AppData\\\\Roaming\\\\uv\\\\python\\\\cpython-3.13.14-windows-x86_64-none\\\\Lib\\\\asyncio\\\\runners.py\\\", line 196, in run\\r\\n    return[... 864 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>\\\\run.py\" ok -> \"Edited <WORKSPACE>/run.py (1 replacement)\"\n[step 1] shell \"python <WORKSPACE>\\\\test_run.py\" failed -> \"(no output)\"\n[step 1] shell \"python <WORKSPACE>\\\\test_run.py 2>&1; echo \\\"EXIT=$LASTEXITCODE\\\"\" ok -> \"EXIT=2\"\n[step 1] write \"<WORKSPACE>\\\\test_run_nosig.py\" ok -> \"Created file successfully: <WORKSPACE>/test_run_nosig.py\"\n[step 1] shell \"python <WORKSPACE>\\\\test_run_nosig.py 2>&1; echo \\\"EXIT=$LASTEXITCODE\\\"\" ok -> \"PASS limit: peak = 3\\r\\nPASS done: all 5 finished\\r\\nPASS error: raised after all finished: [0, 1]\\r\\nALL PASS (no ctrlc)\\r\\nEXIT=0\"\n[step 1] write \"<WORKSPACE>\\\\test_ctrlc.py\" ok -> \"Created file successfully: <WORKSPACE>/test_ctrlc.py\"\n[step 1] write \"<WORKSPACE>\\\\test_ctrlc.py\" ok -> \"Wrote file successfully: <WORKSPACE>/test_ctrlc.py\"\n[step 1] shell \"python <WORKSPACE>\\\\test_ctrlc.py 2>&1; echo \\\"EXIT=$LASTEXITCODE\\\"\" ok -> \"\\u001b[31;1mTraceback (most recent call last):\\u001b[0m\\r\\n\\u001b[31;1m  File \\\"<WORKSPACE>\\\\test_ctrlc.py\\\", line 26, in <module>\\u001b[0m\\r\\n\\u001b[31;1m    asyncio.run(test_ctrlc())\\u001b[0m\\r\\n\\u001b[31;1m    ~~~~~~~~~~~^^^^^^^^^^^^^^\\u001b[0m\\r\\n\\u001b[31;1m  File \\\"<HOME>\\\\AppData\\\\Roaming\\\\uv\\\\python\\\\cpython-3.13.14-windows-x86_64-none\\\\Lib\\\\asyncio\\\\runners.py\\\", line 196, in[... 1717 chars cut by the benchmark]\"\n[step 1] shell \"Remove-Item <WORKSPACE>\\\\test_run.py, <WORKSPACE>\\\\test_run_nosig.py, <WORKSPACE>\\\\test_ctrlc.py -ErrorAction SilentlyContinue; echo \\\"cleaned\\\"\" ok -> \"cleaned\"\n[step 1] read \"<WORKSPACE>\\\\run.py\" ok -> \"Read file <WORKSPACE>\\\\run.py, lines 1-59\\n1: \\\"\\\"\\\"Batch task runner.\\n2: \\n3: Provides ``run_tasks``: run zero-argument callables that return awaitable\\n4: jobs, with a bound on how many jobs run at once.\\n5: \\n6: Assumptions (the brief leaves these open):\\n7: - A \\\"job\\\" is the awaitable returned by the task callable; the callable is\\n8:   inv[... 2468 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>\\\\run.py\" ok -> \"Edited <WORKSPACE>/run.py (1 replacement)\"\n[step 1] edit \"<WORKSPACE>\\\\run.py\" ok -> \"Edited <WORKSPACE>/run.py (1 replacement)\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   true
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 19,
+  "tool_calls": 19,
+  "tool_errors": 0,
+  "shell_commands": 7,
+  "shell_failures": 3,
+  "file_writes": 11,
+  "repeated_tool_calls": 2,
+  "outside_path_uses": 0,
+  "generated_tokens": 7278,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1403
+ },
+ "deliverables": [],
+ "render": null
+}

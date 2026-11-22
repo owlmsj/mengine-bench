@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-ab-playtest",
+ "prompts": [
+  "We playtested two versions of the Pixel Arena tutorial and have to pick one for the next release. The export and its notes are in {WS}/telemetry. Should we ship B instead of A? Give a recommendation a skeptical lead would accept. Record it in {WS}/result.json with ship_b, sessions_a, sessions_b, completion_rate_a, completion_rate_b and p_value."
+ ],
+ "answers": [
+  "**Recommendation: ship B.**\n\n**Goal**\nPick the tutorial variant for release per the README rule: ship a variant only when its completion gain is significant at the 5% level.\n\n**Action**\n- Parsed `telemetry/playtest_ab.csv` (1870 data rows). Per the README, deduped by `session_id` (ETL resends sessions) and normalized `variant` (lowercase / leading spaces). Deduped to 1800 unique sessions, 900 per variant; no conflicting duplicate rows, no unknown variants.\n- Two-proportion z-test (pooled, two-sided) on tutorial completion.\n- Wrote `result.json` with the required keys.\n\n**Result**\n| | A | B |\n|---|---|---|\n| Sessions | 900 | 900 |\n| Completed | 342 | 420 |\n| Completion rate | 38.00% | 46.67% |\n\nB lifts completion by 8.67 percentage points; z = 3.72, **p = 0.000198** < 0.05 → significant. `result.json`: `ship_b: true`, `sessions_a: 900`, `sessions_b: 900`, `completion_rate_a: 0.38`, `completion_rate_b: 0.466667`, `p_value: 0.000198`.\n\n**Assumptions**\n- `session_id` is the unit of analysis (README states it is the unique key); duplicate rows are ETL resends, not separate sessions.\n- Two-sided test at α = 0.05, matching \"statistically significant at the 5% level.\"\n- Completion rate = completed sessions / unique sessions per variant.\n\n**How I know it is right**\n- Counts verified two independent ways: Python (`analyze.py`) and PowerShell both give 1800 unique sessions, 900/900 split, 342 completions in A, 420 in B.\n- p-value computed from the pooled two-proportion z-test (z = 3.720957 → p = 0.000198), not eyeballed.\n- `result.json` re-read after writing; all six required keys present with the values above.\n\nNo browser tabs, windows, or apps were opened, so nothing to close."
+ ],
+ "diff": "A analyze.py\nA result.json\n\n--- analyze.py ---\nimport csv, json, math\nfrom collections import Counter\n\npath = r\"<WORKSPACE>\\telemetry\\playtest_ab.csv\"\n\nsessions = {}  # session_id -> (variant, completed)\nconflicts = 0\nwith open(path, newline=\"\", encoding=\"utf-8\") as f:\n    for row in csv.DictReader(f):\n        sid = row[\"session_id\"].strip()\n        variant = row[\"variant\"].strip().lower()\n        comp = int(row[\"completed_tutorial\"])\n        if sid in sessions:\n            if sessions[sid] != (variant, comp):\n                conflicts += 1\n        sessions[sid] = (variant, comp)\n\na = [c for v, c in sessions.values() if v == \"a\"]\nb = [c for v, c in sessions.values() if v == \"b\"]\nother = [v for v, c in sessions.values() if v not in (\"a\", \"b\")]\n\nn_a, n_b = len(a), len(b)\nx_a, x_b = sum(a), sum(b)\np_a, p_b = x_a / n_a, x_b / n_b\np_pool = (x_a + x_b) / (n_a + n_b)\nse = math.sqrt(p_pool * (1 - p_pool) * (1 / n_a + 1 / n_b))\nz = (p_b - p_a) / se\n# two-sided p-value via normal CDF (erf)\np_value = 2 * (1 - 0.5 * (1 + math.erf(abs(z) / math.sqrt(2))))\n\nprint(f\"rows deduped: {len(sessions)} sessions, conflicts: {conflicts}, other variants: {other}\")\nprint(f\"A: n={n_a} completed={x_a} rate={p_a:.6f}\")\nprint(f\"B: n={n_b} completed={x_b} rate={p_b:.6f}\")\nprint(f\"z={z:.6f} p={p_value:.6f}\")\n\nresult = {\n    \"ship_b\": bool(p_value < 0.05 and p_b > p_a),\n    \"sessions_a\": n_a,\n    \"sessions_b\": n_b,\n    \"completion_rate_a\": round(p_a, 6),\n    \"completion_rate_b\": round(p_b, 6),\n    \"p_value\": round(p_value, 6),\n}\nwith open(r\"<WORKSPACE>\\result.json\", \"w\", encoding=\"utf-8\") as f:\n    json.dump(result, f, indent=2)\nprint(json.dumps(result, indent=2))\n\n--- result.json ---\n{\r\n  \"ship_b\": true,\r\n  \"sessions_a\": 900,\r\n  \"sessions_b\": 900,\r\n  \"completion_rate_a\": 0.38,\r\n  \"completion_rate_b\": 0.466667,\r\n  \"p_value\": 0.000198\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\telemetry\" ok -> \"Read directory <WORKSPACE>\\\\telemetry, entries 1-2\\nplaytest_ab.csv\\nREADME.md\"\n[step 1] read \"<WORKSPACE>\\\\telemetry\\\\README.md\" ok -> \"Read file <WORKSPACE>\\\\telemetry\\\\README.md, lines 1-5\\n1: # Playtest A/B - Pixel Arena tutorial\\n2: \\n3: Export from arena-panel. The ETL resends sessions: `session_id` is the unique key (repeated rows are the same session). `variant` may come lowercase or with a leading space. `completed_tutorial` is 0/1.\\n4: \\n5: Release rule: a variant[... 94 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\telemetry\\\\playtest_ab.csv\" ok -> \"Read file <WORKSPACE>\\\\telemetry\\\\playtest_ab.csv, lines 1-1871\\n1: session_id,variant,player_id,completed_tutorial,match_minutes\\n2: s01423,b,p0798,1,12.6\\n3: s01632,a,p0693,1,9.0\\n4: s00612,A,p0098,0,12.2\\n5: s00389, B,p0202,1,16.5\\n6: s00509, B,p0896,0,14.8\\n7: s00206,a,p0059,1,13.0\\n8: s01758,a,p0342,0,20.4\\n9: s01097, B,p0084,1,15.1\\n10: s[... 51433 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\analyze.py\" ok -> \"Created file successfully: <WORKSPACE>/analyze.py\"\n[step 1] shell \"python analyze.py\" ok -> \"rows deduped: 1800 sessions, conflicts: 0, other variants: []\\r\\nA: n=900 completed=342 rate=0.380000\\r\\nB: n=900 completed=420 rate=0.466667\\r\\nz=3.720957 p=0.000198\\r\\n{\\r\\n  \\\"ship_b\\\": true,\\r\\n  \\\"sessions_a\\\": 900,\\r\\n  \\\"sessions_b\\\": 900,\\r\\n  \\\"completion_rate_a\\\": 0.38,\\r\\n  \\\"completion_rate_b\\\": 0.466667,\\r\\n  \\\"p_value\\\": 0.000198\\r\\n}\"\n[step 1] shell \"$rows = Import-Csv telemetry\\\\playtest_ab.csv | Group-Object session_id | ForEach-Object { $_.Group | Select-Object -First 1 }; $a = $rows | Where-Object { $_.variant.Trim().ToLower() -eq 'a' }; $b = $rows | Where-Object { $_.variant.Trim().ToLower() -eq 'b' }; \\\"total=$($rows.Count) A=$($a.Count) B=$($b.Count) A_done=$($a | Where-Object completed_tutorial -eq 1 | Measure-Object).Count B_done=$($b | Where-Object completed_tutorial -eq 1 | Measure-Object).Count\\\"\" ok -> \"total=1800 A=900 B=900 A_done=Microsoft.PowerShell.Commands.GenericMeasureInfo.Count B_done=Microsoft.PowerShell.Commands.GenericMeasureInfo.Count\"\n[step 1] shell \"$rows = Import-Csv telemetry\\\\playtest_ab.csv | Group-Object session_id | ForEach-Object { $_.Group | Select-Object -First 1 }; $a = @($rows | Where-Object { $_.variant.Trim().ToLower() -eq 'a' }); $b = @($rows | Where-Object { $_.variant.Trim().ToLower() -eq 'b' }); \\\"A_done=$(@($a | Where-Object completed_tutorial -eq 1).Count) B_done=$(@($b | Where-Object completed_tutorial -eq 1).Count)\\\"\" ok -> \"A_done=342 B_done=420\"\n[step 1] read \"<WORKSPACE>\\\\result.json\" ok -> \"Read file <WORKSPACE>\\\\result.json, lines 1-8\\n1: {\\r\\n2:   \\\"ship_b\\\": true,\\r\\n3:   \\\"sessions_a\\\": 900,\\r\\n4:   \\\"sessions_b\\\": 900,\\r\\n5:   \\\"completion_rate_a\\\": 0.38,\\r\\n6:   \\\"completion_rate_b\\\": 0.466667,\\r\\n7:   \\\"p_value\\\": 0.000198\\r\\n8: }\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "deduplicated session counts",
+   true
+  ],
+  [
+   "completion rates",
+   true
+  ],
+  [
+   "the gain is significant",
+   true
+  ],
+  [
+   "ship decision",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 8,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2178,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 740
+ },
+ "deliverables": [],
+ "render": null
+}
