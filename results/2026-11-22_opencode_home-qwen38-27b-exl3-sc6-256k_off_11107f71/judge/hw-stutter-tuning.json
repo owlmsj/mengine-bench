@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "I'm done — no more tool calls needed.\n\n**[goal]** Find why arena-01 hitches every few seconds and which settings fix it, record in ./result.json.\n\n**[action]** Read NOTES.md, settings.json, sensors.csv; computed frame stats from presentmon.csv (8238 frames) with a Python script; correlated slow frames with sensor events; wrote result.json and validated it.\n\n**[result]**\n- **avg_fps: 137.29** (1000 / mean MsBetweenPresents = 7.284 ms), **low_1pct_fps: 45.35** (1000 / p99 = 22.049 ms), per the owner's own formulas in NOTES.md.\n- **Cause:** the GPU's PCIe link drops to L1 every ~4 s (sensor log: L1 at seconds 2, 6, 10, …, 58; BIOS `pcie_aspm_rp1_gpu` = L1). Each wake costs ~20 ms, producing the periodic ~22 ms frame-time spikes. All 110 slow frames (>3× mean) fall within ~1 s of an L1 second — 110/110, so the correlation is exact. Secondary: Defender real-time protection (MsMpEng.exe) spikes DPC latency to 396–455 µs at seconds 43–45 with disk at 80–94%, adding extra outliers.\n- **Changes:** `pcie_aspm_rp1_gpu` L1 → disabled (BIOS; allowed — the constraint only pins link speed Gen5 x4 and XMP/PBO/ratio, not ASPM); `defender_exclusions` [] → game path (Windows; allowed).\n\n**[how I know it's right]** The L1 timestamps and the slow-frame timestamps line up one-to-one (110/110), the spike magnitude (~22 ms ≈ 1000/45.35) matches the 1% low, and the settings dump contains the exact setting that enables the observed behavior.\n\n**[assumptions]** The game's install path isn't in the files, so I used a placeholder `C:\\Games\\Arena.exe` / `C:\\Games\\Arena` for the exclusion — the owner should substitute the real path. I treated \"fix within constraints\" as: no BIOS OC changes, no link-speed change — ASPM L1 disable and Defender exclusions are both outside those constraints.\n\n**[next]** Nothing pending; no browser tabs or apps were opened on this host."
+ ],
+ "diff": "A result.json\nA tmp/analyze.py\n\n--- result.json ---\n{\n  \"avg_fps\": 137.29,\n  \"low_1pct_fps\": 45.35,\n  \"cause\": \"The GPU's PCIe link repeatedly drops to the L1 low-power state (every ~4 s: sensor log shows gpu_pcie_link_state=L1 at seconds 2,6,10,...,58 while BIOS pcie_aspm_rp1_gpu=L1). Each L1 entry costs ~20 ms of wake-up latency, producing the periodic ~22 ms frame-time spikes that wreck the 1% lows (110/110 slow frames fall within ~1 s of an L1 second). A secondary hitch source is Defender real-time protection: MsMpEng.exe drives DPC latency to 396-455 us at seconds 43-45 (top process flips from Arena.exe to MsMpEng.exe) with disk activity at 80-94%, adding extra frame-time outliers.\",\n  \"changes\": [\n    {\n      \"setting\": \"pcie_aspm_rp1_gpu\",\n      \"from\": \"L1\",\n      \"to\": \"disabled\"\n    },\n    {\n      \"setting\": \"defender_exclusions\",\n      \"from\": [],\n      \"to\": [\n        \"C:\\\\Games\\\\Arena.exe\",\n        \"C:\\\\Games\\\\Arena\"\n      ]\n    }\n  ]\n}\n\n--- tmp/analyze.py ---\nimport csv, json, statistics\n\nws = r\"<WORKSPACE>\"\n\nrows = []\nwith open(ws + r\"\\capture\\presentmon.csv\") as f:\n    r = csv.DictReader(f)\n    for row in r:\n        rows.append(row)\n\nmbp = [float(x[\"MsBetweenPresents\"]) for x in rows]\nt = [float(x[\"TimeInSeconds\"]) for x in rows]\nmean = sum(mbp) / len(mbp)\navg_fps = 1000.0 / mean\nsrt = sorted(mbp)\nn = len(srt)\n# 99th percentile (nearest-rank)\np99 = srt[int(round(0.99 * (n - 1)))]\nlow1 = 1000.0 / p99\nprint(\"frames:\", n, \"mean_ms:\", round(mean, 3), \"avg_fps:\", round(avg_fps, 2))\nprint(\"p99_ms:\", p99, \"low1pct_fps:\", round(low1, 2))\nprint(\"p95_ms:\", srt[int(round(0.95 * (n - 1)))])\nprint(\"max_ms:\", max(mbp))\n\n# slow frames: > 3x mean\nslow = [(t[i], mbp[i]) for i in range(n) if mbp[i] > 3 * mean]\nprint(\"slow frames (>3x mean):\", len(slow))\nfor s in slow[:40]:\n    print(\"  t=%.3f ms=%.2f\" % s)\n\n# sensors\nsens = []\nwith open(ws + r\"\\capture\\sensors.csv\") as f:\n    for row in csv.DictReader(f):\n        sens.append(row)\nl1 = [int(s[\"time_s\"]) for s in sens if s[\"gpu_pcie_link_state\"] == \"L1\"]\nprint(\"L1 seconds:\", l1)\ndpc = [(int(s[\"time_s\"]), int(s[\"dpc_latency_us\"])) for s in sens if int(s[\"dpc_latency_us\"]) > 200]\nprint(\"DPC>200us:\", dpc)\n\n# check slow frames vs L1 seconds and DPC seconds\nl1set = set(l1)\ndpcset = {d[0] for d in dpc}\nnear_l1 = sum(1 for s in slow if any(abs(s[0] - (ls + 1)) < 1.2 or abs(s[0] - ls) < 1.2 for ls in l1set))\nprint(\"slow frames within ~1.2s of an L1 second:\", near_l1, \"of\", len(slow))\n# distribution of slow frames by second\nfrom collections import Counter\nc = Counter(int(s[0]) for s in slow)\nprint(\"slow frames by second:\", dict(sorted(c.items())))",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem -Force \\\"<HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-ushl92yt\\\" -Recurse | Select-Object FullName, Length | Format-Table -AutoSize\" ok -> \"\\u001b[32;1mFullName                                                                                            \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m--------                                                                                            \\u001b[0m \\u001b[32;<WORKSPACE>                        \\r\\nC:\\\\Users\\\\<USER>\\\\AppData\\\\Local\\\\T[... 601 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\NOTES.md\" ok -> \"Read file <WORKSPACE>\\\\NOTES.md, lines 1-15\\n1: # Owner notes - rig \\\"arena-01\\\"\\n2: \\n3: The game hitches every few seconds even though the average frame rate looks fine.\\n4: Capture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\n5: taken at the same time (same clock: second 0 of both files is the same i[... 533 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\settings.json\" ok -> \"Read file <WORKSPACE>\\\\settings.json, lines 1-125\\n1: {\\n2:   \\\"rig\\\": \\\"arena-01\\\",\\n3:   \\\"settings\\\": [\\n4:     {\\n5:       \\\"setting\\\": \\\"power_plan\\\",\\n6:       \\\"value\\\": \\\"Balanced\\\",\\n7:       \\\"where\\\": \\\"Windows\\\"\\n8:     },\\n9:     {\\n10:       \\\"setting\\\": \\\"hardware_accelerated_gpu_scheduling\\\",\\n11:       \\\"value\\\": \\\"on\\\",\\n12:       \\\"where\\\": \\\"Windows\\\"\\n13:[... 2660 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\capture\\\\sensors.csv\" ok -> \"Read file <WORKSPACE>\\\\capture\\\\sensors.csv, lines 1-61\\n1: time_s,cpu_clock_mhz,cpu_util_pct,gpu_clock_mhz,gpu_pcie_link_state,gpu_pcie_link_speed,dpc_latency_us,disk_active_pct,top_cpu_process\\n2: 0,5354,35,2724,L0,Gen5 x4,52,1,Arena.exe\\n3: 1,5350,40,2754,L0,Gen5 x4,88,4,Arena.exe\\n4: 2,5270,31,2754,L1,Gen5 x4,40,3,Arena.exe\\n5: 3,5373,[... 2614 chars cut by the benchmark]\"\n[step 1] shell \"Get-Content \\\"<WORKSPACE>\\\\capture\\\\presentmon.csv\\\" -TotalCount 5; (Get-Content \\\"<WORKSPACE>\\\\capture\\\\presentmon.csv\\\" | Measure-Object -Line).Lines\" ok -> \"Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.000000,6.861,6.847,0.294,4.901,5.568\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.006861,6.773,6.812,0.387,4.013,6.252\\r\\nArena.exe,7316,0x000001F2A8C40000,D[... 143 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\analyze.py\" ok -> \"Created file successfully: <WORKSPACE>/tmp/analyze.py\"\n[step 1] shell \"python \\\"<WORKSPACE>\\\\tmp\\\\analyze.py\\\"\" ok -> \"frames: 8238 mean_ms: 7.284 avg_fps: 137.29\\r\\np99_ms: 22.049 low1pct_fps: 45.35\\r\\np95_ms: 7.522\\r\\nmax_ms: 23.675\\r\\nslow frames (>3x mean): 110\\r\\n  t=2.401 ms=21.86\\r\\n  t=2.423 ms=22.85\\r\\n  t=2.445 ms=22.08\\r\\n  t=2.489 ms=22.67\\r\\n  t=2.533 ms=22.12\\r\\n  t=2.555 ms=21.90\\r\\n  t=2.577 ms=21.97\\r\\n  t=2.599 ms=22.50\\r\\n  t=6.448 ms=22.54\\r\\n  t=6.492 ms=22.99\\r\\n  t=6.537 ms=22.38\\r\\n  t=6.559 ms=22.84\\r\\n  t=6.647 ms=22.43\\r\\n[... 865 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\result.json\" ok -> \"Created file successfully: <WORKSPACE>/result.json\"\n[step 1] shell \"python -c \\\"import json; d=json.load(open(r'<WORKSPACE>\\\\result.json')); print(json.dumps(d, indent=1))\\\"\" ok -> \"{\\r\\n \\\"avg_fps\\\": 137.29,\\r\\n \\\"low_1pct_fps\\\": 45.35,\\r\\n \\\"cause\\\": \\\"The GPU's PCIe link repeatedly drops to the L1 low-power state (every ~4 s: sensor log shows gpu_pcie_link_state=L1 at seconds 2,6,10,...,58 while BIOS pcie_aspm_rp1_gpu=L1). Each L1 entry costs ~20 ms of wake-up latency, producing the periodic ~22 ms frame-time spikes that wreck the 1% lows (110/110 slow frames fall within ~1 s of an L1 [... 488 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 9,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2386,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 757
+ },
+ "deliverables": [],
+ "render": null
+}
