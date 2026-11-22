@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "\n\nDone. No browser tabs or apps were opened, so nothing to close.\n\n**Goal**: find the cause of the owner's gaming rig's hitches and the setting changes that fix them, per the owner's constraints.\n\n**What I found**:\n- The PresentMon capture (8238 frames) averages **137.286 fps** (1000/7.284 ms mean) but has **1% low of 45.356 fps** (p99 = 22.048 ms).\n- All **180 hitch frames** fall into exactly **15 clusters of ~12 frames** (~22 ms each, 3x the 6.96 ms median), at t≈2.4, 6.4, …, 58.4 — once every 4 seconds.\n- The sensor log shows the GPU's PCIe link dropping to **L1 at t=2, 6, 10, …, 58** — every 4 seconds, matching the clusters one-for-one. That is the BIOS setting `pcie_aspm_rp1_gpu = L1`: the link powers down between frame bursts, and each wake-up to L0 costs ~0.2 s of stretched frames. Brief, periodic hitches → average FPS looks fine, 1% lows are poor.\n- The Defender burst at t=43–45 (MsMpEng.exe, DPC ~420–455 µs, disk ~94%) produced no extra hitch cluster in the capture — a latent risk, not the measured cause.\n\n**The fix**: set `pcie_aspm_rp1_gpu` from `L1` to `disabled`. This is a power-management setting, not a BIOS overclock, and it leaves the Gen5 x4 link speed/width untouched — within both owner constraints.\n\n**How I know it's right**: the 15 L1 entries and 15 hitch clusters align on the same 4 s cadence (each cluster starting ~0.4 s after the L1 second), all 180 hitch frames are accounted for by them, and stats are computed per the owner's own formula in NOTES.md (1000/mean and 1000/p99). `result.json` is written with avg_fps, low_1pct_fps, cause, and the one change."
+ ],
+ "diff": "A analyze.py\nA result.json\n\n--- analyze.py ---\nimport csv, statistics, json\n\nrows = []\nwith open(r'capture\\presentmon.csv', newline='') as f:\n    r = csv.DictReader(f)\n    for row in r:\n        rows.append(row)\n\nbtw = [float(x['MsBetweenPresents']) for x in rows if x['MsBetweenPresents']]\ntimes = [float(x['TimeInSeconds']) for x in rows]\n\navg_fps = 1000.0 / (sum(btw) / len(btw))\nsrt = sorted(btw)\np99 = srt[int(0.99 * (len(srt) - 1))]\nlow1 = 1000.0 / p99\n\nprint('frames:', len(btw))\nprint('avg_fps: %.3f' % avg_fps)\nprint('mean ms: %.3f' % (sum(btw)/len(btw)))\nprint('p99 ms: %.3f  low1: %.3f' % (p99, low1))\n\n# frames with hitch (above 2x median)\nmed = statistics.median(btw)\nhitch = [(times[i], btw[i]) for i in range(len(rows)) if btw[i] > max(2*med, 20.0)]\nprint('median ms: %.3f' % med)\nprint('hitch count:', len(hitch))\ntail = [(t, ms) for t, ms in hitch if t > 40]\nprint('hitches after t=40:', len(tail))\nfor t, ms in tail[:60]:\n    print('t=%.2f ms=%.2f' % (t, ms))\nmx = max(btw)\nprint('max ms: %.2f' % mx)\n\n\n\n--- result.json ---\n{\n  \"avg_fps\": 137.286,\n  \"low_1pct_fps\": 45.356,\n  \"cause\": \"GPU PCIe port enters ASPM L1 every 4 seconds (sensors.csv: gpu_pcie_link_state=L1 at t=2,6,10,...,58; BIOS pcie_aspm_rp1_gpu=L1). Each wake from L1 to L0 takes ~0.2s, stretching ~12 consecutive frames to ~22 ms (3x the 6.96 ms median). PresentMon shows 180 hitch frames in exactly 15 clusters at t≈2.4,6.4,...,58.4, one per L1 entry. Average FPS stays high because the hitches are brief and periodic.\",\n  \"changes\": [\n    {\n      \"setting\": \"pcie_aspm_rp1_gpu\",\n      \"from\": \"L1\",\n      \"to\": \"disabled\"\n    }\n  ]\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem -Path .. | Select-Object Name, Length\" ok -> \"\\u001b[32;1mName     \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----     \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\nworkspace\"\n[step 1] shell \"Get-ChildItem -Recurse -Path . | Select-Object FullName, Length\" ok -> \"\\u001b[32;1mFullName                                                                                            \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m--------                                                                                            \\u001b[0m \\u001b[32;<WORKSPACE>\\\\capture                \\r\\nC:\\\\Users\\\\<USER>\\\\AppData\\\\Local\\\\T[... 498 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\NOTES.md\" ok -> \"Read file <WORKSPACE>\\\\NOTES.md, lines 1-15\\n1: # Owner notes - rig \\\"arena-01\\\"\\n2: \\n3: The game hitches every few seconds even though the average frame rate looks fine.\\n4: Capture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\n5: taken at the same time (same clock: second 0 of both files is the same ins[... 531 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\settings.json\" ok -> \"Read file <WORKSPACE>\\\\settings.json, lines 1-125\\n1: {\\n2:   \\\"rig\\\": \\\"arena-01\\\",\\n3:   \\\"settings\\\": [\\n4:     {\\n5:       \\\"setting\\\": \\\"power_plan\\\",\\n6:       \\\"value\\\": \\\"Balanced\\\",\\n7:       \\\"where\\\": \\\"Windows\\\"\\n8:     },\\n9:     {\\n10:       \\\"setting\\\": \\\"hardware_accelerated_gpu_scheduling\\\",\\n11:       \\\"value\\\": \\\"on\\\",\\n12:       \\\"where\\\": \\\"Windows\\\"\\n13:  [... 2658 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\capture\\\\sensors.csv\" ok -> \"Read file <WORKSPACE>\\\\capture\\\\sensors.csv, lines 1-61\\n1: time_s,cpu_clock_mhz,cpu_util_pct,gpu_clock_mhz,gpu_pcie_link_state,gpu_pcie_link_speed,dpc_latency_us,disk_active_pct,top_cpu_process\\n2: 0,5354,35,2724,L0,Gen5 x4,52,1,Arena.exe\\n3: 1,5350,40,2754,L0,Gen5 x4,88,4,Arena.exe\\n4: 2,5270,31,2754,L1,Gen5 x4,40,3,Arena.exe\\n5: 3,5373,31[... 2612 chars cut by the benchmark]\"\n[step 1] shell \"$lines = Get-Content .\\\\capture\\\\presentmon.csv; $lines[0]; $lines.Count\" ok -> \"Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\\r\\n8239\"\n[step 1] write \"<WORKSPACE>\\\\analyze.py\" ok -> \"Created file successfully: analyze.py\"\n[step 1] shell \"python analyze.py\" ok -> \"frames: 8238\\r\\navg_fps: 137.286\\r\\nmean ms: 7.284\\r\\np99 ms: 22.048  low1: 45.356\\r\\nmedian ms: 6.962\\r\\nhitch count: 180\\r\\nt=2.40 ms=21.86\\r\\nt=2.42 ms=22.85\\r\\nt=2.45 ms=22.08\\r\\nt=2.47 ms=21.61\\r\\nt=2.49 ms=22.67\\r\\nt=2.51 ms=21.02\\r\\nt=2.53 ms=22.12\\r\\nt=2.55 ms=21.90\\r\\nt=2.58 ms=21.97\\r\\nt=2.60 ms=22.50\\r\\nt=2.62 ms=21.20\\r\\nt=2.64 ms=20.64\\r\\nt=6.41 ms=21.79\\r\\nt=6.43 ms=21.56\\r\\nt=6.45 ms=22.54\\r\\nt=6.47 ms=21.24\\r\\nt=6.49 ms=22.9[... 1128 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>\\\\analyze.py\" ok -> \"Edited analyze.py (1 replacement)\"\n[step 1] shell \"python analyze.py\" ok -> \"frames: 8238\\r\\navg_fps: 137.286\\r\\nmean ms: 7.284\\r\\np99 ms: 22.048  low1: 45.356\\r\\nmedian ms: 6.962\\r\\nhitch count: 180\\r\\nhitches after t=40: 60\\r\\nt=42.41 ms=22.77\\r\\nt=42.43 ms=21.71\\r\\nt=42.45 ms=21.97\\r\\nt=42.47 ms=22.68\\r\\nt=42.49 ms=22.97\\r\\nt=42.52 ms=22.54\\r\\nt=42.54 ms=21.60\\r\\nt=42.56 ms=22.06\\r\\nt=42.58 ms=21.96\\r\\nt=42.61 ms=22.05\\r\\nt=42.63 ms=21.63\\r\\nt=42.65 ms=22.53\\r\\nt=46.40 ms=22.32\\r\\nt=46.42 ms=21.91\\r\\nt=46.44 ms[... 831 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nrows=[float(r['MsBetweenPresents']) for r in csv.DictReader(open(r'capture\\\\presentmon.csv',newline='')) if r['MsBetweenPresents']]\\ns=sorted(rows); n=len(s)\\nfor i in (int(0.99*(n-1)), int(0.99*n)-1):\\n    print(i, round(s[i],3), round(1000/s[i],3))\\nprint('avg', round(1000/(sum(rows)/n),3))\\n\\\"\" ok -> \"8154 22.048 45.356\\r\\n8154 22.048 45.356\\r\\navg 137.286\"\n[step 1] write \"<WORKSPACE>\\\\result.json\" ok -> \"Created file successfully: result.json\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 11,
+  "tool_calls": 12,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 0,
+  "file_writes": 3,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 5218,
+  "reasoning_tokens": 2755,
+  "largest_turn_tokens": 1583
+ },
+ "deliverables": [],
+ "render": null
+}

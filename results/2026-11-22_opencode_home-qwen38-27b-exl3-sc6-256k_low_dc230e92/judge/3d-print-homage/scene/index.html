@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kanagawa-oki Nami-ura — low-poly 3D wallpaper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@600;800&display=swap" rel="stylesheet">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #e8d9b5; }
+  canvas { display: block; }
+  #cartouche {
+    position: fixed; top: 18px; left: 18px; z-index: 10; pointer-events: none;
+    font-family: 'Shippori Mincho', 'Yu Mincho', serif;
+    color: #3c3a33; opacity: 0.82;
+    border: 1px solid rgba(60, 58, 51, 0.45);
+    padding: 10px 8px 8px;
+    background: rgba(232, 217, 181, 0.35);
+  }
+  #cartouche .jp { writing-mode: vertical-rl; font-size: 20px; letter-spacing: 0.35em; font-weight: 800; }
+  #cartouche .en { margin-top: 8px; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; }
+</style>
+</head>
+<body>
+<div id="cartouche">
+  <span class="jp">神奈川沖浪裏</span>
+  <div class="en">The Great Wave off Kanagawa</div>
+</div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+/* Palette sampled from print.jpg (the print is the reference; nothing is used as a texture).
+   Prussian blues on aged-paper beige, off-white foam, tan boats, dark-teal crews, gray Fuji. */
+const C = {
+  paper:  0xe8d9b5, // aged-paper sky
+  deep:   0x1c3f5f, // deep prussian blue (wave troughs / wave body)
+  mid:    0x2a5a86, // prussian blue (open sea)
+  pale:   0x7fa8c4, // celadon blue (wave crests)
+  foam:   0xf4efe2, // off-white foam
+  boat:   0xb0895a, // boat tan
+  boatDk: 0x8a6a3f, // boat shadow tan
+  crew:   0x16323f, // crew dark teal
+  fuji:   0x8a939e, // Mount Fuji gray body
+  snow:   0xf5f2ea, // Mount Fuji snow cap
+  sun:    0xf0e4c4, // faint sun disc
+  cloud:  0xefe3c6,
+};
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(C.paper);
+scene.fog = new THREE.Fog(C.paper, 28, 78);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 200);
+const camBase = new THREE.Vector3(0, 4.6, 24);
+camera.position.copy(camBase);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+const sunLight = new THREE.DirectionalLight(0xfff4dd, 0.9);
+sunLight.position.set(6, 10, 8);
+scene.add(sunLight);
+
+/* ---------- sea: two-tone low-poly swell ---------- */
+const seaGeo = new THREE.PlaneGeometry(84, 90, 46, 46);
+seaGeo.rotateX(-Math.PI / 2);
+const seaPos = seaGeo.attributes.position;
+const seaBase = new Float32Array(seaPos.array);
+const seaCol = new Float32Array(seaPos.count * 3);
+seaGeo.setAttribute('color', new THREE.BufferAttribute(seaCol, 3));
+const cDeep = new THREE.Color(C.deep), cMid = new THREE.Color(C.mid), cPale = new THREE.Color(C.pale);
+const _c = new THREE.Color();
+const sea = new THREE.Mesh(seaGeo, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
+sea.position.set(0, 0, -6);
+scene.add(sea);
+
+function updateSea(t) {
+  for (let i = 0; i < seaPos.count; i++) {
+    const x = seaBase[i * 3], z = seaBase[i * 3 + 2];
+    const y = 0.32 * Math.sin(x * 0.45 + t * 1.1)
+            + 0.22 * Math.sin(z * 0.60 - t * 0.8)
+            + 0.14 * Math.sin(x * 0.7 + z * 0.9 + t * 0.6)
+            + 0.10 * Math.sin(x * 1.3 - z * 0.5 + t * 1.7);
+    seaPos.setY(i, y);
+    const u = THREE.MathUtils.clamp((y + 0.55) / 1.1, 0, 1);
+    if (u < 0.5) _c.copy(cDeep).lerp(cMid, u * 2);
+    else _c.copy(cMid).lerp(cPale, (u - 0.5) * 2);
+    seaCol[i * 3] = _c.r; seaCol[i * 3 + 1] = _c.g; seaCol[i * 3 + 2] = _c.b;
+  }
+  seaPos.needsUpdate = true;
+  seaGeo.attributes.color.needsUpdate = true;
+}
+
+/* ---------- curling wave with claw foam (built in code, flat-shaded low poly) ---------- */
+const foamMat = new THREE.MeshLambertMaterial({ color: C.foam, flatShading: true });
+const foamItems = [];
+const UP = new THREE.Vector3(0, 1, 0);
+
+function addFoam(x, y, z, size, stretch, outward) {
+  const m = new THREE.Mesh(new THREE.ConeGeometry(0.16 * size, 0.5 * size * stretch, 5), foamMat);
+  m.position.set(x, y, z);
+  if (outward) m.quaternion.setFromUnitVectors(UP, outward.clone().normalize());
+  foamGroup.add(m);
+  foamItems.push({ m, phase: Math.random() * Math.PI * 2, speed: 1.6 + Math.random() * 1.4 });
+}
+
+const foamGroup = new THREE.Group();
+scene.add(foamGroup);
+
+function buildWave(pts, radius, zScale, curl, crestT0, clawCount) {
+  const group = new THREE.Group();
+  const curve = new THREE.CatmullRomCurve3(pts);
+  const tube = new THREE.Mesh(
+    new THREE.TubeGeometry(curve, 64, radius, 9, false),
+    new THREE.MeshLambertMaterial({ color: C.deep, flatShading: true })
+  );
+  tube.scale.z = zScale;
+  group.add(tube);
+  const cc = new THREE.Vector2(curl[0], curl[1]);
+  const nSamples = Math.round(56 * (1 - crestT0));
+  for (let i = 0; i < nSamples; i++) {
+    const t = crestT0 + (1 - crestT0) * (i / (nSamples - 1));
+    const p = curve.getPointAt(t);
+    const out = new THREE.Vector3(p.x - cc.x, p.y - cc.y, 0).normalize();
+    const n = 2 + Math.floor(Math.random() * 2);
+    for (let k = 0; k < n; k++) {
+      const z = (Math.random() * 2 - 1) * (radius * zScale) * 0.85;
+      const r = radius + Math.random() * 0.12;
+      addFoam(p.x + out.x * r, p.y + out.y * r, z, 0.55 + Math.random() * 0.7, 0.8 + Math.random() * 0.7, out);
+    }
+  }
+  for (let i = 0; i < clawCount; i++) {
+    const p = curve.getPointAt(0.96 + Math.random() * 0.04);
+    const out = new THREE.Vector3(p.x - cc.x, p.y - cc.y, 0).normalize();
+    const z = (Math.random() * 2 - 1) * (radius * zScale) * 0.9;
+    const r = radius + Math.random() * 0.15;
+    addFoam(p.x + out.x * r, p.y + out.y * r, z, 0.7 + Math.random() * 0.9, 0.6 + Math.random() * 0.5, out);
+  }
+  group.userData.curve = curve;
+  scene.add(group);
+  return group;
+}
+
+/* the great wave: rising from the left, crest curling over into the claw */
+const wave = buildWave([
+  new THREE.Vector3(-10.8, -1.2, 0), new THREE.Vector3(-10.2, 0.6, 0),
+  new THREE.Vector3(-9.0, 2.4, 0),   new THREE.Vector3(-7.2, 3.9, 0),
+  new THREE.Vector3(-4.8, 5.0, 0),  new THREE.Vector3(-2.2, 5.65, 0),
+  new THREE.Vector3(0.4, 5.8, 0),   new THREE.Vector3(2.4, 5.2, 0),
+  new THREE.Vector3(3.3, 4.0, 0),   new THREE.Vector3(3.1, 2.7, 0),
+  new THREE.Vector3(2.2, 1.8, 0),
+], 1.6, 2.2, [2.2, 3.1], 0.30, 26);
+
+/* the print's curl is filled with dark shadow, not sky: a flat disc behind the rim */
+const curlFill = new THREE.Mesh(new THREE.CircleGeometry(1.3, 16),
+  new THREE.MeshBasicMaterial({ color: 0x27405c }));
+curlFill.position.set(1.7, 3.3, 0);
+wave.add(curlFill);
+
+/* secondary wave on the right, like the print's right-hand swell */
+const waveR = buildWave([
+  new THREE.Vector3(11.1, -1.0, 0), new THREE.Vector3(12.3, 0.8, 0),
+  new THREE.Vector3(13.1, 2.2, 0), new THREE.Vector3(12.5, 3.4, 0),
+  new THREE.Vector3(11.1, 3.8, 0), new THREE.Vector3(9.9, 3.1, 0),
+  new THREE.Vector3(9.5, 2.0, 0),
+], 1.0, 1.8, [11.4, 2.9], 0.3, 10);
+
+/* ---------- boats: the print shows three funa, nine crew each ---------- */
+function makeBoat() {
+  const g = new THREE.Group();
+  const hullMat = new THREE.MeshLambertMaterial({ color: C.boat, flatShading: true });
+  const endMat = new THREE.MeshLambertMaterial({ color: C.boatDk, flatShading: true });
+  const crewMat = new THREE.MeshLambertMaterial({ color: C.crew, flatShading: true });
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.42, 0.95), hullMat);
+  g.add(hull);
+  const endL = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.72, 0.95), endMat);
+  endL.position.set(-1.78, 0.18, 0); endL.rotation.z = -0.22;
+  const endR = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.72, 0.95), endMat);
+  endR.position.set(1.78, 0.18, 0); endR.rotation.z = 0.22;
+  g.add(endL, endR);
+  for (let c = 0; c < 3; c++) {          // nine crew in three clusters of three
+    const cx = (c - 1) * 1.15;
+    for (let r = 0; r < 3; r++) {
+      const f = new THREE.Mesh(new THREE.IcosahedronGeometry(0.13, 0), crewMat);
+      f.position.set(cx + (Math.random() - 0.5) * 0.18, 0.34 + Math.random() * 0.05, (r - 1) * 0.22);
+      g.add(f);
+    }
+  }
+  return g;
+}
+const boats = [];
+function placeBoat(x, y, z, ry, rz, s) {
+  const b = makeBoat();
+  b.position.set(x, y, z);
+  b.rotation.set(0, ry, rz);
+  b.scale.setScalar(s);
+  scene.add(b);
+  boats.push({ g: b, phase: Math.random() * Math.PI * 2, baseY: y, baseRz: rz });
+}
+placeBoat(-5.6, 0.95, -1.8, 0.5, -0.30, 0.85); // left, tucked under the great wave
+placeBoat( 6.5, 0.50, -6.0, 1.1, 0.18, 0.90);  // mid-right, below Mount Fuji
+placeBoat(-0.6, 0.45,  7.6, -0.35, 0.14, 1.30); // foreground, the largest
+
+/* ---------- Mount Fuji: small, snow-capped, between the waves ---------- */
+const fuji = new THREE.Group();
+const fujiMain = new THREE.Mesh(new THREE.ConeGeometry(2.6, 2.6, 7),
+  new THREE.MeshLambertMaterial({ color: C.fuji, flatShading: true }));
+fujiMain.position.y = 1.3;
+const fujiCap = new THREE.Mesh(new THREE.ConeGeometry(1.05, 1.05, 7),
+  new THREE.MeshLambertMaterial({ color: C.snow, flatShading: true }));
+fujiCap.position.y = 2.075;
+fuji.add(fujiMain, fujiCap);
+fuji.position.set(10.5, -0.5, -18);
+fuji.scale.setScalar(1.1);
+scene.add(fuji);
+
+/* ---------- sky details: faint sun disc and paper-toned cloud wisps ---------- */
+const sun = new THREE.Mesh(new THREE.CircleGeometry(1.5, 24),
+  new THREE.MeshBasicMaterial({ color: C.sun, transparent: true, opacity: 0.55 }));
+sun.position.set(6.5, 8.5, -30);
+scene.add(sun);
+const cloudMat = new THREE.MeshBasicMaterial({ color: C.cloud, transparent: true, opacity: 0.5 });
+[[7, 11, -30, 3.2], [-3, 12, -32, 4.2], [12, 13, -34, 2.6]].forEach(([x, y, z, s]) => {
+  const cl = new THREE.Mesh(new THREE.IcosahedronGeometry(s, 0), cloudMat);
+  cl.position.set(x, y, z); cl.scale.y = 0.35;
+  scene.add(cl);
+});
+
+/* ---------- gentle motion ---------- */
+const clock = new THREE.Clock();
+function tick() {
+  const t = clock.getElapsedTime();
+  updateSea(t);
+  for (const f of foamItems) f.m.scale.setScalar(1 + 0.10 * Math.sin(t * f.speed + f.phase));
+  wave.position.y = Math.sin(t * 0.5) * 0.12;
+  waveR.position.y = Math.sin(t * 0.6 + 1.7) * 0.10;
+  foamGroup.position.y = (wave.position.y + waveR.position.y) * 0.5;
+  for (const b of boats) {
+    b.g.position.y = b.baseY + Math.sin(t * 1.1 + b.phase) * 0.08;
+    b.g.rotation.z = b.baseRz + Math.sin(t * 0.9 + b.phase) * 0.07;
+    b.g.rotation.x = Math.sin(t * 0.7 + b.phase * 1.3) * 0.04;
+  }
+  camera.position.x = camBase.x + Math.sin(t * 0.12) * 0.35;
+  camera.position.y = camBase.y + Math.sin(t * 0.17) * 0.18;
+  camera.lookAt(0, 3.2, -2);
+  renderer.render(scene, camera);
+}
+renderer.setAnimationLoop(tick);
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
