@@ -1,0 +1,51 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [],
+ "diff": "A parse.py\nA recovered.json\n\n--- parse.py ---\nimport struct, json\n\nwith open('prices.db','rb') as f:\n    data = f.read()\n\ndef varint(buf, i):\n    # SQLite big-endian varint, up to 9 bytes\n    v = 0\n    for n in range(9):\n        b = buf[i+n]\n        if n == 8:\n            v = (v << 8) | b\n            return v, i+9\n        v = (v << 7) | (b & 0x7f)\n        if not (b & 0x80):\n            return v, i+n+1\n    raise ValueError('bad varint')\n\ndef read_serial(buf, i, st):\n    if st == 0: return None, i\n    if st == 1: return struct.unpack('>b', buf[i:i+1])[0], i+1\n    if st == 2: return struct.unpack('>h', buf[i:i+2])[0], i+2\n    if st == 3: return struct.unpack('>i', buf[i:i+4])[0], i+4\n    if st == 4: return struct.unpack('>q', buf[i:i+8])[0], i+8\n    if st == 5:\n        v, = struct.unpack('>d', buf[i:i+8]); return v, i+8\n    if st == 6: return 0, i\n    if st == 7: return 1, i\n    if st == 8: return buf[i:i+24], i+24\n    if st >= 12 and st % 2 == 0:\n        L = (st-12)//2; return buf[i:i+L], i+L\n    if st >= 13:\n        L = (st-13)//2; return buf[i:i+L].decode('utf-8', 'replace'), i+L\n    raise ValueError('bad serial %d' % st)\n\nptrs = [struct.unpack('>H', data[8+2*k:10+2*k])[0] for k in range(10)]\nprint('cell pointers:', ptrs)\nncells = struct.unpack('>H', data[3:5])[0]\nprint('ncells field:', ncells)\n\nrows = []\nfor idx, p in enumerate(ptrs):\n    # cell: payload_size varint, rowid varint, payload\n    try:\n        pl, i = varint(data, p)\n        rid, i = varint(data, i)\n        if i + pl > len(data):\n            print(f'cell {idx} @{p}: payload {pl} exceeds EOF ({len(data)}), cut off')\n            continue\n        payload = data[i:i+pl]\n        hsz, j = varint(payload, 0)\n        stypes = []\n        while j < hsz:\n            st, j = varint(payload, j)\n            stypes.append(st)\n        vals = []\n        k = hsz\n        for st in stypes:\n            v, k = read_serial(payload, k, st)\n            vals.append(v)\n        print(f'cell {idx} @{p}: rowid={rid} stypes={stypes} vals={vals!r}')\n        rows.append((rid, vals))\n    except Exception as e:\n        print(f'cell {idx} @{p}: error {e!r}')\n\nprint()\nprint('parsed rows:', len(rows))\nout = []\nfor rid, vals in rows:\n    # assume (item, price)\n    if len(vals) == 2 and isinstance(vals[0], str):\n        out.append({'item': vals[0], 'price': vals[1]})\nfor r in out:\n    print(r)\nwith open('recovered.json','w',encoding='utf-8') as f:\n    json.dump(out, f, ensure_ascii=False, indent=2)\nprint('wrote', len(out), 'rows')\n\n\n--- recovered.json ---\n[]",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"python -c \\\"\\nimport os\\np='prices.db'\\nprint('size:', os.path.getsize(p))\\nwith open(p,'rb') as f:\\n    data=f.read()\\nprint('first 32 bytes:', data[:32])\\nprint('last 64 bytes:', data[-64:])\\nprint('hex head:', data[:100].hex())\\n\\\"\" ok -> \"size: 4096\\r\\nfirst 32 bytes: b'\\\\r\\\\x00\\\\x00\\\\x00\\\\n\\\\x0f=\\\\x00\\\\x0f\\\\xf1\\\\x0f\\\\xe3\\\\x0f\\\\xcb\\\\x0f\\\\xbd\\\\x0f\\\\xad\\\\x0f\\\\x93\\\\x0f\\\\x7f\\\\x0fm\\\\x0fX\\\\x0f=\\\\x00\\\\x00\\\\x00\\\\x00'\\r\\nlast 64 bytes: b'\\\\x00\\\\x1b\\\\x01lantern\\\\x18\\\\x16\\\\x03\\\\x04\\\\x00!\\\\x07tent stake@\\\\x06\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x00\\\\x0c\\\\x02\\\\x04\\\\x00\\\\x1d\\\\tmatchbox\\\\r\\\\x01\\\\x04\\\\x00\\\\x1f\\\\x08trail map'\\r\\nhex head: 0d0000000a0f3d000ff10fe30fcb0fbd0fad0f930f7f0f6d0f580f3d0000000000000000000000000[... 119 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\parse.py\" ok -> \"Created file successfully: <WORKSPACE>/parse.py\"\n[step 1] shell \"python parse.py\" ok -> \"cell pointers: [4081, 4067, 4043, 4029, 4013, 3987, 3967, 3949, 3928, 3901]\\r\\nncells field: 10\\r\\ncell 0 @4081: rowid=1 stypes=[0, 31, 8] vals=[None, 'trail map', b'']\\r\\ncell 1 @4067: error ValueError('bad serial 9')\\r\\ncell 2 @4043: rowid=3 stypes=[0, 33, 7] vals=[None, 'tent stake', 1]\\r\\ncell 3 @4029: rowid=4 stypes=[0, 27, 1] vals=[None, 'lantern', 24]\\r\\ncell 4 @4013: rowid=5 stypes=[0, 31, 1] vals=[No[... 411 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\ndata=open('prices.db','rb').read()\\nfor start,end,label in [(4067,4081,'cell rowid2'),(4081,4096,'cell rowid1'),(4029,4043,'cell lantern'),(4043,4067,'cell tent stake')]:\\n    print(label, start)\\n    b=data[start:end]\\n    print(' '.join('%02x'%x for x in b))\\n    print('ascii:', ''.join(chr(x) if 32<=x<127 else '.' for x in b))\\n    print()\\n\\\"\" ok -> \"cell rowid2 4067\\r\\n0c 02 04 00 1d 09 6d 61 74 63 68 62 6f 78\\r\\nascii: ......matchbox\\r\\n\\r\\ncell rowid1 4081\\r\\n0d 01 04 00 1f 08 74 72 61 69 6c 20 6d 61 70\\r\\nascii: ......trail map\\r\\n\\r\\ncell lantern 4029\\r\\n0c 04 04 00 1b 01 6c 61 6e 74 65 72 6e 18\\r\\nascii: ......lantern.\\r\\n\\r\\ncell tent stake 4043\\r\\n16 03 04 00 21 07 74 65 6e 74 20 73 74 61 6b 65 40 06 00 00 00 00 00 00\\r\\nascii: ....!.tent stake@.......\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   false
+  ],
+  [
+   "rows with fractional prices recovered",
+   false
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   false
+  ],
+  [
+   "no row that is not in the table",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 4,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 7366,
+  "reasoning_tokens": 5950,
+  "largest_turn_tokens": 5485
+ },
+ "deliverables": [],
+ "render": null
+}
