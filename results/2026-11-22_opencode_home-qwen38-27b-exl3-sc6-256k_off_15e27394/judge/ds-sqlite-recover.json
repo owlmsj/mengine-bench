@@ -1,0 +1,51 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [],
+ "diff": "A recover.py\n\n--- recover.py ---\n#!/usr/bin/env python3\n\"\"\"Recover rows from corrupted SQLite file by scanning for valid record cells.\"\"\"\nimport json, struct\n\ndata = open(\"prices.db\", \"rb\").read()\nn = len(data)\nprint(\"size:\", n)\n\ndef varint(buf, pos):\n    \"\"\"Read SQLite varint (7 bits per byte, little-endian bit order).\"\"\"\n    result = 0\n    for i in range(9):\n        if pos >= len(buf):\n            raise ValueError\n        b = buf[pos]\n        pos += 1\n        if i < 8:\n            result = (result << 7) | (b & 0x7F)\n        else:\n            result = (result << 8) | b\n        if not (b & 0x80):\n            break\n    return result, pos\n\ndef parse_record(buf, pos):\n    \"\"\"Parse a SQLite record. Returns (col_types, values, end_pos).\"\"\"\n    serial, pos = varint(buf, pos)\n    # Determine column count\n    if serial < 12:\n        ncols = serial // 2\n    else:\n        # For serial >= 12: ncols = (serial - 12) // 2 + 1? \n        # Actually from SQLite docs: for serial_type >= 12,\n        # the number of columns is (serial_type - 12) // 2 + 1\n        # Wait no. Let me use the actual rule:\n        # serial_type S:\n        #   if S < 12: ncols = S // 2\n        #   if S >= 12: \n        #     if S is even (blob): ncols = (S - 12) // 2 + 1  -> no\n        # The real rule: S encodes ncols in bits 0-4 for small values,\n        # and for S >= 12, the high bits encode ncols differently.\n        # From SQLite source (vdbe.c, memStack):\n        #   ncols = pRecord->nField\n        #   The serial_type is stored separately.\n        # For our 2-column table, let's just assume ncols=2 when serial>=12.\n        ncols = 2\n    values = []\n    # First column type is encoded in serial\n    # Subsequent columns: their types are in the serial's bit pattern\n    # For serial < 12:\n    #   col0 type = serial (0-11)\n    #   col1 type = serial // 2? No.\n    # The actual encoding: serial_type is a single number that encodes\n    # the types of ALL columns. For 2 columns:\n    #   serial_type = type0 * K + type1? No, it's bit-packed.\n    # From the file format spec:\n    #   \"The serial type is a variable-length integer. The serial type\n    #    encodes the number of columns and the type of the first column.\n    #    The types of subsequent columns are determined by the serial type.\"\n    #   Specifically:\n    #   For serial_type S < 12:\n    #     ncols = S // 2\n    #     col[i] type = S // (2**(i+1))? No.\n    # I think the correct interpretation is:\n    #   S = 0: 0 cols\n    #   S = 1: 1 col, type=1 (1-byte int? no, type 1 = 0-byte int val 0)\n    #   S = 2: 1 col, type=2\n    #   S = 3: 1 col, type=3\n    #   S = 4: 2 cols, col0 type=0, col1 type=2? \n    # This is getting too speculative. Let me use the actual algorithm:\n    # \n    # From SQLite source code (btree.c, sqlite3BtreeNew / record decoding):\n    # The serial type S:\n    #   if S == 0: no columns\n    #   if 1 <= S <= 11:\n    #     ncols = S // 2 + 1  (S=1->1col, S=2->2cols, S=3->2cols, S=4->3cols...)\n    #     Wait: S=1: 1 col (type 1), S=2: 1 col (type 2)? \n    # \n    # OK let me just use the well-known rule:\n    #   S in [0,11]: ncols = S // 2, col types from S\n    #   S in [12,127]: text/blob, ncols from high bits\n    #   S >= 128: extended\n    # \n    # For simplicity, since we expect 2 columns (item TEXT, price numeric):\n    # The serial type for 2 cols with col0=TEXT(len L), col1=INT:\n    #   L = text length\n    #   S = 13 + 2*L  (for odd, text)\n    #   Then col1 type follows in the next byte? No, col1 type is also in S.\n    # \n    # Actually the real rule (from https://www.sqlite.org/fileformat.html#record_format):\n    #   \"The record format encodes all column values in a single byte string.\n    #    The first field of the record is a variable-length integer that \n    #    specifies the serial type. The serial type encodes both the number \n    #    of columns and the storage format of each column.\"\n    #   \n    #   Serial type S:\n    #   - 0: 0 columns\n    #   - 1: 1 column, 0-byte integer (value 0)\n    #   - 2: 1 column, 1-byte integer\n \n[... 4959 chars cut by the benchmark]",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"$bytes = [System.IO.File]::ReadAllBytes(\\\"$PWD\\\\prices.db\\\"); \\\"size: $($bytes.Length)\\\"; $header = [System.Text.Encoding]::ASCII.GetString($bytes[0..15]); \\\"header: $header\\\"\" ok -> \"size: 4096\\r\\nheader: \\r\\u0000\\u0000\\u0000\\n\\u000f=\\u0000\\u000f?\\u000f?\\u000f?\\u000f?\"\n[step 1] shell \"$bytes = [System.IO.File]::ReadAllBytes(\\\"$PWD\\\\prices.db\\\"); $sb = [System.Text.StringBuilder]::new(); for ($i=0; $i -lt $bytes.Length; $i += 16) { $hex = (($bytes[$i..([Math]::Min($i+15,$bytes.Length-1))]) | ForEach-Object { $_.ToString('x2') }) -join ' '; $asc = -join (($bytes[$i..([Math]::Min($i+15,$bytes.Length-1))]) | ForEach-Object { if ($_ -ge 32 -and $_ -lt 127) { [char]$_ } else { '.' } }); $sb.AppendLine((\\\"{0,x6}: {1,-48} {2}\\\" -f $i, $hex, $asc)) }; $sb.ToString()\" ok -> \"\\u001b[31;1mInvalidOperation: \\u001b[31;1mError formatting a string: Input string was not in a correct format. Failure to parse near offset 3. Expected an ASCII digit..\\u001b[0m\\r\\n\\u001b[31;1mInvalidOperation: \\u001b[31;1mError formatting a string: Input string was not in a correct format. Failure to parse near offset 3. Expected an ASCII digit..\\u001b[0m\\r\\n\\u001b[31;1mInvalidOperation: \\u001b[31;1mError formatting a string: Input string [... 41582 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\recover.py\" ok -> \"Created file successfully: <WORKSPACE>/recover.py\"\n[step 1] write \"<WORKSPACE>\\\\recover.py\" ok -> \"Wrote file successfully: <WORKSPACE>/recover.py\"\n[step 1] shell \"python3 -c \\\"\\ndata = open('prices.db','rb').read()\\n# Show all printable ASCII sequences of length >= 3\\nimport re\\nfor m in re.finditer(rb'[ -~]{3,}', data):\\n    print(f'offset {m.start():4d}: {m.group().decode()!r}')\\nprint('---')\\n# Show hex of first 256 bytes\\nfor i in range(0, min(256, len(data)), 16):\\n    hexs = ' '.join(f'{b:02x}' for b in data[i:i+16])\\n    asci = ''.join(chr(b) if 32<=b<127 else '.' for b in data[i:i+16])\\n    print(f'{i:04x}: {hexs:<48} {asci}')\\n\\\"\\n\" failed -> \"Python was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases.\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   false
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   false
+  ],
+  [
+   "rows with fractional prices recovered",
+   false
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   false
+  ],
+  [
+   "no row that is not in the table",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 5,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 1,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 7896,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 4387
+ },
+ "deliverables": [],
+ "render": null
+}
