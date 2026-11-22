@@ -1,0 +1,63 @@
+{
+ "task_id": "web-archery-game",
+ "prompts": [
+  "Remember the little archery games of the Windows 95 days? We want the first level of one, our own, in {WS}/game/index.html, a single file. An archer you aim with the mouse, pulling the bow back for power, balloons to pop, a score on screen, a way to start and a way to lose. How it looks, plays and sounds is your call, and that is what we care about most: a minute of play should be fun, and every shot and hit should feel and sound good. It is reviewed by opening the file, with no build step, in a browser that reaches only Google Fonts, and by playing it."
+ ],
+ "answers": [
+  "[goal] One playable level of a Windows-95-style archery game, single file, no build.\n[action] Built `game/index.html` (canvas + Web Audio, Google Fonts only): archer at bottom-left aims with the mouse, hold to draw (power meter + dotted trajectory), release to fire; colorful balloons rise and wobble, arrows pop them with particles, streak scoring, 5 escapes = game over; title and game-over screens, sounds for draw/release/pop/miss/start/game-over, best score in localStorage. Verified by loading it in the browser, dispatching start + fire events, confirming the canvas renders non-empty pixels and zero JS errors.\n[result] Delivered and smoke-tested. I could not visually confirm look/feel (this model can't see screenshots), so scoring/feel are unverified by eye — recommend one manual playthrough.\n[next] Play it once in-browser; tweak feel (arrow gravity, spawn pace, charge rate) if the rhythm feels off.\n\nAssumptions: side view, one archer, balloons escape upward = the only lose condition (5 max), no arrow limit. Known limits: mouse-only polish (touch supported but untested), no difficulty ramp beyond slight balloon speed increase."
+ ],
+ "diff": "A game/index.html\n\n--- game/index.html ---\n<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<title>Balloon Archer — Level 1</title>\n<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Luckiest+Guy&family=Rubik:wght@400;600;800&display=swap\" rel=\"stylesheet\">\n<style>\n  * { margin: 0; padding: 0; box-sizing: border-box; }\n  html, body { width: 100%; height: 100%; overflow: hidden; background: #0e1a2b; }\n  body { font-family: 'Rubik', sans-serif; user-select: none; -webkit-user-select: none; }\n  #wrap { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }\n  canvas { display: block; cursor: crosshair; }\n</style>\n</head>\n<body>\n<div id=\"wrap\"><canvas id=\"game\"></canvas></div>\n<script>\n(() => {\n'use strict';\n\n// ---------- setup ----------\nconst GAME_W = 960, GAME_H = 540;\nconst canvas = document.getElementById('game');\nconst ctx = canvas.getContext('2d');\nlet scale = 1, ox = 0, oy = 0;\n\nfunction resize() {\n  const dpr = Math.min(window.devicePixelRatio || 1, 2);\n  const vw = window.innerWidth, vh = window.innerHeight;\n  scale = Math.min(vw / GAME_W, vh / GAME_H);\n  canvas.width = Math.round(GAME_W * scale * dpr);\n  canvas.height = Math.round(GAME_H * scale * dpr);\n  canvas.style.width = (GAME_W * scale) + 'px';\n  canvas.style.height = (GAME_H * scale) + 'px';\n  ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);\n}\nwindow.addEventListener('resize', resize);\nresize();\n\nfunction toGame(e) {\n  const r = canvas.getBoundingClientRect();\n  const cx = (e.clientX - r.left) / r.width * GAME_W;\n  const cy = (e.clientY - r.top) / r.height * GAME_H;\n  return { x: cx, y: cy };\n}\n\n// ---------- audio ----------\nlet audioCtx = null;\nfunction ac() {\n  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();\n  if (audioCtx.state === 'suspended') audioCtx.resume();\n  return audioCtx;\n}\nfunction tone(freq, dur, type, vol, slideTo, delay = 0) {\n  const a = ac(), t = a.currentTime + delay;\n  const o = a.createOscillator(), g = a.createGain();\n  o.type = type; o.frequency.setValueAtTime(freq, t);\n  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);\n  g.gain.setValueAtTime(vol, t);\n  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);\n  o.connect(g).connect(a.destination);\n  o.start(t); o.stop(t + dur + 0.05);\n}\nfunction noise(dur, vol, filterFreq, delay = 0) {\n  const a = ac(), t = a.currentTime + delay;\n  const len = Math.max(1, Math.floor(a.sampleRate * dur));\n  const buf = a.createBuffer(1, len, a.sampleRate);\n  const d = buf.getChannelData(0);\n  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);\n  const src = a.createBufferSource(); src.buffer = buf;\n  const f = a.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = filterFreq;\n  const g = a.createGain(); g.gain.setValueAtTime(vol, t);\n  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);\n  src.connect(f).connect(g).connect(a.destination);\n  src.start(t);\n}\nconst sfx = {\n  drawStart() { tone(180, 0.12, 'triangle', 0.05, 260); },\n  release(power) {\n    noise(0.09, 0.35, 1800); tone(320 + power * 240, 0.14, 'square', 0.16, 90);\n  },\n  pop(big) {\n    noise(0.18, 0.5, 2600); tone(big ? 420 : 520, 0.16, 'sine', 0.28, 120);\n    tone(900, 0.05, 'square', 0.12, 500, 0.02);\n  },\n  miss() { tone(200, 0.35, 'sawtooth', 0.16, 70); },\n  start() { tone(440, 0.1, 'square', 0.14); tone(660, 0.12, 'square', 0.14, null, 0.1); tone(880, 0.2, 'square', 0.14, null, 0.2); },\n  over() { tone(520, 0.25, 'sawtooth', 0.18, 380); tone(392, 0.3, 'sawtooth', 0.18, 250, 0.22); tone(261, 0.7, 'sawtooth', 0.18, 130, 0.48); },\n  score() { tone(920, 0.07, 'sine', 0.1, 1300); },\n};\n\n// ---------- game state ----------\nconst state = {\n  mode: 'title', // title | play | over\n  score: 0,\n  best: 0,\n  misses: 0,\n  maxMisses: 5,\n  streak: 0,\n \n[... 20934 chars cut by the benchmark]",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"ls -la; pwd\" ok -> \"\\u001b[31;1mGet-ChildItem: \\u001b[31;1mA parameter cannot be found that matches parameter name 'la'.\\u001b[0m\\r\\n\\r\\n\\u001b[32;1mPath\\u001b[0m\\r\\n\\u001b[32;<WORKSPACE>\"\n[step 1] shell \"Get-ChildItem -Force; Test-Path ./game\" ok -> \"Directory: <WORKSPACE>\\r\\n\\r\\n\\u001b[32;1mMode   \\u001b[0m\\u001b[32;1m              LastWriteTime\\u001b[0m\\u001b[32;1m         Length\\u001b[0m\\u001b[32;1m Name\\u001b[0m\\r\\n\\u001b[32;1m----   \\u001b[0m \\u001b[32;1m             -------------\\u001b[0m \\u001b[32;1m        ------\\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\n-a---          21/11/2026    13:12            394 AGENTS.md\\r\\nFalse\"\n[step 1] shell \"New-Item -ItemType Directory -Path ./game -Force | Out-Null; 'ok'\" ok -> \"ok\"\n[step 1] write \"game/index.html\" ok -> \"Created file successfully: game/index.html\"\n[step 1] browser \"{\\\"action\\\": \\\"launch\\\"}\" ok -> \"browser ready\"\n[step 1] browser \"{\\\"action\\\": \\\"navigate\\\", \\\"url\\\": \\\"<WORKSPACE>/game/index.html\\\"}\" ok -> \"navigated to <WORKSPACE>/game/index.html | Balloon Archer — Level 1 | load confirmed | content not settled\"\n[step 1] browser \"{\\\"action\\\": \\\"exec\\\", \\\"js\\\": \\\"JSON.stringify({mode: document.title, w: canvas.width, h: canvas.height, score: 0})\\\"}\" failed -> \"\"\n[step 1] browser \"{\\\"action\\\": \\\"exec\\\", \\\"js\\\": \\\"(() => { const c = document.getElementById('game'); return JSON.stringify({w: c.width, h: c.height, sw: c.style.width, sh: c.style.height, title: document.title}); })()\\\"}\" ok -> \"\\\"{\\\\\\\"w\\\\\\\":1280,\\\\\\\"h\\\\\\\":720,\\\\\\\"sw\\\\\\\":\\\\\\\"1280px\\\\\\\",\\\\\\\"sh\\\\\\\":\\\\\\\"720px\\\\\\\",\\\\\\\"title\\\\\\\":\\\\\\\"Balloon Archer — Level 1\\\\\\\"}\\\"\"\n[step 1] browser \"{\\\"action\\\": \\\"exec\\\", \\\"js\\\": \\\"(() => { window.__errs = []; window.onerror = (m) => window.__errs.push(m); const c = document.getElementById('game'); const r = c.getBoundingClientRect(); const opts = (x,y) => ({clientX: r.left + x/r.width*0 + r.width*x, clientY: r.top + r.height*y, bubbles: true, cancelable: true, ctrlKey: false, pointerType: 'mouse'}); c.dispatchEvent(new MouseEvent('mousedown', {...opts(0.5,0.5), button:0})); window.dispatchEvent(new MouseEvent('mouseup', {})); return 'dispatched'; })()\\\"}\" ok -> \"\\\"dispatched\\\"\"\n[step 1] browser \"{\\\"action\\\": \\\"exec\\\", \\\"js\\\": \\\"new Promise(res => { setTimeout(() => { const c = document.getElementById('game'); const ctx = c.getContext('2d'); const d = ctx.getImageData(0,0,c.width,c.height).data; let sum=0; for (let i=0;i<d.length;i+=400) sum+=d[i]+d[i+1]+d[i+2]; return res(JSON.stringify({sum, errs: window.__errs})); }, 1500); })\\\"}\" ok -> \"\\\"{\\\\\\\"sum\\\\\\\":2859029,\\\\\\\"errs\\\\\\\":[]}\\\"\"\n[step 1] browser \"{\\\"action\\\": \\\"close_tab\\\", \\\"target\\\": \\\"current\\\"}\" ok -> \"current already closed\"\n[step 1] browser \"{\\\"action\\\": \\\"tabs\\\"}\" ok -> \"[B80FA57E] about:blank | about:blank\\n* [184C5483] Balloon Archer — Level 1 | <WORKSPACE>/game/index.html\"\n[step 1] browser \"{\\\"action\\\": \\\"select_tab\\\", \\\"target\\\": \\\"184C5483\\\"}\" ok -> \"selected tab 184C5483 | <WORKSPACE>/game/index.html | Balloon Archer — Level 1\"\n[step 1] browser \"{\\\"action\\\": \\\"close_tab\\\", \\\"target\\\": \\\"184C5483\\\"}\" ok -> \"closed tab 184C5483 | now on about:blank |\"",
+ "checks": [
+  [
+   "index.html exists with content",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "takes the mouse: press and release",
+   true
+  ],
+  [
+   "makes its own sound",
+   true
+  ],
+  [
+   "needs nothing beside the page",
+   true
+  ],
+  [
+   "a scripted basic play raises the score",
+   true
+  ],
+  [
+   "page runs without script errors",
+   true
+  ],
+  [
+   "page draws something (screenshot not blank)",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 15,
+  "tool_calls": 14,
+  "tool_errors": 1,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 15095,
+  "reasoning_tokens": 1909,
+  "largest_turn_tokens": 12383
+ },
+ "deliverables": [
+  "game/index.html"
+ ],
+ "render": "game/index.html"
+}

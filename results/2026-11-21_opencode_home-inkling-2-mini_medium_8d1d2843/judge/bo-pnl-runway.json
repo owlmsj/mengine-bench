@@ -1,0 +1,53 @@
+{
+ "task_id": "bo-pnl-runway",
+ "prompts": [
+  "The investors meet tomorrow and want the first half of 2026 closed. The books and the board's notes are in {WS}/finance. How did each month go, and how many months of cash do we have left at the current burn? Prepare what the CFO needs to present. Record the key figures in {WS}/result.json: revenue, gross_margin_pct and ebitda, each mapping 2026-01 to 2026-06 to its value, plus burn and runway_months."
+ ],
+ "answers": [
+  "[goal] Close H1 2026 for the CFO. [action] Parsed the ledger and CoA, computed monthly P&L, burn and runway. [result] `result.json` written. [next] Present to board.\n\nFindings (R$, Brazilian format parsed: `56.661,03` = 56,661.03):\n- Revenue grew 200.5k (Jan) → 272.4k (Jun), ~+9% MoM avg. Gross margin stable ~68–72% (best Jun at 72.4%).\n- EBITDA negative every month, improving from -210k to -193k (Jun).\n- Board burn = avg of Apr/May/Jun negative EBITDA = 197,288.23. Runway = 1,847,350.40 (30/06 balance) ÷ 197,288.23 = 9.36 months.\n\nAssumptions: EBITDA = revenue − COGS − S&M − R&D − G&A (excludes financial items, as interest/investments are not in EBITDA); refunds counted inside revenue as posted; latest cash = 30/06 balance (the 31/05 one is stale). Note: June cash dropped 2.309M→1.847M (~462k), larger than June EBITDA (-193k); the gap is not in the ledger — flag it before presenting.\n\nEvidence: figures computed directly from `finance/ledger.csv` mapped via `finance/chart_of_accounts.csv` pnl_line; `result.json` shows the same numbers. Nothing opened in browser/windows; helper scripts removed."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\r\n  \"revenue\": {\r\n    \"2026-01\": 200510.87,\r\n    \"2026-02\": 216328.06,\r\n    \"2026-03\": 219066.17,\r\n    \"2026-04\": 238163.26,\r\n    \"2026-05\": 243032.89,\r\n    \"2026-06\": 272391.57\r\n  },\r\n  \"gross_margin_pct\": {\r\n    \"2026-01\": 70.03,\r\n    \"2026-02\": 70.29,\r\n    \"2026-03\": 68.46,\r\n    \"2026-04\": 70.24,\r\n    \"2026-05\": 69.56,\r\n    \"2026-06\": 72.41\r\n  },\r\n  \"ebitda\": {\r\n    \"2026-01\": -210278.96,\r\n    \"2026-02\": -212300.08,\r\n    \"2026-03\": -204525.45,\r\n    \"2026-04\": -196950.65,\r\n    \"2026-05\": -201945.82,\r\n    \"2026-06\": -192968.22\r\n  },\r\n  \"burn\": 197288.23,\r\n  \"runway_months\": 9.36\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"ls -la ./finance\" failed -> \"\\u001b[31;1mGet-ChildItem: \\u001b[31;1mA parameter cannot be found that matches parameter name 'la'.\\u001b[0m\"\n[step 1] shell \"Get-ChildItem -Recurse ./finance | Select-Object FullName, Length\" ok -> \"\\u001b[32;1mFullName                                                                                                   \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m--------                                                                                                   \\u001b[0m \\u001b[32;<WORKSPACE>\\\\finance\\\\cash_balance.txt         104\\r\\nC:\\\\Users[... 338 chars cut by the benchmark]\"\n[step 1] shell \"Get-Content ./finance/README.md; Write-Host ---; Get-Content ./finance/cash_balance.txt; Write-Host ---; Get-Content ./finance/chart_of_accounts.csv; Write-Host ---; Get-Content ./finance/ledger.csv\" ok -> \"# Finance notes\\r\\n\\r\\nThe board reads burn as the average monthly negative EBITDA of the last three closed months. Runway is the latest closing cash balance divided by that burn.\\r\\n---\\r\\nConsolidated balance on 31/05/2026: R$ 2.309.188,00\\r\\nConsolidated balance on 30/06/2026: R$ 1.847.350,40\\r\\n---\\r\\naccount;name;pnl_line\\r\\n3.1.01;SaaS subscriptions;revenue\\r\\n3.1.02;Onboarding services;revenue\\r\\n3.1.09;Refund[... 4243 chars cut by the benchmark]\"\n[step 1] shell \"python3 - <<'EOF'\\nimport csv, re\\nfrom collections import defaultdict\\nimport io\\n\\ncoas = {}\\nwith open('finance/chart_of_accounts.csv', encoding='utf-8') as f:\\n    for row in csv.DictReader(f, delimiter=';'):\\n        coas[row['account'].strip()] = row['pnl_line'].strip()\\n\\ndef parse_amt(s):\\n    s = s.strip()\\n    return float(s.replace('.','').replace(',','.'))\\n\\nmonthly = defaultdict(lambda: defaultdict(float))\\nwith open('finance/ledger.csv', encoding='utf-8') as f:\\n    for row in csv.DictReader(f, delimiter=';'):\\n        d = row['date'].strip()\\n        m = d[3:5] + '/' + d[:2]  # placeholder\\n        # dd/mm/yyyy\\n        dd, mm, yyyy = d.split('/')\\n        month = yyyy + '-' + mm\\n        acct = row['account'].strip()\\n        line = coas[acct]\\n        amt = parse_amt(row['amount'])\\n        monthly[month][line] += amt\\n\\nfor m in sorted(monthly):\\n    d = monthly[m]\\n    rev = sum(v for k,v in d.items() if k=='revenue')\\n    cogs = sum(v for k,v in d.items() if k=='cogs')\\n    sm = sum(v for k,v in d.items() if k=='sales_marketing')\\n    rnd = sum(v for k,v in d.items() if k=='rnd')\\n    ga = sum(v for k,v in d.items() if k=='ga')\\n    fin = sum(v for k,v in d.items() if k=='financial')\\n    gm_pct = (rev + cogs)/rev*100 if rev else 0  # cogs negative\\n    ebitda = rev + cogs + sm + rnd + ga\\n    print(m, f\\\"rev={rev:.2f} cogs={cogs:.2f} gm={gm_pct:.2f}% ebitda={ebitda:.2f} fin={fin:.2f}\\\")\\n\\n# burn = avg monthly negative EBITDA of last three closed months (Apr-Jun)\\nimport numpy as np\\nvals = {}\\nfo[... 542 chars cut by the benchmark]\" failed -> \"\"\n[step 1] write \"calc.py\" ok -> \"Created file successfully: calc.py\"\n[step 1] shell \"python calc.py\" ok -> \"2026-01 rev=200510.87 cogs=-60091.92 gm=70.03% ebitda=-210278.96 fin=6466.77\\r\\n2026-02 rev=216328.06 cogs=-64278.71 gm=70.29% ebitda=-212300.08 fin=7298.39\\r\\n2026-03 rev=219066.17 cogs=-69096.05 gm=68.46% ebitda=-204525.45 fin=6446.51\\r\\n2026-04 rev=238163.26 cogs=-70867.73 gm=70.24% ebitda=-196950.65 fin=7280.37\\r\\n2026-05 rev=243032.89 cogs=-73973.13 gm=69.56% ebitda=-201945.82 fin=6501.04\\r\\n2026-06 re[... 191 chars cut by the benchmark]\"\n[step 1] shell \"python - <<'EOF'\\nimport json\\ndata = {\\n \\\"revenue\\\": {\\\"2026-01\\\":200510.87,\\\"2026-02\\\":216328.06,\\\"2026-03\\\":219066.17,\\\"2026-04\\\":238163.26,\\\"2026-05\\\":243032.89,\\\"2026-06\\\":272391.57},\\n \\\"gross_margin_pct\\\": {\\\"2026-01\\\":70.03,\\\"2026-02\\\":70.29,\\\"2026-03\\\":68.46,\\\"2026-04\\\":70.24,\\\"2026-05\\\":69.56,\\\"2026-06\\\":72.41},\\n \\\"ebitda\\\": {\\\"2026-01\\\":-210278.96,\\\"2026-02\\\":-212300.08,\\\"2026-03\\\":-204525.45,\\\"2026-04\\\":-196950.65,\\\"2026-05\\\":-201945.82,\\\"2026-06\\\":-192968.22},\\n \\\"burn\\\": 197288.23,\\n \\\"runway_months\\\": 9.36\\n}\\nwith open('result.json','w') as f:\\n    json.dump(data, f, indent=2)\\nprint(open('result.json').read())\\nEOF\" failed -> \"\"\n[step 1] write \"write_result.py\" ok -> \"Created file successfully: write_result.py\"\n[step 1] shell \"python write_result.py\" ok -> \"{\\r\\n  \\\"revenue\\\": {\\r\\n    \\\"2026-01\\\": 200510.87,\\r\\n    \\\"2026-02\\\": 216328.06,\\r\\n    \\\"2026-03\\\": 219066.17,\\r\\n    \\\"2026-04\\\": 238163.26,\\r\\n    \\\"2026-05\\\": 243032.89,\\r\\n    \\\"2026-06\\\": 272391.57\\r\\n  },\\r\\n  \\\"gross_margin_pct\\\": {\\r\\n    \\\"2026-01\\\": 70.03,\\r\\n    \\\"2026-02\\\": 70.29,\\r\\n    \\\"2026-03\\\": 68.46,\\r\\n    \\\"2026-04\\\": 70.24,\\r\\n    \\\"2026-05\\\": 69.56,\\r\\n    \\\"2026-06\\\": 72.41\\r\\n  },\\r\\n  \\\"ebitda\\\": {\\r\\n    \\\"2026-01\\\": -210278.96,\\r\\n   [... 190 chars cut by the benchmark]\"\n[step 1] shell \"Remove-Item calc.py, write_result.py\" ok -> \"(no output)\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "revenue per month",
+   true
+  ],
+  [
+   "gross_margin_pct per month",
+   true
+  ],
+  [
+   "ebitda per month",
+   true
+  ],
+  [
+   "3-month average burn",
+   true
+  ],
+  [
+   "runway in months",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 11,
+  "tool_calls": 10,
+  "tool_errors": 2,
+  "shell_commands": 8,
+  "shell_failures": 1,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 4069,
+  "reasoning_tokens": 896,
+  "largest_turn_tokens": 1209
+ },
+ "deliverables": [],
+ "render": null
+}

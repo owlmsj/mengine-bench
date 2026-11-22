@@ -1,0 +1,53 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [
+  "[goal] Deliver `./run.py` with `from run import run_tasks`\n[action] Implemented + tested\n[result] Done and verified\n[next] None\n\n`run.py` (new): `async def run_tasks(tasks, max_concurrent)`.\n- `tasks`: iterable of zero-arg callables returning awaitables.\n- Semaphore bounds concurrency to `max_concurrent` (must be >= 1, else ValueError).\n- Waits for every job (no early bail), returns the list of results in input order.\n- If any job raised, cleanup runs for all jobs, then the first exception is re-raised.\n- Ctrl+C: outer coroutine cancellation propagates into `asyncio.gather`, which cancels the in-flight jobs and awaits them, so `finally` blocks run before the error escapes (verified with an actual task cancellation).\n\nAssumptions (brief leaves them open): results are returned as a list; on failure the first exception is raised after all jobs finish; cleanup runs via standard `finally` semantics. Verified on Python 3.13 (target 3.11+, stdlib only): concurrency peak <= 3, results ordered, first exception re-raised after all complete, cancellation runs cleanup — `ALL PASS`."
+ ],
+ "diff": "A run.py\n\n--- run.py ---\n\"\"\"Batch task runner with bounded concurrency.\"\"\"\n\nimport asyncio\nfrom typing import Any, Awaitable, Callable, Iterable, List, TypeVar\n\nT = TypeVar(\"T\")\n\n\nasync def run_tasks(\n    tasks: Iterable[Callable[[], Awaitable[Any]]],\n    max_concurrent: int,\n) -> List[Any]:\n    \"\"\"Run tasks with at most ``max_concurrent`` jobs in flight.\n\n    Each task is a zero-argument callable returning an awaitable job.\n    Returns a list of job results (one per task, in input order) when every\n    job completed without error. If any job raised, the first such exception\n    is re-raised after every job has finished (cleanup still runs).\n\n    If the caller is interrupted (e.g. Ctrl+C), pending jobs are cancelled\n    and awaited, so ``finally`` blocks inside the jobs run before the\n    cancellation propagates.\n    \"\"\"\n    if max_concurrent < 1:\n        raise ValueError(f\"max_concurrent must be >= 1, got {max_concurrent!r}\")\n\n    semaphore = asyncio.Semaphore(max_concurrent)\n\n    async def run_one(task: Callable[[], Awaitable[Any]]) -> Any:\n        async with semaphore:\n            return await task()\n\n    results = await asyncio.gather(\n        *(run_one(task) for task in tasks), return_exceptions=True\n    )\n\n    for result in results:\n        if isinstance(result, BaseException):\n            raise result\n\n    return results\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"ls -la; python --version\" ok -> \"\\u001b[31;1mGet-ChildItem: \\u001b[31;1mA parameter cannot be found that matches parameter name 'la'.\\u001b[0m\\r\\nPython 3.13.14\"\n[step 1] shell \"ls; python -c \\\"import asyncio; print('ok')\\\"\" ok -> \"Directory: <WORKSPACE>\\r\\n\\r\\n\\u001b[32;1mMode   \\u001b[0m\\u001b[32;1m              LastWriteTime\\u001b[0m\\u001b[32;1m         Length\\u001b[0m\\u001b[32;1m Name\\u001b[0m\\r\\n\\u001b[32;1m----   \\u001b[0m \\u001b[32;1m             -------------\\u001b[0m \\u001b[32;1m        ------\\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\n-a---          21/11/2026    13:14            394 AGENTS.md\\r\\nok\"\n[step 1] write \"run.py\" ok -> \"Created file successfully: run.py\"\n[step 1] shell \"python - <<'EOF'\\nimport asyncio, sys\\nsys.path.insert(0, '.')\\nfrom run import run_tasks\\n\\npeak = 0\\ncurrent = 0\\n\\nasync def job(i, fails=False):\\n    global peak, current\\n    current += 1\\n    peak = max(peak, current)\\n    await asyncio.sleep(0.05)\\n    current -= 1\\n    if fails:\\n        raise RuntimeError(f\\\"boom {i}\\\")\\n    return i\\n\\nasync def main():\\n    global peak, current\\n    # concurrency + order\\n    res = await run_tasks([lambda i=i: job(i) for i in range(10)], 3)\\n    assert res == list(range(10)), res\\n    assert peak <= 3, peak\\n\\n    # exception: first raised after all complete\\n    try:\\n        await run_tasks([lambda: job(0), lambda: job(1, True), lambda: job(2)], 2)\\n        raise AssertionError(\\\"should raise\\\")\\n    except RuntimeError as e:\\n        assert \\\"boom 1\\\" in str(e)\\n\\n    # cancellation cleanup\\n    cleaned = []\\n    async def cleanup_job():\\n        try:\\n            await asyncio.sleep(10)\\n        finally:\\n            cleaned.append(True)\\n        raise asyncio.CancelledError()\\n\\n    async def killer():\\n        try:\\n            await run_tasks([cleanup_job], 1)\\n        except asyncio.CancelledError:\\n            pass\\n\\n    task = asyncio.ensure_future(killer())\\n    await asyncio.sleep(0.2)\\n    task.cancel()\\n    try:\\n        await task\\n    except asyncio.CancelledError:\\n        pass\\n    assert cleaned, \\\"cleanup did not run\\\"\\n    print(\\\"ALL PASS\\\")\\n\\nasyncio.run(main())\\nEOF\" failed -> \"\"\n[step 1] shell \"python -c \\\"import sys; print(sys.version)\\\"\" ok -> \"3.13.14 (main, Jun 23 2026, 15:19:27) [MSC v.1944 64 bit (AMD64)]\"\n[step 1] write \"tmp_check.py\" ok -> \"Created file successfully: tmp_check.py\"\n[step 1] shell \"python tmp_check.py\" ok -> \"ALL PASS\"\n[step 1] shell \"Remove-Item tmp_check.py\" ok -> \"(no output)\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 9,
+  "tool_calls": 8,
+  "tool_errors": 1,
+  "shell_commands": 6,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 3496,
+  "reasoning_tokens": 1531,
+  "largest_turn_tokens": 1792
+ },
+ "deliverables": [],
+ "render": null
+}

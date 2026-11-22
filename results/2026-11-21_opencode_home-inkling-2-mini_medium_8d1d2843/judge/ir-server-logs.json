@@ -1,0 +1,57 @@
+{
+ "task_id": "ir-server-logs",
+ "prompts": [
+  "The game went down in June and we owe the team an incident report. The logs and their notes are in {WS}/logs. When did it start and end, how long was it, did we keep our monthly availability target, and why did it happen? Record it in {WS}/result.json: start, end, minutes_down, availability_june_pct, slo_999_ok, root_cause."
+ ],
+ "answers": [
+  "[goal] Incident report for the June game-server outage.\n[action] Parsed logs in ./logs; computed downtime and SLO.\n[result] `./result.json` written:\n- start: 2026-06-02 03:17:42 (first SaveGame failure)\n- end: 2026-06-02 03:53:31 (\"server ready\")\n- minutes_down: ~35.82 (35 min 49 s)\n- availability_june_pct: 99.9171% (30-day June)\n- slo_999_ok: true (99.9% = ~43.2 min down budget; actual 35.8 min)\n- root_cause: /data disk hit 97% (3.1 GB free, WARN at 03:10:02) → SaveGame failed with \"No space left on device\" → server unresponsive → repeated watchdog restarts exiting code 137 → backup rotation freed 38.2 GB at 03:52:10 → ready at 03:53:31.\n\nAssumptions: down defined per README (first save error → \"server ready\"); availability computed over the full 30-day June as 43,200 min with the one incident subtracted. Ignored the unrelated 2026-06-01 RCON bad-password error (not a downtime event, no server-unresponsive impact).\n\nHow it is right: timestamps and messages were read directly from the daily logs (lines 251/254/294 of gameserver-2026-06-02.log); arithmetic recomputed with node. Note 2026-06-03 log had no error/ready lines, consistent with one incident.\n[next] None; no browser/apps opened."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"start\": \"2026-06-02T03:17:42\",\n  \"end\": \"2026-06-02T03:53:31\",\n  \"minutes_down\": 35.82,\n  \"availability_june_pct\": 99.9171,\n  \"slo_999_ok\": true,\n  \"root_cause\": \"Disk /data reached 97% (3.1 GB free); SaveGame failed ('No space left on device'), server went unresponsive, watchdog restart attempts kept failing (exit 137) until a backup rotation freed 38.2 GB at 03:52:10, then the server reached 'server ready' at 03:53:31.\"\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"ls -la ./logs && cat ./logs/* 2>/dev/null | head -200\" failed -> \"\\u001b[31;1mGet-ChildItem: \\u001b[31;1mA parameter cannot be found that matches parameter name 'la'.\\u001b[0m\"\n[step 1] shell \"ls -R ./logs\" ok -> \"Directory: <WORKSPACE>\\\\logs\\r\\n\\r\\n\\u001b[32;1mMode   \\u001b[0m\\u001b[32;1m              LastWriteTime\\u001b[0m\\u001b[32;1m         Length\\u001b[0m\\u001b[32;1m Name\\u001b[0m\\r\\n\\u001b[32;1m----   \\u001b[0m \\u001b[32;1m             -------------\\u001b[0m \\u001b[32;1m        ------\\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\n-a---          21/11/2026    13:18         112050 gameserver-2026-06-01.log\\r\\n-a---          21/11/2026 [... 187 chars cut by the benchmark]\"\n[step 1] shell \"cat ./logs/README.md\" ok -> \"Dedicated game server. Monthly availability SLO: 99.9%. Down = from the first save error to the 'server ready' line. June has 30 days; there is only one incident.\"\n[step 1] shell \"head -50 ./logs/gameserver-2026-06-01.log\" ok -> \"2026-06-01 00:00:05 INFO player joined steam_7670397083158796 players=1\\n2026-06-01 00:01:14 INFO heartbeat players=1 tick=64 mem_gb=23.9\\n2026-06-01 00:01:41 INFO player joined steam_6731262393085476 players=2\\n2026-06-01 00:02:21 INFO player joined steam_8939172821036409 players=3\\n2026-06-01 00:02:49 INFO player left players=2\\n2026-06-01 00:03:26 INFO heartbeat players=2 tick=64 mem_gb=27.3\\n2026-06[... 2587 chars cut by the benchmark]\"\n[step 1] shell \"Select-String -Path ./logs/gameserver-*.log -Pattern \\\"error|ERROR|ready|fail|WARN\\\" | Select-Object -First 60 | ForEach-Object { \\\"$($_.Filename):$($_.LineNumber): $($_.Line)\\\" }\" ok -> \"gameserver-2026-06-01.log:685: 2026-06-01 09:12:40 ERROR RCON auth failed from 203.0.113.12 (bad password)\\r\\ngameserver-2026-06-02.log:241: 2026-06-02 03:10:02 WARN disk /data usage 97% (free 3.1 GB)\\r\\ngameserver-2026-06-02.log:251: 2026-06-02 03:17:42 ERROR SaveGame failed: write /data/game/Saved/Level.sav: No space left on device\\r\\ngameserver-2026-06-02.log:252: 2026-06-02 03:18:00 ERROR SaveGame f[... 4326 chars cut by the benchmark]\"\n[step 1] shell \"sed -n '235,300p' ./logs/gameserver-2026-06-02.log; echo ====; grep -n \\\"server ready\\\" ./logs/*.log; echo ====; grep -n \\\"ERROR\\\\|WARN\\\" ./logs/gameserver-2026-06-03.log ./logs/gameserver-2026-06-01.log\" ok -> \"2026-06-02 03:05:32 INFO heartbeat players=15 tick=64 mem_gb=26.8\\n2026-06-02 03:06:22 INFO player joined steam_6669951207312145 players=16\\n2026-06-02 03:06:48 INFO player joined steam_4890415667087712 players=17\\n2026-06-02 03:08:01 INFO player joined steam_1093840144667060 players=18\\n2026-06-02 03:08:30 INFO heartbeat players=18 tick=64 mem_gb=26.6\\n2026-06-02 03:09:37 INFO player joined steam_6619[... 4550 chars cut by the benchmark]\"\n[step 1] shell \"powershell -Command \\\"$start=[datetime]'2026-06-02 03:17:42'; $end=[datetime]'2026-06-02 03:53:31'; $d=($end-$start).TotalMinutes; $down=$d; $total=30*24*60; $avail=($total-$down)/$total*100; \\\\\\\"down_min=$d total=$total avail=$avail slo_ok=$($avail -ge 99.9)\\\\\\\"\\\"\" failed -> \"At line:1 char:72\\r\\n+ ... ]'2026-06-02 03:17:42'; =[datetime]'2026-06-02 03:53:31'; =(-).TotalM ...\\r\\n+                                                                  ~\\r\\nMissing expression after unary operator '-'.\\r\\nAt line:1 char:105\\r\\n+ ... e]'2026-06-02 03:53:31'; =(-).TotalMinutes; =; =30*24*60; =(-)/*100;  ...\\r\\n+                                                                  ~\\r\\nMissing expre[... 180 chars cut by the benchmark]\"\n[step 1] shell \"node -e \\\"const s=new Date('2026-06-02T03:17:42'), e=new Date('2026-06-02T03:53:31'); const d=(e-s)/60000; const total=30*24*60; const avail=(total-d)/total*100; console.log('down_min',d,'avail',avail,'ok',avail>=99.9)\\\"\" ok -> \"down_min 35.81666666666667 avail 99.91709104938272 ok true\"\n[step 1] shell \"cat > result.json <<'EOF'\\n{\\n  \\\"start\\\": \\\"2026-06-02T03:17:42\\\",\\n  \\\"end\\\": \\\"2026-06-02T03:53:31\\\",\\n  \\\"minutes_down\\\": 35.82,\\n  \\\"availability_june_pct\\\": 99.9171,\\n  \\\"slo_999_ok\\\": true,\\n  \\\"root_cause\\\": \\\"Disk /data filled to 97% (3.1 GB free); SaveGame failed ('No space left on device'), the server went unresponsive and watchdog restarts kept failing (exit 137) until a backup rotation freed 38.2 GB at 03:52:10 and the server reached 'server ready' at 03:53:31.\\\"\\n}\\nEOF\\ncat result.json\" failed -> \"\\u001b[31;1mParserError: \\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1mLine |\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1m\\u001b[36;1m   1 | \\u001b[0m cat > result.json <\\u001b[36;1m<\\u001b[0m'EOF'\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1m\\u001b[36;1m\\u001b[0m\\u001b[36;1m\\u001b[0m\\u001b[36;1m     | \\u001b[31;1m                    ~\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1m\\u001b[36;1m\\u001b[0m\\u001b[36;1m\\u001b[0m\\u001b[36;1m\\u001b[31;1m\\u001b[31;1m\\u001b[36;1m     | \\u001b[31;1mMissing file specification after redirection operator.\\u001b[0m\"\n[step 1] write \"result.json\" ok -> \"Created file successfully: result.json\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "incident start",
+   true
+  ],
+  [
+   "incident end",
+   true
+  ],
+  [
+   "minutes down",
+   true
+  ],
+  [
+   "June availability",
+   true
+  ],
+  [
+   "SLO 99.9 met",
+   true
+  ],
+  [
+   "root cause = /data disk full",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 11,
+  "tool_calls": 10,
+  "tool_errors": 0,
+  "shell_commands": 9,
+  "shell_failures": 3,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2072,
+  "reasoning_tokens": 857,
+  "largest_turn_tokens": 424
+ },
+ "deliverables": [],
+ "render": null
+}
