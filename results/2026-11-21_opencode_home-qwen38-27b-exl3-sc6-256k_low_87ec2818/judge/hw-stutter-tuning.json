@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "\n\n[goal]\nFind what causes the periodic hitches on arena-01 and the setting changes that fix them within the owner's constraints; record metrics in result.json.\n\n[action]\nParsed capture/presentmon.csv (8238 frames, 67 s) and capture/sensors.csv (1 Hz) per the owner's definitions; correlated hitch timing with sensor state; wrote result.json; moved scratch scripts out of the workspace.\n\n[result]\n- avg_fps = 137.29 (1000/mean MsBetweenPresents, mean 7.284 ms); low_1pct_fps = 45.35 (1000/p99, p99 = 22.049 ms), measured exactly as the notes define them.\n- Cause: PCIe ASPM on the GPU root port (pcie_aspm_rp1_gpu = L1) puts the Gen5 x4 link into L1, and each ~15 ms wake stalls the next batch of frames. Evidence: 15 hitch blocks of 12 frames at ~22 ms starting t = 2.40, 6.41, 10.40, …, 58.40 s — every 4 s; the sensor log shows gpu_pcie_link_state = L1 in exactly those seconds (t = 2, 6, 10, …, 58), with link speed constant Gen5 x4 the whole capture (no downtrain). Per-frame work latencies are unchanged during hitches (Present API 0.27 ms, render-complete 4.72 ms), so the extra time is link-wake waiting, not GPU/CPU work. Ruled out: CPU clock steady ~5300 MHz (power plan not throttling), DPC latency 40–90 µs normal, disk spikes (t = 13, 27, 43–45, 52) don't align with the 4 s hitch cadence.\n- Change: pcie_aspm_rp1_gpu: L1 → disabled (BIOS). Respects both constraints — GPU stays Gen5 x4, no BIOS overclocking touched (XMP/PBO/ratio unchanged).\n- Assumption: \"L1 disabled\" means the GPU root port no longer initiates ASPM L1 entry; if the platform exposes only \"Disabled/L0s/L1\", pick Disabled.\n\n[result]\nresult.json written with avg_fps, low_1pct_fps, cause, and the single change {setting: pcie_aspm_rp1_gpu, from: L1, to: disabled}; JSON validated (all required keys). No browser tabs, windows or apps were opened, so nothing to close.\n\n[next]\nAfter the owner applies the BIOS change, re-capture 60 s with PresentMon: expect p99 to drop to ~7 ms (~137 fps 1% lows) and L1 to disappear from the sensor log; re-measure before/after to confirm."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"avg_fps\": 137.29,\n  \"low_1pct_fps\": 45.35,\n  \"cause\": \"PCIe ASPM on the GPU root port (pcie_aspm_rp1_gpu=L1) drops the Gen5 x4 link into L1 every 4 s; the ~15 ms wake latency stalls the next frame batch. PresentMon shows 15 identical hitch blocks (12 frames each at ~22 ms / ~45 fps) starting at t=2.40, 6.41, 10.40, ... 58.40 s; the 1 Hz sensor log shows gpu_pcie_link_state=L1 in exactly the matching seconds (t=2,6,10,...,58) with link speed constant Gen5 x4 throughout (no downtrain, no DPC spike, no disk/CPU correlation). Fix is to stop the GPU link from entering L1; link speed stays Gen5 x4 and no BIOS overclock is touched.\",\n  \"changes\": [\n    {\n      \"setting\": \"pcie_aspm_rp1_gpu\",\n      \"from\": \"L1\",\n      \"to\": \"disabled\"\n    }\n  ]\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem -Force .. | Select-Object Name,Length; Get-ChildItem -Force . | Select-Object Name,Length\" ok -> \"\\u001b[32;1mName         \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----         \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\nworkspace     \\r\\ncapture       \\r\\nAGENTS.md     394\\r\\nNOTES.md      774\\r\\nsettings.json 2429\"\n[step 1] read \"settings.json\" ok -> \"Read file settings.json, lines 1-125\\n1: {\\n2:   \\\"rig\\\": \\\"arena-01\\\",\\n3:   \\\"settings\\\": [\\n4:     {\\n5:       \\\"setting\\\": \\\"power_plan\\\",\\n6:       \\\"value\\\": \\\"Balanced\\\",\\n7:       \\\"where\\\": \\\"Windows\\\"\\n8:     },\\n9:     {\\n10:       \\\"setting\\\": \\\"hardware_accelerated_gpu_scheduling\\\",\\n11:       \\\"value\\\": \\\"on\\\",\\n12:       \\\"where\\\": \\\"Windows\\\"\\n13:     },\\n14:     {\\n15:       \\\"setting\\\": \\\"game_mode\\\",\\n16:       \\\"value\\\": \\\"on\\\",\\n1[... 2582 chars cut by the benchmark]\"\n[step 1] read \"NOTES.md\" ok -> \"Read file NOTES.md, lines 1-15\\n1: # Owner notes - rig \\\"arena-01\\\"\\n2: \\n3: The game hitches every few seconds even though the average frame rate looks fine.\\n4: Capture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\n5: taken at the same time (same clock: second 0 of both files is the same instant).\\n6: settings.json is a dump of the rig's current settings.\\n7: \\n8: How [... 455 chars cut by the benchmark]\"\n[step 1] read \"capture\" ok -> \"Read directory capture, entries 1-2\\npresentmon.csv\\nsensors.csv\"\n[step 1] shell \"Get-Item .\\\\capture\\\\presentmon.csv, .\\\\capture\\\\sensors.csv | Select-Object Name,Length; Get-Content .\\\\capture\\\\presentmon.csv -TotalCount 5; Get-Content .\\\\capture\\\\sensors.csv -TotalCount 10\" ok -> \"\\u001b[32;1mName          \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----          \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\npresentmon.csv 715870\\r\\nsensors.csv      2660\\r\\nApplication,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.000000,6.861,6.847,0.294[... 787 chars cut by the benchmark]\"\n[step 1] shell \"python --version 2>$null; if (-not $?) { Write-Output \\\"no python\\\" }\" ok -> \"Python 3.13.14\"\n[step 1] write \"analyze.py\" ok -> \"Created file successfully: analyze.py\"\n[step 1] shell \"python analyze.py\" ok -> \"frames=8238 duration=67.033s\\r\\navg_fps=137.29 (1000/mean, mean=7.284 ms)\\r\\np99=22.049 ms  low_1pct=45.35\\r\\nmedian=6.96 ms  max=23.68 ms\\r\\nhitches (>2x median): 180\\r\\n  t=2.401s frame=21.86ms (46 fps)\\r\\n  t=2.423s frame=22.85ms (44 fps)\\r\\n  t=2.445s frame=22.08ms (45 fps)\\r\\n  t=2.467s frame=21.61ms (46 fps)\\r\\n  t=2.489s frame=22.67ms (44 fps)\\r\\n  t=2.512s frame=21.02ms (48 fps)\\r\\n  t=2.533s frame=22.12ms (45 [... 2971 chars cut by the benchmark]\"\n[step 1] other \"{\\\"code\\\": \\\"import csv\\\\nrows=[]\\\\nwith open(\\\\\\\"capture/presentmon.csv\\\\\\\") as f:\\\\n    for row in csv.DictReader(f):\\\\n        rows.append([float(row[k]) for k in (\\\\\\\"TimeInSeconds\\\\\\\",\\\\\\\"MsBetweenPresents\\\\\\\",\\\\\\\"MsInPresentAPI\\\\\\\",\\\\\\\"MsUntilRenderComplete\\\\\\\",\\\\\\\"MsUntilDisplayed\\\\\\\")])\\\\ntyp=[r for r in rows if r[1]<10]\\\\nhic=[r for r in rows if r[1]>15]\\\\ndef avg(lst,i): return sum(x[i] for x in lst)/len(lst)\\\\nfor i,name in ((1,\\\\\\\"MsBetweenPresents\\\\\\\"),(2,\\\\\\\"MsInPresentAPI\\\\\\\"),(3,\\\\\\\"MsUntilRenderComplete\\\\\\\"),(4,\\\\\\\"MsUntilDisplayed\\\\\\\")):\\\\n    print(f\\\\\\\"{name}: normal={avg(typ,i):.3f}ms hitch={avg(hic,i):.3f}ms\\\\\\\")\\\\n# window alignment: each hitch block vs sensor L1 second\\\\nblocks=[]\\\\ncur=[rows[0]]\\\\nfor r in rows[1:]:\\\\n    if r[1]>15:\\\\n        if not blocks or r[0]-blocks[-1][-1][0]>0.5: blocks.append([])\\\\n        blocks[-1].append(r)\\\\n    else:\\\\n        blocks[-1].append(r) if False else None\\\\nprint(\\\\\\\"hitch block start times:\\\\\\\", [f\\\\\\\"{b[0][0]:.2f}\\\\\\\" for b in blocks])\\\\n\\\"}\" ok -> \"SyntaxError: Unexpected token. Code must be plain JavaScript written as a program body. (line 2, col 1)\"\n[step 1] write \"breakdown.py\" ok -> \"Created file successfully: breakdown.py\"\n[step 1] shell \"python breakdown.py\" ok -> \"MsBetweenPresents: normal=6.955ms hitch=22.035ms\\r\\nMsInPresentAPI: normal=0.276ms hitch=0.274ms\\r\\nMsUntilRenderComplete: normal=4.753ms hitch=4.720ms\\r\\nMsUntilDisplayed: normal=5.751ms hitch=5.749ms\\r\\nhitch block starts: ['2.40', '6.41', '10.40', '14.40', '18.40', '22.40', '26.40', '30.41', '34.41', '38.41', '42.41', '46.40', '50.41', '54.40', '58.40']\"\n[step 1] write \"result.json\" ok -> \"Created file successfully: result.json\"\n[step 1] shell \"Move-Item -Force analyze.py, breakdown.py <HOME>\\\\AppData\\\\Local\\\\Temp\\\\opencode\\\\; python -c \\\"import json; d=json.load(open('result.json')); print(sorted(d.keys())); print([sorted(c.keys()) for c in d['changes']])\\\"\" ok -> \"['avg_fps', 'cause', 'changes', 'low_1pct_fps']\\r\\n[['from', 'setting', 'to']]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 11,
+  "tool_calls": 13,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 0,
+  "file_writes": 3,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 6821,
+  "reasoning_tokens": 3599,
+  "largest_turn_tokens": 1996
+ },
+ "deliverables": [],
+ "render": null
+}

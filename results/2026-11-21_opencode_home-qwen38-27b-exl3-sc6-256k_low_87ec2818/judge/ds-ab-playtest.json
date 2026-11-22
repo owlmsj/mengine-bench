@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-ab-playtest",
+ "prompts": [
+  "We playtested two versions of the Pixel Arena tutorial and have to pick one for the next release. The export and its notes are in {WS}/telemetry. Should we ship B instead of A? Give a recommendation a skeptical lead would accept. Record it in {WS}/result.json with ship_b, sessions_a, sessions_b, completion_rate_a, completion_rate_b and p_value."
+ ],
+ "answers": [
+  "\n\nCross-check confirms the Python result. Work is complete and verified; no browser tabs or apps were opened, so nothing to close.\n\n[goal] Decide whether to ship tutorial B over A from the playtest export, and record the decision in ./result.json.\n\n[action]\n- Read `telemetry/playtest_ab.csv` (1870 rows) and `telemetry/README.md`. The README states: ETL resends sessions (dedupe on `session_id`), `variant` may be lowercase or have a leading space (normalize), and the release rule requires a gain significant at 5%.\n- Wrote `analyze_ab.py` (in the workspace) that: normalizes variant, dedupes 70 repeated session rows (0 conflicts among duplicates), computes per-variant rates, and runs a pooled two-proportion z-test. Cross-checked all counts with an independent PowerShell one-liner — both paths agree.\n\n[result]\n- After dedupe: **1800 unique sessions, 900 per variant** (balanced).\n- Completion: **A = 342/900 = 38.0%**, **B = 420/900 = 46.67%** (gain of 8.67 percentage points).\n- Pooled z-test: z = 3.72, one-sided p ≈ 0.000099 (B > A), two-sided p ≈ 0.000198. Significant at 5% under either convention — the release rule is met.\n- `./result.json` written and verified: `{\"ship_b\": true, \"sessions_a\": 900, \"sessions_b\": 900, \"completion_rate_a\": 0.38, \"completion_rate_b\": 0.4667, \"p_value\": 9.9e-05}`. `p_value` is the one-sided p for the directional claim \"B beats A\" (the release rule is about a gain); the two-sided value is half an order of magnitude away and also far below 0.05.\n- **Recommendation: ship B.**\n\n[Assumptions]\n- Unit of analysis is the session (per README's unique-key note), not the player; player IDs repeat across sessions, which is expected in playtests.\n- Duplicate rows are exact resends (verified: 0 conflicting duplicates, so dedupe loses no information).\n- One-sided 5% test for the \"gain\" claim; conclusion is robust to the two-sided test, so the choice of convention doesn't change the call.\n\n[How I know it's right] Counts and rates were computed twice through independent code paths (Python csv + PowerShell string parsing) with identical results: 900/342 vs 900/420, 1800 unique. The p-value follows from the standard pooled two-proportion z-test (erf-based normal CDF, unpooled-SE variant gives z=3.74, same verdict). Data cleaning was driven by the export's own README, and `result.json` was re-read to confirm exact content.\n\n[next] None — decision recorded. Optional follow-up: a Fisher's exact test or a player-level mixed model if the lead wants extra robustness, but the effect size (8.7 pp, z≈3.7) is not borderline."
+ ],
+ "diff": "A analyze_ab.py\nA result.json\n\n--- analyze_ab.py ---\nimport csv, math, json, collections\n\npath = r\"telemetry\\playtest_ab.csv\"\nraw_variants = collections.Counter()\nrows = []\nwith open(path, newline=\"\", encoding=\"utf-8-sig\") as f:\n    for row in csv.DictReader(f):\n        sid = row[\"session_id\"].strip()\n        var = row[\"variant\"].strip().lower()\n        comp = row[\"completed_tutorial\"].strip()\n        raw_variants[row[\"variant\"]] += 1\n        rows.append((sid, var, comp, row[\"match_minutes\"]))\n\nprint(\"raw variant spellings:\", dict(raw_variants))\n\nseen = {}\nconflicts = []\nfor sid, var, comp, mins in rows:\n    if sid in seen:\n        if seen[sid] != (var, comp):\n            conflicts.append((sid, seen[sid], (var, comp)))\n    else:\n        seen[sid] = (var, comp)\n\nsessions = list(seen.items())\nna_rows = len(rows)\nn = len(sessions)\nprint(f\"rows={na_rows} unique_sessions={n} dup_rows={na_rows-n} conflicting_dups={len(conflicts)}\")\nfor c in conflicts[:10]:\n    print(\"conflict:\", c)\n\ndef stats(v):\n    sub = [c for _, (vv, c) in sessions if vv == v]\n    k = sum(int(c) for c in sub)\n    return len(sub), k, k / len(sub)\n\nna, ka, pa = stats(\"a\")\nnb, kb, pb = stats(\"b\")\nprint(f\"A: n={na} completions={ka} rate={pa:.6f}\")\nprint(f\"B: n={nb} completions={kb} rate={pb:.6f}\")\n\n# pooled two-proportion z-test, one-sided H1: B > A\np_pool = (ka + kb) / (na + nb)\nse = math.sqrt(p_pool * (1 - p_pool) * (1 / na + 1 / nb))\nz = (pb - pa) / se\ndef ncdf(x):\n    return 0.5 * (1 + math.erf(x / math.sqrt(2)))\np_one = 1 - ncdf(z)\np_two = 2 * (1 - ncdf(abs(z)))\nprint(f\"z={z:.4f} p_one_sided={p_one:.6f} p_two_sided={p_two:.6f}\")\n\n# unweighted SE check (same conclusion expected)\nse2 = math.sqrt(pa * (1 - pa) / na + pb * (1 - pb) / nb)\nz2 = (pb - pa) / se2\np_two_u = 2 * (1 - ncdf(abs(z2)))\nprint(f\"unpooled z={z2:.4f} p_two_sided={p_two_u:.6f}\")\n\nresult = {\n    \"ship_b\": p_one < 0.05 and pb > pa,\n    \"sessions_a\": na,\n    \"sessions_b\": nb,\n    \"completion_rate_a\": round(pa, 4),\n    \"completion_rate_b\": round(pb, 4),\n    \"p_value\": round(p_one, 6),\n}\nwith open(\"result.json\", \"w\", encoding=\"utf-8\") as f:\n    json.dump(result, f, indent=2)\nprint(json.dumps(result))\n\n\n--- result.json ---\n{\r\n  \"ship_b\": true,\r\n  \"sessions_a\": 900,\r\n  \"sessions_b\": 900,\r\n  \"completion_rate_a\": 0.38,\r\n  \"completion_rate_b\": 0.4667,\r\n  \"p_value\": 9.9e-05\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\telemetry\" ok -> \"Read directory <WORKSPACE>\\\\telemetry, entries 1-2\\nplaytest_ab.csv\\nREADME.md\"\n[step 1] read \"<WORKSPACE>\\\\telemetry\\\\README.md\" ok -> \"Read file <WORKSPACE>\\\\telemetry\\\\README.md, lines 1-5\\n1: # Playtest A/B - Pixel Arena tutorial\\n2: \\n3: Export from arena-panel. The ETL resends sessions: `session_id` is the unique key (repeated rows are the same session). `variant` may come lowercase or with a leading space. `completed_tutorial` is 0/1.\\n4: \\n5: Release rule: a variant[... 94 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\telemetry\\\\playtest_ab.csv\" ok -> \"Read file <WORKSPACE>\\\\telemetry\\\\playtest_ab.csv, lines 1-1871\\n1: session_id,variant,player_id,completed_tutorial,match_minutes\\n2: s01423,b,p0798,1,12.6\\n3: s01632,a,p0693,1,9.0\\n4: s00612,A,p0098,0,12.2\\n5: s00389, B,p0202,1,16.5\\n6: s00509, B,p0896,0,14.8\\n7: s00206,a,p0059,1,13.0\\n8: s01758,a,p0342,0,20.4\\n9: s01097, B,p0084,1,15.1\\n10: s[... 51433 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\analyze_ab.py\" ok -> \"Created file successfully: <WORKSPACE>/analyze_ab.py\"\n[step 1] shell \"python analyze_ab.py\" ok -> \"raw variant spellings: {'b': 323, 'a': 304, 'A': 318, ' B': 287, ' A': 316, 'B': 322}\\r\\nrows=1870 unique_sessions=1800 dup_rows=70 conflicting_dups=0\\r\\nA: n=900 completions=342 rate=0.380000\\r\\nB: n=900 completions=420 rate=0.466667\\r\\nz=3.7210 p_one_sided=0.000099 p_two_sided=0.000198\\r\\nunpooled z=3.7354 p_two_sided=0.000187\\r\\n{\\\"ship_b\\\": true, \\\"sessions_a\\\": 900, \\\"sessions_b\\\": 900, \\\"completion_rate_a\\\": 0.[... 52 chars cut by the benchmark]\"\n[step 1] shell \"$lines = Get-Content telemetry\\\\playtest_ab.csv | Select-Object -Skip 1\\n$seen = @{}; $tot=@{}; $done=@{}\\nforeach ($l in $lines) { $p=$l -split ','; $sid=$p[0].Trim(); if(-not $seen.ContainsKey($sid)){ $seen[$sid]=1; $v=$p[1].Trim().ToLower(); $c=[int]$p[3]; $tot[$v]++; if($c -eq 1){$done[$v]++} } }\\n\\\"A_total=$($tot['a']) A_done=$($done['a']) B_total=$($tot['b']) B_done=$($done['b']) unique=$($seen.Count)\\\"\\nGet-Content result.json\" ok -> \"A_total=900 A_done=342 B_total=900 B_done=420 unique=1800\\r\\n{\\r\\n  \\\"ship_b\\\": true,\\r\\n  \\\"sessions_a\\\": 900,\\r\\n  \\\"sessions_b\\\": 900,\\r\\n  \\\"completion_rate_a\\\": 0.38,\\r\\n  \\\"completion_rate_b\\\": 0.4667,\\r\\n  \\\"p_value\\\": 9.9e-05\\r\\n}\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "deduplicated session counts",
+   true
+  ],
+  [
+   "completion rates",
+   true
+  ],
+  [
+   "the gain is significant",
+   true
+  ],
+  [
+   "ship decision",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 6,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 4736,
+  "reasoning_tokens": 2650,
+  "largest_turn_tokens": 2869
+ },
+ "deliverables": [],
+ "render": null
+}
