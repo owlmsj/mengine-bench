@@ -1,0 +1,53 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [
+  "**[goal]** Recover rows from the truncated SQLite file `prices.db` into `recovered.json`.\n\n**[action]** The 4096-byte file has no `SQLite format 3` header (front truncated), but offset 0 is a valid leaf table b-tree page header: page type `0x0D`, 10 cells, cell content area at 0x0F3D. Parsed the cell pointer array and each cell's varint payload/rowid/record (serial types `[0, text, float]` — first column is the rowid alias, stored NULL in the record). Extracted all 10 cells.\n\n**[result]** `recovered.json` written with 10 rows, all read directly from the file:\n\n| item | price |\n|---|---|\n| trail map | 0 |\n| matchbox | 1 |\n| tent stake | 2.75 |\n| lantern | 24 |\n| rope coil | 18 |\n| water filter | 39.9 |\n| sleeping bag | 129 |\n| camp stove | 310 |\n| compass | 15.5 |\n| first aid kit | 0.99 |\n\n**[how I know it's right]** Each cell's byte-level parse succeeded: varint lengths, rowids 1–10 in order, UTF-8 text lengths matching the serial-type sizes (e.g. \"first aid kit\" = 13 chars, serial type 39 = 12+2×13.5 → text), and float64/integer prices decoding cleanly. The JSON round-trips through `json.load` with 10 entries. No rows were guessed — every value came from the file's cell bytes.\n\n**Assumptions:** the table schema is `(rowid, item TEXT, price REAL)` — the NULL first column is the rowid alias, so `item`/`price` map to columns 2 and 3. Prices are numeric (int or float as stored). The file is a single leaf page; no overflow pages or additional pages exist in the 4096 bytes."
+ ],
+ "diff": "A recovered.json\n\n--- recovered.json ---\n[\n  {\n    \"item\": \"trail map\",\n    \"price\": 0\n  },\n  {\n    \"item\": \"matchbox\",\n    \"price\": 1\n  },\n  {\n    \"item\": \"tent stake\",\n    \"price\": 2.75\n  },\n  {\n    \"item\": \"lantern\",\n    \"price\": 24\n  },\n  {\n    \"item\": \"rope coil\",\n    \"price\": 18\n  },\n  {\n    \"item\": \"water filter\",\n    \"price\": 39.9\n  },\n  {\n    \"item\": \"sleeping bag\",\n    \"price\": 129\n  },\n  {\n    \"item\": \"camp stove\",\n    \"price\": 310\n  },\n  {\n    \"item\": \"compass\",\n    \"price\": 15.5\n  },\n  {\n    \"item\": \"first aid kit\",\n    \"price\": 0.99\n  }\n]",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-Item .\\\\prices.db | Select-Object Length; Get-Content .\\\\prices.db -Encoding Byte -TotalCount 100 | ForEach-Object { $_.ToString('X2') }\" failed -> \"\\u001b[32;1mLength\\u001b[0m\\r\\n\\u001b[32;1m------\\u001b[0m\\r\\n  4096\\r\\n\\u001b[31;1mGet-Content: \\u001b[31;1mCannot process argument transformation on parameter 'Encoding'. 'Byte' is not a supported encoding name. For information on defining a custom encoding, see the documentation for the Encoding.RegisterProvider method. (Parameter 'name')\\u001b[0m\"\n[step 1] shell \"$bytes = [System.IO.File]::ReadAllBytes('.\\\\prices.db'); $hex = ($bytes | ForEach-Object { $_.ToString('X2') }) -join ' '; $hex | Out-File .\\\\hexdump.txt -Encoding ascii; Write-Output \\\"total bytes: $($bytes.Length)\\\"; Write-Output $hex.Substring(0, 512)\" ok -> \"total bytes: 4096\\r\\n0D 00 00 00 0A 0F 3D 00 0F F1 0F E3 0F CB 0F BD 0F AD 0F 93 0F 7F 0F 6D 0F 58 0F 3D 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 [... 131 chars cut by the benchmark]\"\n[step 1] shell \"$bytes = [System.IO.File]::ReadAllBytes('.\\\\prices.db'); $sig = [byte[]](0x53,0x51,0x4C,0x69,0x74,0x65); for($i=0;$i -lt $bytes.Length-6;$i++){ if($bytes[$i] -eq 0x53 -and $bytes[$i+1] -eq 0x51 -and $bytes[$i+2] -eq 0x4C -and $bytes[$i+3] -eq 0x69 -and $bytes[$i+4] -eq 0x74 -and $bytes[$i+5] -eq 0x65){ Write-Output \\\"SQLite header at offset $i\\\" } }\" ok -> \"(no output)\"\n[step 1] shell \"$bytes = [System.IO.File]::ReadAllBytes('.\\\\prices.db'); $sb = New-Object System.Text.StringBuilder; for($i=0;$i -lt $bytes.Length;$i++){ $b=$bytes[$i]; if($b -ge 32 -and $b -le 126){ [void]$sb.Append([char]$b) } else { if($sb.Length -ge 3){ Write-Output (\\\"{0}: {1}\\\" -f $i - $sb.ToString()); $sb.Clear() } } }; if($sb.Length -ge 3){ Write-Output $sb.ToString() }\" ok -> \"\\u001b[31;1mInvalidOperation: \\u001b[31;1mError formatting a string: Index (zero based) must be greater than or equal to zero and less than the size of the argument list..\\u001b[0m\\r\\n\\r\\n\\u001b[32;1mCapacity\\u001b[0m\\u001b[32;1m MaxCapacity\\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m--------\\u001b[0m \\u001b[32;1m-----------\\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\n      16  2147483647      0\\r\\n\\u001b[31;1mInvalidOperation: \\u001b[31;1mError formatting a string: Index (zero based) [... 1891 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\recover.py\" ok -> \"Created file successfully: <WORKSPACE>/recover.py\"\n[step 1] shell \"python .\\\\recover.py\" ok -> \"<WORKSPACE>\\\\recover.py:3: SyntaxWarning: invalid escape sequence '\\\\p'\\r\\n  data = open('.\\\\prices.db','rb').read()\\r\\nfile size: 4096\\r\\nfirst 16 bytes hex: 0d0000000a0f3d000ff10fe30fcb0fbd\\r\\npage_type=0xd first_freeblock=0 ncells=10 cell_content_start=3901 frag=0\\r\\ncell pointers: ['0xff1', '0xfe3', '0xfcb', '0xfbd', '0xfad', '0xf93', '0xf7f[... 483 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\recovered.json\" ok -> \"Created file successfully: <WORKSPACE>/recovered.json\"\n[step 1] shell \"python -c \\\"\\ndata = open('.\\\\prices.db','rb').read()\\n# cell at 0xf3d (last cell, rowid=10)\\ndef read_varint(buf, pos):\\n    result = 0\\n    for i in range(9):\\n        byte = buf[pos+i]\\n        if i == 8:\\n            result = (result << 8) | byte\\n            return result, pos+9\\n        result = (result << 7) | (byte & 0x7F)\\n        if not (byte & 0x80):\\n            return result, pos+i+1\\n    return result, pos+9\\n\\nptr = 0xf3d\\npayload_len, p = read_varint(data, ptr)\\nrowid, p = read_varint(data, p)\\nheader_size, p2 = read_varint(data, p)\\nprint(f'payload_len={payload_len} rowid={rowid} header_size={header_size}')\\n# read serial types\\ntp = p2\\nsts = []\\nwhile tp < p + header_size:\\n    st, tp = read_varint(data, tp)\\n    sts.append(st)\\nprint('serial types:', sts)\\n# st=0 means NULL, st>=12 even means text of length (st-12)/2\\n# So [0, 18, 13] would be [NULL, text(3), int]... \\n# Let me check: 'first aid kit' is 13 chars -> st = 12+2*13 = 38\\n# 0.99 as float -> st=7\\n# So serial types should be [0, 38, 7] or similar\\n\\\"\" ok -> \"<string>:2: SyntaxWarning: invalid escape sequence '\\\\p'\\r\\npayload_len=25 rowid=10 header_size=4\\r\\nserial types: [0, 39, 7]\"\n[step 1] shell \"python -c \\\"import json; rows=json.load(open('.\\\\recovered.json')); print(len(rows),'rows'); [print(r) for r in rows]\\\"\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<string>\\\", line 1, in <module>\\r\\n    import json; rows=json.load(open('.\\\\recovered.json')); print(len(rows),'rows'); [print(r) for r in rows]\\r\\n                                ~~~~^^^^^^^^^^^^^^^^^^^^\\r\\nOSError: [Errno 22] Invalid argument: '.\\\\recovered.json'\"\n[step 1] shell \"python -c \\\"import json; rows=json.load(open('recovered.json')); print(len(rows),'rows'); [print(r) for r in rows]\\\"\" ok -> \"10 rows\\r\\n{'item': 'trail map', 'price': 0}\\r\\n{'item': 'matchbox', 'price': 1}\\r\\n{'item': 'tent stake', 'price': 2.75}\\r\\n{'item': 'lantern', 'price': 24}\\r\\n{'item': 'rope coil', 'price': 18}\\r\\n{'item': 'water filter', 'price': 39.9}\\r\\n{'item': 'sleeping bag', 'price': 129}\\r\\n{'item': 'camp stove', 'price': 310}\\r\\n{'item': 'compass', 'price': 15.5}\\r\\n{'item': 'first aid kit', 'price': 0.99}\"\n[step 1] shell \"Remove-Item .\\\\recover.py, .\\\\hexdump.txt -ErrorAction SilentlyContinue; Get-ChildItem . | Select-Object Name\" ok -> \"\\u001b[32;1mName\\u001b[0m\\r\\n\\u001b[32;1m----\\u001b[0m\\r\\nAGENTS.md\\r\\nprices.db\\r\\nrecovered.json\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   true
+  ],
+  [
+   "rows with fractional prices recovered",
+   true
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   true
+  ],
+  [
+   "no row that is not in the table",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 12,
+  "tool_calls": 11,
+  "tool_errors": 0,
+  "shell_commands": 9,
+  "shell_failures": 2,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 4064,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1869
+ },
+ "deliverables": [],
+ "render": null
+}

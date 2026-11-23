@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "[goal] Find the hitch cause and setting fix for rig arena-01, record in result.json.\n\n[action] Parsed presentmon.csv (8238 frames) and sensors.csv; correlated frame-time spikes with sensor events; wrote result.json.\n\n[result]\n- avg_fps: 137.29 (1000 / mean 7.284 ms, per owner's definition)\n- low_1pct_fps: 45.35 (1000 / p99 22.049 ms)\n- cause: GPU PCIe link enters ASPM L1 every ~4 s (seconds 2,6,…,58). Each L1 entry produces a burst of 12 slow frames at 22–24 ms. Verified 1:1: all 180 frames >18 ms fall in the 15 L1 seconds; zero slow frames in any other second. The MsMpEng.exe DPC spikes (43–45 s) are a separate, smaller effect.\n- change: pcie_aspm_rp1_gpu L1 → disabled (BIOS). This is a power-management setting, not an overclock, so it respects both constraints (link speed stays Gen5 x4; no XMP/PBO/ratio changes).\n\nEvidence: the correlation is exact and bidirectional (no slow frames outside L1 seconds; every L1 second has 12 slow frames). result.json parses cleanly and numbers recompute identically.\n\n[assumptions] 1% low computed as 1000/p99 of MsBetweenPresents with linear-interpolation percentile, matching the owner's stated formula. The L1 transition itself (not the DPC spikes) is the dominant hitch source because the frame spikes align only with L1, not with the 43–45 s DPC window.\n\n[next] None — deliverable complete; no browser tabs or apps were opened."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"avg_fps\": 137.29,\n  \"low_1pct_fps\": 45.35,\n  \"cause\": \"GPU PCIe link repeatedly drops to L1 power state (ASPM L1) every ~4 seconds. Each L1 entry costs ~15 ms of frame time (22-24 ms frames), producing the periodic hitches. All 180 slow frames (>18 ms) occur exactly in the 15 seconds where the sensor log shows gpu_pcie_link_state=L1; zero slow frames occur in any other second. The DPC latency spikes at seconds 43-45 (MsMpEng.exe) are a separate, smaller effect and do not align with the dominant hitch pattern.\",\n  \"changes\": [\n    {\n      \"setting\": \"pcie_aspm_rp1_gpu\",\n      \"from\": \"L1\",\n      \"to\": \"disabled\"\n    }\n  ]\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem -Path . -Recurse | Select-Object FullName, Length | Format-Table -AutoSize; Write-Host '--- parent ---'; Get-ChildItem -Path .. -Recurse -Depth 1 | Select-Object FullName, Length | Format-Table -AutoSize\" ok -> \"\\u001b[32;1mFullName                                                                                            \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m--------                                                                                            \\u001b[0m \\u001b[32;<WORKSPACE>\\\\capture                \\r\\nC:\\\\Users\\\\<USER>\\\\AppData\\\\Local\\\\T[... 1242 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\settings.json\" ok -> \"Read file <WORKSPACE>\\\\settings.json, lines 1-125\\n1: {\\n2:   \\\"rig\\\": \\\"arena-01\\\",\\n3:   \\\"settings\\\": [\\n4:     {\\n5:       \\\"setting\\\": \\\"power_plan\\\",\\n6:       \\\"value\\\": \\\"Balanced\\\",\\n7:       \\\"where\\\": \\\"Windows\\\"\\n8:     },\\n9:     {\\n10:       \\\"setting\\\": \\\"hardware_accelerated_gpu_scheduling\\\",\\n11:       \\\"value\\\": \\\"on\\\",\\n12:       \\\"where\\\": \\\"Windows\\\"\\n13:[... 2660 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\NOTES.md\" ok -> \"Read file <WORKSPACE>\\\\NOTES.md, lines 1-15\\n1: # Owner notes - rig \\\"arena-01\\\"\\n2: \\n3: The game hitches every few seconds even though the average frame rate looks fine.\\n4: Capture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\n5: taken at the same time (same clock: second 0 of both files is the same i[... 533 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\capture\\\\sensors.csv\" ok -> \"Read file <WORKSPACE>\\\\capture\\\\sensors.csv, lines 1-61\\n1: time_s,cpu_clock_mhz,cpu_util_pct,gpu_clock_mhz,gpu_pcie_link_state,gpu_pcie_link_speed,dpc_latency_us,disk_active_pct,top_cpu_process\\n2: 0,5354,35,2724,L0,Gen5 x4,52,1,Arena.exe\\n3: 1,5350,40,2754,L0,Gen5 x4,88,4,Arena.exe\\n4: 2,5270,31,2754,L1,Gen5 x4,40,3,Arena.exe\\n5: 3,5373,[... 2614 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv, statistics\\nrows=[]\\nwith open('capture/presentmon.csv') as f:\\n    r=csv.DictReader(f)\\n    cols=r.fieldnames\\n    print('COLS:', cols)\\n    for row in r:\\n        rows.append(row)\\nprint('N rows:', len(rows))\\nprint('first:', rows[0])\\nprint('last:', rows[-1])\\n\\\"\" ok -> \"COLS: ['Application', 'ProcessID', 'SwapChainAddress', 'Runtime', 'SyncInterval', 'PresentFlags', 'Dropped', 'TimeInSeconds', 'MsBetweenPresents', 'MsBetweenDisplayChange', 'MsInPresentAPI', 'MsUntilRenderComplete', 'MsUntilDisplayed']\\r\\nN rows: 8238\\r\\nfirst: {'Application': 'Arena.exe', 'ProcessID': '7316', 'SwapChainAddress': '0x000001F2A8C40000', 'Runtime': 'DXGI', 'SyncInterval': '0', 'PresentFl[... 575 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nvals=[]\\ntimes=[]\\nwith open('capture/presentmon.csv') as f:\\n    r=csv.DictReader(f)\\n    for row in r:\\n        mbp=float(row['MsBetweenPresents'])\\n        vals.append(mbp)\\n        times.append(float(row['TimeInSeconds']))\\nn=len(vals)\\nmean=sum(vals)/n\\navg_fps=1000/mean\\nsv=sorted(vals)\\n# p99: 99th percentile of frame times\\nimport math\\n# linear interpolation percentile (numpy default)\\ndef pct(s,p):\\n    k=(len(s)-1)*p/100\\n    f=math.floor(k); c=math.ceil(k)\\n    if f==c: return s[int(k)]\\n    return s[f]+(s[c]-s[f])*(k-f)\\np99=pct(sv,99)\\nlow1=1000/p99\\nprint('n=',n,'mean_ms=',round(mean,4),'avg_fps=',round(avg_fps,2))\\nprint('p99_ms=',round(p99,3),'low1fps=',round(low1,2))\\n# worst 30 frames with timestamps\\nidx=sorted(range(n), key=lambda i:-vals[i])[:30]\\nidx.sort()\\nprint('worst frames (t_s, ms):')\\nfor i in idx:\\n    print(round(times[i],2), round(vals[i],2))\\n\\\"\" ok -> \"n= 8238 mean_ms= 7.2841 avg_fps= 137.29\\r\\np99_ms= 22.049 low1fps= 45.35\\r\\nworst frames (t_s, ms):\\r\\n2.42 22.85\\r\\n2.49 22.67\\r\\n6.49 22.99\\r\\n6.56 22.84\\r\\n14.45 23.68\\r\\n18.42 22.57\\r\\n18.62 22.94\\r\\n22.4 23.02\\r\\n22.58 22.9\\r\\n22.64 22.86\\r\\n30.41 22.71\\r\\n30.43 23.2\\r\\n30.58 22.91\\r\\n34.45 22.71\\r\\n34.52 22.81\\r\\n38.47 22.95\\r\\n38.51 22.65\\r\\n42.41 22.77\\r\\n42.47 22.68\\r\\n42.49 22.97\\r\\n46.55 22.79\\r\\n50.43 22.65\\r\\n54.42 22.84\\r\\n54.54 22.67[... 77 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv\\n# sensor L1 seconds\\nl1=[]\\nwith open('capture/sensors.csv') as f:\\n    r=csv.DictReader(f)\\n    for row in r:\\n        if row['gpu_pcie_link_state']=='L1':\\n            l1.append(int(row['time_s']))\\nprint('L1 seconds:', l1)\\n# frame spikes > 18ms with timestamps\\nspikes=[]\\nwith open('capture/presentmon.csv') as f:\\n    r=csv.DictReader(f)\\n    for row in r:\\n        mbp=float(row['MsBetweenPresents'])\\n        if mbp>18:\\n            spikes.append((float(row['TimeInSeconds']), mbp))\\nprint('spike count:', len(spikes))\\n# cluster spike times\\nimport math\\nprint('spike times:', [round(t,1) for t,_ in spikes])\\n\\\"\" ok -> \"L1 seconds: [2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58]\\r\\nspike count: 180\\r\\nspike times: [2.4, 2.4, 2.4, 2.5, 2.5, 2.5, 2.5, 2.6, 2.6, 2.6, 2.6, 2.6, 6.4, 6.4, 6.4, 6.5, 6.5, 6.5, 6.5, 6.6, 6.6, 6.6, 6.6, 6.6, 10.4, 10.4, 10.4, 10.5, 10.5, 10.5, 10.5, 10.6, 10.6, 10.6, 10.6, 10.6, 14.4, 14.4, 14.4, 14.5, 14.5, 14.5, 14.5, 14.6, 14.6, 14.6, 14.6, 14.6, 18.4, 18.4, 18.4, 18.5, 18.5, 18[... 759 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv, math\\n# precise correlation: for each L1 second, find frames in [t, t+1) and their max ms\\nl1=[]\\nwith open('capture/sensors.csv') as f:\\n    r=csv.DictReader(f)\\n    for row in r:\\n        if row['gpu_pcie_link_state']=='L1':\\n            l1.append(int(row['time_s']))\\nframes=[]\\nwith open('capture/presentmon.csv') as f:\\n    r=csv.DictReader(f)\\n    for row in r:\\n        frames.append((float(row['TimeInSeconds']), float(row['MsBetweenPresents'])))\\nprint('L1 sec | frames in window | max_ms | count>18ms')\\nfor s in l1:\\n    w=[m for t,m in frames if s<=t<s+1]\\n    print(s, len(w), round(max(w),2) if w else None, sum(1 for m in w if m>18))\\n# also: any >18ms frames NOT in an L1 second?\\nout=[ (round(t,2),round(m,2)) for t,m in frames if m>18 and int(t) not in l1]\\nprint('spikes outside L1 seconds:', out[:10], 'count', len(out))\\n\\\"\" ok -> \"L1 sec | frames in window | max_ms | count>18ms\\r\\n2 118 22.85 12\\r\\n6 118 22.99 12\\r\\n10 118 22.49 12\\r\\n14 119 23.68 12\\r\\n18 117 22.94 12\\r\\n22 117 23.02 12\\r\\n26 118 22.24 12\\r\\n30 117 23.2 12\\r\\n34 117 22.81 12\\r\\n38 118 22.95 12\\r\\n42 118 22.97 12\\r\\n46 117 22.79 12\\r\\n50 118 22.65 12\\r\\n54 117 22.98 12\\r\\n58 117 23.33 12\\r\\nspikes outside L1 seconds: [] count 0\"\n[step 1] write \"<WORKSPACE>\\\\result.json\" ok -> \"Created file successfully: <WORKSPACE>/result.json\"\n[step 1] shell \"python -c \\\"\\nimport json\\nd=json.load(open('result.json'))\\nprint(d)\\n# recompute to confirm\\nimport csv,math\\nvals=[]\\nwith open('capture/presentmon.csv') as f:\\n    r=csv.DictReader(f)\\n    for row in r: vals.append(float(row['MsBetweenPresents']))\\nmean=sum(vals)/len(vals)\\nsv=sorted(vals)\\nk=(len(sv)-1)*0.99\\nf=math.floor(k);c=math.ceil(k)\\np99=sv[f]+(sv[c]-sv[f])*(k-f)\\nprint('avg_fps',round(1000/mean,2),'low1',round(1000/p99,2))\\n\\\"\" ok -> \"{'avg_fps': 137.29, 'low_1pct_fps': 45.35, 'cause': 'GPU PCIe link repeatedly drops to L1 power state (ASPM L1) every ~4 seconds. Each L1 entry costs ~15 ms of frame time (22-24 ms frames), producing the periodic hitches. All 180 slow frames (>18 ms) occur exactly in the 15 seconds where the sensor log shows gpu_pcie_link_state=L1; zero slow frames occur in any other second. The DPC latency spikes[... 220 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 9,
+  "tool_calls": 10,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2545,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 418
+ },
+ "deliverables": [],
+ "render": null
+}
