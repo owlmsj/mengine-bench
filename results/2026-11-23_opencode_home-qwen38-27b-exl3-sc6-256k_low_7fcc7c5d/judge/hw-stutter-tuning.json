@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "result.json validated. I didn't open any browser tabs, windows or apps (only file reads and a local Python script), so there is nothing to close.\n\n**Goal**: Find what causes the hitches on rig arena-01 and which setting changes fix them, within the owner's constraints.\n\n**Action**: Parsed presentmon.csv (8238 frames, 60 s) and sensors.csv (60 samples) with a Python script; read NOTES.md and settings.json.\n\n**Result**:\n- **avg_fps = 137.29** (1000 / mean MsBetweenPresents = 1000 / 7.2841 ms, per the owner's formula in NOTES.md)\n- **low_1pct_fps = 45.35** (1000 / p99 = 1000 / 22.049 ms)\n- **Cause**: the GPU's PCIe link drops into the **L1 low-power state (ASPM) every ~4 s** — sensors show `gpu_pcie_link_state=L1` at t=2,6,10,…,58 s, and the frame capture shows 15 identical ~220 ms hitch windows (11–12 frames at 21–23 ms instead of ~7 ms) starting at t=2.401, 6.405, 10.401, … 58.405 s, matching the L1 transitions one-for-one. CPU/GPU clocks and link speed (Gen5 x4) stay constant during hitches, ruling out throttling. Secondary, smaller contributor: a Defender real-time scan (MsMpEng.exe, DPC 420–455 µs, disk 80–94%) at t=43–45 s.\n- **Changes** (recorded in `result.json`):\n  1. `pcie_aspm_rp1_gpu`: **L1 → disabled** (BIOS) — stops the periodic link power-state transitions. This does not touch link speed/width (Gen5 x4 stays, constraint satisfied) nor any XMP/PBO/core-ratio setting.\n  2. `defender_exclusions`: **[] → add the Arena.exe game directory** — stops the scan-induced DPC/disk spikes (secondary).\n\n**How I know it is right**: the 4 s hitch period in the frame data matches the L1 sample period in the sensor log exactly (15/15 windows aligned); clocks and link speed are flat during hitches, so L1 entry/exit is the only correlated event; the fix targets exactly the setting that controls that state and stays inside the stated constraints.\n\n**Assumptions**: p99 computed with linear interpolation on sorted MsBetweenPresents; \"from\" values copied verbatim from settings.json; the Defender change is advisory since the dominant cause is ASPM."
+ ],
+ "diff": "A analyze.py\nA result.json\n\n--- analyze.py ---\nimport csv, json, statistics\n\nrows = []\nwith open('capture/presentmon.csv') as f:\n    for r in csv.DictReader(f):\n        rows.append(r)\n\nbtw = [float(r['MsBetweenPresents']) for r in rows]\ntsec = [float(r['TimeInSeconds']) for r in rows]\nn = len(btw)\nprint('frames:', n)\nprint('capture seconds (last TimeInSeconds):', tsec[-1])\nmean_ms = statistics.mean(btw)\nprint('mean MsBetweenPresents:', round(mean_ms, 4))\nprint('avg fps = 1000/mean:', round(1000/mean_ms, 2))\n\n# p99 of MsBetweenPresents (nearest-rank on sorted values)\nsrt = sorted(btw)\n# linear interpolation percentile\ndef pct(vals, p):\n    vals = sorted(vals)\n    k = (len(vals)-1) * p/100\n    f = int(k); c = min(f+1, len(vals)-1)\n    return vals[f] + (vals[c]-vals[f])*(k-f)\np99 = pct(btw, 99)\nprint('p99 ms:', round(p99, 4))\nprint('1% low fps = 1000/p99:', round(1000/p99, 2))\n\n# find hitch frames: MsBetweenPresents > 2x median\nmed = statistics.median(btw)\nprint('median ms:', round(med, 3))\nhitches = [(i, tsec[i], btw[i]) for i in range(n) if btw[i] > 3*med]\nprint('frames > 3x median:')\nfor i, t, ms in hitches:\n    print(f'  idx {i} t={t:.3f}s ms={ms:.3f}')\n\n# windows around each hitch: sum ms, count frames\nfor i, t, ms in hitches:\n    lo = max(0, i-2); hi = min(n, i+3)\n    print(f'  window t[{lo}:{hi}] times={[round(tsec[j],3) for j in range(lo,hi)]} ms={[round(btw[j],3) for j in range(lo,hi)]}')\n\n# sensor correlation\nprint('\\nsensors with DPC>300 or top!=Arena or link L1:')\nwith open('capture/sensors.csv') as f:\n    for r in csv.DictReader(f):\n        if (int(r['dpc_latency_us']) > 300 or r['top_cpu_process'] != 'Arena.exe'\n            or r['gpu_pcie_link_state'] == 'L1' or int(r['disk_active_pct']) > 50):\n            print(' ', r)\n\n--- result.json ---\n{\n  \"avg_fps\": 137.29,\n  \"low_1pct_fps\": 45.35,\n  \"cause\": \"The GPU's PCIe link drops into the L1 low-power state (ASPM) every ~4 seconds (sensor log shows gpu_pcie_link_state L1 at t=2,6,10,14,18,22,26,30,34,38,42,46,50,54,58 s). Each L1 entry/exit stalls present for ~220 ms (11-12 frames at 21-23 ms instead of ~7 ms), producing the periodic hitches. The frame capture shows 15 identical hitch windows starting at t=2.401, 6.405, 10.401, ... 58.405 s (every 4 s), which line up with the L1 transitions in the 1 s sensor log. CPU clocks, GPU clocks and link speed (Gen5 x4) stay constant during the hitches, ruling out throttling; the only correlated event is the PCIe link power state. A secondary, smaller hitch source is the Defender real-time scan (MsMpEng.exe, DPC 420-455 us, disk ~80-94%) at t=43-45 s, but the dominant periodic cause is PCIe ASPM L1 on the GPU link.\",\n  \"changes\": [\n    {\n      \"setting\": \"pcie_aspm_rp1_gpu\",\n      \"from\": \"L1\",\n      \"to\": \"disabled\"\n    },\n    {\n      \"setting\": \"defender_exclusions\",\n      \"from\": \"[]\",\n      \"to\": \"add Arena.exe game directory (and MsMpEng.exe scan of it)\"\n    }\n  ]\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem -Path .. -Recurse | Select-Object FullName, Length\" ok -> \"\\u001b[32;1mFullName                                                                                            \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m--------                                                                                            \\u001b[0m \\u001b[32;<WORKSPACE>                        \\r\\nC:\\\\Users\\\\<USER>\\\\AppData\\\\Local\\\\T[... 601 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\NOTES.md\" ok -> \"Read file <WORKSPACE>\\\\NOTES.md, lines 1-15\\n1: # Owner notes - rig \\\"arena-01\\\"\\n2: \\n3: The game hitches every few seconds even though the average frame rate looks fine.\\n4: Capture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\n5: taken at the same time (same clock: second 0 of both files is the same i[... 533 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\settings.json\" ok -> \"Read file <WORKSPACE>\\\\settings.json, lines 1-125\\n1: {\\n2:   \\\"rig\\\": \\\"arena-01\\\",\\n3:   \\\"settings\\\": [\\n4:     {\\n5:       \\\"setting\\\": \\\"power_plan\\\",\\n6:       \\\"value\\\": \\\"Balanced\\\",\\n7:       \\\"where\\\": \\\"Windows\\\"\\n8:     },\\n9:     {\\n10:       \\\"setting\\\": \\\"hardware_accelerated_gpu_scheduling\\\",\\n11:       \\\"value\\\": \\\"on\\\",\\n12:       \\\"where\\\": \\\"Windows\\\"\\n13:[... 2660 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\capture\\\\presentmon.csv\" ok -> \"Read file <WORKSPACE>\\\\capture\\\\presentmon.csv, lines 1-5\\n1: Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\\n2: Arena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.000000,6.861,6.847,0.294,4.901,5.[... 322 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\capture\\\\sensors.csv\" ok -> \"Read file <WORKSPACE>\\\\capture\\\\sensors.csv, lines 1-61\\n1: time_s,cpu_clock_mhz,cpu_util_pct,gpu_clock_mhz,gpu_pcie_link_state,gpu_pcie_link_speed,dpc_latency_us,disk_active_pct,top_cpu_process\\n2: 0,5354,35,2724,L0,Gen5 x4,52,1,Arena.exe\\n3: 1,5350,40,2754,L0,Gen5 x4,88,4,Arena.exe\\n4: 2,5270,31,2754,L1,Gen5 x4,40,3,Arena.exe\\n5: 3,5373,[... 2614 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\analyze.py\" ok -> \"Created file successfully: <WORKSPACE>/analyze.py\"\n[step 1] shell \"python analyze.py\" ok -> \"frames: 8238\\r\\ncapture seconds (last TimeInSeconds): 59.999207\\r\\nmean MsBetweenPresents: 7.2841\\r\\navg fps = 1000/mean: 137.29\\r\\np99 ms: 22.0486\\r\\n1% low fps = 1000/p99: 45.35\\r\\nmedian ms: 6.962\\r\\nframes > 3x median:\\r\\n  idx 345 t=2.401s ms=21.863\\r\\n  idx 346 t=2.423s ms=22.853\\r\\n  idx 347 t=2.445s ms=22.078\\r\\n  idx 348 t=2.467s ms=21.606\\r\\n  idx 349 t=2.489s ms=22.669\\r\\n  idx 350 t=2.512s ms=21.025\\r\\n  idx 351 [... 30177 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\result.json\" ok -> \"Created file successfully: <WORKSPACE>/result.json\"\n[step 1] shell \"python -c \\\"import json; d=json.load(open('result.json')); print(json.dumps(d, indent=1)[:600])\\\"\" ok -> \"{\\r\\n \\\"avg_fps\\\": 137.29,\\r\\n \\\"low_1pct_fps\\\": 45.35,\\r\\n \\\"cause\\\": \\\"The GPU's PCIe link drops into the L1 low-power state (ASPM) every ~4 seconds (sensor log shows gpu_pcie_link_state L1 at t=2,6,10,14,18,22,26,30,34,38,42,46,50,54,58 s). Each L1 entry/exit stalls present for ~220 ms (11-12 frames at 21-23 ms instead of ~7 ms), producing the periodic hitches. The frame capture shows 15 identical hitch win[... 203 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 9,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2710,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 762
+ },
+ "deliverables": [],
+ "render": null
+}

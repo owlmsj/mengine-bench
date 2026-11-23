@@ -1,0 +1,51 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [],
+ "diff": "A run.py\nA test_run.py\n\n--- run.py ---\n\"\"\"Batch task runner.\n\nUsage:\n    from run import run_tasks\n    await run_tasks([make_task_a, make_task_b, ...], max_concurrent=4)\n\nEach element of ``tasks`` is a zero-argument callable that returns an\nawaitable job.  At most ``max_concurrent`` jobs run at the same time.\n\nCtrl+C (KeyboardInterrupt) handling: when a KeyboardInterrupt is raised\n(either from a job or from the event loop), all pending jobs are cancelled\nand their ``finally``/``except`` cleanup code runs before the exception\npropagates.\n\"\"\"\n\nfrom __future__ import annotations\n\nimport asyncio\nfrom collections.abc import Awaitable, Callable, Iterable\n\n\nasync def run_tasks(\n    tasks: Iterable[Callable[[], Awaitable[object]]],\n    max_concurrent: int,\n) -> None:\n    \"\"\"Run ``tasks`` with at most ``max_concurrent`` jobs in flight.\n\n    Args:\n        tasks: zero-argument callables, each returning an awaitable.\n        max_concurrent: maximum number of concurrently running jobs.\n            Must be a positive integer.\n\n    Returns once every job has finished (or been cancelled).\n\n    Raises:\n        ValueError: if ``max_concurrent`` < 1.\n        KeyboardInterrupt: re-raised after all jobs' cleanup has run.\n    \"\"\"\n    if max_concurrent < 1:\n        raise ValueError(f\"max_concurrent must be >= 1, got {max_concurrent}\")\n\n    sem = asyncio.Semaphore(max_concurrent)\n\n    async def _run_one(make_job: Callable[[], Awaitable[object]]) -> None:\n        async with sem:\n            await make_job()\n\n    # Wrap each job in its own Task so we can cancel the actual task\n    # objects on interrupt (coroutines have no .done()/.cancel()).\n    job_tasks = [asyncio.create_task(_run_one(f)) for f in tasks]\n    try:\n        await asyncio.gather(*job_tasks)\n    except BaseException:\n        # Cancel every pending job so its cleanup code runs, then wait\n        # for them to finish cleaning up before re-raising.\n        for t in job_tasks:\n            if not t.done():\n                t.cancel()\n        await asyncio.gather(*job_tasks, return_exceptions=True)\n        raise\n\n--- test_run.py ---\nimport asyncio\nimport sys\n\nfrom run import run_tasks\n\nrunning = 0\npeak = 0\ncleanups = []\n\n\ndef make_task(i):\n    async def job():\n        global running, peak\n        running += 1\n        peak = max(peak, running)\n        try:\n            await asyncio.sleep(0.05)\n        finally:\n            running -= 1\n            cleanups.append(i)\n    return job\n\n\nasync def main():\n    global peak\n    peak = 0\n    await run_tasks([make_task(i) for i in range(10)], max_concurrent=3)\n    assert peak <= 3, f\"peak {peak} exceeded limit\"\n    assert peak == 3, f\"peak {peak} did not reach limit (wasted concurrency)\"\n    assert len(cleanups) == 10, f\"cleanups {cleanups}\"\n    print(\"basic OK: peak =\", peak, \"cleanups =\", len(cleanups))\n\n    # KeyboardInterrupt path: simulate cancel of the gather\n    cleanups.clear()\n    peak = 0\n    tasks = [make_task(i) for i in range(6)]\n\n    async def run_and_interrupt():\n        global peak\n        peak = 0\n        # emulate Ctrl+C by raising KeyboardInterrupt inside a job\n        async def boom():\n            global running\n            running += 1\n            try:\n                await asyncio.sleep(10)\n            finally:\n                running -= 1\n                cleanups.append(\"boom\")\n            raise KeyboardInterrupt\n\n        jobs = [make_task(1), make_task(2), boom, make_task(3)]\n        try:\n            await run_tasks(jobs, max_concurrent=2)\n            print(\"FAIL: KeyboardInterrupt not propagated\")\n            sys.exit(1)\n        except KeyboardInterrupt:\n            pass\n\n    await run_and_interrupt()\n    assert \"boom\" in cleanups, f\"boom cleanup missing: {cleanups}\"\n    assert len(cleanups) == 4, f\"expected 4 cleanups, got {cleanups}\"\n    print(\"interrupt OK: cleanups =\", cleanups)\n\n    # max_concurrent validation\n    try:\n        await run_tasks([], max_concurrent=0)\n        print(\"FAIL: no ValueError\")\n        sys.exit(1)\n    except ValueError:\n        print(\"validation OK\")\n\n\nasyncio.run(main())\nprint(\"ALL PASS\")",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Created file successfully: <WORKSPACE>/run.py\"\n[step 1] write \"<WORKSPACE>\\\\test_run.py\" ok -> \"Created file successfully: <WORKSPACE>/test_run.py\"\n[step 1] shell \"python test_run.py\" failed -> \"unhandled exception during asyncio.run() shutdown\\r\\ntask: <Task finished name='Task-1' coro=<main() done, defined at <WORKSPACE>\\\\test_run.py:24> exception=AttributeError(\\\"'coroutine' object has no attribute 'done'\\\")>\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-p_z2xraq\\\\works[... 2531 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Wrote file successfully: <WORKSPACE>/run.py\"\n[step 1] shell \"python test_run.py\" failed -> \"basic OK: peak = 3 cleanups = 10\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\test_run.py\\\", line 74, in <module>\\r\\n    asyncio.run(main())\\r\\n    ~~~~~~~~~~~^^^^^^^^\\r\\n  File \\\"<HOME>\\\\AppData\\\\Roaming\\\\uv\\\\python\\\\cpython-3.13.14-windows-x86_64-none\\\\Lib\\\\asyncio\\\\runners.py\\\", line 196, in run\\r\\n    return runner.run(mai[... 1372 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Wrote file successfully: <WORKSPACE>/run.py\"\n[step 1] shell \"python test_run.py\" failed -> \"basic OK: peak = 3 cleanups = 10\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\test_run.py\\\", line 74, in <module>\\r\\n    asyncio.run(main())\\r\\n    ~~~~~~~~~~~^^^^^^^^\\r\\n  File \\\"<HOME>\\\\AppData\\\\Roaming\\\\uv\\\\python\\\\cpython-3.13.14-windows-x86_64-none\\\\Lib\\\\asyncio\\\\runners.py\\\", line 196, in run\\r\\n    return runner.run(mai[... 1372 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 3,
+  "file_writes": 4,
+  "repeated_tool_calls": 2,
+  "outside_path_uses": 0,
+  "generated_tokens": 2714,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 650
+ },
+ "deliverables": [],
+ "render": null
+}

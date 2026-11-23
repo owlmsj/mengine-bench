@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Balloon Pop Archery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<style>
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#0b1020; }
+  #wrap { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; }
+  canvas { display:block; image-rendering:pixelated; box-shadow:0 0 40px rgba(0,0,0,.6); }
+  #hud {
+    position:fixed; top:10px; left:50%; transform:translateX(-50%);
+    font-family:'Press Start 2P', monospace; color:#fff; text-align:center;
+    text-shadow:2px 2px 0 #000; pointer-events:none; user-select:none;
+  }
+  #hud .score { font-size:20px; }
+  #hud .lives { font-size:14px; margin-top:8px; color:#ff6b6b; }
+  #overlay {
+    position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:rgba(5,8,20,.75); font-family:'Press Start 2P', monospace; color:#fff; text-align:center;
+    cursor:pointer; user-select:none;
+  }
+  #overlay h1 { font-size:34px; margin:0 0 24px; color:#ffd93d; text-shadow:3px 3px 0 #c0392b; }
+  #overlay p { font-family:'VT323', monospace; font-size:26px; line-height:1.5; margin:6px 0; color:#cfe8ff; }
+  #overlay .start { margin-top:28px; font-size:18px; color:#7CFC00; animation:blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity:.25; } }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+<div id="hud">
+  <div class="score">SCORE 0</div>
+  <div class="lives">HEARTS <span id="hearts">&#9829;&#9829;&#9829;</span></div>
+</div>
+<div id="overlay">
+  <h1>BALLOON POP</h1>
+  <p>Click &amp; drag away from the target to draw the bow.<br>
+     Release to fire. Pop balloons before they float away!<br>
+     Miss 3 and it's game over.</p>
+  <div class="start">&gt; CLICK TO START &lt;</div>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const hudScore = document.querySelector('#hud .score');
+  const hudHearts = document.getElementById('hearts');
+  const overlay = document.getElementById('overlay');
+
+  // Logical resolution, scaled to fit window
+  const W = 960, H = 540;
+  function resize() {
+    const s = Math.min(window.innerWidth / W, window.innerHeight / H);
+    canvas.width = W; canvas.height = H;
+    canvas.style.width = (W * s) + 'px';
+    canvas.style.height = (H * s) + 'px';
+  }
+  window.addEventListener('resize', resize); resize();
+
+  // ---- Audio: tiny WebAudio synth, no assets ----
+  let AC = null;
+  function audio() { if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)(); return AC; }
+  function beep(freq, dur, type='square', vol=0.15, slide=0) {
+    try {
+      const ac = audio(); const t = ac.currentTime;
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = type; o.frequency.setValueAtTime(freq, t);
+      if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, freq + slide), t + dur);
+      g.gain.setValueAtTime(vol, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      o.connect(g).connect(ac.destination);
+      o.start(t); o.stop(t + dur);
+    } catch (e) {}
+  }
+  const sfx = {
+    draw: () => beep(180, 0.08, 'sawtooth', 0.06, -60),
+    shoot: () => { beep(500, 0.12, 'square', 0.12, -350); beep(900, 0.05, 'triangle', 0.08, -500); },
+    pop: () => { beep(700, 0.09, 'square', 0.2, 400); beep(1200, 0.06, 'sine', 0.15, 300); },
+    miss: () => beep(160, 0.25, 'sawtooth', 0.1, -100),
+    win: () => { [523,659,784,1047].forEach((f,i)=>setTimeout(()=>beep(f,0.15,'square',0.15), i*120)); },
+    lose: () => { [400,300,200,120].forEach((f,i)=>setTimeout(()=>beep(f,0.2,'sawtooth',0.15), i*150)); },
+  };
+
+  // ---- State ----
+  let state = 'title'; // title | play | over
+  let score = 0, lives = 3, level = 1;
+  let balloons = [], arrows = [], parts = [], floats = [];
+  let mouse = { x: W/2, y: H/2, down: false, sx: 0, sy: 0 };
+  let last = 0;
+
+  const ARCHER = { x: 120, y: H - 90 };
+  const LEVELS = [
+    { count: 8, speed: 0.35, rMin: 22, rMax: 34, target: 6 },   // pop 6 of 8
+    { count: 10, speed: 0.5, rMin: 18, rMax: 30, target: 7 },
+    { count: 12, speed: 0.65, rMin: 16, rMax: 28, target: 9 },
+  ];
+
+  const COLORS = ['#ff5d5d','#ffd93d','#6bcb77','#4d96ff','#c77dff','#ff9f45'];
+
+  function reset() {
+    score = 0; lives = 3; level = 1;
+    balloons = []; arrows = []; parts = []; floats = [];
+    spawnLevel();
+  }
+
+  function spawnLevel() {
+    const L = LEVELS[Math.min(level, LEVELS.length) - 1];
+    balloons = [];
+    for (let i = 0; i < L.count; i++) {
+      balloons.push({
+        x: 200 + Math.random() * (W - 260),
+        y: H + 40 + i * 60 + Math.random() * 30,
+        r: L.rMin + Math.random() * (L.rMax - L.rMin),
+        vy: -(L.speed + Math.random() * 0.25),
+        vx: (Math.random() - 0.5) * 0.3,
+        color: COLORS[i % COLORS.length],
+        wobble: Math.random() * Math.PI * 2,
+        alive: true,
+        popped: 0,
+      });
+    }
+  }
+
+  function updateHud() {
+    hudScore.textContent = 'SCORE ' + score;
+    hudHearts.innerHTML = '&#9829;'.repeat(Math.max(0, lives)) + '<span style="opacity:.25">&#9829;</span>'.repeat(3 - Math.max(0, lives));
+  }
+
+  function toCanvas(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (W / r.width), y: (e.clientY - r.top) * (H / r.height) };
+  }
+
+  canvas.addEventListener('mousemove', e => { const p = toCanvas(e); mouse.x = p.x; mouse.y = p.y; });
+  canvas.addEventListener('mousedown', e => {
+    if (state !== 'play') return;
+    const p = toCanvas(e);
+    mouse.down = true; mouse.sx = p.x; mouse.sy = p.y;
+  });
+  window.addEventListener('mouseup', e => {
+    if (state !== 'play' || !mouse.down) return;
+    mouse.down = false;
+    const p = toCanvas(e);
+    fire(p.x, p.y);
+  });
+  overlay.addEventListener('click', () => {
+    audio(); // unlock audio on gesture
+    if (state === 'title' || state === 'over') {
+      reset(); state = 'play'; overlay.classList.add('hidden');
+      sfx.win();
+    }
+  });
+
+  function fire(px, py) {
+    // Aim: from archer toward mouse; power = drag distance from press point (pull back)
+    const dx = mouse.x - ARCHER.x, dy = mouse.y - ARCHER.y;
+    const ang = Math.atan2(dy, dx);
+    const pull = Math.min(160, Math.hypot(mouse.sx - mouse.x, mouse.sy - mouse.y));
+    const power = 6 + pull * 0.09;
+    arrows.push({ x: ARCHER.x + Math.cos(ang) * 30, y: ARCHER.y + Math.sin(ang) * 30, vx: Math.cos(ang) * power, vy: Math.sin(ang) * power, dead: false });
+    sfx.shoot();
+  }
+
+  function boom(x, y, color) {
+    for (let i = 0; i < 14; i++) {
+      const a = Math.random() * Math.PI * 2, s = 2 + Math.random() * 4;
+      parts.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 1, life: 1, color });
+    }
+    floats.push({ x, y, txt: '+10', life: 1 });
+  }
+
+  function update(dt) {
+    if (state !== 'play') return;
+    const L = LEVELS[Math.min(level, LEVELS.length) - 1];
+
+    // balloons rise
+    for (const b of balloons) {
+      if (!b.alive) continue;
+      b.y += b.vy * dt * 60;
+      b.x += b.vx * dt * 60 + Math.sin(b.wobble += 0.03) * 0.4;
+      if (b.y < -b.r - 20) { b.alive = false; b.popped = -1; loseLife(); }
+    }
+
+    // arrows
+    for (const a of arrows) {
+      if (a.dead) continue;
+      a.vy += 0.12 * dt * 60; // light gravity
+      a.x += a.vx * dt * 60; a.y += a.vy * dt * 60;
+      if (a.x < -20 || a.x > W + 20 || a.y > H + 20) { a.dead = true; loseLife(); sfx.miss(); }
+      for (const b of balloons) {
+        if (!b.alive) continue;
+        if (Math.hypot(a.x - b.x, a.y - b.y) < b.r + 4) {
+          a.dead = true; b.alive = false; b.popped = 1;
+          score += 10; boom(b.x, b.y, b.color); sfx.pop(); updateHud();
+          break;
+        }
+      }
+    }
+    arrows = arrows.filter(a => !a.dead);
+    balloons = balloons.filter(b => b.alive || b.popped === 1); // keep popped briefly? no: remove
+    balloons = balloons.filter(b => b.alive);
+
+    // particles
+    for (const p of parts) { p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life -= 0.03; }
+    parts = parts.filter(p => p.life > 0);
+    for (const f of floats) { f.y -= 1; f.life -= 0.02; }
+    floats = floats.filter(f => f.life > 0);
+
+    // level clear check
+    if (balloons.length === 0) {
+      const poppedCount = score / 10;
+      if (level < LEVELS.length) { level++; spawnLevel(); }
+      else { state = 'over'; showOverlay('YOU WIN!', 'Final score: ' + score); sfx.win(); }
+    }
+    if (lives <= 0 && state === 'play') {
+      state = 'over'; showOverlay('GAME OVER', 'Score: ' + score); sfx.lose();
+    }
+  }
+
+  function loseLife() {
+    lives--; updateHud();
+  }
+
+  function showOverlay(title, sub) {
+    overlay.querySelector('h1').textContent = title;
+    overlay.querySelectorAll('p').forEach(p => p.remove());
+    const p = document.createElement('p'); p.textContent = sub;
+    overlay.insertBefore(p, overlay.querySelector('.start'));
+    overlay.querySelector('.start').textContent = state === 'over' ? '> CLICK TO RETRY <' : '> CLICK TO START <';
+    overlay.classList.remove('hidden');
+  }
+
+  // ---- Drawing ----
+  function draw() {
+    // sky gradient
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#2b3a67'); g.addColorStop(0.6, '#4a6fa5'); g.addColorStop(1, '#7fb3d5');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+
+    // clouds
+    ctx.fillStyle = 'rgba(255,255,255,.5)';
+    for (let i = 0; i < 4; i++) {
+      const cx = (i * 260 + 80) % W, cy = 60 + i * 40;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, 40, 14, 0, 0, 7); ctx.ellipse(cx + 25, cy - 8, 28, 12, 0, 0, 7);
+      ctx.fill();
+    }
+
+    // ground
+    ctx.fillStyle = '#3e8e4c'; ctx.fillRect(0, H - 60, W, 60);
+    ctx.fillStyle = '#2f6e3a'; ctx.fillRect(0, H - 60, W, 8);
+
+    // balloons
+    for (const b of balloons) {
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      // string
+      ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(0, b.r); ctx.quadraticCurveTo(3, b.r + 14, 0, b.r + 26); ctx.stroke();
+      // body
+      ctx.fillStyle = b.color;
+      ctx.beginPath(); ctx.ellipse(0, 0, b.r * 0.85, b.r, 0, 0, 7); ctx.fill();
+      // shine
+      ctx.fillStyle = 'rgba(255,255,255,.45)';
+      ctx.beginPath(); ctx.ellipse(-b.r * 0.3, -b.r * 0.35, b.r * 0.22, b.r * 0.3, -0.5, 0, 7); ctx.fill();
+      // knot
+      ctx.fillStyle = b.color;
+      ctx.beginPath(); ctx.moveTo(0, b.r); ctx.lineTo(-4, b.r + 6); ctx.lineTo(4, b.r + 6); ctx.fill();
+      ctx.restore();
+    }
+
+    // archer (simple pixel-ish figure)
+    const ax = ARCHER.x, ay = ARCHER.y;
+    ctx.save();
+    ctx.translate(ax, ay);
+    // body
+    ctx.fillStyle = '#8b5a2b'; ctx.fillRect(-6, -10, 12, 26);
+    // head
+    ctx.fillStyle = '#f1c27d'; ctx.beginPath(); ctx.arc(0, -18, 8, 0, 7); ctx.fill();
+    // hat
+    ctx.fillStyle = '#5b3a1e'; ctx.fillRect(-9, -26, 18, 5);
+    // bow
+    const ang = Math.atan2(mouse.y - ay, mouse.x - ax);
+    ctx.rotate(ang);
+    const pull = mouse.down ? Math.min(160, Math.hypot(mouse.sx - mouse.x, mouse.sy - mouse.y)) * 0.25 : 0;
+    ctx.strokeStyle = '#7a4a21'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(14, 0, 22, -Math.PI/2.4, Math.PI/2.4); ctx.stroke();
+    // string
+    ctx.strokeStyle = '#eee'; ctx.lineWidth = 1.5;
+    const sx = 14 + Math.cos(-Math.PI/2.4) * 22, sy = Math.sin(-Math.PI/2.4) * 22;
+    const ex = 14 + Math.cos(Math.PI/2.4) * 22, ey = Math.sin(Math.PI/2.4) * 22;
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(14 - pull, 0); ctx.lineTo(ex, ey); ctx.stroke();
+    // arrow nocked while drawing
+    if (mouse.down) {
+      ctx.strokeStyle = '#c9a227'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(14 - pull, 0); ctx.lineTo(34, 0); ctx.stroke();
+      ctx.fillStyle = '#ddd';
+      ctx.beginPath(); ctx.moveTo(38, 0); ctx.lineTo(30, -4); ctx.lineTo(30, 4); ctx.fill();
+    }
+    ctx.restore();
+
+    // arrows in flight
+    for (const a of arrows) {
+      const ang = Math.atan2(a.vy, a.vx);
+      ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(ang);
+      ctx.strokeStyle = '#c9a227'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(10, 0); ctx.stroke();
+      ctx.fillStyle = '#ddd';
+      ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(6, -4); ctx.lineTo(6, 4); ctx.fill();
+      ctx.restore();
+    }
+
+    // particles
+    for (const p of parts) {
+      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - 3, p.y - 3, 6, 6);
+    }
+    ctx.globalAlpha = 1;
+
+    // score floats
+    ctx.font = "16px 'Press Start 2P', monospace";
+    for (const f of floats) {
+      ctx.globalAlpha = Math.max(0, f.life);
+      ctx.fillStyle = '#fff'; ctx.fillText(f.txt, f.x - 14, f.y);
+    }
+    ctx.globalAlpha = 1;
+
+    // aim guide while drawing
+    if (state === 'play' && mouse.down) {
+      const ang = Math.atan2(mouse.y - ay, mouse.x - ax);
+      const pull = Math.min(160, Math.hypot(mouse.sx - mouse.x, mouse.sy - mouse.y));
+      const power = 6 + pull * 0.09;
+      ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.setLineDash([6, 8]); ctx.lineWidth = 2;
+      ctx.beginPath();
+      let px = ax + Math.cos(ang) * 30, py = ay + Math.sin(ang) * 30;
+      let vx = Math.cos(ang) * power, vy = Math.sin(ang) * power;
+      ctx.moveTo(px, py);
+      for (let i = 0; i < 30; i++) { vy += 0.12; px += vx; py += vy; ctx.lineTo(px, py); }
+      ctx.stroke(); ctx.setLineDash([]);
+      // power bar
+      ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.fillRect(ax - 26, ay + 34, 52, 8);
+      ctx.fillStyle = pull > 120 ? '#ff5d5d' : pull > 60 ? '#ffd93d' : '#6bcb77';
+      ctx.fillRect(ax - 24, ay + 36, pull / 160 * 48, 4);
+    }
+  }
+
+  function loop(t) {
+    const dt = Math.min(0.05, (t - last) / 1000 || 0.016); last = t;
+    update(dt); draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+  updateHud();
+})();
+</script>
+</body>
+</html>

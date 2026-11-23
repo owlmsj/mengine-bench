@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>The Great Wave off Kanagawa — low poly</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#e8ddc0}
+  #c{display:block;width:100%;height:100%}
+  #cap{position:fixed;left:14px;bottom:10px;font:12px/1.4 Georgia,serif;color:#3a3a3a;opacity:.75;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="cap">Kanagawa oki nami ura (1831) — low poly reinterpretation</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+/* ---- palette sampled from the print ---- */
+const COL = {
+  sky:      0xefe4c8,   // cream sky
+  deep:     0x14304d,   // darkest Prussian blue
+  mid:      0x1e4c78,   // main wave body
+  light:    0x55809f,   // pale blue
+  foam:     0xf3eee1,   // off-white foam
+  hull:     0xc08040,   // boat hull ochre
+  hullLt:   0xe6c69a,
+  hullDk:   0x7a4e28,
+  fuji:     0x2c405e,   // mountain body
+  snow:     0xf1eee5,
+  ink:      0x262626
+};
+
+const renderer = new THREE.WebGLRenderer({canvas:document.getElementById('c'),antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+function resize(){renderer.setSize(innerWidth,innerHeight);}
+addEventListener('resize',resize);resize();
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(COL.sky);
+scene.fog = new THREE.Fog(0xdccfae, 70, 170);
+
+const camera = new THREE.PerspectiveCamera(40, innerWidth/innerHeight, 0.1, 400);
+camera.position.set(0, 10, 52);
+camera.lookAt(0, 6, 0);
+
+scene.add(new THREE.HemisphereLight(0xfff4dc, 0x1e4c78, 1.05));
+const sun = new THREE.DirectionalLight(0xfff0d0, 0.65);
+sun.position.set(-15, 35, 25);
+scene.add(sun);
+
+const flat = c => new THREE.MeshLambertMaterial({color:c,flatShading:true});
+
+/* =========================================================
+   MOUNT FUJI
+   ========================================================= */
+{
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.ConeGeometry(15, 13, 7, 1), flat(COL.fuji));
+  body.position.y = 6.5; g.add(body);
+  const cap  = new THREE.Mesh(new THREE.ConeGeometry(5.6, 5.0, 7, 1), flat(COL.snow));
+  cap.position.y = 10.8; g.add(cap);
+  g.position.set(10, -5, -52);
+  scene.add(g);
+}
+
+/* =========================================================
+   WAVES — extruded swells.
+   Each swell is a long bar (BoxGeometry) whose top edge is
+   displaced into a sine profile, giving a rolling blue mass
+   with a white foam lip on the crest.
+   ========================================================= */
+const swells = [];   // {mesh, foam, phase, baseY}
+
+function swell(z, y, h, w, color, phase){
+  const segs = 40, depth = 4.5;
+  const geo = new THREE.BoxGeometry(w, h, depth, segs, 1, 1);
+  const p = geo.attributes.position;
+  for(let i=0;i<p.count;i++){
+    const x = p.getX(i), yy = p.getY(i);
+    if(yy > 0){ // top edge -> sine profile
+      const t = (x + w/2)/w;
+      const crest = Math.sin(t*Math.PI*3 + phase)*0.5 + 0.5; // 0..1
+      p.setY(i, yy + crest*h*0.55);
+      // slight forward lean on the crest
+      p.setZ(i, p.getZ(i) + crest*0.8);
+    }
+  }
+  p.needsUpdate = true; geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, flat(color));
+  m.position.set(0, y, z);
+  scene.add(m);
+
+  // foam lip: thin white box along the crest
+  const fg = new THREE.BoxGeometry(w, 0.7, depth*0.6, segs, 1, 1);
+  const fp = fg.attributes.position;
+  for(let i=0;i<fp.count;i++){
+    const x = fp.getX(i), yy = fp.getY(i);
+    const t = (x + w/2)/w;
+    const crest = Math.sin(t*Math.PI*3 + phase)*0.5 + 0.5;
+    if(yy>0) fp.setY(i, yy + crest*h*0.55 + 2.0);
+  }
+  fp.needsUpdate = true; fg.computeVertexNormals();
+  const fm = new THREE.Mesh(fg, flat(COL.foam));
+  fm.position.set(0, y, z);
+  scene.add(fm);
+
+  swells.push({mesh:m, foam:fm, phase, baseY:y, z});
+}
+
+// back to front, layered like the print
+swell(-30,  0.0, 4.0, 70, COL.mid,  0.0);
+swell(-20,  0.0, 5.0, 70, COL.deep, 1.1);
+swell(-10,  0.0, 6.0, 70, COL.mid,  2.2);
+swell(  0,  0.0, 7.0, 70, COL.deep, 0.6);
+swell(  8,  0.0, 7.5, 70, COL.mid,  1.8);
+swell( 16,  0.0, 8.0, 70, COL.deep, 2.9);
+
+/* ---- the great curling wave (left): a big C-ribbon ---- */
+const gw = new THREE.Group();
+{
+  // solid curl: a fat tube following a C-arc
+  const segs = 18, R = 10;
+  const P=[];
+  for(let i=0;i<=segs;i++){
+    const a = Math.PI*1.05 - (i/segs)*Math.PI*1.25;
+    P.push([Math.cos(a)*R, Math.sin(a)*R*0.8 + 7, 0]);
+  }
+  // build a tube: at each point a small square cross-section
+  const pos=[], idx=[];
+  const r = 3.2;
+  for(let i=0;i<P.length;i++){
+    const [x,y]=P[i];
+    const a = Math.PI*1.05 - (i/P.length)*Math.PI*1.25;
+    const nx=-Math.sin(a), ny=Math.cos(a);
+    // 4 corners of cross-section (in x-y plane)
+    pos.push(x+nx*r, y+ny*r, -r);
+    pos.push(x+nx*r, y+ny*r,  r);
+    pos.push(x-nx*r, y-ny*r,  r);
+    pos.push(x-nx*r, y-ny*r, -r);
+  }
+  for(let i=0;i<P.length-1;i++){
+    const a=i*4, b=a+4;
+    // 4 side quads
+    for(let k=0;k<4;k++){
+      const k2=(k+1)%4;
+      idx.push(a+k, b+k, b+k2, a+k, b+k2, a+k2);
+    }
+  }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+  geo.setIndex(idx);geo.computeVertexNormals();
+  gw.add(new THREE.Mesh(geo, flat(COL.deep)));
+  // foam: slightly larger tube on the outer edge
+  const fp=[];
+  for(let i=0;i<P.length;i++){
+    const [x,y]=P[i];
+    const a = Math.PI*1.05 - (i/P.length)*Math.PI*1.25;
+    const nx=-Math.sin(a), ny=Math.cos(a);
+    const r2=r*1.18;
+    fp.push(x+nx*r2, y+ny*r2, -r2);
+    fp.push(x+nx*r2, y+ny*r2,  r2);
+    fp.push(x-nx*r2, y-ny*r2,  r2);
+    fp.push(x-nx*r2, y-ny*r2, -r2);
+  }
+  const fgeo=new THREE.BufferGeometry();
+  fgeo.setAttribute('position',new THREE.Float32BufferAttribute(fp,3));
+  fgeo.setIndex(idx);fgeo.computeVertexNormals();
+  gw.add(new THREE.Mesh(fgeo, flat(COL.foam)));
+  gw.position.set(-26, 1, -16);
+  scene.add(gw);
+}
+
+/* ---- foam claws: white spike clusters on crests ---- */
+function claw(x,y,z,s){
+  const g=new THREE.Group();
+  for(let i=0;i<8;i++){
+    const a=i/8*Math.PI*2;
+    const m=new THREE.Mesh(new THREE.ConeGeometry(0.3*s,(1+Math.random()*1.5)*s,4),flat(COL.foam));
+    m.position.set(Math.cos(a)*0.9*s, Math.random()*0.6*s, Math.sin(a)*0.9*s);
+    m.rotation.z=Math.cos(a)*0.8; m.rotation.x=Math.sin(a)*0.8;
+    g.add(m);
+  }
+  g.position.set(x,y,z); scene.add(g);
+}
+claw(-26,15,-16,1.7);
+claw(-12,8,-10,1.2);
+claw(  2,9, 0,1.3);
+claw( 14,10, 8,1.4);
+claw(-20,7, 8,1.1);
+
+/* =========================================================
+   BOATS — three, as in the print
+   ========================================================= */
+function makeBoat(s=1){
+  const g=new THREE.Group();
+  const hull=new THREE.Mesh(new THREE.BoxGeometry(7,0.6,1.7,6,1,1),flat(COL.hull));
+  const hp=hull.geometry.attributes.position;
+  for(let i=0;i<hp.count;i++){
+    const x=hp.getX(i);
+    const taper=1-Math.pow(Math.abs(x)/3.5,3)*0.7;
+    hp.setY(i,hp.getY(i)*taper+(Math.abs(x)>2.5?(Math.abs(x)-2.5)*0.3:0));
+  }
+  hp.needsUpdate=true;hull.geometry.computeVertexNormals();
+  g.add(hull);
+  const stripe=new THREE.Mesh(new THREE.BoxGeometry(6.4,0.16,1.75),flat(COL.hullLt));
+  stripe.position.y=0.38;g.add(stripe);
+  for(let i=0;i<6;i++){
+    const r=new THREE.Mesh(new THREE.ConeGeometry(0.2,0.65,5),flat(COL.ink));
+    r.position.set(-2.5+i*1.0,0.7,0);g.add(r);
+    const o=new THREE.Mesh(new THREE.BoxGeometry(0.07,0.07,1.5),flat(COL.hullDk));
+    o.position.set(-2.5+i*1.0,0.45,1.05);o.rotation.x=0.35;g.add(o);
+  }
+  g.scale.setScalar(s);
+  return g;
+}
+const boats=[];
+function placeBoat(x,y,z,ry,s){
+  const b=makeBoat(s);b.position.set(x,y,z);b.rotation.y=ry;
+  scene.add(b);boats.push(b);
+}
+placeBoat(-22,7.5,-6, 0.5,1.0);
+placeBoat(-14,6.0, 2, 0.35,1.05);
+placeBoat( 12,7.0,-2,-0.55,1.1);
+
+/* ---- gentle motion ---- */
+const t0=performance.now();
+function tick(){
+  const t=(performance.now()-t0)/1000;
+  swells.forEach((s,i)=>{
+    s.mesh.position.y  = s.baseY + Math.sin(t*0.7+s.phase)*0.4;
+    s.foam.position.y  = s.baseY + Math.sin(t*0.7+s.phase)*0.4;
+  });
+  gw.rotation.z = Math.sin(t*0.5)*0.05;
+  gw.position.y = 1 + Math.sin(t*0.6)*0.5;
+  boats.forEach((b,i)=>{
+    b.rotation.z = Math.sin(t*1.1+i*1.7)*0.12;
+    b.rotation.x = Math.cos(t*0.9+i*1.3)*0.06;
+  });
+  camera.position.x = Math.sin(t*0.1)*1.5;
+  camera.lookAt(0,6,0);
+  renderer.render(scene,camera);
+  requestAnimationFrame(tick);
+}
+tick();
+</script>
+</body>
+</html>
