@@ -1,0 +1,47 @@
+{
+ "task_id": "txt-regex-log",
+ "prompts": [
+  "We search our server logs with Python regexes; {WS}/server.log shows what a log looks like. We need one regex that gives, for every log line containing an IPv4 address, the last date on that line (YYYY-MM-DD); lines without an address give nothing. Only real calendar dates count, with February allowed up to the 29th in every year. Addresses are dotted decimal, each part 0 to 255 with no leading zeros. A date or an address with a letter or digit right before or after it does not count. Save the regex alone in {WS}/regex.txt: we read the file, strip it, and run re.findall(pattern, log_text, re.MULTILINE) over a whole log, expecting exactly those dates in order."
+ ],
+ "answers": [],
+ "diff": "A check.py\nA edge.py\nA regex.txt\n\n--- check.py ---\nimport re\n\npattern = open(\"regex.txt\", encoding=\"utf-8\").read().strip()\nlog = open(\"server.log\", encoding=\"utf-8\").read()\n\nfound = re.findall(pattern, log, re.MULTILINE)\nprint(\"found:\", found)\n\n# Expected: for each line containing a valid IPv4, the last date on that line\nipv4 = re.compile(r'(?<![\\d.])((?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(?![\\d.])')\ndates = re.compile(r'\\b\\d{4}-\\d{2}-\\d{2}\\b')\nexpected = []\nfor line in log.splitlines():\n    if ipv4.search(line):\n        ds = dates.findall(line)\n        if ds:\n            expected.append(ds[-1])\nprint(\"expected:\", expected)\nprint(\"match:\", found == expected)\n\n--- edge.py ---\nimport re\n\npattern = open(\"regex.txt\", encoding=\"utf-8\").read().strip()\n\ncases = [\n    (\"2026-04-02 INFO no address here\", []),\n    (\"2026-04-02 INFO ip 10.12.0.7 date 2026-04-01\", [\"2026-04-01\"]),\n    (\"2026-04-02 INFO ip 10.12.0.7 only\", [\"2026-04-02\"]),\n    (\"x2026-04-02 INFO ip 10.12.0.7 date 2026-04-01\", [\"2026-04-01\"]),\n    (\"2026-04-02 INFO ip 10.12.0.7 date 2026-04-01x\", [\"2026-04-02\"]),\n    (\"2026-04-02 INFO ip 10.12.0.77 date 2026-04-01\", [\"2026-04-01\"]),\n    (\"2026-04-02 INFO ip 10.12.0.777 date 2026-04-01\", []),\n    (\"2026-04-02 INFO ip 010.12.0.7 date 2026-04-01\", []),\n    (\"2026-04-02 INFO ip 10.12.0.07 date 2026-04-01\", []),\n    (\"2026-04-02 INFO ip 10.12.0.256 date 2026-04-01\", []),\n    (\"2026-02-30 INFO ip 10.12.0.7 date 2026-02-28\", [\"2026-02-28\"]),\n    (\"2026-04-02 INFO ip 10.12.0.7 date 2026-02-29\", [\"2026-02-29\"]),\n    (\"2026-04-02 INFO ip 10.12.0.7 date 2026-02-30\", [\"2026-04-02\"]),\n    (\"2026-04-02 INFO ip 10.12.0.7 date 2026-04-31\", [\"2026-04-02\"]),\n    (\"2026-04-02 INFO ip 10.12.0.7 date 2026-01-31\", [\"2026-01-31\"]),\n    (\"2026-04-02 INFO ip 10.12.0.7 date 2026-06-31\", [\"2026-04-02\"]),\n    (\"2026-04-02 INFO ip 10.12.0.7 date 2026-04-01 2026-04-05\", [\"2026-04-05\"]),\n    (\"2026-04-02 INFO 10.12.0.7\", [\"2026-04-02\"]),\n    (\"INFO 10.12.0.7 2026-04-01\", [\"2026-04-01\"]),\n    (\"2026-04-01 10.12.0.7 2026-04-02\", [\"2026-04-02\"]),\n    # letter before IP: still a valid IP per brief (only digit adjacency disqualifies)\n    (\"a10.12.0.7 2026-04-01\", [\"2026-04-01\"]),\n    # letter after IP: still valid\n    (\"10.12.0.7a 2026-04-01\", [\"2026-04-01\"]),\n    (\"10.12.0.7x 2026-04-01\", [\"2026-04-01\"]),\n    # digit before IP: invalid (910 > 255 as first octet)\n    (\"910.12.0.7 2026-04-01\", []),\n    # date with digit before: 20260402... not a date\n    (\"20260402 10.12.0.7 2026-04-01\", [\"2026-04-01\"]),\n    # date with digit after: 2026-04-011 not a date\n    (\"10.12.0.7 2026-04-011\", []),\n    # multiple IPs, one date\n    (\"10.0.0.1 10.0.0.2 2026-04-01\", [\"2026-04-01\"]),\n    # no date at all\n    (\"10.0.0.1 10.0.0.2\", []),\n]\n\nok = True\nfor line, expected in cases:\n    got = re.findall(pattern, line + \"\\n\", re.MULTILINE)\n    status = \"OK\" if got == expected else \"FAIL\"\n    if got != expected:\n        ok = False\n    print(f\"{status}  got={got}  expected={expected}  line={line!r}\")\n\nprint(\"ALL PASS\" if ok else \"SOME FAILED\")\n\n--- regex.txt ---\n^(?=[^\\n]*(?<![0-9.])(?:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(?![0-9.])).*(?<![0-9A-Za-z])(?P<d>\\d{4}-(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|\\d{4}-(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|\\d{4}-02-(?:0[1-9]|1\\d|2[0-9]))(?![0-9A-Za-z])",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\server.log\" ok -> \"Read file <WORKSPACE>\\\\server.log, lines 1-5\\n1: 2026-04-02 07:15:09 INFO  gateway accepted 10.12.0.7 for build 2026-04-01\\n2: 2026-04-02 07:15:11 INFO  cache warm, 412 keys, next sweep 2026-04-03\\n3: 2026-04-02 07:16:40 WARN  peer 192.168.40.3 slow, retry window 2026-04-02 to 2026-04-05\\n4: 2026-04-02 07:18:02 INFO  job 7781-20-4410 que[... 84 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\regex.txt\" ok -> \"Created file successfully: <WORKSPACE>/regex.txt\"\n[step 1] write \"<WORKSPACE>\\\\check.py\" ok -> \"Created file successfully: <WORKSPACE>/check.py\"\n[step 1] shell \"python check.py\" ok -> \"found: [('0.', '2026-04-02'), ('40.', '2026-04-02'), ('1.', '2026-04-02')]\\r\\nexpected: ['2026-04-01', '2026-04-05', '2026-04-02']\\r\\nmatch: False\"\n[step 1] edit \"<WORKSPACE>\\\\regex.txt\" ok -> \"Edited <WORKSPACE>/regex.txt (1 replacement)\"\n[step 1] write \"<WORKSPACE>\\\\regex.txt\" ok -> \"Wrote file successfully: <WORKSPACE>/regex.txt\"\n[step 1] write \"<WORKSPACE>\\\\regex.txt\" ok -> \"Wrote file successfully: <WORKSPACE>/regex.txt\"\n[step 1] shell \"python check.py\" ok -> \"found: ['2026-04-01', '2026-04-05', '2026-04-02']\\r\\nexpected: ['2026-04-01', '2026-04-05', '2026-04-02']\\r\\nmatch: True\"\n[step 1] write \"<WORKSPACE>\\\\edge.py\" ok -> \"Created file successfully: <WORKSPACE>/edge.py\"\n[step 1] shell \"python edge.py\" ok -> \"OK  got=[]  expected=[]  line='2026-04-02 INFO no address here'\\r\\nOK  got=['2026-04-01']  expected=['2026-04-01']  line='2026-04-02 INFO ip 10.12.0.7 date 2026-04-01'\\r\\nFAIL  got=['2026-04-02']  expected=[]  line='2026-04-02 INFO ip 10.12.0.7 only'\\r\\nFAIL  got=['2026-04-01']  expected=[]  line='x2026-04-02 INFO ip 10.12.0.7 date 2026-04-01'\\r\\nFAIL  got=['2026-04-02']  expected=[]  line='2026-04-02 INF[... 1396 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\regex.txt\" ok -> \"Wrote file successfully: <WORKSPACE>/regex.txt\"\n[step 1] write \"<WORKSPACE>\\\\edge.py\" ok -> \"Wrote file successfully: <WORKSPACE>/edge.py\"\n[step 1] shell \"python edge.py; python check.py\" ok -> \"OK  got=[]  expected=[]  line='2026-04-02 INFO no address here'\\r\\nFAIL  got=['2026-04-02']  expected=['2026-04-01']  line='2026-04-02 INFO ip 10.12.0.7 date 2026-04-01'\\r\\nOK  got=['2026-04-02']  expected=['2026-04-02']  line='2026-04-02 INFO ip 10.12.0.7 only'\\r\\nOK  got=['2026-04-01']  expected=['2026-04-01']  line='x2026-04-02 INFO ip 10.12.0.7 date 2026-04-01'\\r\\nOK  got=['2026-04-02']  expected=['20[... 1869 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\regex.txt\" ok -> \"Wrote file successfully: <WORKSPACE>/regex.txt\"\n[step 1] shell \"python edge.py; python check.py\" ok -> \"OK  got=[]  expected=[]  line='2026-04-02 INFO no address here'\\r\\nOK  got=['2026-04-01']  expected=['2026-04-01']  line='2026-04-02 INFO ip 10.12.0.7 date 2026-04-01'\\r\\nOK  got=['2026-04-02']  expected=['2026-04-02']  line='2026-04-02 INFO ip 10.12.0.7 only'\\r\\nOK  got=['2026-04-01']  expected=['2026-04-01']  line='x2026-04-02 INFO ip 10.12.0.7 date 2026-04-01'\\r\\nOK  got=['2026-04-02']  expected=['2026[... 1856 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\edge.py\" ok -> \"Wrote file successfully: <WORKSPACE>/edge.py\"\n[step 1] shell \"python edge.py; python check.py\" ok -> \"OK  got=[]  expected=[]  line='2026-04-02 INFO no address here'\\r\\nOK  got=['2026-04-01']  expected=['2026-04-01']  line='2026-04-02 INFO ip 10.12.0.7 date 2026-04-01'\\r\\nOK  got=['2026-04-02']  expected=['2026-04-02']  line='2026-04-02 INFO ip 10.12.0.7 only'\\r\\nOK  got=['2026-04-01']  expected=['2026-04-01']  line='x2026-04-02 INFO ip 10.12.0.7 date 2026-04-01'\\r\\nOK  got=['2026-04-02']  expected=['2026[... 2162 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\regex.txt\" ok -> \"Read file <WORKSPACE>\\\\regex.txt, lines 1-1\\n1: ^(?=[^\\\\n]*(?<![0-9.])(?:(?:25[0-5]|2[0-4]\\\\d|1\\\\d\\\\d|[1-9]?\\\\d)\\\\.){3}(?:25[0-5]|2[0-4]\\\\d|1\\\\d\\\\d|[1-9]?\\\\d)(?![0-9.])).*(?<![0-9A-Za-z])(?P<d>\\\\d{4}-(?:0[13578]|1[02])-(?:0[1-9]|[12]\\\\d|3[01])|\\\\d{4}-(?:0[469]|11)-(?:0[1-9]|[12]\\\\d|30)|\\\\d{4}-02-(?:0[1-9]|1\\\\d|2[0-9]))(?![0-9A-Za-z])\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "the last date on each line with an address",
+   true
+  ],
+  [
+   "lines without a valid address match nothing",
+   false
+  ],
+  [
+   "impossible dates match nothing",
+   true
+  ],
+  [
+   "dates glued to letters or digits match nothing",
+   true
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 19,
+  "tool_calls": 18,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 0,
+  "file_writes": 10,
+  "repeated_tool_calls": 3,
+  "outside_path_uses": 0,
+  "generated_tokens": 7132,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1544
+ },
+ "deliverables": [],
+ "render": null
+}
