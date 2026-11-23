@@ -1,0 +1,57 @@
+{
+ "task_id": "doc-lab-pdf",
+ "prompts": [
+  "A patient brought lab exam PDFs from two different labs, months apart; they are in {WS}/exams. Build one history per marker, every value in the units of the first report, and say what got worse. Record in {WS}/result.json: history (marker -> {date: value}) and worse (a list of the markers that got worse and are now outside the first report's reference range)."
+ ],
+ "answers": [
+  "**Goal:** Build one history per marker from two lab PDFs, all values in the first report's units, and identify markers that got worse and are now outside the first report's reference range.\n\n**Action:**\n- Read both PDFs via `pypdf`.\n- Alfa (10/02/2026) is the first report; its units are the target: mg/dL (glicose, LDL, creatinina) and % (HbA1c).\n- Beta (18/08/2026) uses mmol/L (glicose, LDL, creatinina) and mmol/mol (HbA1c); converted to Alfa's units.\n- Wrote `result.json`.\n\n**Result:**\n\n| Marker | 10/02/2026 (Alfa) | 18/08/2026 (Beta, converted) | Alfa range | Worse? |\n|---|---|---|---|---|\n| Glicose em jejum | 92 mg/dL | 109.9 mg/dL | 70–99 | **Yes** (rose, >99) |\n| Colesterol LDL | 118 mg/dL | 143.1 mg/dL | <130 | **Yes** (rose, >130) |\n| Creatinina | 0.95 mg/dL | 0.86 mg/dL | 0.70–1.30 | No (fell, in range) |\n| HbA1c | 5.4 % | 5.5 % | 4.0–5.6 | No (rose slightly, still in range) |\n\n`worse` = `[\"Glicose em jejum\", \"Colesterol LDL\"]`\n\n**Assumptions:**\n- \"First report\" = `laudo_alfa.pdf` (earlier date: 10/02/2026).\n- Unit conversions: glucose 1 mmol/L = 18.01559 mg/dL; LDL 1 mmol/L = 38.66903 mg/dL; creatinine 1 µmol/L = 0.011299 mg/dL; HbA1c IFCC→NGSP: % = mmol/mol / 10.929 + 2.15.\n- \"Worse\" = value rose AND is outside the first report's reference range.\n\n**How I know it's right:** PDF text extracted directly; conversions are standard factors; result.json verified on disk. No browser tabs or apps were opened, so nothing to close."
+ ],
+ "diff": "A build_result.py\nA result.json\n\n--- build_result.py ---\nimport json\n\n# Alfa (first report, 10/02/2026) units are the target units.\n# Beta (18/08/2026) values converted to Alfa units:\n#  Glicose: 6.1 mmol/L * 18.01559 = mg/dL\n#  LDL:     3.70 mmol/L * 38.66903 = mg/dL\n#  Creatinina: 76 umol/L * 0.011299 = mg/dL\n#  HbA1c:   37 mmol/mol -> IFCC formula: (37+23.5)/1.594 = %\nglu = 6.1 * 18.01559\nldl = 3.70 * 38.66903\ncre = 76 * 0.011299\nhba = 37 / 10.929 + 2.15  # IFCC mmol/mol -> NGSP %\n\nhistory = {\n    \"Glicose em jejum\": {\"10/02/2026\": 92, \"18/08/2026\": round(glu, 1)},\n    \"Colesterol LDL\": {\"10/02/2026\": 118, \"18/08/2026\": round(ldl, 1)},\n    \"Creatinina\": {\"10/02/2026\": 0.95, \"18/08/2026\": round(cre, 2)},\n    \"Hemoglobina glicada (HbA1c)\": {\"10/02/2026\": 5.4, \"18/08/2026\": round(hba, 1)},  # hba = 5.2 %\n}\n\n# Worse = rose and is now outside the FIRST report's reference range.\n# Ranges from Alfa: Glicose 70-99, LDL <130, Creatinina 0.70-1.30, HbA1c 4.0-5.6\nworse = []\nif history[\"Glicose em jejum\"][\"18/08/2026\"] > 99:\n    worse.append(\"Glicose em jejum\")\nif history[\"Colesterol LDL\"][\"18/08/2026\"] > 130:\n    worse.append(\"Colesterol LDL\")\nif history[\"Creatinina\"][\"18/08/2026\"] > 1.30:\n    worse.append(\"Creatinina\")\nif history[\"Hemoglobina glicada (HbA1c)\"][\"18/08/2026\"] > 5.6:\n    worse.append(\"Hemoglobina glicada (HbA1c)\")\n\nresult = {\"history\": history, \"worse\": worse}\nwith open(\"result.json\", \"w\", encoding=\"utf-8\") as f:\n    json.dump(result, f, ensure_ascii=False, indent=2)\nprint(json.dumps(result, ensure_ascii=False, indent=2))\n\n--- result.json ---\n{\r\n  \"history\": {\r\n    \"Glicose em jejum\": {\r\n      \"10/02/2026\": 92,\r\n      \"18/08/2026\": 109.9\r\n    },\r\n    \"Colesterol LDL\": {\r\n      \"10/02/2026\": 118,\r\n      \"18/08/2026\": 143.1\r\n    },\r\n    \"Creatinina\": {\r\n      \"10/02/2026\": 0.95,\r\n      \"18/08/2026\": 0.86\r\n    },\r\n    \"Hemoglobina glicada (HbA1c)\": {\r\n      \"10/02/2026\": 5.4,\r\n      \"18/08/2026\": 5.5\r\n    }\r\n  },\r\n  \"worse\": [\r\n    \"Glicose em jejum\",\r\n    \"Colesterol LDL\"\r\n  ]\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\exams\" ok -> \"Read directory <WORKSPACE>\\\\exams, entries 1-2\\nlaudo_alfa.pdf\\nresultado_beta.pdf\"\n[step 1] shell \"cd <WORKSPACE>; python -c \\\"import pypdf\\\" 2>$null; if ($?) { echo HAS_PYPDF } else { echo NO_PYPDF }; python --version\" ok -> \"HAS_PYPDF\\r\\nPython 3.13.14\"\n[step 1] shell \"cd <WORKSPACE>; python -c \\\"\\nfrom pypdf import PdfReader\\nfor f in ['exams/laudo_alfa.pdf','exams/resultado_beta.pdf']:\\n    print('='*20, f, '='*20)\\n    r = PdfReader(f)\\n    for i,p in enumerate(r.pages):\\n        print(f'--- page {i+1} ---')\\n        print(p.extract_text())\\n\\\"\" ok -> \"==================== exams/laudo_alfa.pdf ====================\\r\\n--- page 1 ---\\r\\nLaborat�rio Alfa de An�lises Cl�nicas\\r\\nRua Exemplo, 100 - Campinas/SP\\r\\nPaciente: Teste Sint�tico 0042    Sexo: F    Nascimento: 01/01/1980\\r\\nData da coleta: 10/02/2026    Pedido: 2026-0217\\r\\nRESULTADOS\\r\\nGLICOSE EM JEJUM\\r\\nResultado: 92 mg/dL\\r\\nValor de refer�ncia: 70 a 99 mg/dL\\r\\nCOLESTEROL LDL\\r\\nResultado: 118 mg/dL\\r\\nValor [... 745 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\build_result.py\" ok -> \"Created file successfully: <WORKSPACE>/build_result.py\"\n[step 1] shell \"cd <WORKSPACE>; python build_result.py\" ok -> \"{\\r\\n  \\\"history\\\": {\\r\\n    \\\"Glicose em jejum\\\": {\\r\\n      \\\"10/02/2026\\\": 92,\\r\\n      \\\"18/08/2026\\\": 109.9\\r\\n    },\\r\\n    \\\"Colesterol LDL\\\": {\\r\\n      \\\"10/02/2026\\\": 118,\\r\\n      \\\"18/08/2026\\\": 143.1\\r\\n    },\\r\\n    \\\"Creatinina\\\": {\\r\\n      \\\"10/02/2026\\\": 0.95,\\r\\n      \\\"18/08/2026\\\": 0.86\\r\\n    },\\r\\n    \\\"Hemoglobina glicada (HbA1c)\\\": {\\r\\n      \\\"10/02/2026\\\": 5.4,\\r\\n      \\\"18/08/2026\\\": 38.0\\r\\n    }\\r\\n  },\\r\\n  \\\"worse\\\": [\\r\\n    \\\"Glic[... 80 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>\\\\build_result.py\" ok -> \"Edited <WORKSPACE>/build_result.py (1 replacement)\"\n[step 1] shell \"cd <WORKSPACE>; python -c \\\"\\nhba = (37 + 23.5) / 1.594\\nprint('hba =', hba)\\nglu = 6.1 * 18.01559\\nldl = 3.70 * 38.66903\\ncre = 76 * 0.011299\\nprint('glu =', glu)\\nprint('ldl =', ldl)\\nprint('cre =', cre)\\n\\\"\" ok -> \"hba = 37.954830614805516\\r\\nglu = 109.89509899999999\\r\\nldl = 143.075411\\r\\ncre = 0.858724\"\n[step 1] edit \"<WORKSPACE>\\\\build_result.py\" ok -> \"Edited <WORKSPACE>/build_result.py (1 replacement)\"\n[step 1] shell \"cd <WORKSPACE>; python build_result.py\" ok -> \"{\\r\\n  \\\"history\\\": {\\r\\n    \\\"Glicose em jejum\\\": {\\r\\n      \\\"10/02/2026\\\": 92,\\r\\n      \\\"18/08/2026\\\": 109.9\\r\\n    },\\r\\n    \\\"Colesterol LDL\\\": {\\r\\n      \\\"10/02/2026\\\": 118,\\r\\n      \\\"18/08/2026\\\": 143.1\\r\\n    },\\r\\n    \\\"Creatinina\\\": {\\r\\n      \\\"10/02/2026\\\": 0.95,\\r\\n      \\\"18/08/2026\\\": 0.86\\r\\n    },\\r\\n    \\\"Hemoglobina glicada (HbA1c)\\\": {\\r\\n      \\\"10/02/2026\\\": 5.4,\\r\\n      \\\"18/08/2026\\\": 5.5\\r\\n    }\\r\\n  },\\r\\n  \\\"worse\\\": [\\r\\n    \\\"Glico[... 43 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\result.json\" ok -> \"Read file <WORKSPACE>\\\\result.json, lines 1-24\\n1: {\\r\\n2:   \\\"history\\\": {\\r\\n3:     \\\"Glicose em jejum\\\": {\\r\\n4:       \\\"10/02/2026\\\": 92,\\r\\n5:       \\\"18/08/2026\\\": 109.9\\r\\n6:     },\\r\\n7:     \\\"Colesterol LDL\\\": {\\r\\n8:       \\\"10/02/2026\\\": 118,\\r\\n9:       \\\"18/08/2026\\\": 143.1\\r\\n10:     },\\r\\n11:     \\\"Creatinina\\\": {\\r\\n12:       \\\"10/02/2026\\\": 0.95,\\r\\n13:      [... 242 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "hba1c history",
+   true
+  ],
+  [
+   "glucose history",
+   true
+  ],
+  [
+   "ldl history",
+   true
+  ],
+  [
+   "creatinine history",
+   true
+  ],
+  [
+   "flags what got worse and left the range",
+   true
+  ],
+  [
+   "leaves out what stayed in range",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 11,
+  "tool_calls": 10,
+  "tool_errors": 0,
+  "shell_commands": 5,
+  "shell_failures": 0,
+  "file_writes": 3,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 3772,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1142
+ },
+ "deliverables": [],
+ "render": null
+}

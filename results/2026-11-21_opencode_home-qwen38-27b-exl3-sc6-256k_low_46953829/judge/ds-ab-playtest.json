@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-ab-playtest",
+ "prompts": [
+  "We playtested two versions of the Pixel Arena tutorial and have to pick one for the next release. The export and its notes are in {WS}/telemetry. Should we ship B instead of A? Give a recommendation a skeptical lead would accept. Record it in {WS}/result.json with ship_b, sessions_a, sessions_b, completion_rate_a, completion_rate_b and p_value."
+ ],
+ "answers": [
+  "All verified. No browser tabs, windows, or apps were opened, so nothing to close.\n\n## Recommendation: Ship B\n\n**What I found**\n- 1870 raw rows → **1800 unique sessions** after dedup on `session_id` (70 ETL resends, zero value conflicts). Variants were mixed case / leading-space (`a`, `A`, ` a`, `b`, `B`, ` b`) — normalized per the README.\n- A: 900 sessions, 342 completions → **38.0%**\n- B: 900 sessions, 420 completions → **46.67%**\n- B lifts completion by **+8.67 points**.\n\n**Statistical test** (two-sided, 5% level, per the release rule in `telemetry/README.md`)\n- Pooled two-proportion z-test: z = 3.721, **p = 0.000198**\n- Continuity-corrected z-test: p = 0.000239\n- Fisher exact (two-sided): p = 0.000237\n\nAll three methods agree: p ≈ 0.0002, far below 0.05. The gain is statistically significant and in B's favor. A skeptical lead can't fault the direction, the effect size (8.7 pts on n=900/arm is large), or the robustness across test choices.\n\n**Assumptions**\n1. `session_id` is the unit of analysis (README states it's the unique key); resends deduped, first occurrence kept — no conflicts existed, so this is unambiguous.\n2. \"Gain in tutorial completion\" = B vs A, two-sided test at α=0.05 (the README's release rule).\n3. `completed_tutorial` 0/1 is the outcome; `match_minutes` ignored (not part of the ship rule).\n\n**How I know it's right**\n- Counts cross-verified with two independent implementations (Python `csv` module and PowerShell `Split`/`Trim`/`ToLower`) — both give 1800 unique, A 900/342, B 900/420.\n- p-value cross-verified three ways (z-test, continuity-corrected z, Fisher exact) — all ≈ 0.0002.\n- `result.json` written with the exact required keys: `ship_b=true, sessions_a=900, sessions_b=900, completion_rate_a=0.38, completion_rate_b=0.4666666666666667, p_value=0.00019846895397623854`.\n\n**result.json**\n```json\n{\n  \"ship_b\": true,\n  \"sessions_a\": 900,\n  \"sessions_b\": 900,\n  \"completion_rate_a\": 0.38,\n  \"completion_rate_b\": 0.4666666666666667,\n  \"p_value\": 0.00019846895397623854\n}\n```"
+ ],
+ "diff": "A analyze.py\nA result.json\n\n--- analyze.py ---\nimport csv, json, math\nfrom collections import Counter\n\npath = r\"<WORKSPACE>\\telemetry\\playtest_ab.csv\"\n\nrows = []\nwith open(path, newline=\"\", encoding=\"utf-8\") as f:\n    for r in csv.DictReader(f):\n        rows.append(r)\n\nprint(\"total rows:\", len(rows))\n\n# normalize variant\ndef norm_variant(v):\n    return v.strip().lower()\n\n# check for conflicts: same session_id with different completed_tutorial or variant\nby_sid = {}\nconflicts = 0\nfor r in rows:\n    sid = r[\"session_id\"].strip()\n    v = norm_variant(r[\"variant\"])\n    comp = r[\"completed_tutorial\"].strip()\n    if sid not in by_sid:\n        by_sid[sid] = {\"variant\": v, \"completed\": comp}\n    else:\n        e = by_sid[sid]\n        if e[\"variant\"] != v or e[\"completed\"] != comp:\n            conflicts += 1\n            print(\"CONFLICT\", sid, e, (v, comp))\n\nprint(\"unique sessions:\", len(by_sid))\nprint(\"conflicting duplicates:\", conflicts)\n\n# variant distribution (raw and normalized)\nraw_variants = Counter(r[\"variant\"] for r in rows)\nprint(\"raw variant values:\", dict(raw_variants))\nnorm_variants = Counter(norm_variant(r[\"variant\"]) for r in rows)\nprint(\"normalized variant values:\", dict(norm_variants))\n\n# check completed values\ncomp_vals = Counter(r[\"completed_tutorial\"].strip() for r in rows)\nprint(\"completed values:\", dict(comp_vals))\n\n# aggregate per variant over unique sessions\na_n = a_c = b_n = b_c = 0\nfor sid, e in by_sid.items():\n    if e[\"variant\"] == \"a\":\n        a_n += 1\n        a_c += int(e[\"completed\"])\n    elif e[\"variant\"] == \"b\":\n        b_n += 1\n        b_c += int(e[\"completed\"])\n    else:\n        print(\"UNEXPECTED VARIANT\", sid, e)\n\nprint(f\"A: n={a_n} completed={a_c}\")\nprint(f\"B: n={b_n} completed={b_c}\")\n\np_a = a_c / a_n\np_b = b_c / b_n\nprint(f\"p_a={p_a:.6f} p_b={p_b:.6f} diff={p_b-p_a:.6f}\")\n\n# two-proportion z-test, two-sided, pooled\np_pool = (a_c + b_c) / (a_n + b_n)\nse = math.sqrt(p_pool * (1 - p_pool) * (1/a_n + 1/b_n))\nz = (p_b - p_a) / se\n# normal CDF via erf\ndef norm_cdf(x):\n    return 0.5 * (1 + math.erf(x / math.sqrt(2)))\np_value = 2 * (1 - norm_cdf(abs(z)))\nprint(f\"z={z:.4f} p_value={p_value:.6f}\")\n\n# also continuity-corrected (Haldane) for the skeptical lead\nse_cc = math.sqrt(p_pool * (1 - p_pool) * (1/a_n + 1/b_n))\nz_cc = (abs(p_b - p_a) - 0.5 * (1/a_n + 1/b_n)) / se_cc\np_cc = 2 * (1 - norm_cdf(abs(z_cc)))\nprint(f\"continuity-corrected z={z_cc:.4f} p={p_cc:.6f}\")\n\n# Fisher exact (two-sided) via hypergeometric for robustness\nfrom math import comb\n# table: a_c, a_n-a_c, b_c, b_n-b_c\ndef fisher_two_sided(x11, x12, x21, x22):\n    n = x11 + x12 + x21 + x22\n    r1 = x11 + x12\n    r2 = x21 + x22\n    c1 = x11 + x21\n    c2 = x12 + x22\n    def pmf(k):\n        lo = max(0, r1 - c2)\n        hi = min(r1, c1)\n        if k < lo or k > hi:\n            return 0.0\n        return comb(c1, k) * comb(c2, r1 - k) / comb(n, r1)\n    p_obs = pmf(x11)\n    tot = 0.0\n    for k in range(max(0, r1 - c2), min(r1, c1) + 1):\n        pk = pmf(k)\n        if pk <= p_obs + 1e-15:\n            tot += pk\n    return tot\n\np_fisher = fisher_two_sided(a_c, a_n - a_c, b_c, b_n - b_c)\nprint(f\"fisher two-sided p={p_fisher:.6f}\")\n\nresult = {\n    \"ship_b\": bool(p_value < 0.05 and p_b > p_a),\n    \"sessions_a\": a_n,\n    \"sessions_b\": b_n,\n    \"completion_rate_a\": p_a,\n    \"completion_rate_b\": p_b,\n    \"p_value\": p_value,\n}\nwith open(r\"<WORKSPACE>\\result.json\", \"w\", encoding=\"utf-8\") as f:\n    json.dump(result, f, indent=2)\nprint(json.dumps(result, indent=2))\n\n--- result.json ---\n{\r\n  \"ship_b\": true,\r\n  \"sessions_a\": 900,\r\n  \"sessions_b\": 900,\r\n  \"completion_rate_a\": 0.38,\r\n  \"completion_rate_b\": 0.4666666666666667,\r\n  \"p_value\": 0.00019846895397623854\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\telemetry\" ok -> \"Read directory <WORKSPACE>\\\\telemetry, entries 1-2\\nplaytest_ab.csv\\nREADME.md\"\n[step 1] read \"<WORKSPACE>\\\\telemetry\\\\README.md\" ok -> \"Read file <WORKSPACE>\\\\telemetry\\\\README.md, lines 1-5\\n1: # Playtest A/B - Pixel Arena tutorial\\n2: \\n3: Export from arena-panel. The ETL resends sessions: `session_id` is the unique key (repeated rows are the same session). `variant` may come lowercase or with a leading space. `completed_tutorial` is 0/1.\\n4: \\n5: Release rule: a variant[... 94 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\telemetry\\\\playtest_ab.csv\" ok -> \"Read file <WORKSPACE>\\\\telemetry\\\\playtest_ab.csv, lines 1-1871\\n1: session_id,variant,player_id,completed_tutorial,match_minutes\\n2: s01423,b,p0798,1,12.6\\n3: s01632,a,p0693,1,9.0\\n4: s00612,A,p0098,0,12.2\\n5: s00389, B,p0202,1,16.5\\n6: s00509, B,p0896,0,14.8\\n7: s00206,a,p0059,1,13.0\\n8: s01758,a,p0342,0,20.4\\n9: s01097, B,p0084,1,15.1\\n10: s[... 51433 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\analyze.py\" ok -> \"Created file successfully: <WORKSPACE>/analyze.py\"\n[step 1] shell \"python analyze.py\" ok -> \"total rows: 1870\\r\\nunique sessions: 1800\\r\\nconflicting duplicates: 0\\r\\nraw variant values: {'b': 323, 'a': 304, 'A': 318, ' B': 287, ' A': 316, 'B': 322}\\r\\nnormalized variant values: {'b': 932, 'a': 938}\\r\\ncompleted values: {'1': 790, '0': 1080}\\r\\nA: n=900 completed=342\\r\\nB: n=900 completed=420\\r\\np_a=0.380000 p_b=0.466667 diff=0.086667\\r\\nz=3.7210 p_value=0.000198\\r\\ncontinuity-corrected z=3.6733 p=0.000239\\r\\n[... 207 chars cut by the benchmark]\"\n[step 1] shell \"$lines = Get-Content \\\"telemetry\\\\playtest_ab.csv\\\" | Select-Object -Skip 1\\n$lines.Count\\n$seen = @{}\\nforeach ($l in $lines) {\\n  $p = $l.Split(',')\\n  $sid = $p[0].Trim()\\n  $v = $p[1].Trim().ToLower()\\n  $c = $p[3].Trim()\\n  if (-not $seen.ContainsKey($sid)) { $seen[$sid] = @{v=$v; c=$c} }\\n}\\n$seen.Count\\n$a = $seen.Values | Where-Object { $_.v -eq 'a' }\\n$b = $seen.Values | Where-Object { $_.v -eq 'b' }\\n\\\"unique sessions: $($seen.Count)\\\"\\n\\\"A n=$($a.Count) completed=$(($a | Where-Object {$_.c -eq '1'}).Count)\\\"\\n\\\"B n=$($b.Count) completed=$(($b | Where-Object {$_.c -eq '1'}).Count)\\\"\" ok -> \"1870\\r\\n1800\\r\\nunique sessions: 1800\\r\\nA n=900 completed=342\\r\\nB n=900 completed=420\"\n[step 1] read \"<WORKSPACE>\\\\result.json\" ok -> \"Read file <WORKSPACE>\\\\result.json, lines 1-8\\n1: {\\r\\n2:   \\\"ship_b\\\": true,\\r\\n3:   \\\"sessions_a\\\": 900,\\r\\n4:   \\\"sessions_b\\\": 900,\\r\\n5:   \\\"completion_rate_a\\\": 0.38,\\r\\n6:   \\\"completion_rate_b\\\": 0.4666666666666667,\\r\\n7:   \\\"p_value\\\": 0.00019846895397623854\\r\\n8: }\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "deduplicated session counts",
+   true
+  ],
+  [
+   "completion rates",
+   true
+  ],
+  [
+   "the gain is significant",
+   true
+  ],
+  [
+   "ship decision",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 7,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2985,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1457
+ },
+ "deliverables": [],
+ "render": null
+}

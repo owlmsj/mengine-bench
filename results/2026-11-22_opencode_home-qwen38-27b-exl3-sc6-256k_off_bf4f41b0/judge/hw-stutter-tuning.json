@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "I opened no browser tabs, windows or apps, so nothing to close. Work is complete.\n\n## What I found\n\n**Hitch cause (measured, not guessed):** the GPU's PCIe root port repeatedly drops into the ASPM **L1** low-power state. In `sensors.csv` the link state is L1 at t = 2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58 s — every 4th second, matching the owner's \"every few seconds\" report. In `presentmon.csv` those exact 15 seconds are the only seconds containing slow frames: each holds 12 frames at ~21–24 ms, all 15 × 12 = 180 frames ≥ 16.7 ms, and that is the entire >16.7 ms population. Link speed/width stay Gen5 x4 the whole capture, so it's L1 wake latency, not a degraded link.\n\n**Numbers (computed per the owner's stated method):** mean MsBetweenPresents = 7.284 ms → **avg_fps = 137.29**; p99 = 22.049 ms → **low_1pct_fps = 45.35**.\n\n**Fix within the constraints:** disable L1 on the GPU root port — `pcie_aspm_rp1_gpu`: **L1 → disabled**. This is a power-management change, not an overclock: it leaves link speed/width at the fixed Gen5 x4 (constraint 1) and touches no XMP/PBO/core ratio (constraint 2). The other slow-frame coincidences (MsMpEng.exe scan at t=43–45, 52 s) produced no frames >16.7 ms in the capture, so a Defender exclusion is not required to fix the 1% lows.\n\n**How I know it's right:** per-second frame-time sums show slow frames exist *only* in the 15 L1 seconds and are absent in all 45 L0 seconds; the slow-frame count (180) equals the >16.7 ms count exactly; and the change touches no constrained setting.\n\n**Assumptions stated:** I treated \"the rig\" as fully described by the three files (no live access to arena-01), used the owner's own definitions of average FPS and 1% low, and assumed disabling L1 on the GPU root port is the actionable lever (it's the setting that matches the observed L1 pattern; the NVMe L1 port and chipset port show no L1 pattern in the sensor log). `result.json` is written in the workspace."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"avg_fps\": 137.29,\n  \"low_1pct_fps\": 45.35,\n  \"cause\": \"Every 4th second the GPU's PCIe link enters the ASPM L1 low-power state (sensors.csv gpu_pcie_link_state=L1 at t=2,6,10,...,58). Each L1 entry costs the GPU ~12 frames of 21-24 ms (presentmon MsBetweenPresents), 15 events x 12 = 180 slow frames, which is exactly the >16.7 ms population that pulls the 99th-percentile frame time to 22.0 ms and the 1% low to ~45 fps. The link speed/width stay Gen5 x4 throughout, so this is not a bandwidth degradation; it is repeated L1 power-state wake latency. A secondary, smaller hitch source is the Defender (MsMpEng.exe) quick scan at t=43-45 and 52, but those seconds show 0 frames >16.7 ms in presentmon, so they do not drive the 1% low.\",\n  \"changes\": [\n    {\n      \"setting\": \"pcie_aspm_rp1_gpu\",\n      \"from\": \"L1\",\n      \"to\": \"disabled\"\n    }\n  ]\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem -Force | Select-Object Name,Length; Write-Host '---PARENT---'; Get-ChildItem -Force .. | Select-Object Name,Length\" ok -> \"---PARENT---\\r\\n\\u001b[32;1mName         \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----         \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\ncapture       \\r\\nAGENTS.md     394\\r\\nNOTES.md      774\\r\\nsettings.json 2429\\r\\nworkspace\"\n[step 1] read \"<HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-clo5_1w9\\\\settings.json\" failed -> \"\"\n[step 1] read \"<HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-clo5_1w9\\\\NOTES.md\" failed -> \"\"\n[step 1] shell \"Get-ChildItem -Force ..\\\\capture | Select-Object Name,Length\" failed -> \"\\u001b[31;1mGet-ChildItem: \\u001b[31;1mCannot find path '<HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-clo5_1w9\\\\capture' because it does not exist.\\u001b[0m\"\n[step 1] read \"<WORKSPACE>\\\\NOTES.md\" ok -> \"Read file <WORKSPACE>\\\\NOTES.md, lines 1-15\\n1: # Owner notes - rig \\\"arena-01\\\"\\n2: \\n3: The game hitches every few seconds even though the average frame rate looks fine.\\n4: Capture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\n5: taken at the same time (same clock: second 0 of both files is the same ins[... 531 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\settings.json\" ok -> \"Read file <WORKSPACE>\\\\settings.json, lines 1-125\\n1: {\\n2:   \\\"rig\\\": \\\"arena-01\\\",\\n3:   \\\"settings\\\": [\\n4:     {\\n5:       \\\"setting\\\": \\\"power_plan\\\",\\n6:       \\\"value\\\": \\\"Balanced\\\",\\n7:       \\\"where\\\": \\\"Windows\\\"\\n8:     },\\n9:     {\\n10:       \\\"setting\\\": \\\"hardware_accelerated_gpu_scheduling\\\",\\n11:       \\\"value\\\": \\\"on\\\",\\n12:       \\\"where\\\": \\\"Windows\\\"\\n13:  [... 2658 chars cut by the benchmark]\"\n[step 1] shell \"Get-ChildItem -Force .\\\\capture | Select-Object Name,Length\" ok -> \"\\u001b[32;1mName          \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m----          \\u001b[0m \\u001b[32;1m------\\u001b[0m\\r\\npresentmon.csv 715870\\r\\nsensors.csv      2660\"\n[step 1] shell \"$sm = Get-Content .\\\\capture\\\\presentmon.csv -TotalCount 3; $sm; Write-Host '---'; Get-Content .\\\\capture\\\\sensors.csv\" ok -> \"Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.000000,6.861,6.847,0.294,4.901,5.568\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.006861,6.773,6.812,0.387,4.013,6.252\\r\\n---\\r\\ntime_s,cpu_clock_mhz,cpu_util_[... 2689 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv, statistics\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\nfps=[float(r['MsBetweenPresents']) for r in rows if r['MsBetweenPresents']]\\nmean=sum(fps)/len(fps)\\ns=sorted(fps)\\nimport math\\n# p99: use rank method - take value at index 0.99*(n-1), linear interp\\nn=len(s); idx=0.99*(n-1); lo=int(idx); hi=min(lo+1,n-1); frac=idx-lo\\np99=s[lo]+(s[hi]-s[lo])*frac\\nprint('frames',len(rows))\\nprint('mean_ms',round(mean,3))\\nprint('avg_fps',round(1000/mean,2))\\nprint('p99_ms',round(p99,3))\\nprint('low1pct_fps',round(1000/p99,2))\\n# per-second sums of frame time (TimeInSeconds marks frame start)\\nfrom collections import defaultdict\\nsec=defaultdict(list)\\nfor r in rows:\\n    t=float(r['TimeInSeconds']); sec[int(t)].append(float(r['MsBetweenPresents']))\\n# find worst seconds\\nworst=sorted(sec.items(), key=lambda kv: -sum(kv[1]))[:8]\\nfor k,v in sorted(worst): print('sec',k,'frames',len(v),'sum_ms',round(sum(v),1),'max',round(max(v),1))\\n# distribution\\nimport bisect\\nfor th in (16.7,25,40,60,100,200):\\n    print('frames >=',th,'ms:',len([x for x in fps if x>=th]))\\nprint('max_ms',round(max(fps),2))\\n\\\"\" ok -> \"frames 8238\\r\\nmean_ms 7.284\\r\\navg_fps 137.29\\r\\np99_ms 22.049\\r\\nlow1pct_fps 45.35\\r\\nsec 0 frames 144 sum_ms 1005.2 max 7.8\\r\\nsec 9 frames 144 sum_ms 1003.5 max 7.6\\r\\nsec 13 frames 145 sum_ms 1003.8 max 7.7\\r\\nsec 27 frames 144 sum_ms 1006.7 max 7.8\\r\\nsec 48 frames 144 sum_ms 1003.4 max 7.8\\r\\nsec 51 frames 145 sum_ms 1006.4 max 7.8\\r\\nsec 53 frames 144 sum_ms 1003.6 max 7.8\\r\\nsec 59 frames 145 sum_ms 1004.2 max 7[... 142 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nfrom collections import Counter\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\nfps=[(float(r['TimeInSeconds']),float(r['MsBetweenPresents'])) for r in rows if r['MsBetweenPresents']]\\nslow=[t for t,m in fps if m>16.7]\\nbuckets=Counter(round(t) for t in slow)\\nfor k in sorted(buckets): print(k, buckets[k])\\nms=[m for t,m in fps if m>16.7]\\nms2=sorted(ms)\\nimport statistics\\nprint('n_slow',len(ms),'mean',round(statistics.mean(ms),2),'min',round(ms2[0],2),'max',round(ms2[-1],2))\\n\\\"\" ok -> \"2 5\\r\\n3 7\\r\\n6 5\\r\\n7 7\\r\\n10 5\\r\\n11 7\\r\\n14 5\\r\\n15 7\\r\\n18 5\\r\\n19 7\\r\\n22 5\\r\\n23 7\\r\\n26 5\\r\\n27 7\\r\\n30 5\\r\\n31 7\\r\\n34 5\\r\\n35 7\\r\\n38 5\\r\\n39 7\\r\\n42 5\\r\\n43 7\\r\\n46 5\\r\\n47 7\\r\\n50 5\\r\\n51 7\\r\\n54 5\\r\\n55 7\\r\\n58 5\\r\\n59 7\\r\\nn_slow 180 mean 22.04 min 20.64 max 23.68\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nfrom collections import defaultdict\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\nfps=defaultdict(list)\\nfor r in rows:\\n    if r['MsBetweenPresents']:\\n        fps[int(float(r['TimeInSeconds']))].append(float(r['MsBetweenPresents']))\\nprint('sec : slow(>16.7) / count  [sensors: L1 secs=2,6,10,14,18,22,26,30,34,38,42,46,50,54,58; scan 43-45,52]')\\nfor s in range(60):\\n    v=fps[s]; slow=sum(1 for x in v if x>16.7)\\n    mark=''\\n    if slow: mark='  <-- slow frames'\\n    print(s, slow, '/', len(v), mark)\\n\\\"\" ok -> \"sec : slow(>16.7) / count  [sensors: L1 secs=2,6,10,14,18,22,26,30,34,38,42,46,50,54,58; scan 43-45,52]\\r\\n0 0 / 144 \\r\\n1 0 / 144 \\r\\n2 12 / 118   <-- slow frames\\r\\n3 0 / 144 \\r\\n4 0 / 144 \\r\\n5 0 / 143 \\r\\n6 12 / 118   <-- slow frames\\r\\n7 0 / 144 \\r\\n8 0 / 143 \\r\\n9 0 / 144 \\r\\n10 12 / 118   <-- slow frames\\r\\n11 0 / 143 \\r\\n12 0 / 144 \\r\\n13 0 / 145 \\r\\n14 12 / 119   <-- slow frames\\r\\n15 0 / 144 \\r\\n16 0 / 144 \\r\\n17 0 / 144 \\r[... 742 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\result.json\" ok -> \"Created file successfully: result.json\"\n[step 1] shell \"python -c \\\"\\nimport json\\nd=json.load(open('result.json'))\\nprint('valid JSON, keys:', list(d))\\nprint('avg_fps', d['avg_fps'])\\nprint('low_1pct', d['low_1pct_fps'])\\nfor c in d['changes']: print(c)\\n\\\"\" ok -> \"valid JSON, keys: ['avg_fps', 'low_1pct_fps', 'cause', 'changes']\\r\\navg_fps 137.29\\r\\nlow_1pct 45.35\\r\\n{'setting': 'pcie_aspm_rp1_gpu', 'from': 'L1', 'to': 'disabled'}\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 10,
+  "tool_calls": 13,
+  "tool_errors": 2,
+  "shell_commands": 8,
+  "shell_failures": 1,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 1,
+  "generated_tokens": 3081,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 787
+ },
+ "deliverables": [],
+ "render": null
+}

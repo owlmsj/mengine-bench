@@ -1,0 +1,51 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [],
+ "diff": "A recover.py\nA recovered.json\n\n--- recover.py ---\nimport json, struct\n\ndata = open('prices.db', 'rb').read()\nn = len(data)\nassert n == 4096, n\n\n# Leaf table b-tree page: cell pointer array starts right after the 8-byte\n# page header (offset 8); page 1 would use offset 108. The zeroed middle of\n# the file is the cell pointer array region (all zeros = no cells there);\n# the real pointers sit at the very start of the page.\nPAGE = 4096\nCP = 8\n\n# --- record decoding (SQLite file format, section 1.6.1) ---\ndef varint(buf, off):\n    v = 0\n    for i in range(9):\n        b = buf[off + i]\n        if i == 8:\n            v = (v << 8) | b\n            return v, off + 9\n        v = (v << 7) | (b & 0x7F)\n        if not (b & 0x80):\n            return v, off + i + 1\n    raise ValueError('varint too long')\n\ndef decode_record(buf, off):\n    hlen, off = varint(buf, off)\n    hstart = off\n    types = []\n    while off < hstart + hlen:\n        t, off = varint(buf, off)\n        types.append(t)\n    vals = []\n    for t in types:\n        if t == 0:\n            vals.append(None)\n        elif t == 1:\n            vals.append(int.from_bytes(buf[off:off+1], 'big', signed=True)); off += 1\n        elif t == 2:\n            vals.append(int.from_bytes(buf[off:off+2], 'big', signed=True)); off += 2\n        elif t == 3:\n            vals.append(int.from_bytes(buf[off:off+3], 'big', signed=True)); off += 3\n        elif t == 4:\n            vals.append(int.from_bytes(buf[off:off+4], 'big', signed=True)); off += 4\n        elif t == 5:\n            vals.append(int.from_bytes(buf[off:off+6], 'big', signed=True)); off += 6\n        elif t == 6:\n            vals.append(int.from_bytes(buf[off:off+8], 'big', signed=True)); off += 8\n        elif t == 7:\n            vals.append(struct.unpack('>d', buf[off:off+8])[0]); off += 8\n        elif t == 8:\n            vals.append(0)\n        elif t == 9:\n            vals.append(1)\n        elif t >= 12 and t % 2 == 0:\n            ln = (t - 12) // 2\n            vals.append(buf[off:off+ln].decode('utf-8')); off += ln\n        elif t >= 13:\n            ln = (t - 13) // 2\n            vals.append(bytes(buf[off:off+ln])); off += ln\n        else:\n            raise ValueError(f'bad serial type {t}')\n    return vals\n\n# --- leaf cell parsing (section 1.6.2) ---\ndef parse_leaf(buf, off):\n    payload_len, off = varint(buf, off)\n    rowid, off = varint(buf, off)\n    return rowid, decode_record(buf, off)\n\nrows = []\nerrors = []\n# walk cell pointer array; stop at first zero pointer (rest of array is zeroed)\noff = CP\nptrs = []\nwhile off < CP + 100 and off + 2 <= PAGE:\n    p = struct.unpack('>H', data[off:off+2])[0]\n    off += 2\n    if p == 0:\n        break\n    ptrs.append(p)\n\nfor p in ptrs:\n    try:\n        rowid, vals = parse_leaf(data, p)\n        rows.append((rowid, vals))\n    except Exception as e:\n        errors.append((p, repr(e)))\n\nprint('cell pointers:', [hex(p) for p in ptrs])\nprint('errors:', errors)\nfor rowid, vals in rows:\n    print(rowid, vals)\n\n# Build output: item = first text column, price = numeric column.\n# Schema assumed: (item TEXT, price <numeric>) -> 2 columns; rowid implicit.\nout = []\nfor rowid, vals in rows:\n    if len(vals) < 2:\n        continue\n    item, price = vals[0], vals[1]\n    if not isinstance(item, str):\n        continue\n    if isinstance(price, float) and price.is_integer():\n        price = int(price)\n    out.append({'item': item, 'price': price})\n\nwith open('recovered.json', 'w', encoding='utf-8') as f:\n    json.dump(out, f, ensure_ascii=False, indent=2)\nprint('wrote', len(out), 'rows')\n\n--- recovered.json ---\n[]",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-Item prices.db | Format-List Name,Length; $b=[IO.File]::ReadAllBytes('prices.db'); \\\"first16: \\\" + (($b[0..15] | ForEach-Object { $_.ToString('X2') }) -join ' '); \\\"last16: \\\" + (($b[($b.Length-16)..($b.Length-1)] | ForEach-Object { $_.ToString('X2') }) -join ' ')\" ok -> \"\\u001b[32;1mName   : \\u001b[0mprices.db\\r\\n\\u001b[32;1mLength : \\u001b[0m4096\\r\\n\\r\\nfirst16: 0D 00 00 00 0A 0F 3D 00 0F F1 0F E3 0F CB 0F BD\\r\\nlast16: 78 0D 01 04 00 1F 08 74 72 61 69 6C 20 6D 61 70\"\n[step 1] shell \"$b=[IO.File]::ReadAllBytes('prices.db'); $sb=New-Object System.Text.StringBuilder; for($i=0;$i -lt $b.Length;$i+=16){ $hex=($b[$i..([Math]::Min($i+15,$b.Length-1))] | ForEach-Object { $_.ToString('X2') }) -join ' '; $asc=-join ($b[$i..([Math]::Min($i+15,$b.Length-1))] | ForEach-Object { if($_ -ge 32 -and $_ -lt 127){[char]$_}else{'.'} }); [void]$sb.AppendLine(('{0:X4}  {1,-47}  {2}' -f $i,$hex,$asc)) }; $sb.ToString()\" ok -> \"0000  0D 00 00 00 0A 0F 3D 00 0F F1 0F E3 0F CB 0F BD  ......=.........\\r\\n0010  0F AD 0F 93 0F 7F 0F 6D 0F 58 0F 3D 00 00 00 00  .......m.X.=....\\r\\n0020  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................\\r\\n0030  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................\\r\\n0040  00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................\\r\\n0050  00 00 00 00 00 00 00 00 00 00[... 18286 chars cut by the benchmark]\"\n[step 1] write \"recover.py\" ok -> \"Created file successfully: recover.py\"\n[step 1] shell \"python recover.py\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\recover.py\\\", line 76, in <module>\\r\\n    p = struct.unpack('>H', buf[off:off+2])[0]\\r\\n                            ^^^\\r\\nNameError: name 'buf' is not defined\"\n[step 1] edit \"recover.py\" ok -> \"Edited recover.py (1 replacement)\"\n[step 1] shell \"python recover.py\" ok -> \"cell pointers: []\\r\\nerrors: []\\r\\nwrote 0 rows\"\n[step 1] edit \"recover.py\" ok -> \"Edited recover.py (1 replacement)\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   false
+  ],
+  [
+   "rows with fractional prices recovered",
+   false
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   false
+  ],
+  [
+   "no row that is not in the table",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 1,
+  "file_writes": 3,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 2098,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1242
+ },
+ "deliverables": [],
+ "render": null
+}

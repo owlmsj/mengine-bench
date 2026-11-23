@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "Done. No browser tabs, windows or apps were opened, so nothing to close.\n\n**Goal** — find the cause of periodic hitches in the owner's rig (arena-01) and the setting changes that fix them, within the owner's constraints (GPU stays Gen5 x4, no BIOS OC/XMP/PBO/ratio changes).\n\n**Action** — read NOTES.md, settings.json, presentmon.csv (8238 frames) and sensors.csv (60 s); computed stats in a Python script.\n\n**Result** — recorded in `./result.json`:\n- `avg_fps: 137.3` (8238 frames / 60 s, per the owner's formula)\n- `low_1pct_fps: 45.36` (1000 / p99 of MsBetweenPresents; p99 = 22.048 ms)\n- **Cause:** the GPU PCIe link drops to **L1 every 4 seconds** (sensor log: `gpu_pcie_link_state=L1` at seconds 2, 6, 10, …, 58 — exactly the seconds where PresentMon shows ~21–23 ms frame-time hitches; 177 hitched frames total). Link speed stays Gen5 x4, so the hitches come from L1 exit latency, not link degradation. Root setting: BIOS `pcie_aspm_rp1_gpu = L1` allows the GPU root port to enter L1. Secondary one-off hitch at 43–45 s: Defender real-time scan (`MsMpEng.exe` top CPU, disk 80–94%) — not periodic, so not the main cause.\n- **Changes:**\n  1. `pcie_aspm_rp1_gpu`: `L1` → `disabled` (BIOS; does not touch link speed/width, XMP, PBO or core ratio, so all constraints hold)\n  2. `defender_exclusions`: `[]` → `[\"C:\\\\Games\\\\Arena\", \"C:\\\\Games\\\\Arena\\\\Arena.exe\"]` (mitigates the scan-related hitch; path is an assumption — the game's install path isn't in the files)\n\n**How I know it's right** — the hitch timestamps in PresentMon (2.40 s, 6.40 s, 10.40 s, …, 58.40 s, every 4 s) match the L1 entries in the sensor log second-for-second (15/15), and during L1 seconds frame time jumps from a ~6.9 ms median to ~22 ms. No other sensor anomaly (CPU clock, GPU clock, DPC) correlates with the periodic hitches; the only other anomaly (Defender at 43–45 s) is a single event, not the 4 s rhythm.\n\n**Assumptions** — the 1-minute capture is exactly 60 s (8238 frames / 137.3 fps is consistent with that); the Defender exclusion path is a placeholder for the actual game directory."
+ ],
+ "diff": "A analyze.py\nA result.json\n\n--- analyze.py ---\nimport csv, statistics, json\n\n# presentmon\nrows = []\nwith open('capture/presentmon.csv') as f:\n    for r in csv.DictReader(f):\n        rows.append(r)\n\nmsb = [float(r['MsBetweenPresents']) for r in rows]\nn = len(rows)\ntotal_s = n / 60.0  # 1 minute capture\navg_fps = n / 60.0\nmsb_sorted = sorted(msb)\np99 = msb_sorted[int(0.99 * (n - 1))]\nlow1 = 1000.0 / p99\n\nprint(f\"frames={n} avg_fps={avg_fps:.2f} p99_ms={p99:.3f} low1pct={low1:.2f}\")\n\n# big hitches: frame times > 3x median\nmed = statistics.median(msb)\nhitches = [(i, t) for i, t in enumerate(msb) if t > 3 * med]\nprint(f\"median_ms={med:.2f} hitches(>3x med)={len(hitches)}\")\nfor i, t in hitches:\n    ts = float(rows[i]['TimeInSeconds'])\n    print(f\"  frame {i} t={ts:.3f}s msb={t:.2f}\")\n\n# sensor log\nsens = []\nwith open('capture/sensors.csv') as f:\n    for r in csv.DictReader(f):\n        sens.append(r)\nprint(\"sensors rows:\", len(sens))\n\n# find seconds where gpu went to L1\nl1 = [int(r['time_s']) for r in sens if r['gpu_pcie_link_state'] == 'L1']\nprint(\"L1 seconds:\", l1)\n\n# dpc latency spikes\ndpc = [(int(r['time_s']), int(r['dpc_latency_us'])) for r in sens if int(r['dpc_latency_us']) > 200]\nprint(\"dpc>200us:\", dpc)\n\n# cpu clock drops\nclk = [(int(r['time_s']), int(r['cpu_clock_mhz'])) for r in sens if int(r['cpu_clock_mhz']) < 4500]\nprint(\"cpu<4500mhz:\", clk)\n\n# disk activity\ndisk = [(int(r['time_s']), int(r['disk_active_pct'])) for r in sens if int(r['disk_active_pct']) > 20]\nprint(\"disk>20%:\", disk)\n\n# top cpu process changes\nprocs = [(int(r['time_s']), r['top_cpu_process']) for r in sens if r['top_cpu_process'] != 'Arena.exe']\nprint(\"top proc != Arena:\", procs)\n\n# gpu clock\ngclk = [(int(r['time_s']), int(r['gpu_clock_mhz'])) for r in sens if int(r['gpu_clock_mhz']) < 2500]\nprint(\"gpu<2500mhz:\", gclk)\n\n# correlation: hitch seconds vs L1 seconds\nhitch_secs = sorted(set(int(float(rows[i]['TimeInSeconds'])) for i, t in hitches))\nprint(\"hitch seconds:\", hitch_secs)\nprint(\"L1 secs:\", sorted(l1))\n\n--- result.json ---\n{\n  \"avg_fps\": 137.3,\n  \"low_1pct_fps\": 45.36,\n  \"cause\": \"The GPU PCIe link drops to the L1 low-power state every 4 seconds (sensor log shows gpu_pcie_link_state=L1 at seconds 2,6,10,...,58, while the link speed stays Gen5 x4). Each L1 entry costs ~20 ms, producing 177 hitched frames (~21-23 ms) that drag the 1% low to 45 fps while the average stays ~137 fps. The L1 entry is allowed because BIOS PCIe ASPM for the GPU root port (pcie_aspm_rp1_gpu) is set to L1. A secondary, one-off hitch at 43-45 s comes from Defender (MsMpEng.exe) real-time scanning hitting disk, but the periodic hitches are the PCIe ASPM L1 transitions.\",\n  \"changes\": [\n    {\n      \"setting\": \"pcie_aspm_rp1_gpu\",\n      \"from\": \"L1\",\n      \"to\": \"disabled\"\n    },\n    {\n      \"setting\": \"defender_exclusions\",\n      \"from\": \"[]\",\n      \"to\": \"[\\\"C:\\\\\\\\Games\\\\\\\\Arena\\\", \\\"C:\\\\\\\\Games\\\\\\\\Arena\\\\\\\\Arena.exe\\\"]\"\n    }\n  ]\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem -Force <HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-chfxxa8e | Select-Object Name; Get-ChildItem -Force <WORKSPACE> | Select-Object Name\" ok -> \"\\u001b[32;1mName\\u001b[0m\\r\\n\\u001b[32;1m----\\u001b[0m\\r\\nworkspace\\r\\ncapture\\r\\nAGENTS.md\\r\\nNOTES.md\\r\\nsettings.json\"\n[step 1] read \"<WORKSPACE>\\\\settings.json\" ok -> \"Read file <WORKSPACE>\\\\settings.json, lines 1-125\\n1: {\\n2:   \\\"rig\\\": \\\"arena-01\\\",\\n3:   \\\"settings\\\": [\\n4:     {\\n5:       \\\"setting\\\": \\\"power_plan\\\",\\n6:       \\\"value\\\": \\\"Balanced\\\",\\n7:       \\\"where\\\": \\\"Windows\\\"\\n8:     },\\n9:     {\\n10:       \\\"setting\\\": \\\"hardware_accelerated_gpu_scheduling\\\",\\n11:       \\\"value\\\": \\\"on\\\",\\n12:       \\\"where\\\": \\\"Windows\\\"\\n13:[... 2660 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\NOTES.md\" ok -> \"Read file <WORKSPACE>\\\\NOTES.md, lines 1-15\\n1: # Owner notes - rig \\\"arena-01\\\"\\n2: \\n3: The game hitches every few seconds even though the average frame rate looks fine.\\n4: Capture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\n5: taken at the same time (same clock: second 0 of both files is the same i[... 533 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\capture\" ok -> \"Read directory <WORKSPACE>\\\\capture, entries 1-2\\npresentmon.csv\\nsensors.csv\"\n[step 1] shell \"cd <WORKSPACE>\\\\capture; Get-Content presentmon.csv -TotalCount 5; Write-Host '---'; Get-Content sensors.csv -TotalCount 5; Write-Host '---'; (Get-Content presentmon.csv).Count; (Get-Content sensors.csv).Count\" ok -> \"Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.000000,6.861,6.847,0.294,4.901,5.568\\r\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.006861,6.773,6.812,0.387,4.013,6.252\\r\\nArena.exe,7316,0x000001F2A8C40000,D[... 461 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\analyze.py\" ok -> \"Created file successfully: <WORKSPACE>/analyze.py\"\n[step 1] shell \"cd <WORKSPACE>; python analyze.py\" ok -> \"frames=8238 avg_fps=137.30 p99_ms=22.048 low1pct=45.36\\r\\nmedian_ms=6.96 hitches(>3x med)=177\\r\\n  frame 345 t=2.401s msb=21.86\\r\\n  frame 346 t=2.423s msb=22.85\\r\\n  frame 347 t=2.445s msb=22.08\\r\\n  frame 348 t=2.467s msb=21.61\\r\\n  frame 349 t=2.489s msb=22.67\\r\\n  frame 350 t=2.512s msb=21.02\\r\\n  frame 351 t=2.533s msb=22.12\\r\\n  frame 352 t=2.555s msb=21.90\\r\\n  frame 353 t=2.577s msb=21.97\\r\\n  frame 354 t=2.599[... 6133 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\result.json\" ok -> \"Created file successfully: <WORKSPACE>/result.json\"\n[step 1] shell \"python -c \\\"import json; d=json.load(open(r'<WORKSPACE>\\\\result.json')); print(json.dumps(d, indent=1)[:400])\\\"\" ok -> \"{\\r\\n \\\"avg_fps\\\": 137.3,\\r\\n \\\"low_1pct_fps\\\": 45.36,\\r\\n \\\"cause\\\": \\\"The GPU PCIe link drops to the L1 low-power state every 4 seconds (sensor log shows gpu_pcie_link_state=L1 at seconds 2,6,10,...,58, while the link speed stays Gen5 x4). Each L1 entry costs ~20 ms, producing 177 hitched frames (~21-23 ms) that drag the 1% low to 45 fps while the average stays ~137 fps. The L1 entry is allowed because BIOS [... 3 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 9,
+  "tool_errors": 0,
+  "shell_commands": 4,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2427,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 786
+ },
+ "deliverables": [],
+ "render": null
+}
