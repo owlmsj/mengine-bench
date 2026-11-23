@@ -1,0 +1,47 @@
+{
+ "task_id": "txt-regex-log",
+ "prompts": [
+  "We search our server logs with Python regexes; {WS}/server.log shows what a log looks like. We need one regex that gives, for every log line containing an IPv4 address, the last date on that line (YYYY-MM-DD); lines without an address give nothing. Only real calendar dates count, with February allowed up to the 29th in every year. Addresses are dotted decimal, each part 0 to 255 with no leading zeros. A date or an address with a letter or digit right before or after it does not count. Save the regex alone in {WS}/regex.txt: we read the file, strip it, and run re.findall(pattern, log_text, re.MULTILINE) over a whole log, expecting exactly those dates in order."
+ ],
+ "answers": [],
+ "diff": "A regex.txt\nA tmp_check.py\n\n--- regex.txt ---\n^(?:[^\\r\\n]*?\\b(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}\\b[^\\r\\n]*?\\b)((?:19|20)\\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01]))\\b(?![\\r\\n]|[-\\d])\n\n--- tmp_check.py ---\nimport re, datetime, sys\n\npat = open(\"regex.txt\").read().strip()\nprint(\"pattern:\", pat)\n\n# --- sample log ---\ntext = open(\"server.log\").read()\ngot = re.findall(pat, text, re.MULTILINE)\nprint(\"sample:\", got)\n# expected: lines with IPv4: line1 (10.12.0.7) -> last date 2026-04-01\n# line3 (192.168.40.3) -> last date 2026-04-05\n# line5 (172.20.1.14) -> no date on line -> nothing\n# lines 2,4: no IP -> nothing\nexpected = [\"2026-04-01\", \"2026-04-05\"]\nprint(\"sample ok:\", got == expected)\n\n# --- edge cases ---\ncases = [\n    (\"no ip, has date\", \"2026-04-02 INFO nothing\", []),\n    (\"ip, date before ip\", \"2026-04-02 ip 10.0.0.1\", []),\n    (\"ip, date after ip\", \"ip 10.0.0.1 at 2026-04-02\", [\"2026-04-02\"]),\n    (\"two dates after ip\", \"ip 10.0.0.1 a 2026-04-02 b 2026-04-05\", [\"2026-04-05\"]),\n    (\"feb29 leap\", \"ip 1.2.3.4 on 2024-02-29\", [\"2024-02-29\"]),\n    (\"feb29 nonleap\", \"ip 1.2.3.4 on 2023-02-29\", []),\n    (\"feb30\", \"ip 1.2.3.4 on 2024-02-30\", []),\n    (\"month13\", \"ip 1.2.3.4 on 2024-13-01\", []),\n    (\"day00\", \"ip 1.2.3.4 on 2024-01-00\", []),\n    (\"day32\", \"ip 1.2.3.4 on 2024-01-32\", []),\n    (\"date glued left\", \"ip 1.2.3.4 on x2024-01-01\", []),\n    (\"date glued right\", \"ip 1.2.3.4 on 2024-01-01x\", []),\n    (\"date glued right digit\", \"ip 1.2.3.4 on 2024-01-012\", []),\n    (\"date at line end\", \"ip 1.2.3.4 on 2024-01-01\", [\"2024-01-01\"]),\n    (\"bad ip part 256\", \"256.1.1.1 on 2024-01-01\", []),\n    (\"bad ip leading zero\", \"01.1.1.1 on 2024-01-01\", []),\n    (\"bad ip leading zero 2\", \"1.01.1.1 on 2024-01-01\", []),\n    (\"ip glued\", \"ip 121.2.3.4 on 2024-01-01\", []),\n    (\"ip glued left\", \"ip a1.2.3.4 on 2024-01-01\", []),\n    (\"ip 255 ok\", \"255.255.255.255 on 2024-01-01\", [\"2024-01-01\"]),\n    (\"ip 0 ok\", \"0.0.0.0 on 2024-01-01\", [\"2024-01-01\"]),\n    (\"date before ip only\", \"2024-01-01 then 10.0.0.1\", []),\n    (\"multi line order\", \"ip 1.1.1.1 d 2024-01-01\\nno ip 2024-01-02\\nip 2.2.2.2 d 2024-01-03\", [\"2024-01-01\", \"2024-01-03\"]),\n    (\"crlf\", \"ip 1.1.1.1 d 2024-01-01\\r\\nno ip 2024-01-02\\r\\nip 2.2.2.2 d 2024-01-03\", [\"2024-01-01\", \"2024-01-03\"]),\n    (\"two ips one date\", \"ip 1.1.1.1 and 2.2.2.2 on 2024-01-01\", [\"2024-01-01\"]),\n    (\"ip then date then ip\", \"1.1.1.1 2024-01-01 2.2.2.2\", [\"2024-01-01\"]),\n    (\"year 1999\", \"ip 1.1.1.1 1999-12-31\", [\"1999-12-31\"]),\n    (\"year 1899\", \"ip 1.1.1.1 1899-12-31\", []),\n    (\"year 2099\", \"ip 1.1.1.1 2099-12-31\", [\"2099-12-31\"]),\n    (\"ip at end no date\", \"2024-01-01 ip 1.1.1.1\", []),\n    (\"date only after ip on same line, ip at start\", \"1.1.1.1 2024-01-01\", [\"2024-01-01\"]),\n]\n\nok = True\nfor name, line, exp in cases:\n    got = re.findall(pat, line, re.MULTILINE)\n    status = \"OK \" if got == exp else \"FAIL\"\n    if got != exp:\n        ok = False\n    print(f\"{status} {name}: got={got} exp={exp}\")\n\nprint(\"ALL OK\" if ok else \"SOME FAILED\")",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\server.log\" ok -> \"Read file <WORKSPACE>\\\\server.log, lines 1-5\\n1: 2026-04-02 07:15:09 INFO  gateway accepted 10.12.0.7 for build 2026-04-01\\n2: 2026-04-02 07:15:11 INFO  cache warm, 412 keys, next sweep 2026-04-03\\n3: 2026-04-02 07:16:40 WARN  peer 192.168.40.3 slow, retry window 2026-04-02 to 2026-04-05\\n4: 2026-04-02 07:18:02 INFO  job 7781-20-4410 que[... 84 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\regex.txt\" ok -> \"Created file successfully: <WORKSPACE>/regex.txt\"\n[step 1] write \"<WORKSPACE>\\\\tmp_check.py\" ok -> \"Created file successfully: <WORKSPACE>/tmp_check.py\"\n[step 1] shell \"python tmp_check.py\" ok -> \"pattern: ^(?:[^\\\\r\\\\n]*?\\\\b(?:25[0-5]|2[0-4]\\\\d|1\\\\d\\\\d|[1-9]?\\\\d)(?:\\\\.(?:25[0-5]|2[0-4]\\\\d|1\\\\d\\\\d|[1-9]?\\\\d)){3}\\\\b[^\\\\r\\\\n]*?\\\\b)((?:19|20)\\\\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\\\d|3[01]))\\\\b(?![\\\\r\\\\n]|[-\\\\d])\\r\\nsample: ['2026-04-02']\\r\\nsample ok: False\\r\\nOK  no ip, has date: got=[] exp=[]\\r\\nOK  ip, date before ip: got=[] exp=[]\\r\\nOK  ip, date after ip: got=['2026-04-02'] exp=['2026-04-02']\\r\\nFAIL two dates after ip: g[... 1318 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "the last date on each line with an address",
+   false
+  ],
+  [
+   "lines without a valid address match nothing",
+   false
+  ],
+  [
+   "impossible dates match nothing",
+   false
+  ],
+  [
+   "dates glued to letters or digits match nothing",
+   true
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 4,
+  "tool_errors": 0,
+  "shell_commands": 1,
+  "shell_failures": 0,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2018,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1686
+ },
+ "deliverables": [],
+ "render": null
+}
