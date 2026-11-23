@@ -1,0 +1,53 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [
+  "[goal] Provide `./run.py` with `from run import run_tasks` — `async def run_tasks(tasks, max_concurrent)` running zero-arg callables that return awaitable jobs, at most `max_concurrent` concurrent, returning when all done, with Ctrl+C-safe cleanup.\n\n[action] Wrote `run.py` (asyncio.Semaphore + `asyncio.create_task` per job, `gather`, explicit cancel-and-await on `KeyboardInterrupt`/`CancelledError`) and `test_run.py`; ran the tests.\n\n[result] All checks pass on Python 3.13:\n- `OK limit: peak=3 results=10` — 10 jobs, max_concurrent=3, peak active never exceeded 3.\n- `OK order: [0, 1, 2, 3, 4]` — results returned in task order despite varying durations.\n- `OK cleanup on cancel: ['cleaned']` — cancelling the outer task (stand-in for Ctrl+C) let the job's `finally` cleanup run before propagation.\n- `OK validation: max_concurrent must be >= 1, got 0`.\n\nAssumptions I made (brief left these open):\n- Returns a list of job results in input order (brief only says \"returns when every job is done\").\n- `max_concurrent < 1` raises `ValueError`.\n- Ctrl+C: jobs are cancelled (so `finally`/`async with` cleanup runs) and the interrupt is re-raised after cleanup completes.\n- Jobs that raise: `asyncio.gather` propagates the first exception and cancels the rest (standard gather semantics); I did not add per-job exception isolation since the brief doesn't require it.\n\nEvidence: test output above, all assertions passed, `ALL OK`.\n\n[next] None — work complete. No browser tabs, windows, or apps were opened, so nothing to close."
+ ],
+ "diff": "A run.py\nA test_run.py\n\n--- run.py ---\n\"\"\"Concurrency helper for batch scripts.\n\nProvides ``run_tasks(tasks, max_concurrent)``: run zero-argument callables\nthat each return an awaitable job, with at most ``max_concurrent`` jobs\nrunning at once. Returns when every job is done.\n\nCtrl+C handling: on KeyboardInterrupt (SIGINT), already-started jobs are\ngiven a chance to run their cleanup code (``finally`` blocks /\n``asyncio.CancelledError`` handlers) before the function returns.\n\nPython 3.11+, standard library only.\n\"\"\"\n\nfrom __future__ import annotations\n\nimport asyncio\nfrom collections.abc import Awaitable, Callable, Iterable\nfrom typing import TypeVar\n\n__all__ = [\"run_tasks\"]\n\nT = TypeVar(\"T\")\n\n\nasync def run_tasks(\n    tasks: Iterable[Callable[[], Awaitable[T]]],\n    max_concurrent: int,\n) -> list[T]:\n    \"\"\"Run ``tasks`` with at most ``max_concurrent`` concurrent jobs.\n\n    Each element of ``tasks`` is a zero-argument callable that returns an\n    awaitable (e.g. a coroutine function). The callables are invoked lazily\n    as slots free up, so at most ``max_concurrent`` jobs run at once.\n\n    Returns a list of the jobs' results, in the order of ``tasks``.\n\n    On Ctrl+C (KeyboardInterrupt) the running jobs are cancelled and awaited\n    so their cleanup code (``finally`` blocks, ``async with`` exit, etc.)\n    runs before this function re-raises.\n    \"\"\"\n    if max_concurrent < 1:\n        raise ValueError(f\"max_concurrent must be >= 1, got {max_concurrent!r}\")\n\n    factories = list(tasks)\n    semaphore = asyncio.Semaphore(max_concurrent)\n    results: list[T | None] = [None] * len(factories)\n\n    async def _run_one(index: int, factory: Callable[[], Awaitable[T]]) -> None:\n        async with semaphore:\n            results[index] = await factory()\n\n    tasks = [asyncio.create_task(_run_one(i, f)) for i, f in enumerate(factories)]\n    try:\n        await asyncio.gather(*tasks)\n    except (KeyboardInterrupt, asyncio.CancelledError):\n        # Cancel every job that has not finished yet, then wait for them so\n        # their cleanup code (finally blocks, async-with exit, etc.) runs\n        # before we propagate the interrupt.\n        for t in tasks:\n            if not t.done():\n                t.cancel()\n        await asyncio.gather(*tasks, return_exceptions=True)\n        raise\n\n    return results  # type: ignore[return-value]\n\n--- test_run.py ---\n\"\"\"Quick checks for run.run_tasks.\"\"\"\nimport asyncio\nimport sys\nimport time\n\nfrom run import run_tasks\n\nactive = 0\npeak = 0\n\n\ndef make_job(delay=0.05):\n    async def job():\n        global active, peak\n        active += 1\n        peak = max(peak, active)\n        try:\n            await asyncio.sleep(delay)\n        finally:\n            active -= 1\n        return \"done\"\n    return job\n\n\ndef test_limit_and_order():\n    global active, peak\n    active = 0\n    peak = 0\n    results = asyncio.run(run_tasks([make_job() for _ in range(10)], 3))\n    assert results == [\"done\"] * 10, results\n    assert peak <= 3, peak\n    print(f\"OK limit: peak={peak} results={len(results)}\")\n\n\ndef test_order_preserved():\n    def mk(i):\n        async def job():\n            await asyncio.sleep(0.01 * (5 - i))\n            return i\n        return job\n    factories = [mk(i) for i in range(5)]\n    results = asyncio.run(run_tasks(factories, 2))\n    assert results == [0, 1, 2, 3, 4], results\n    print(\"OK order:\", results)\n\n\ndef test_cleanup_on_cancel():\n    \"\"\"Simulate Ctrl+C: cancel the outer task; job cleanup must run.\"\"\"\n    cleaned = []\n\n    async def job():\n        try:\n            await asyncio.sleep(10)\n        finally:\n            cleaned.append(\"cleaned\")\n\n    async def main():\n        await run_tasks([job], 2)\n\n    async def driver():\n        t = asyncio.create_task(main())\n        await asyncio.sleep(0.05)\n        t.cancel()  # stands in for KeyboardInterrupt / task cancel\n        try:\n            await t\n        except (asyncio.CancelledError, KeyboardInterrupt):\n            pass\n        return cleaned\n\n    cleaned = asyncio.run(driver())\n    assert cleaned == [\"cleaned\"], cleaned\n    print(\"OK cleanup on cancel:\", cleaned)\n\n\ndef test_max_concurrent_validation():\n    try:\n        asyncio.run(run_tasks([make_job()], 0))\n    except ValueError as e:\n        print(\"OK validation:\", e)\n    else:\n        raise AssertionError(\"expected ValueError\")\n\n\nif __name__ == \"__main__\":\n    test_limit_and_order()\n    test_order_preserved()\n    test_cleanup_on_cancel()\n    test_max_concurrent_validation()\n    print(\"ALL OK\")",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Created file successfully: <WORKSPACE>/run.py\"\n[step 1] write \"<WORKSPACE>\\\\test_run.py\" ok -> \"Created file successfully: <WORKSPACE>/test_run.py\"\n[step 1] shell \"python test_run.py\" failed -> \"OK limit: peak=3 results=10\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\test_run.py\\\", line 86, in <module>\\r\\n    test_order_preserved()\\r\\n    ~~~~~~~~~~~~~~~~~~~~^^\\r\\n  File \\\"<WORKSPACE>\\\\test_run.py\\\", line 42, in test_order_preserved\\r\\n    results = asyncio.r[... 1136 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>\\\\test_run.py\" ok -> \"Edited <WORKSPACE>/test_run.py (1 replacement)\"\n[step 1] shell \"python test_run.py\" failed -> \"OK limit: peak=3 results=10\\r\\nOK order: [0, 1, 2, 3, 4]\\r\\nTraceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\run.py\\\", line 54, in run_tasks\\r\\n    await asyncio.gather(*coros)\\r\\n  File \\\"<WORKSPACE>\\\\run.py\\\", line 50, in _run_one\\r\\n    results[index] = await factory()\\r\\n [... 1992 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>\\\\run.py\" ok -> \"Edited <WORKSPACE>/run.py (1 replacement)\"\n[step 1] shell \"python test_run.py\" ok -> \"OK limit: peak=3 results=10\\r\\nOK order: [0, 1, 2, 3, 4]\\r\\nOK cleanup on cancel: ['cleaned']\\r\\nOK validation: max_concurrent must be >= 1, got 0\\r\\nALL OK\"\n[step 1] read \"<WORKSPACE>\\\\run.py\" ok -> \"Read file <WORKSPACE>\\\\run.py, lines 1-65\\n1: \\\"\\\"\\\"Concurrency helper for batch scripts.\\n2: \\n3: Provides ``run_tasks(tasks, max_concurrent)``: run zero-argument callables\\n4: that each return an awaitable job, with at most ``max_concurrent`` jobs\\n5: running at once. Returns when every job is done.\\n6: \\n7: Ctrl+C handling: on KeyboardInter[... 2276 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   false
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 9,
+  "tool_calls": 8,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 2,
+  "file_writes": 4,
+  "repeated_tool_calls": 2,
+  "outside_path_uses": 0,
+  "generated_tokens": 2685,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 682
+ },
+ "deliverables": [],
+ "render": null
+}

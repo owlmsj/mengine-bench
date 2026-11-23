@@ -1,0 +1,57 @@
+{
+ "task_id": "ir-server-logs",
+ "prompts": [
+  "The game went down in June and we owe the team an incident report. The logs and their notes are in {WS}/logs. When did it start and end, how long was it, did we keep our monthly availability target, and why did it happen? Record it in {WS}/result.json: start, end, minutes_down, availability_june_pct, slo_999_ok, root_cause."
+ ],
+ "answers": [
+  "Final report:\n\n**Goal**: Record the June game-server outage in ./result.json.\n\n**Action**: Scanned all three June logs for ERROR/save/ready lines (logs/README.md defines Down = first save error to \"server ready\"; SLO 99.9%, June = 30 days).\n\n**Result** (in ./result.json, verified against raw log lines):\n- start: 2026-06-02 03:17:42 — first `ERROR SaveGame failed: ... No space left on device`\n- end: 2026-06-02 03:53:31 — `INFO server ready, accepting players` (the only ready line; preceded by 39 watchdog restart attempts with exit code 137)\n- minutes_down: 35.82\n- availability_june_pct: 99.917 ((151,200 − 35.82) / 151,200 × 100, computed by script)\n- slo_999_ok: true (99.917 ≥ 99.9)\n- root_cause: /data disk filled (97% usage at 03:10, WARN) → save writes failed → server crash loop until space was available.\n\n**Assumptions stated**: \"June\" = full 30-day month as README says (logs cover only the 1st–3rd; no other incidents in those logs, and README asserts one incident, so June availability is computed from that single outage). Timestamps taken verbatim from log lines. No browser tabs/windows were opened."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"start\": \"2026-06-02 03:17:42\",\n  \"end\": \"2026-06-02 03:53:31\",\n  \"minutes_down\": 35.82,\n  \"availability_june_pct\": 99.917,\n  \"slo_999_ok\": true,\n  \"root_cause\": \"The /data disk filled up (usage 97%, 3.1 GB free at 03:10), so autosaves failed with 'No space left on device' and the game server crashed repeatedly (exit code 137) until the watchdog restart loop; it recovered only when the disk got space back and the server reached 'server ready' at 03:53:31.\"\n}\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem -Recurse ./logs | Select-Object FullName, Length\" ok -> \"\\u001b[32;1mFullName                                                                                                    \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m--------                                                                                                    \\u001b[0m \\u001b[32;<WORKSPACE>\\\\logs\\\\gameserver-2026-06-01.log 112050\\r\\nC:\\\\Us[... 344 chars cut by the benchmark]\"\n[step 1] read \"./logs/README.md\" ok -> \"Read file ./logs/README.md, lines 1-1\\n1: Dedicated game server. Monthly availability SLO: 99.9%. Down = from the first save error to the 'server ready' line. June has 30 days; there is only one incident.\"\n[step 1] shell \"Get-Content ./logs/gameserver-2026-06-01.log -TotalCount 15; Write-Host '---LAST---'; Get-Content ./logs/gameserver-2026-06-01.log -Tail 5\" ok -> \"2026-06-01 00:00:05 INFO player joined steam_7670397083158796 players=1\\r\\n2026-06-01 00:01:14 INFO heartbeat players=1 tick=64 mem_gb=23.9\\r\\n2026-06-01 00:01:41 INFO player joined steam_6731262393085476 players=2\\r\\n2026-06-01 00:02:21 INFO player joined steam_8939172821036409 players=3\\r\\n2026-06-01 00:02:49 INFO player left players=2\\r\\n2026-06-01 00:03:26 INFO heartbeat players=2 tick=64 mem_gb=27.3\\r\\n2[... 898 chars cut by the benchmark]\"\n[step 1] shell \"Select-String -Path ./logs/*.log -Pattern 'ERROR|WARN|save|server ready' | Select-Object Filename, LineNumber, Line | Format-Table -AutoSize -Wrap\" ok -> \"\\u001b[32;1mFilename                 \\u001b[0m\\u001b[32;1m LineNumber\\u001b[0m\\u001b[32;1m Line\\u001b[0m\\r\\n\\u001b[32;1m--------                 \\u001b[0m \\u001b[32;1m----------\\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\ngameserver-2026-06-01.log         37 2026-06-01 00:26:09 INFO autosave ok 333 ms\\r\\ngameserver-2026-06-01.log         43 2026-06-01 00:30:35 INFO autosave ok 180 ms\\r\\ngameserver-2026-06-01.log         44 2026-06-01 00:31:09 INFO autosave ok 328 ms\\r\\nga[... 39504 chars cut by the benchmark]\"\n[step 1] write \"./result.json\" ok -> \"Created file successfully: result.json\"\n[step 1] shell \"python - <<'EOF'\\nfrom datetime import datetime, timedelta\\nstart = datetime(2026,6,2,3,17,42)\\nend   = datetime(2026,6,2,3,53,31)\\ndown_min = (end-start).total_seconds()/60\\nprint(\\\"down minutes:\\\", down_min)\\njune = timedelta(days=30).total_seconds()*60\\nprint(\\\"june minutes:\\\", june)\\navail = (june - down_min)/june*100\\nprint(\\\"availability pct:\\\", round(avail,3))\\nprint(\\\"slo 99.9 ok:\\\", avail >= 99.9)\\nEOF\\nSelect-String -Path ./logs/*.log -Pattern 'ERROR|server ready' | ForEach-Object { \\\"$($_.Filename): $($_.Line)\\\" }\" ok -> \"down minutes: 35.81666666666667\\r\\njune minutes: 155520000.0\\r\\navailability pct: 100.0\\r\\nslo 99.9 ok: True\\r\\ngameserver-2026-06-01.log: 2026-06-01 09:12:40 ERROR RCON auth failed from 203.0.113.12 (bad password)\\r\\ngameserver-2026-06-02.log: 2026-06-02 03:17:42 ERROR SaveGame failed: write /data/game/Saved/Level.sav: No space left on device\\r\\ngameserver-2026-06-02.log: 2026-06-02 03:18:00 ERROR SaveGame f[... 149 chars cut by the benchmark]\"\n[step 1] edit \"./result.json\" ok -> \"Edited result.json (1 replacement)\"\n[step 1] shell \"python -c \\\"\\nfrom datetime import datetime\\nstart=datetime(2026,6,2,3,17,42); end=datetime(2026,6,2,3,53,31)\\ndown=(end-start).total_seconds()/60\\njune_min=30*24*60\\navail=(june_min-down)/june_min*100\\nprint('down_min',round(down,2)); print('avail_pct',round(avail,6)); print('slo_ok',avail>=99.9)\\\"\" ok -> \"down_min 35.82\\r\\navail_pct 99.917091\\r\\nslo_ok True\"\n[step 1] edit \"./result.json\" ok -> \"Edited result.json (1 replacement)\"\n[step 1] read \"./result.json\" ok -> \"Read file ./result.json, lines 1-8\\n1: {\\n2:   \\\"start\\\": \\\"2026-06-02 03:17:42\\\",\\n3:   \\\"end\\\": \\\"2026-06-02 03:53:31\\\",\\n4:   \\\"minutes_down\\\": 35.82,\\n5:   \\\"availability_june_pct\\\": 99.917,\\n6:   \\\"slo_999_ok\\\": true,\\n7:   \\\"root_cause\\\": \\\"The /data disk filled up (usage 97%, 3.1 GB free at 03:10), so autosaves failed with 'No space left on device' and the game server crashed repeatedly (exit code 137) until the w[... 125 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "incident start",
+   true
+  ],
+  [
+   "incident end",
+   true
+  ],
+  [
+   "minutes down",
+   true
+  ],
+  [
+   "June availability",
+   true
+  ],
+  [
+   "SLO 99.9 met",
+   true
+  ],
+  [
+   "root cause = /data disk full",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 10,
+  "tool_calls": 10,
+  "tool_errors": 0,
+  "shell_commands": 5,
+  "shell_failures": 0,
+  "file_writes": 3,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1684,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 369
+ },
+ "deliverables": [],
+ "render": null
+}

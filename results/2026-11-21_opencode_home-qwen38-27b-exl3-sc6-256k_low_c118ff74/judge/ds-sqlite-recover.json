@@ -1,0 +1,53 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [
+  "The parser script is written; now I'll run it to decode the 13 cells.\n\n"
+ ],
+ "diff": "A recover.ps1\n\n--- recover.ps1 ---\n$b = [System.IO.File]::ReadAllBytes('.\\prices.db')\n$ncells = [BitConverter]::ToUInt16($b, 0)\nWrite-Host \"ncells=$ncells\"\n# cell pointers: 2 bytes big-endian each, starting at offset 2\n$ptrs = @()\nfor ($i = 0; $i -lt $ncells; $i++) {\n  $off = 2 + 2*$i\n  $p = ($b[$off] -shl 8) -bor $b[$off+1]\n  $ptrs += $p\n}\nWrite-Host (\"ptrs: \" + ($ptrs -join ','))\n\nfunction ReadVarInt([byte[]]$b, [int]$pos) {\n  $v = 0\n  for ($i = 0; $i -lt 9; $i++) {\n    $byte = $b[$pos + $i]\n    if ($i -eq 8) { $v = ($v -shl 8) -bor $byte; return @($v, $pos + 9) }\n    $v = ($v -shl 7) -bor ($byte -band 0x7F)\n    if (($byte -band 0x80) -eq 0) { return @($v, $pos + $i + 1) }\n  }\n  return @($v, $pos + 9)\n}\n\n$rows = @()\nforeach ($p in $ptrs) {\n  $payloadLenRaw = ReadVarInt $b $p\n  $payloadLen = $payloadLenRaw[0]\n  $rowidRaw = ReadVarInt $b ($p + $payloadLenRaw[1])\n  $rowid = $rowidRaw[0]\n  $recStart = $rowidRaw[1]\n  $hdrLenRaw = ReadVarInt $b $recStart\n  $hdrLen = $hdrLenRaw[0]\n  $hdrStart = $recStart\n  $bodyStart = $recStart + $hdrLen\n  # serial types\n  $types = @()\n  $hp = $hdrStart + 1\n  while ($hp -lt $hdrStart + $hdrLen) {\n    $tRaw = ReadVarInt $b $hp\n    $types += $tRaw[0]\n    $hp = $tRaw[1]\n  }\n  $vals = @()\n  $bp = $bodyStart\n  foreach ($t in $types) {\n    if ($t -eq 0) { $vals += $null }\n    elseif ($t -eq 1) { $vals += [int64]($bp -ge 0 ? $b[$bp] : $b[$bp]); $bp += 1 }\n    elseif ($t -eq 2) { $v = [BitConverter]::ToInt16($b, $bp); $vals += $v; $bp += 2 }\n    elseif ($t -eq 3) { $v = [BitConverter]::ToInt32($b, $bp); $vals += $v; $bp += 3 }\n    elseif ($t -eq 4) { $v = [BitConverter]::ToInt64($b, $bp); $vals += $v; $bp += 4 }\n    elseif ($t -eq 5) { $v = [BitConverter]::ToInt64($b, $bp); $vals += $v; $bp += 6 }\n    elseif ($t -eq 6) { $v = [BitConverter]::ToInt64($b, $bp); $vals += $v; $bp += 8 }\n    elseif ($t -eq 7) {\n      # IEEE754 big-endian double\n      $bb = New-Object byte[] 8\n      for ($k = 0; $k -lt 8; $k++) { $bb[7-$k] = $b[$bp+$k] }\n      $v = [BitConverter]::ToDouble($bb, 0)\n      $vals += $v\n      $bp += 8\n    }\n    elseif ($t -eq 8) { $vals += 0 }\n    elseif ($t -eq 9) { $vals += 1 }\n    elseif ($t -ge 12 -and $t % 2 -eq 0) {\n      $len = ($t - 12) / 2\n      $s = [System.Text.Encoding]::UTF8.GetString($b, $bp, $len)\n      $vals += $s\n      $bp += $len\n    }\n    elseif ($t -ge 13 -and $t % 2 -eq 1) {\n      $len = ($t - 13) / 2\n      $vals += (\"blob:\" + $len)\n      $bp += $len\n    } else { $vals += (\"unk:$t\"); }\n  }\n  $rows += [pscustomobject]@{ rowid=$rowid; payloadLen=$payloadLen; types=($types -join ','); vals=($vals -join '|') }\n}\n$rows | Format-List",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-Item .\\\\prices.db | Select-Object Length; Get-Content .\\\\prices.db -Encoding Byte -TotalCount 100 | ForEach-Object { '{0:X2}' -f $_ }\" failed -> \"\\u001b[32;1mLength\\u001b[0m\\r\\n\\u001b[32;1m------\\u001b[0m\\r\\n  4096\\r\\n\\u001b[31;1mGet-Content: \\u001b[31;1mCannot process argument transformation on parameter 'Encoding'. 'Byte' is not a supported encoding name. For information on defining a custom encoding, see the documentation for the Encoding.RegisterProvider method. (Parameter 'name')\\u001b[0m\"\n[step 1] shell \"$b = [System.IO.File]::ReadAllBytes('.\\\\prices.db'); ($b[0..4095] | ForEach-Object { '{0:X2}' -f $_ }) -join ' '\" ok -> \"0D 00 00 00 0A 0F 3D 00 0F F1 0F E3 0F CB 0F BD 0F AD 0F 93 0F 7F 0F 6D 0F 58 0F 3D 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 0[... 11887 chars cut by the benchmark]\"\n[step 1] other \"{\\\"code\\\": \\\"const fs = require('fs');\\\\nconst b = fs.readFileSync('prices.db');\\\\nconsole.log('len', b.length);\\\\n// find non-zero regions\\\\nlet i = 0;\\\\nwhile (i < b.length) {\\\\n  if (b[i] !== 0) {\\\\n    let j = i;\\\\n    while (j < b.length && b[j] !== 0) j++;\\\\n    console.log('region', i, '-', j-1, 'len', j-i);\\\\n    i = j;\\\\n  } else i++;\\\\n}\\\"}\" ok -> \"Error: Cannot import \\\"fs\\\": it isn't available here, where packages and files can't be loaded. Use the provided globals. (line 1, col 12)\"\n[step 1] write \"<WORKSPACE>\\\\recover.ps1\" ok -> \"Created file successfully: <WORKSPACE>/recover.ps1\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   false
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   false
+  ],
+  [
+   "rows with fractional prices recovered",
+   false
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   false
+  ],
+  [
+   "no row that is not in the table",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 5,
+  "tool_calls": 4,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 1,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1679,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 1280
+ },
+ "deliverables": [],
+ "render": null
+}
