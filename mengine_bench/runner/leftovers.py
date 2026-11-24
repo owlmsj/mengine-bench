@@ -80,11 +80,18 @@ class TaskWindow:
         rows = psutil._ppid_map()
         with self._lock:
             for pid, parent in rows.items():
-                if pid in self._born or pid in self._before:
+                if pid in self._before:
+                    continue
+                known = self._born.get(pid)
+                if known is not None and known[1] == parent:
                     continue
                 try:
                     created = psutil.Process(pid).create_time()
                 except psutil.Error:
+                    continue
+                # #313: a new parent with a new creation time is a reused pid, so the old link must go or the
+                # stranger's children walk it up to the runner; a POSIX reparent (same process) keeps its link.
+                if known is not None and known[0] == created:
                     continue
                 self._born[pid] = (created, parent)
 
