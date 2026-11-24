@@ -533,6 +533,10 @@ class CodexAgent:
         return _cli_version("codex")
 
 
+# #314: OpenCode 2.3.2 emits `background_wait` and blocks on background shell jobs after its final reply.
+OPENCODE_FINAL_EVENT = '{"type":"background_wait"'
+
+
 @dataclass
 class OpencodeAgent:
     """`opencode run --format json`; effort maps to the model variant (`model#effort`).
@@ -558,8 +562,8 @@ class OpencodeAgent:
         for attachment in attachments:
             argv += ["--file", attachment]
         if len(prompt) > ARGV_PROMPT_LIMIT:
-            return Invocation(argv=argv, stdin_text=prompt)
-        return Invocation(argv=[*argv, prompt], stdin_text=None)
+            return Invocation(argv=argv, stdin_text=prompt, final_event=OPENCODE_FINAL_EVENT)
+        return Invocation(argv=[*argv, prompt], stdin_text=None, final_event=OPENCODE_FINAL_EVENT)
 
     def judge_invocation(self, prompt: str, workdir: Path, attachments: Sequence[str],
                          prompt_file: Path | None = None, system_prompt: str | None = None) -> Invocation:

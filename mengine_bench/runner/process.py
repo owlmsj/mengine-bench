@@ -10,6 +10,7 @@ inherited pipe would otherwise block the read forever.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
 import threading
@@ -26,6 +27,20 @@ KILL_WAIT_S = 10
 WATCH_EVERY_S = 0.2
 # Long enough for a normal exit (1 to 3 s measured for `codex exec`), short enough to cost nothing: the clock has stopped.
 FINAL_EVENT_GRACE_S = 5
+# #314: OpenCode 2.3.2 emits `background_wait` and blocks on background shell jobs after its final reply.
+# Wait this many seconds of quiet stdout before stopping; never scaled by MENGINE_BENCH_TIME_SCALE.
+BACKGROUND_WAIT_EVENT = '{"type":"background_wait"'
+BACKGROUND_WAIT_GRACE_S = 300
+
+
+def _background_wait_grace_s() -> float:
+    raw = os.environ.get("MENGINE_BENCH_BACKGROUND_GRACE_S")
+    if not raw:
+        return BACKGROUND_WAIT_GRACE_S
+    value = float(raw)
+    if value < 0:
+        raise ValueError(f"received MENGINE_BENCH_BACKGROUND_GRACE_S={raw!r}; expected >= 0")
+    return value
 
 
 @dataclass(frozen=True)
@@ -95,12 +110,50 @@ class _FinalEventWatch(threading.Thread):
         self.stopped = False
 
     def run(self) -> None:
-        if self._final_event is None or not self._saw_final_event(self._final_event):
+        if self._final_event is None:
+            return
+        if self._final_event == BACKGROUND_WAIT_EVENT:
+            self._watch_background_wait()
+            return
+        if not self._saw_final_event(self._final_event):
             return
         self.finished_at = time.monotonic()
         if not self._closed.wait(FINAL_EVENT_GRACE_S):
             self.stopped = True
             kill_tree(self._proc.pid)
+
+    def _watch_background_wait(self) -> None:
+        """Stop an idle OpenCode 2.3.2 `background_wait` after quiet grace (#314).
+
+        OpenCode 2.3.2 moves timed-out shell commands to background jobs and emits
+        `background_wait` instead of exiting. Any new stdout line resets the wait so
+        a resumed agent keeps running until it exits or emits `background_wait` again.
+        """
+        expected = json.loads(BACKGROUND_WAIT_EVENT + "}")
+        grace_s = _background_wait_grace_s()
+        pending = b""
+        waiting_since: float | None = None
+        with self._output.open("rb") as reader:
+            while not self._closed.wait(WATCH_EVERY_S):
+                lines = (pending + reader.read()).split(b"\n")
+                pending = lines.pop()
+                for line in lines:
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except (ValueError, UnicodeDecodeError):
+                        event = None
+                    if isinstance(event, dict) and expected.items() <= event.items():
+                        waiting_since = time.monotonic()
+                        self.finished_at = waiting_since
+                    elif waiting_since is not None:
+                        waiting_since = None
+                        self.finished_at = None
+                if waiting_since is not None and time.monotonic() - waiting_since >= grace_s:
+                    self.stopped = True
+                    kill_tree(self._proc.pid)
+                    return
 
     def _saw_final_event(self, final_event: str) -> bool:
         expected = json.loads(final_event + "}")
