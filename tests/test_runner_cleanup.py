@@ -333,3 +333,79 @@ def test_a_child_of_a_task_process_stays_the_runners(monkeypatch: pytest.MonkeyP
     finally:
         window._stop.set()
         window._thread.join()
+
+
+def test_a_short_lived_reuser_between_polls_does_not_taint_its_child(monkeypatch: pytest.MonkeyPatch) -> None:
+    """mengine-bench#313: our process X dies; later stranger Q reuses X, spawns R and exits between two polls;
+    R (ppid=X) must not inherit X's stale ancestry."""
+    from mengine_bench.runner import leftovers
+
+    runner = 100
+    procs = _FakeProcesses({runner: (1.0, 1)})
+    monkeypatch.setattr(leftovers, "_started", procs.started)
+    monkeypatch.setattr(leftovers.psutil, "_ppid_map", procs.ppid_map)
+    monkeypatch.setattr(leftovers.psutil, "Process", procs.process)
+    window = leftovers.TaskWindow(root_pid=runner, every_s=3600)
+    try:
+        procs.table[300] = (2.0, runner)  # our process X
+        window._observe()
+        del procs.table[300]  # X exits
+        window._observe()
+        # Between polls: stranger Q reuses pid 300, spawns R (400, ppid=300), and Q exits before the next poll.
+        procs.table[400] = (5.0, 300)
+        window._observe()
+        assert window._ours(400, 5.0) is False
+    finally:
+        window._stop.set()
+        window._thread.join()
+
+
+def test_a_pid_reused_with_the_same_ppid_is_not_the_runners(monkeypatch: pytest.MonkeyPatch) -> None:
+    """mengine-bench#313: pid reuse keeping the same ppid must still revalidate create_time so the stranger and
+    its children are never claimed."""
+    from mengine_bench.runner import leftovers
+
+    runner = 100
+    procs = _FakeProcesses({runner: (1.0, 1)})
+    monkeypatch.setattr(leftovers, "_started", procs.started)
+    monkeypatch.setattr(leftovers.psutil, "_ppid_map", procs.ppid_map)
+    monkeypatch.setattr(leftovers.psutil, "Process", procs.process)
+    window = leftovers.TaskWindow(root_pid=runner, every_s=3600)
+    try:
+        procs.table[301] = (2.0, runner)
+        procs.table[300] = (2.5, 301)
+        window._observe()
+        del procs.table[301]
+        window._observe()
+        procs.table[300] = (6.0, 301)  # reused pid with the same recorded ppid
+        procs.table[400] = (7.0, 300)  # child of the stranger
+        window._observe()
+        assert window._ours(300, 6.0) is False
+        assert window._ours(400, 7.0) is False
+    finally:
+        window._stop.set()
+        window._thread.join()
+
+
+def test_a_detached_leftover_stays_ours_after_its_parent_pid_is_reused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """mengine-bench#313: a detached leftover L observed while our shell S was alive stays ours even after S dies
+    and a stranger reuses S's pid."""
+    from mengine_bench.runner import leftovers
+
+    runner, other_runner = 100, 200
+    procs = _FakeProcesses({runner: (1.0, 1), other_runner: (1.0, 1)})
+    monkeypatch.setattr(leftovers, "_started", procs.started)
+    monkeypatch.setattr(leftovers.psutil, "_ppid_map", procs.ppid_map)
+    monkeypatch.setattr(leftovers.psutil, "Process", procs.process)
+    window = leftovers.TaskWindow(root_pid=runner, every_s=3600)
+    try:
+        procs.table[300] = (2.0, runner)  # our shell S
+        procs.table[400] = (3.0, 300)  # detached leftover L
+        window._observe()
+        procs.table[300] = (5.0, other_runner)  # S exits; stranger reuses pid 300
+        window._observe()
+        assert window._ours(400, 3.0) is True
+        assert window._ours(300, 5.0) is False
+    finally:
+        window._stop.set()
+        window._thread.join()
