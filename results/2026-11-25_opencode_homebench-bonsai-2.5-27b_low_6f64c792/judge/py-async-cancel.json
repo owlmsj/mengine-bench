@@ -1,0 +1,51 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [],
+ "diff": "A run.py\nA tmp/test_run.py\n\n--- run.py ---\n\"\"\"Helper for running a batch of async tasks with a concurrency cap.\n\nProvides :func:`run_tasks`, which runs a list of zero-argument callables\n(each returning an awaitable job) with at most ``max_concurrent`` jobs in\nflight at once. It returns once every job has finished, and it makes sure\nthat a Ctrl+C (or an external cancellation) still lets each job's cleanup\ncode (``finally`` blocks) run before the exception is re-raised.\n\nStandard library only; requires Python 3.11+.\n\"\"\"\n\nimport asyncio\n\n\nasync def run_tasks(tasks, max_concurrent):\n    \"\"\"Run ``tasks`` with at most ``max_concurrent`` jobs in flight.\n\n    Each element of ``tasks`` is a zero-argument callable that returns an\n    awaitable job. Jobs are started as needed so that no more than\n    ``max_concurrent`` are running at the same time.\n\n    Returns a list of the jobs' results, in the same order as ``tasks``.\n\n    If the run is interrupted (Ctrl+C, or the enclosing task being\n    cancelled), the in-flight and not-yet-started jobs are cancelled and\n    awaited so that their cleanup code runs, and the exception is then\n    re-raised.\n    \"\"\"\n    semaphore = asyncio.Semaphore(max_concurrent)\n\n    async def run(task):\n        async with semaphore:\n            return await task()\n\n    jobs = [asyncio.create_task(run(task)) for task in tasks]\n    try:\n        return await asyncio.gather(*jobs)\n    except (KeyboardInterrupt, asyncio.CancelledError):\n        # A Ctrl+C (or cancellation) arrived. Cancel every job that has not\n        # finished yet so its cleanup (finally) code gets a chance to run,\n        # then wait for them to finish before re-raising.\n        for job in jobs:\n            if not job.done():\n                job.cancel()\n        await asyncio.gather(*jobs, return_exceptions=True)\n        raise\n\n\n--- tmp/test_run.py ---\n\"\"\"Tests for run.py: normal path, concurrency cap, and cancellation cleanup.\"\"\"\nimport asyncio\nimport os\nimport signal\nimport sys\nimport threading\nimport time\n\nsys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))\nfrom run import run_tasks  # noqa: E402\n\n\ndef make_job(i, sleep=10.0):\n    async def job():\n        try:\n            await asyncio.sleep(sleep)\n        finally:\n            print(f\"job{i} cleanup\", flush=True)\n            await asyncio.sleep(0.05)  # cleanup itself does an await\n        return i\n    return job\n\n\nasync def test_normal():\n    async def job(i):\n        await asyncio.sleep(0.01)\n        return i * 10\n\n    tasks = [lambda: job(i) for i in range(5)]\n    result = await run_tasks(tasks, max_concurrent=2)\n    assert result == [0, 10, 20, 30, 40], result\n    print(\"test_normal OK\", result, flush=True)\n\n\nasync def test_concurrency_cap():\n    running = 0\n    max_running = 0\n\n    async def job(i):\n        nonlocal running, max_running\n        running += 1\n        max_running = max(max_running, running)\n        await asyncio.sleep(0.05)\n        running -= 1\n        return i\n\n    tasks = [lambda: job(i) for i in range(10)]\n    result = await run_tasks(tasks, max_concurrent=3)\n    assert max_running <= 3, max_running\n    assert result == list(range(10)), result\n    print(\"test_concurrency_cap OK max_running =\", max_running, flush=True)\n\n\nasync def test_cancelled_error_path():\n    \"\"\"Simulate asyncio.run cancelling the main task (what Ctrl+C triggers).\"\"\"\n    async def main():\n        tasks = [make_job(i) for i in range(5)]\n        result = await run_tasks(tasks, max_concurrent=2)\n        print(\"RESULT\", result, flush=True)\n\n    main_task = asyncio.create_task(main())\n    await asyncio.sleep(0.5)\n    main_task.cancel()\n    try:\n        await main_task\n        print(\"ERROR: main task did not cancel\", flush=True)\n    except asyncio.CancelledError:\n        print(\"test_cancelled_error_path OK (main cancelled, see cleanups above)\", flush=True)\n\n\ndef test_sigint_path():\n    \"\"\"Real Ctrl+C: send SIGINT to ourselves while the run is in flight.\"\"\"\n    async def main():\n        tasks = [make_job(i) for i in range(5)]\n        result = await run_tasks(tasks, max_concurrent=2)\n        print(\"RESULT\", result, flush=True)\n\n    def send_sigint():\n        time.sleep(0.5)\n        os.kill(os.getpid(), signal.SIGINT)\n\n    t = threading.Thread(target=send_sigint, daemon=True)\n    t.start()\n    try:\n        asyncio.run(main())\n        print(\"ERROR: did not get KeyboardInterrupt\", flush=True)\n    except KeyboardInterrupt:\n        print(\"test_sigint_path OK (got KeyboardInterrupt, see cleanups above)\", flush=True)\n\n\nif __name__ == \"__main__\":\n    which = sys.argv[1] if len(sys.argv) > 1 else \"all\"\n    if which in (\"normal\", \"all\"):\n        asyncio.run(test_normal())\n    if which in (\"cap\", \"all\"):\n        asyncio.run(test_concurrency_cap())\n    if which in (\"cancel\", \"all\"):\n        asyncio.run(test_cancelled_error_path())\n    if which in (\"sigint\", \"all\"):\n        test_sigint_path()\n    print(\"ALL DONE\", flush=True)\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"python --version; echo \\\"---\\\"; python3 --version; echo \\\"---\\\"; pwd; echo \\\"---\\\"; ls -la\" failed -> \"Python 3.13.14\\r\\n---\\r\\nPython was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases.\\r\\n---\\r\\n\\r\\n\\u001b[32;1mPath\\u001b[0m\\r\\n\\u001b[32;<WORKSPACE>\\r\\n---\\r\\n\\u001b[31;1mGet-ChildItem: \\u001b[31;1mA parameter cannot be found that matches paramet[... 17 chars cut by the benchmark]\"\n[step 1] shell \"ls -la; echo \\\"---\\\"; python -c \\\"import sys; print(sys.version)\\\"\" ok -> \"\\u001b[31;1mGet-ChildItem: \\u001b[31;1mA parameter cannot be found that matches parameter name 'la'.\\u001b[0m\\r\\n---\\r\\n3.13.14 (main, Jun 23 2026, 15:19:27) [MSC v.1944 64 bit (AMD64)]\"\n[step 1] read \"<WORKSPACE>\" ok -> \"Read directory <WORKSPACE>, entries 1-1\\nAGENTS.md\"\n[step 1] write \"<WORKSPACE>\\\\run.py\" ok -> \"Created file successfully: <WORKSPACE>/run.py\"\n[step 1] write \"<WORKSPACE>\\\\tmp\\\\test_run.py\" ok -> \"Created file successfully: <WORKSPACE>/tmp/test_run.py\"\n[step 1] shell \"python tmp/test_run.py normal; echo \\\"=== cap ===\\\"; python tmp/test_run.py cap; echo \\\"=== cancel ===\\\"; python tmp/test_run.py cancel\" ok -> \"Traceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\tmp\\\\test_run.py\\\", line 94, in <module>\\r\\n    asyncio.run(test_normal())\\r\\n    ~~~~~~~~~~~^^^^^^^^^^^^^^^\\r\\n  File \\\"<HOME>\\\\AppData\\\\Roaming\\\\uv\\\\python\\\\cpython-3.13.14-windows-x86_64-none\\\\Lib\\\\asyncio\\\\runners.py\\\", line 196, in run\\r\\n    return runner.run(main)\\r\\n           ~[... 1987 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 7,
+  "tool_calls": 6,
+  "tool_errors": 0,
+  "shell_commands": 3,
+  "shell_failures": 1,
+  "file_writes": 2,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 12063,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 8224
+ },
+ "deliverables": [],
+ "render": null
+}

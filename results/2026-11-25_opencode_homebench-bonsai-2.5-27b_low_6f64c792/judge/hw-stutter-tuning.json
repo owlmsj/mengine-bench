@@ -1,0 +1,55 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [],
+ "diff": "A analyze.ps1\n\n--- analyze.ps1 ---\n$rows = Import-Csv 'capture/presentmon.csv'\n$mbp = $rows | ForEach-Object { [double]$_.'MsBetweenPresents' }\n$mean = ($mbp | Measure-Object -Average).Average\n$avg_fps = 1000/$mean\n\n$sorted = $mbp | Sort-Object\n$n = $sorted.Count\n$idx = 0.99 * ($n - 1)\n$f = [math]::Floor($idx)\n$c = [math]::Ceiling($idx)\nif ($f -eq $c) { $p99 = $sorted[$f] } else { $p99 = $sorted[$f] * ($c - $idx) + $sorted[$c] * ($idx - $f) }\n$low1 = 1000/$p99\n\nWrite-Host (\"frames={0} last_t={1} mean_ms={2:0.5} avg_fps={3:0.4} p99_ms={4:0.4} low1_fps={5:0.4}\" -f $n, $rows[-1].TimeInSeconds, $mean, $avg_fps, $p99, $low1)\n\n# nearest-rank p99 for comparison\n$rank = [math]::Ceiling(0.99 * $n)\n$p99_nr = $sorted[$rank - 1]\nWrite-Host (\"nearest_rank p99_ms={0:0.4} low1_fps={1:0.4}\" -f $p99_nr, (1000/$p99_nr))\n\n# hitch detection: ms > 1.5x mean\n$thr = 1.5 * $mean\n$hits = @()\nfor ($i = 0; $i -lt $rows.Count; $i++) {\n  if ($mbp[$i] -gt $thr) { $hits += [pscustomobject]@{ t = [double]$rows[$i].TimeInSeconds } }\n}\n# cluster hits into bursts (gap > 0.2s = new burst)\n$bursts = @()\n$cur = $null\nforeach ($h in $hits) {\n  if ($null -eq $cur) { $cur = [pscustomobject]@{ start = $h.t; end = $h.t; count = 1 } }\n  elseif ($h.t - $cur.end -lt 0.2) { $cur.end = $h.t; $cur.count++ }\n  else { $bursts += $cur; $cur = [pscustomobject]@{ start = $h.t; end = $h.t; count = 1 } }\n}\nif ($cur) { $bursts += $cur }\nWrite-Host \"bursts (start, end, frames):\"\nforeach ($b in $bursts) { Write-Host (\"{0:0.000} - {1:0.000} ({2} frames)\" -f $b.start, $b.end, $b.count) }\n",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\" ok -> \"Read directory <WORKSPACE>, entries 1-4\\ncapture\\\\\\nAGENTS.md\\nNOTES.md\\nsettings.json\"\n[step 1] search \"{\\\"pattern\\\": \\\"**/*\\\"}\" ok -> \"<WORKSPACE><WORKSPACE><WORKSPACE><WORKSPACE>\\\\capture\\\\presentmon.csv\\nC:\\\\Users\\\\<USER>\\\\AppData\\\\Loca[... 55 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\NOTES.md\" ok -> \"Read file <WORKSPACE>\\\\NOTES.md, lines 1-15\\n1: # Owner notes - rig \\\"arena-01\\\"\\n2: \\n3: The game hitches every few seconds even though the average frame rate looks fine.\\n4: Capture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\n5: taken at the same time (same clock: second 0 of both files is the same i[... 533 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\settings.json\" ok -> \"Read file <WORKSPACE>\\\\settings.json, lines 1-125\\n1: {\\n2:   \\\"rig\\\": \\\"arena-01\\\",\\n3:   \\\"settings\\\": [\\n4:     {\\n5:       \\\"setting\\\": \\\"power_plan\\\",\\n6:       \\\"value\\\": \\\"Balanced\\\",\\n7:       \\\"where\\\": \\\"Windows\\\"\\n8:     },\\n9:     {\\n10:       \\\"setting\\\": \\\"hardware_accelerated_gpu_scheduling\\\",\\n11:       \\\"value\\\": \\\"on\\\",\\n12:       \\\"where\\\": \\\"Windows\\\"\\n13:[... 2660 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\capture\\\\presentmon.csv\" ok -> \"Read file <WORKSPACE>\\\\capture\\\\presentmon.csv, lines 1-50\\n1: Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\\n2: Arena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.000000,6.861,6.847,0.294,4.901,5[... 4370 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\capture\\\\sensors.csv\" ok -> \"Read file <WORKSPACE>\\\\capture\\\\sensors.csv, lines 1-61\\n1: time_s,cpu_clock_mhz,cpu_util_pct,gpu_clock_mhz,gpu_pcie_link_state,gpu_pcie_link_speed,dpc_latency_us,disk_active_pct,top_cpu_process\\n2: 0,5354,35,2724,L0,Gen5 x4,52,1,Arena.exe\\n3: 1,5350,40,2754,L0,Gen5 x4,88,4,Arena.exe\\n4: 2,5270,31,2754,L1,Gen5 x4,40,3,Arena.exe\\n5: 3,5373,[... 2614 chars cut by the benchmark]\"\n[step 1] shell \"python3 -c \\\"\\nimport csv, statistics\\n\\nwith open('capture/presentmon.csv') as f:\\n    rows = list(csv.DictReader(f))\\n\\nmbp = [float(r['MsBetweenPresents']) for r in rows]\\nmapi = [float(r['MsInPresentAPI']) for r in rows]\\nmrc = [float(r['MsUntilRenderComplete']) for r in rows]\\nmd = [float(r['MsUntilDisplayed']) for r in rows]\\nt = [float(r['TimeInSeconds']) for r in rows]\\n\\nn = len(mbp)\\nmean = sum(mbp)/n\\navg_fps = 1000/mean\\nprint('frames:', n, 'duration s:', t[-1])\\nprint('mean ms:', round(mean,3), 'avg_fps:', round(avg_fps,2))\\n\\ndef p99(vals):\\n    s = sorted(vals)\\n    k = (len(s)-1)*0.99\\n    import math\\n    f = math.floor(k); c = math.ceil(k)\\n    if f==c: return s[f]\\n    return s[f]*(c-k)+s[c]*(k-f)\\np99 = p99(mbp)\\nprint('p99 ms:', round(p99,3), '1pct low fps:', round(1000/p99,2))\\n\\n# find hitch frames: ms > 1.5x mean\\nthr = 1.5*mean\\nhitches = [(round(t[i],3), round(mbp[i],2), round(mapi[i],2), round(mrc[i],2), round(md[i],2)) for i in range(n) if mbp[i] > thr]\\nprint('hitches (t, ms, presentapi, rendercomplete, displayed):')\\nfor h in hitches: print(h)\\n\\\"\\n\" failed -> \"Python was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases.\"\n[step 1] shell \"$rows = Import-Csv 'capture/presentmon.csv'\\n$mbp = $rows | ForEach-Object { [double]$_.'MsBetweenPresents' }\\n$mean = ($mbp | Measure-Object -Average).Average\\n$avg_fps = 1000/$mean\\n# p99\\n$sorted = $mbp | Sort-Object\\n$k = ($sorted.Count - 1) * 0.99\\n$f = [math]::Floor($k); $c = [math]::Ceil($k)\\nif ($f -eq $c) { $p99 = $sorted[$f] } else { $p99 = $sorted[$f] * ($c - $k) + $sorted[$c] * ($k - $f) }\\n$low1 = 1000/$p99\\nWrite-Host \\\"frames=$($sorted.Count) mean_ms=$([math]::Round($mean,3)) avg_fps=$([math]::Round($avg_fps,2)) p99_ms=$([math]::Round($p99,3)) 1pct_low_fps=$([math]::Round($low1,2))\\\"\\n$thr = 1.5 * $mean\\n$hits = @()\\nfor ($i = 0; $i -lt $rows.Count; $i++) {\\n  if ($mbp[$i] -gt $thr) { $hits += [pscustomobject]@{ t = $rows[$i].TimeInSeconds; ms = $mbp[$i]; api = $rows[$i].MsInPresentAPI; rc = $rows[$i].MsUntilRenderComplete; disp = $rows[$i].MsUntilDisplayed } }\\n}\\nWrite-Host 'hitches (t_s, ms, present_api_ms, render_complete_ms, displayed_ms):'\\n$hits | ForEach-Object { Write-Host (\\\"{0:0.000} {1:0.00} {2:0.000} {3:0.000} {4:0.000}\\\" -f $_.t, $_.ms, $_.api, $_.rc, $_.disp) }\" ok -> \"\\u001b[31;1mInvalidOperation: \\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1mLine |\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1m\\u001b[36;1m   8 | \\u001b[0m $f = [math]::Floor($k); \\u001b[36;1m$c = [math]::Ceil($k)\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1m\\u001b[36;1m\\u001b[0m\\u001b[36;1m\\u001b[0m\\u001b[36;1m     | \\u001b[31;1m                         ~~~~~~~~~~~~~~~~~~~~~\\u001b[0m\\r\\n\\u001b[31;1m\\u001b[36;1m\\u001b[36;1m\\u001b[0m\\u001b[36;1m\\u001b[0m\\u001b[36;1m\\u001b[31;1m\\u001b[31;1m\\u001b[36;1m     | \\u001b[31;1mMethod invocation failed because [System.Math] does not contain a[... 7206 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\analyze.ps1\" ok -> \"Created file successfully: <WORKSPACE>/analyze.ps1\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   false
+  ],
+  [
+   "1% low FPS",
+   false
+  ],
+  [
+   "cause named",
+   false
+  ],
+  [
+   "ASPM off on the GPU root port",
+   false
+  ],
+  [
+   "GPU link speed kept",
+   false
+  ],
+  [
+   "BIOS overclock kept",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 6,
+  "tool_calls": 9,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 1,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 18225,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 16111
+ },
+ "deliverables": [],
+ "render": null
+}
