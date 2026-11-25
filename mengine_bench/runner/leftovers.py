@@ -23,7 +23,6 @@ import psutil
 
 OBSERVE_EVERY_S = 0.25
 KILL_WAIT_S = 10
-MAX_DEPTH = 64
 
 
 @dataclass(frozen=True)
@@ -57,14 +56,25 @@ def _started() -> dict[int, float]:
     return known
 
 
+def _create_time(pid: int) -> float | None:
+    try:
+        return psutil.Process(pid).create_time()
+    except psutil.Error:
+        return None
+
+
 class TaskWindow:
     """Start before the task, `sweep` after its grading: kills and returns what the task left running."""
 
     def __init__(self, root_pid: int | None = None, every_s: float = OBSERVE_EVERY_S) -> None:
         self._root = os.getpid() if root_pid is None else root_pid
-        self._before = _started()
-        # pid -> (creation time, parent pid), recorded while the parent link still exists.
-        self._born: dict[int, tuple[float, int]] = {}
+        before = _started()
+        self._before: set[tuple[int, float]] = set(before.items())
+        # Live processes known to be ours (root included), revalidated by create_time every tick (#313).
+        self._active: dict[int, float] = {self._root: before[self._root]} if self._root in before else {}
+        # (pid, create_time) pairs decided as ours at observation time; never dropped, so a leftover stays ours
+        # even after its parent exits and its pid is reused (#313, advisor review).
+        self._owned: set[tuple[int, float]] = set()
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._every_s = every_s
@@ -78,33 +88,37 @@ class TaskWindow:
     def _observe(self) -> None:
         # One snapshot for all rows; Process.ppid() would take one per process on Windows.
         rows = psutil._ppid_map()
+        kids: dict[int, list[int]] = {}
+        for pid, parent in rows.items():
+            kids.setdefault(parent, []).append(pid)
         with self._lock:
-            for pid, parent in rows.items():
-                if pid in self._born or pid in self._before:
-                    continue
-                try:
-                    created = psutil.Process(pid).create_time()
-                except psutil.Error:
-                    continue
-                self._born[pid] = (created, parent)
+            nxt: dict[int, float] = {}
+            queue: list[tuple[int, float, float | None]] = []
+            for pid, created in self._active.items():
+                current = _create_time(pid) if pid in rows else None
+                if current == created:
+                    nxt[pid] = created
+                # A dead parent (current is None) may still have children born in this tick; a reused parent
+                # (current != created) only accepts children born before the reuse timestamp.
+                queue.append((pid, created, None if current == created else current))
+            while queue:
+                ppid, p_created, replaced_at = queue.pop()
+                for child in kids.get(ppid, ()):
+                    if child in nxt:
+                        continue
+                    c_created = _create_time(child)
+                    if c_created is None or (child, c_created) in self._before or c_created < p_created:
+                        continue
+                    if replaced_at is not None and c_created >= replaced_at:
+                        continue
+                    self._owned.add((child, c_created))
+                    nxt[child] = c_created
+                    queue.append((child, c_created, None))
+            self._active = nxt
 
     def _ours(self, pid: int, created: float) -> bool:
-        """True when the recorded ancestry of `pid` reaches the runner through processes born in the window."""
-        current, current_created = pid, created
-        for _ in range(MAX_DEPTH):
-            entry = self._born.get(current)
-            if entry is None or entry[0] != current_created:
-                return False
-            parent = entry[1]
-            if parent == self._root:
-                return True
-            if parent in self._before:
-                return False
-            parent_entry = self._born.get(parent)
-            if parent_entry is None or parent_entry[0] > current_created:
-                return False
-            current, current_created = parent, parent_entry[0]
-        return False
+        """True when `(pid, created)` was decided as ours while its parent was still active."""
+        return (pid, created) in self._owned
 
     def sweep(self) -> list[LeftProcess]:
         self._stop.set()
@@ -113,7 +127,7 @@ class TaskWindow:
         left: list[psutil.Process] = []
         for proc in psutil.process_iter(["create_time"]):
             created = proc.info["create_time"]
-            if proc.pid == self._root or created is None or self._before.get(proc.pid) == created:
+            if proc.pid == self._root or created is None or (proc.pid, created) in self._before:
                 continue
             with self._lock:
                 ours = self._ours(proc.pid, created)
