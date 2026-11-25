@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Balloon Archer — Windows 95 Edition</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; overflow:hidden; background:#1a1c2c; }
+  body { display:flex; align-items:center; justify-content:center; font-family:'Press Start 2P', monospace; }
+  #wrap { position:relative; width:min(96vw, 960px); }
+  canvas { display:block; width:100%; height:auto; image-rendering:auto; border:4px solid #0f0f1a; border-radius:10px; box-shadow:0 0 0 4px #3c3f5a, 0 20px 60px #000; cursor:crosshair; background:#2b2d42; }
+  #hud { position:absolute; top:10px; left:12px; right:12px; display:flex; justify-content:space-between; pointer-events:none; color:#fff; text-shadow:2px 2px 0 #000; font-size:12px; }
+  #overlay { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; background:rgba(10,10,20,.78); border-radius:10px; color:#fff; text-align:center; padding:20px; transition:opacity .25s; }
+  #overlay.hidden { opacity:0; pointer-events:none; }
+  #overlay h1 { font-size:clamp(18px,4vw,34px); color:#ffd23f; text-shadow:3px 3px 0 #b5541f; margin-bottom:18px; line-height:1.5; }
+  #overlay p { font-size:11px; line-height:2; color:#cdd2ff; margin-bottom:22px; }
+  button { font-family:inherit; font-size:14px; padding:14px 26px; background:#ffd23f; color:#301d00; border:0; border-radius:8px; cursor:pointer; box-shadow:0 5px 0 #b5541f; }
+  button:active { transform:translateY(4px); box-shadow:0 1px 0 #b5541f; }
+  #final { color:#7dff9b; font-size:20px; margin-bottom:14px; display:none; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="cv" width="960" height="600"></canvas>
+  <div id="hud"><span id="score">SCORE 0</span><span id="lives">❤❤❤</span></div>
+  <div id="overlay">
+    <h1>BALLOON<br>ARCHER</h1>
+    <p id="msg">Aim with the mouse.<br>Hold LEFT CLICK to draw the bow,<br>release to fire.<br>Pop balloons! Don't let them escape!</p>
+    <div id="final"></div>
+    <button id="startBtn">▶ START</button>
+  </div>
+</div>
+<script>
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const W = cv.width, H = cv.height;
+const scoreEl = document.getElementById('score'), livesEl = document.getElementById('lives');
+const overlay = document.getElementById('overlay'), msgEl = document.getElementById('msg'), startBtn = document.getElementById('startBtn'), finalEl = document.getElementById('final');
+
+// ---------- audio ----------
+let AC = null;
+function audio(){ if(!AC) AC = new (window.AudioContext||window.webkitAudioContext)(); if(AC.state==='suspended') AC.resume(); return AC; }
+function tone(freq, dur, type='square', vol=.2, slide=0){
+  const a = audio(), o = a.createOscillator(), g = a.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, a.currentTime);
+  if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(20,freq+slide), a.currentTime+dur);
+  g.gain.setValueAtTime(vol, a.currentTime); g.gain.exponentialRampToValueAtTime(.001, a.currentTime+dur);
+  o.connect(g).connect(a.destination); o.start(); o.stop(a.currentTime+dur);
+}
+function noise(dur=.15, vol=.3, freq=1200){
+  const a = audio(), n = a.sampleRate*dur, buf = a.createBuffer(1,n,a.sampleRate), d = buf.getChannelData(0);
+  for(let i=0;i<n;i++) d[i]=(Math.random()*2-1)*(1-i/n);
+  const s = a.createBufferSource(); s.buffer=buf;
+  const f = a.createBiquadFilter(); f.type='bandpass'; f.frequency.value=freq; f.Q.value=.7;
+  const g = a.createGain(); g.gain.value=vol;
+  s.connect(f).connect(g).connect(a.destination); s.start();
+}
+const sfx = {
+  draw: () => tone(180, .08, 'sine', .06, 40),
+  shoot: () => { noise(.18,.35,900); tone(300,.18,'sawtooth',.15,-220); },
+  pop: () => { noise(.12,.5,1800); tone(660,.1,'square',.2,300); },
+  miss: () => tone(160,.25,'triangle',.18,-80),
+  lose: () => { tone(220,.4,'sawtooth',.2,-160); setTimeout(()=>tone(140,.6,'sawtooth',.2,-90),180); },
+  start: () => { tone(440,.12,'square',.2); setTimeout(()=>tone(660,.12,'square',.2),110); setTimeout(()=>tone(880,.2,'square',.2),220); }
+};
+
+// ---------- game state ----------
+const GROUND = H - 70;
+const ARCHER = { x: 90, y: GROUND };
+let state, score, lives, balloons, arrows, particles, mouse, drawing, pullStart, pullT, spawnTimer, best=0;
+function reset(){
+  state='menu'; score=0; lives=3; balloons=[]; arrows=[]; particles=[]; mouse={x:W/2,y:H/3}; drawing=false; pullT=0; spawnTimer=0;
+  updateHud();
+}
+function startGame(){ state='playing'; score=0; lives=3; balloons=[]; arrows=[]; particles=[]; spawnTimer=0; overlay.classList.add('hidden'); finalEl.style.display='none'; sfx.start(); updateHud(); }
+function gameOver(){ state='over'; sfx.lose(); finalEl.style.display='block'; finalEl.textContent='SCORE '+score+(score>best?'  ★ NEW BEST!':''); best=Math.max(best,score); msgEl.innerHTML='Balloons got away...<br>or maybe not.<br>The archer rests.'; startBtn.textContent='↻ AGAIN'; overlay.classList.remove('hidden'); }
+function updateHud(){ scoreEl.textContent='SCORE '+score; livesEl.textContent='❤'.repeat(Math.max(0,lives))+'♡'.repeat(Math.max(0,3-lives)); }
+
+const COLORS=['#ff5d5d','#ffb84d','#ffe14d','#7dff9b','#4dd8ff','#c77dff'];
+function spawnBalloon(){
+  const r = 22 + Math.random()*16;
+  balloons.push({ x: 220 + Math.random()*(W-300), y: H+40, r, vy: 0.9+Math.random()*0.9, vx:(Math.random()-.5)*0.6, color: COLORS[(Math.random()*COLORS.length)|0], wob: Math.random()*Math.PI*2, wobSpd: .02+Math.random()*.03, dead:false });
+}
+
+function fire(power){
+  const dx = mouse.x-ARCHER.x, dy = mouse.y-(ARCHER.y-70);
+  const ang = Math.atan2(dy,dx), speed = 8 + power*14;
+  arrows.push({ x:ARCHER.x+Math.cos(ang)*30, y:ARCHER.y-70+Math.sin(ang)*30, vx:Math.cos(ang)*speed, vy:Math.sin(ang)*speed-power*2.2, ang, life:0 });
+  sfx.shoot();
+}
+
+function burst(x,y,color){
+  for(let i=0;i<16;i++){ const a=Math.random()*Math.PI*2, s=1+Math.random()*4;
+    particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-1,life:1,color:Math.random()<.6?color:'#fff',size:2+Math.random()*3}); }
+}
+
+// ---------- input ----------
+function mousePos(e){ const r=cv.getBoundingClientRect(); return { x:(e.clientX-r.left)*W/r.width, y:(e.clientY-r.top)*H/r.height }; }
+cv.addEventListener('mousemove', e => { mouse = mousePos(e); });
+cv.addEventListener('mousedown', e => { if(state!=='playing') return; if(e.button!==0) return; mouse=mousePos(e); drawing=true; pullT=0; sfx.draw(); });
+window.addEventListener('mouseup', e => { if(!drawing) return; drawing=false; if(state==='playing'){ const power = Math.min(1, pullT/45); if(power>0.08) fire(power); } });
+cv.addEventListener('contextmenu', e => e.preventDefault());
+
+// ---------- loop ----------
+let last=performance.now();
+function loop(now){
+  const dt = Math.min(32, now-last)/16.67; last=now;
+  ctx.clearRect(0,0,W,H);
+  drawBackground();
+  if(state==='playing'){
+    if(drawing){ pullT += dt; if(pullT%20<dt) sfx.draw(); }
+    spawnTimer += dt;
+    if(spawnTimer>90 && balloons.length<6){ spawnBalloon(); spawnTimer=0; }
+    for(const b of balloons){ b.wob+=b.wobSpd*dt; b.y-=b.vy*dt; b.x+=b.vx*dt+Math.sin(b.wob)*0.4*dt; }
+    balloons = balloons.filter(b=>{ if(b.y < -60){ lives--; updateHud(); if(lives<=0) gameOver(); return false; } return true; });
+    for(const a of arrows){ a.vy += 0.18*dt; a.x += a.vx*dt; a.y += a.vy*dt; a.life+=dt; }
+    arrows = arrows.filter(a=> a.x>-50 && a.x<W+50 && a.y>-60 && a.y<H+60 && a.life<600);
+    // collisions
+    for(const a of arrows){ if(a.dead) continue;
+      for(const b of balloons){ if(b.dead) continue;
+        const d = Math.hypot(a.x-b.x, a.y-b.y);
+        if(d < b.r+6){ b.dead=true; a.dead=true; score+= (b.r<26?20:10); sfx.pop(); burst(b.x,b.y,b.color); updateHud(); break; }
+      }
+    }
+    arrows = arrows.filter(a=>!a.dead); balloons = balloons.filter(b=>!b.dead);
+    for(const p of particles){ p.x+=p.vx*dt; p.y+=p.vy*dt; p.vy+=0.12*dt; p.life-=0.025*dt; }
+    particles = particles.filter(p=>p.life>0);
+  } else {
+    for(const p of particles){ p.x+=p.vx*dt; p.y+=p.vy*dt; p.vy+=0.12*dt; p.life-=0.025*dt; }
+    particles = particles.filter(p=>p.life>0);
+  }
+  drawArrows(); drawBalloons(); drawParticles(); drawArcher();
+  if(drawing && state==='playing') drawAimGuide();
+  requestAnimationFrame(loop);
+}
+
+function drawBackground(){
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#79c9e8'); g.addColorStop(.7,'#b8e3d4'); g.addColorStop(1,'#d8f0c8');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  // sun
+  ctx.fillStyle='#ffe98a'; ctx.beginPath(); ctx.arc(W-130,80,42,0,7); ctx.fill();
+  ctx.fillStyle='#fff7c2'; ctx.beginPath(); ctx.arc(W-130,80,30,0,7); ctx.fill();
+  // clouds
+  ctx.fillStyle='rgba(255,255,255,.85)';
+  for(const [cx,cy,s] of [[180,90,1],[520,60,.7],[830,150,.8]]){
+    ctx.beginPath(); ctx.arc(cx,cy,22*s,0,7); ctx.arc(cx+24*s,cy+4*s,17*s,0,7); ctx.arc(cx-24*s,cy+5*s,16*s,0,7); ctx.fill();
+  }
+  // ground
+  ctx.fillStyle='#5d8f4a'; ctx.fillRect(0,GROUND,W,H-GROUND);
+  ctx.fillStyle='#4c7a3c'; ctx.fillRect(0,GROUND,W,8);
+  // grass tufts
+  ctx.strokeStyle='#3d6630'; ctx.lineWidth=2;
+  for(let x=10;x<W;x+=36){ const h = 8+((x*13)%7); ctx.beginPath(); ctx.moveTo(x,GROUND+10); ctx.lineTo(x-4,GROUND+10-h); ctx.moveTo(x,GROUND+10); ctx.lineTo(x+4,GROUND+10-h-3); ctx.stroke(); }
+}
+
+function drawArcher(){
+  const {x,y} = ARCHER;
+  ctx.save(); ctx.translate(x,y);
+  // legs
+  ctx.strokeStyle='#3a2b1a'; ctx.lineWidth=7; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(0,-38); ctx.lineTo(-10,0); ctx.moveTo(0,-38); ctx.lineTo(12,0); ctx.stroke();
+  // body
+  ctx.strokeStyle='#2f5d8a'; ctx.lineWidth=12;
+  ctx.beginPath(); ctx.moveTo(0,-38); ctx.lineTo(0,-78); ctx.stroke();
+  // head
+  ctx.fillStyle='#f2c99a'; ctx.beginPath(); ctx.arc(0,-90,11,0,7); ctx.fill();
+  // hood/hat
+  ctx.fillStyle='#2f5d8a'; ctx.beginPath(); ctx.arc(0,-94,11,Math.PI,0); ctx.fill();
+  // aim direction
+  const aimAng = Math.atan2(mouse.y-(y-70), mouse.x-x);
+  const power = Math.min(1, pullT/45);
+  ctx.rotate(aimAng);
+  // arm
+  ctx.strokeStyle='#f2c99a'; ctx.lineWidth=6;
+  ctx.beginPath(); ctx.moveTo(0,-70); ctx.lineTo(26,-70); ctx.stroke();
+  // bow
+  ctx.strokeStyle='#6b4423'; ctx.lineWidth=5;
+  ctx.beginPath(); ctx.arc(26,-70,34,-1.25,1.25); ctx.stroke();
+  // string
+  const pull = drawing ? power*22 : 0;
+  ctx.strokeStyle='#eee'; ctx.lineWidth=1.5;
+  const top = {x:26+Math.cos(-1.25)*34, y:-70+Math.sin(-1.25)*34}, bot = {x:26+Math.cos(1.25)*34, y:-70+Math.sin(1.25)*34};
+  const mid = {x:26-pull, y:-70};
+  ctx.beginPath(); ctx.moveTo(top.x,top.y); ctx.lineTo(mid.x,mid.y); ctx.lineTo(bot.x,bot.y); ctx.stroke();
+  // arrow while drawing
+  if(drawing){
+    ctx.strokeStyle='#4a2e14'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.moveTo(mid.x,mid.y); ctx.lineTo(mid.x+44,mid.y); ctx.stroke();
+    ctx.fillStyle='#444'; ctx.beginPath(); ctx.moveTo(mid.x+44,mid.y); ctx.lineTo(mid.x+34,mid.y-4); ctx.lineTo(mid.x+34,mid.y+4); ctx.fill();
+  }
+  ctx.restore();
+  // power bar while drawing
+  if(drawing && state==='playing'){
+    const bw = 120*power;
+    ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(x-60,y-160,120,12);
+    ctx.fillStyle= power<.5?'#7dff9b':power<.85?'#ffd23f':'#ff5d5d';
+    ctx.fillRect(x-58,y-158,bw,8);
+  }
+}
+
+function drawAimGuide(){
+  const power=Math.min(1,pullT/45);
+  const dx = mouse.x-ARCHER.x, dy = mouse.y-(ARCHER.y-70);
+  const ang = Math.atan2(dy,dx), speed = 8+power*14;
+  ctx.save(); ctx.globalAlpha=.35; ctx.setLineDash([6,8]); ctx.strokeStyle='#fff'; ctx.lineWidth=2;
+  ctx.beginPath(); let x=ARCHER.x+Math.cos(ang)*30, y=ARCHER.y-70+Math.sin(ang)*30, vx=Math.cos(ang)*speed, vy=Math.sin(ang)*speed-power*2.2;
+  ctx.moveTo(x,y);
+  for(let i=0;i<40;i++){ vy+=0.18; x+=vx; y+=vy; ctx.lineTo(x,y); }
+  ctx.stroke(); ctx.restore();
+}
+
+function drawBalloons(){
+  for(const b of balloons){
+    ctx.save(); ctx.translate(b.x,b.y);
+    // string
+    ctx.strokeStyle='rgba(40,30,30,.6)'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(0,b.r*0.9); ctx.quadraticCurveTo(Math.sin(b.wob*2)*6,b.r+24,0,b.r+44); ctx.stroke();
+    // body
+    const g = ctx.createRadialGradient(-b.r*.35,-b.r*.4,b.r*.15,0,0,b.r*1.1);
+    g.addColorStop(0,'#ffffff'); g.addColorStop(.25,b.color); g.addColorStop(1,'rgba(0,0,0,.35)');
+    ctx.fillStyle=b.color; ctx.beginPath(); ctx.ellipse(0,0,b.r*.82,b.r,0,0,7); ctx.fill();
+    ctx.fillStyle=g; ctx.globalAlpha=.55; ctx.beginPath(); ctx.ellipse(0,0,b.r*.82,b.r,0,0,7); ctx.fill();
+    ctx.globalAlpha=1;
+    // knot
+    ctx.fillStyle=b.color; ctx.beginPath(); ctx.moveTo(-5,b.r*.92); ctx.lineTo(5,b.r*.92); ctx.lineTo(0,b.r*1.15); ctx.fill();
+    ctx.restore();
+  }
+}
+function drawArrows(){
+  for(const a of arrows){
+    ctx.save(); ctx.translate(a.x,a.y); ctx.rotate(Math.atan2(a.vy,a.vx));
+    ctx.strokeStyle='#4a2e14'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(-14,0); ctx.lineTo(10,0); ctx.stroke();
+    ctx.fillStyle='#444'; ctx.beginPath(); ctx.moveTo(16,0); ctx.lineTo(8,-4); ctx.lineTo(8,4); ctx.fill();
+    ctx.fillStyle='#ff5d5d'; ctx.beginPath(); ctx.moveTo(-14,0); ctx.lineTo(-20,-4); ctx.lineTo(-20,4); ctx.fill();
+    ctx.restore();
+  }
+}
+function drawParticles(){
+  for(const p of particles){ ctx.globalAlpha=Math.max(0,p.life); ctx.fillStyle=p.color; ctx.fillRect(p.x-p.size/2,p.y-p.size/2,p.size,p.size); }
+  ctx.globalAlpha=1;
+}
+
+startBtn.addEventListener('click', () => { audio(); startGame(); });
+reset(); requestAnimationFrame(loop);
+</script>
+</body>
+</html>

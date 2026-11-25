@@ -1,0 +1,49 @@
+{
+ "task_id": "ds-ab-playtest",
+ "prompts": [
+  "We playtested two versions of the Pixel Arena tutorial and have to pick one for the next release. The export and its notes are in {WS}/telemetry. Should we ship B instead of A? Give a recommendation a skeptical lead would accept. Record it in {WS}/result.json with ship_b, sessions_a, sessions_b, completion_rate_a, completion_rate_b and p_value."
+ ],
+ "answers": [
+  "[goal]: decide whether to ship B vs A\n\n[action]: Read `telemetry/playtest_ab.csv` (1870 raw rows) and README; deduplicated on `session_id` (1800 unique, 900 A / 900 B, no conflicting duplicates), normalized variant casing/whitespace, compared completion with a two-proportion z-test.\n\n[result]: `result.json` written with `ship_b: true`, sessions 900/900, completion 0.380 (A) vs 0.4667 (B), p≈0.0002 (z≈3.72). B's gain (~8.7pp) is significant at 5%.\n\n[next]: ship B. Assumptions: first-wins dedupe is safe (no duplicate conflicts); normal/Fisher-style z-test as the release rule's \"statistically significant at 5%\". Skeptical note: p-value not from Fisher exact since scipy unavailable, but z-test is the standard quick screen and is far from threshold."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\r\n  \"ship_b\": true,\r\n  \"sessions_a\": 900,\r\n  \"sessions_b\": 900,\r\n  \"completion_rate_a\": 0.38,\r\n  \"completion_rate_b\": 0.4666666666666667,\r\n  \"p_value\": 0.00019846895397623854\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"ls -la ./telemetry; ls -la .\" failed -> \"\\u001b[31;1mGet-ChildItem: \\u001b[31;1mA parameter cannot be found that matches parameter name 'la'.\\u001b[0m\\r\\n\\u001b[31;1mGet-ChildItem: \\u001b[31;1mA parameter cannot be found that matches parameter name 'la'.\\u001b[0m\"\n[step 1] shell \"Get-ChildItem -Recurse ./telemetry\" ok -> \"Directory: <WORKSPACE>\\\\telemetry\\r\\n\\r\\n\\u001b[32;1mMode   \\u001b[0m\\u001b[32;1m              LastWriteTime\\u001b[0m\\u001b[32;1m         Length\\u001b[0m\\u001b[32;1m Name\\u001b[0m\\r\\n\\u001b[32;1m----   \\u001b[0m \\u001b[32;1m             -------------\\u001b[0m \\u001b[32;1m        ------\\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\n-a---          25/11/2026    00:03          41587 playtest_ab.csv\\r\\n-a---          25/11/2026    00[... 28 chars cut by the benchmark]\"\n[step 1] shell \"Get-Content ./telemetry/README.md; Write-Host ---; Get-Content ./telemetry/playtest_ab.csv -TotalCount 15\" ok -> \"# Playtest A/B - Pixel Arena tutorial\\r\\n\\r\\nExport from arena-panel. The ETL resends sessions: `session_id` is the unique key (repeated rows are the same session). `variant` may come lowercase or with a leading space. `completed_tutorial` is 0/1.\\r\\n\\r\\nRelease rule: a variant ships only when its gain in tutorial completion is statistically significant at the 5% level.\\r\\n---\\r\\nsession_id,variant,player_id,[... 359 chars cut by the benchmark]\"\n[step 1] shell \"python - <<'EOF'\\nimport csv\\nrows=list(csv.DictReader(open('telemetry/playtest_ab.csv')))\\nprint('raw rows', len(rows))\\nseen={}\\nfor r in rows:\\n    sid=r['session_id'].strip()\\n    # keep first? check duplicates for conflicting values\\n    seen[sid]=(r['variant'].strip().lower(), r['completed_tutorial'].strip())\\nprint('unique sessions', len(seen))\\n# check dup conflict\\nfrom collections import defaultdict\\nraw=defaultdict(list)\\nfor r in rows:\\n    raw[r['session_id'].strip()].append((r['variant'].strip().lower(), r['completed_tutorial'].strip()))\\nconflicts=[(k,v) for k,v in raw.items() if len(set(v))>1]\\nprint('conflicts', conflicts[:10], len(conflicts))\\ndata=list(seen.values())\\na=[v for v in data if v[0]=='a']\\nb=[v for v in data if v[0]=='b']\\nprint('A n',len(a),'completed',sum(1 for v in a if v[1]=='1'))\\nprint('B n',len(b),'completed',sum(1 for v in b if v[1]=='1'))\\nEOF\" ok -> \"raw rows 1870\\r\\nunique sessions 1800\\r\\nconflicts [] 0\\r\\nA n 900 completed 342\\r\\nB n 900 completed 420\"\n[step 1] shell \"python - <<'EOF'\\nfrom math import sqrt\\nfrom statistics import stdev\\n# chi-square / z-test two proportions\\na_n,a_x=900,342\\nb_n,b_x=900,420\\np_a=a_x/a_n; p_b=b_x/b_n\\np=(a_x+b_x)/(a_n+b_n)\\nse=sqrt(p*(1-p)*(1/a_n+1/b_n))\\nz=(p_b-p_a)/se\\n# two-sided p via normal approx\\nfrom math import erf\\nphi=lambda x:0.5*(1+erf(x/sqrt(2)))\\npval=2*(1-phi(abs(z)))\\nprint(p_a,p_b,p_b-p_a,z,pval)\\n# exact Fisher via scipy if available\\ntry:\\n    from scipy.stats import chi2_contingency\\n    import numpy as np\\n    table=np.array([[a_x,a_n-a_x],[b_x,b_n-b_x]])\\n    chi2,p,dof,exp=chi2_contingency(table,correction=False)\\n    print('chi2',chi2,'p',p)\\n    from scipy.stats import fisher_exact\\n    fe,fp=fisher_exact(table)\\n    print('fisher',fp)\\nexcept Exception as e:\\n    print('scipy missing',e)\\nEOF\" ok -> \"0.38 0.4666666666666667 0.08666666666666667 3.7209573559508202 0.00019846895397623854\\r\\nscipy missing No module named 'scipy'\"\n[step 1] shell \"python - <<'EOF'\\nimport json\\nres={\\n \\\"ship_b\\\": True,\\n \\\"sessions_a\\\": 900,\\n \\\"sessions_b\\\": 900,\\n \\\"completion_rate_a\\\": 342/900,\\n \\\"completion_rate_b\\\": 420/900,\\n \\\"p_value\\\": 0.00019846895397623854\\n}\\nopen('result.json','w').write(json.dumps(res,indent=2))\\nprint(open('result.json').read())\\nEOF\" ok -> \"{\\r\\n  \\\"ship_b\\\": true,\\r\\n  \\\"sessions_a\\\": 900,\\r\\n  \\\"sessions_b\\\": 900,\\r\\n  \\\"completion_rate_a\\\": 0.38,\\r\\n  \\\"completion_rate_b\\\": 0.4666666666666667,\\r\\n  \\\"p_value\\\": 0.00019846895397623854\\r\\n}\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "deduplicated session counts",
+   true
+  ],
+  [
+   "completion rates",
+   true
+  ],
+  [
+   "the gain is significant",
+   true
+  ],
+  [
+   "ship decision",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 7,
+  "tool_calls": 6,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 1,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1517,
+  "reasoning_tokens": 208,
+  "largest_turn_tokens": 455
+ },
+ "deliverables": [],
+ "render": null
+}
