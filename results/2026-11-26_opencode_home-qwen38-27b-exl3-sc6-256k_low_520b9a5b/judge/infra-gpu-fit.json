@@ -1,0 +1,57 @@
+{
+ "task_id": "infra-gpu-fit",
+ "prompts": [
+  "We want to serve the model described in {WS}/MODEL.md on rented GPUs. Today's offers are in {WS}/offers.csv and our rental rules in {WS}/POLICY.md. Pick the cheapest way to serve it under the policy and justify the choice. Record it in {WS}/result.json with weights_gb, kv_cache_gb, total_gb, offer_id, usd_per_hour and usd_per_month."
+ ],
+ "answers": [
+  "Found the winner: of-117 (2×H100, 160 GB, $3.58/h) is the cheapest offer that fits 120.95 GB under the policy. No browser was opened, so nothing to close.\n\n**[goal]** Serve arena-coder-70b on the cheapest policy-compliant GPU offer.\n\n**[action]** Computed memory needs from MODEL.md, filtered offers.csv by POLICY.md, wrote result.json.\n\n**[result]**\n- weights_gb = 70.0 (70B params × 1 byte FP8)\n- kv_cache_gb = 42.94967296 (4 seqs × 32,768 tok × 327,680 B/tok)\n- total_gb = 120.94967296 (weights + KV + 8 GB overhead)\n- **offer_id = of-117** (voltbay, us-central, 2×H100 80GB = 160 GB, $3.58/h)\n- usd_per_hour = 3.58, usd_per_month = 2613.40\n\n**Why of-117:** Policy filters (in_stock=yes, region in {us-east, us-central, eu-west}, ≤ $4/h) leave 6 offers; only 3 fit 120.95 GB: of-117 (160 GB, $3.58), of-120 (141 GB, $3.79), of-124 (192 GB, $3.92). of-117 is cheapest. Excluded: of-101/of-104/of-113 (too little VRAM), of-108 (out of stock), of-129 ($4.89 > cap), of-133 ($7.10 > cap), of-137 (sa-east not allowed).\n\n**Assumptions:** GB = 10⁹ bytes per MODEL.md; KV cache sized for full 32,768-token context on all 4 sequences simultaneously (per \"every sequence must hold its full context\"); usd_per_hour is whole-offer price per POLICY.md; monthly = 730 h.\n\n**How I know it's right:** calc.py computed each quantity from the source numbers and verified every offer against all policy constraints; the script output above shows the fit/price for each candidate, and result.json was written with the measured values."
+ ],
+ "diff": "A calc.py\nA result.json\n\n--- calc.py ---\nimport csv, json\n\n# Memory needs (GB = 10^9 bytes)\nweights_gb = 70e9 / 1e9                      # 70 GB (FP8, 1 byte/param)\nkv_cache_gb = 4 * 32768 * 327680 / 1e9       # 4 seqs x 32768 tok x 327680 B/tok\noverhead_gb = 8.0\ntotal_gb = weights_gb + kv_cache_gb + overhead_gb\nprint(f\"weights_gb={weights_gb} kv_cache_gb={kv_cache_gb} total_gb={total_gb}\")\n\nrows = list(csv.DictReader(open(\"offers.csv\")))\nbest = None\nfor r in rows:\n    if r[\"in_stock\"] != \"yes\": continue\n    if r[\"region\"] not in (\"us-east\",\"us-central\",\"eu-west\"): continue\n    price = float(r[\"usd_per_hour\"])\n    if price > 4.0: continue\n    vram = int(r[\"gpu_count\"]) * float(r[\"vram_gb_per_gpu\"])\n    ok = vram >= total_gb\n    print(f'{r[\"offer_id\"]} region={r[\"region\"]} vram={vram} price={price} fits={ok}')\n    if ok and (best is None or price < best[1]):\n        best = (r[\"offer_id\"], price)\n\nr = next(x for x in rows if x[\"offer_id\"] == best[0])\nout = {\n    \"weights_gb\": weights_gb,\n    \"kv_cache_gb\": kv_cache_gb,\n    \"total_gb\": total_gb,\n    \"offer_id\": best[0],\n    \"usd_per_hour\": best[1],\n    \"usd_per_month\": round(best[1] * 730, 2),\n}\njson.dump(out, open(\"result.json\",\"w\"), indent=2)\nprint(json.dumps(out, indent=2))\n\n--- result.json ---\n{\r\n  \"weights_gb\": 70.0,\r\n  \"kv_cache_gb\": 42.94967296,\r\n  \"total_gb\": 120.94967296,\r\n  \"offer_id\": \"of-117\",\r\n  \"usd_per_hour\": 3.58,\r\n  \"usd_per_month\": 2613.4\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\offers.csv\" ok -> \"Read file <WORKSPACE>\\\\offers.csv, lines 1-12\\n1: offer_id,provider,region,gpu,gpu_count,vram_gb_per_gpu,usd_per_hour,in_stock\\n2: of-101,cloudnine,us-east,RTX PRO 6000,1,96,1.79,yes\\n3: of-104,cloudnine,us-east,A100 80GB,1,80,1.29,yes\\n4: of-108,gridrent,eu-west,H100 80GB,2,80,3.1,no\\n5: of-111,gridrent,ap-southeast,RTX PRO 6000,2,96,2.9[... 349 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\MODEL.md\" ok -> \"Read file <WORKSPACE>\\\\MODEL.md, lines 1-16\\n1: # Model to serve: arena-coder-70b\\n2: \\n3: | property | value |\\n4: | --- | --- |\\n5: | parameters | 70 billion |\\n6: | weight precision | 8-bit (FP8) |\\n7: | KV cache | 327,680 bytes per token (FP16, all layers, K and V) |\\n8: | context we want per sequence | 32,768 tokens |\\n9: | concurrent se[... 434 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\POLICY.md\" ok -> \"Read file <WORKSPACE>\\\\POLICY.md, lines 1-8\\n1: # Rental policy\\n2: \\n3: - Hourly cap: US$ 4 per hour for the whole deployment. Nothing above it is rented.\\n4: - Rent only offers that are in stock now (`in_stock` = yes).\\n5: - Allowed regions: us-east, us-central, eu-west.\\n6: - `usd_per_hour` in offers.csv is the price of the whole offer [... 131 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\calc.py\" ok -> \"Created file successfully: <WORKSPACE>/calc.py\"\n[step 1] shell \"python calc.py\" ok -> \"weights_gb=70.0 kv_cache_gb=42.94967296 total_gb=120.94967296\\r\\nof-101 region=us-east vram=96.0 price=1.79 fits=False\\r\\nof-104 region=us-east vram=80.0 price=1.29 fits=False\\r\\nof-113 region=us-central vram=96.0 price=1.84 fits=False\\r\\nof-117 region=us-central vram=160.0 price=3.58 fits=True\\r\\nof-120 region=eu-west vram=141.0 price=3.79 fits=True\\r\\nof-124 region=us-east vram=192.0 price=3.92 fits=True\\r\\n{[... 163 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "weights size",
+   true
+  ],
+  [
+   "KV cache size",
+   true
+  ],
+  [
+   "total memory needed",
+   true
+  ],
+  [
+   "cheapest feasible offer",
+   true
+  ],
+  [
+   "hourly price",
+   true
+  ],
+  [
+   "monthly price",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 4,
+  "tool_calls": 5,
+  "tool_errors": 0,
+  "shell_commands": 1,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1316,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 577
+ },
+ "deliverables": [],
+ "render": null
+}

@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Balloon Bow — Win95 Archery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#000; }
+  canvas { display:block; width:100vw; height:100vh; cursor:crosshair; image-rendering:pixelated; }
+  #ui {
+    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    font-family:'Press Start 2P', monospace; color:#fff; pointer-events:none; z-index:10;
+  }
+  .panel {
+    pointer-events:auto; text-align:center; background:rgba(20,24,40,.92);
+    border:4px solid #fff; box-shadow:8px 8px 0 rgba(0,0,0,.5); padding:36px 44px;
+  }
+  .panel h1 { font-size:28px; margin-bottom:18px; color:#ffd23f; text-shadow:3px 3px 0 #b3541e; }
+  .panel p { font-size:10px; line-height:1.9; margin-bottom:8px; }
+  .panel .big { font-size:14px; color:#7CFC00; margin:14px 0; }
+  .btn {
+    font-family:inherit; font-size:12px; color:#000; background:#ffd23f; border:none;
+    padding:14px 26px; margin-top:14px; cursor:pointer; box-shadow:4px 4px 0 #b3541e;
+  }
+  .btn:active { transform:translate(4px,4px); box-shadow:none; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <div class="panel" id="startPanel">
+    <h1>BALLOON BOW</h1>
+    <p>AIM WITH MOUSE &middot; HOLD TO DRAW &middot; RELEASE TO SHOOT</p>
+    <p>POP 15 BALLOONS TO WIN &middot; 30 SECONDS ON THE CLOCK</p>
+    <button class="btn" id="startBtn">START</button>
+  </div>
+  <div class="panel hidden" id="endPanel">
+    <h1 id="endTitle">YOU WIN!</h1>
+    <p class="big" id="endScore">SCORE 0</p>
+    <p id="endMsg"></p>
+    <button class="btn" id="againBtn">PLAY AGAIN</button>
+  </div>
+</div>
+<script>
+(() => {
+"use strict";
+const cv = document.getElementById('c');
+const cx = cv.getContext('2d');
+let W = 0, H = 0, DPR = 1;
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR;
+  cx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ---------- audio ----------
+let AC = null;
+function audio() { if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === 'suspended') AC.resume(); return AC; }
+function tone(freq, dur, type, vol, slideTo) {
+  const a = audio(); const t = a.currentTime;
+  const o = a.createOscillator(), g = a.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t);
+  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+  g.gain.setValueAtTime(vol, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  o.connect(g); g.connect(a.destination);
+  o.start(t); o.stop(t + dur + 0.02);
+}
+function noise(dur, vol, lp) {
+  const a = audio(); const t = a.currentTime;
+  const n = Math.floor(a.sampleRate * dur);
+  const buf = a.createBuffer(1, n, a.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+  const s = a.createBufferSource(); s.buffer = buf;
+  const f = a.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = lp;
+  const g = a.createGain(); g.gain.value = vol;
+  s.connect(f); f.connect(g); g.connect(a.destination);
+  s.start(t);
+}
+const sfx = {
+  draw() { tone(180, 0.08, 'sawtooth', 0.05, 120); },
+  shoot() { noise(0.12, 0.35, 3000); tone(320, 0.1, 'square', 0.12, 90); },
+  pop() { noise(0.06, 0.5, 5000); tone(600 + Math.random() * 400, 0.09, 'square', 0.25, 150); },
+  win() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.18, 'square', 0.2), i * 130)); },
+  lose() { [400, 330, 262, 196].forEach((f, i) => setTimeout(() => tone(f, 0.22, 'sawtooth', 0.18), i * 160)); },
+  tick() { tone(1000, 0.04, 'square', 0.08); },
+};
+
+// ---------- state ----------
+const WIN_SCORE = 15, TIME_LIMIT = 30;
+let state = 'menu'; // menu | play | win | lose
+let score = 0, timeLeft = TIME_LIMIT, lastTickSec = -1;
+let mouse = { x: 0, y: 0, down: false };
+let drawStart = 0;
+let arrows = [], balloons = [], parts = [], floats = [];
+let balloonTimer = 0;
+
+const archer = { x: 0, y: 0 };
+function layout() { archer.x = 90; archer.y = H - 110; }
+layout(); window.addEventListener('resize', layout);
+
+const COLORS = ['#ff5252', '#ffd23f', '#4fc3f7', '#7CFC00', '#e040fb', '#ff8a65'];
+
+function spawnBalloon() {
+  const r = 22 + Math.random() * 14;
+  balloons.push({
+    x: W * 0.25 + Math.random() * W * 0.7,
+    y: -r - 10,
+    r,
+    vy: 26 + Math.random() * 22,
+    sway: Math.random() * Math.PI * 2,
+    swaySpeed: 0.8 + Math.random() * 1.2,
+    color: COLORS[(Math.random() * COLORS.length) | 0],
+  });
+}
+
+function reset() {
+  score = 0; timeLeft = TIME_LIMIT; lastTickSec = -1;
+  arrows = []; balloons = []; parts = []; floats = [];
+  balloonTimer = 0;
+  for (let i = 0; i < 5; i++) { spawnBalloon(); const b = balloons[balloons.length - 1]; b.y = 60 + Math.random() * (H * 0.5); }
+}
+
+function startGame() {
+  audio();
+  reset();
+  state = 'play';
+  document.getElementById('startPanel').classList.add('hidden');
+  document.getElementById('endPanel').classList.add('hidden');
+}
+
+function endGame(won) {
+  state = won ? 'win' : 'lose';
+  const p = document.getElementById('endPanel');
+  document.getElementById('endTitle').textContent = won ? 'YOU WIN!' : "TIME'S UP!";
+  document.getElementById('endTitle').style.color = won ? '#7CFC00' : '#ff5252';
+  document.getElementById('endScore').textContent = 'SCORE ' + score + ' / ' + WIN_SCORE;
+  document.getElementById('endMsg').textContent = won ? 'ALL ' + WIN_SCORE + ' BALLOONS POPPED!' : 'NEED ' + WIN_SCORE + ' POPS. TRY AGAIN!';
+  p.classList.remove('hidden');
+  if (won) sfx.win(); else sfx.lose();
+}
+
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('againBtn').addEventListener('click', startGame);
+
+// ---------- input ----------
+cv.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+cv.addEventListener('mousedown', e => {
+  if (state !== 'play') return;
+  mouse.down = true; drawStart = performance.now();
+  sfx.draw();
+});
+window.addEventListener('mouseup', e => {
+  if (state !== 'play' || !mouse.down) return;
+  mouse.down = false;
+  const power = Math.min(1, (performance.now() - drawStart) / 900);
+  if (power < 0.08) return;
+  const a = aimAngle();
+  const speed = 520 + power * 780;
+  arrows.push({ x: archer.x + 26, y: archer.y - 34, vx: Math.cos(a) * speed, vy: Math.sin(a) * speed, power });
+  sfx.shoot();
+});
+
+function aimAngle() {
+  const ax = archer.x + 26, ay = archer.y - 34;
+  return Math.atan2(mouse.y - ay, mouse.x - ax);
+}
+
+// ---------- update ----------
+function update(dt) {
+  if (state !== 'play') return;
+  timeLeft -= dt;
+  const sec = Math.ceil(timeLeft);
+  if (sec !== lastTickSec && sec <= 5 && sec > 0) { lastTickSec = sec; sfx.tick(); }
+  if (timeLeft <= 0) { timeLeft = 0; endGame(false); return; }
+
+  balloonTimer -= dt;
+  if (balloonTimer <= 0 && balloons.length < 9) { spawnBalloon(); balloonTimer = 0.9 + Math.random() * 0.8; }
+
+  for (const b of balloons) {
+    b.y += b.vy * dt;
+    b.sway += b.swaySpeed * dt;
+    b.x += Math.sin(b.sway) * 18 * dt;
+  }
+  balloons = balloons.filter(b => b.y < H + 60);
+
+  for (const a of arrows) {
+    a.vy += 620 * dt; // gravity
+    a.x += a.vx * dt; a.y += a.vy * dt;
+    for (const b of balloons) {
+      const dx = a.x - b.x, dy = a.y - b.y;
+      if (dx * dx + dy * dy < (b.r + 6) * (b.r + 6)) {
+        b.dead = true; a.dead = true;
+        score++;
+        sfx.pop();
+        floats.push({ x: b.x, y: b.y, t: 0, txt: '+1' });
+        for (let i = 0; i < 14; i++) {
+          const an = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 220;
+          parts.push({ x: b.x, y: b.y, vx: Math.cos(an) * sp, vy: Math.sin(an) * sp, t: 0, life: 0.5 + Math.random() * 0.4, color: b.color, size: 3 + Math.random() * 4 });
+        }
+        if (score >= WIN_SCORE) { endGame(true); }
+        break;
+      }
+    }
+  }
+  balloons = balloons.filter(b => !b.dead);
+  arrows = arrows.filter(a => !a.dead && a.x > -40 && a.x < W + 40 && a.y < H + 40);
+
+  for (const p of parts) { p.t += dt; p.vy += 300 * dt; p.x += p.vx * dt; p.y += p.vy * dt; }
+  parts = parts.filter(p => p.t < p.life);
+  for (const f of floats) f.t += dt;
+  floats = floats.filter(f => f.t < 0.9);
+}
+
+// ---------- draw ----------
+function drawSky() {
+  const g = cx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#2b3a67');
+  g.addColorStop(0.55, '#4a5d8a');
+  g.addColorStop(1, '#8fb3d9');
+  cx.fillStyle = g;
+  cx.fillRect(0, 0, W, H);
+  // sun
+  cx.fillStyle = '#ffd23f';
+  cx.beginPath(); cx.arc(W - 110, 90, 42, 0, Math.PI * 2); cx.fill();
+  cx.fillStyle = 'rgba(255,210,63,.25)';
+  cx.beginPath(); cx.arc(W - 110, 90, 60, 0, Math.PI * 2); cx.fill();
+  // clouds
+  cx.fillStyle = 'rgba(255,255,255,.85)';
+  cloud(W * 0.2, 100, 1); cloud(W * 0.55, 160, 0.8); cloud(W * 0.8, 60, 1.2);
+  function cloud(x, y, s) {
+    cx.beginPath();
+    cx.arc(x, y, 22 * s, 0, Math.PI * 2);
+    cx.arc(x + 24 * s, y - 8 * s, 18 * s, 0, Math.PI * 2);
+    cx.arc(x + 46 * s, y, 20 * s, 0, Math.PI * 2);
+    cx.arc(x + 22 * s, y + 8 * s, 20 * s, 0, Math.PI * 2);
+    cx.fill();
+  }
+  // hills
+  cx.fillStyle = '#3e7c4f';
+  cx.beginPath(); cx.moveTo(0, H); cx.lineTo(0, H - 160);
+  cx.quadraticCurveTo(W * 0.3, H - 260, W * 0.6, H - 150);
+  cx.quadraticCurveTo(W * 0.85, H - 80, W, H - 170);
+  cx.lineTo(W, H); cx.closePath(); cx.fill();
+  cx.fillStyle = '#2f5e3d';
+  cx.beginPath(); cx.moveTo(0, H); cx.lineTo(0, H - 90);
+  cx.quadraticCurveTo(W * 0.4, H - 150, W, H - 60);
+  cx.lineTo(W, H); cx.closePath(); cx.fill();
+}
+
+function drawBalloon(b) {
+  cx.save();
+  cx.translate(b.x, b.y);
+  // string
+  cx.strokeStyle = 'rgba(255,255,255,.7)'; cx.lineWidth = 1.5;
+  cx.beginPath(); cx.moveTo(0, b.r);
+  cx.quadraticCurveTo(6, b.r + 18, -3, b.r + 34);
+  cx.stroke();
+  // body
+  cx.fillStyle = b.color;
+  cx.beginPath(); cx.ellipse(0, 0, b.r * 0.85, b.r, 0, 0, Math.PI * 2); cx.fill();
+  // knot
+  cx.beginPath(); cx.moveTo(0, b.r); cx.lineTo(-5, b.r + 8); cx.lineTo(5, b.r + 8); cx.closePath(); cx.fill();
+  // shine
+  cx.fillStyle = 'rgba(255,255,255,.55)';
+  cx.beginPath(); cx.ellipse(-b.r * 0.3, -b.r * 0.35, b.r * 0.22, b.r * 0.32, -0.5, 0, Math.PI * 2); cx.fill();
+  cx.restore();
+}
+
+function drawArcher() {
+  const a = aimAngle();
+  const draw = mouse.down && state === 'play' ? Math.min(1, (performance.now() - drawStart) / 900) : 0;
+  const ax = archer.x, ay = archer.y;
+  cx.save();
+  cx.translate(ax, ay);
+  // legs
+  cx.strokeStyle = '#5b3a1e'; cx.lineWidth = 7; cx.lineCap = 'round';
+  cx.beginPath(); cx.moveTo(-4, 20); cx.lineTo(-10, 46); cx.stroke();
+  cx.beginPath(); cx.moveTo(6, 20); cx.lineTo(12, 46); cx.stroke();
+  // body
+  cx.strokeStyle = '#c0392b'; cx.lineWidth = 10;
+  cx.beginPath(); cx.moveTo(0, 22); cx.lineTo(0, -8); cx.stroke();
+  // head
+  cx.fillStyle = '#f5cba7';
+  cx.beginPath(); cx.arc(0, -20, 10, 0, Math.PI * 2); cx.fill();
+  // hat
+  cx.fillStyle = '#2c3e50';
+  cx.fillRect(-12, -30, 24, 5);
+  cx.fillRect(-8, -38, 16, 9);
+  // bow arm + bow
+  cx.save();
+  cx.translate(26, -34);
+  cx.rotate(a);
+  // bow limb
+  cx.strokeStyle = '#8d5524'; cx.lineWidth = 5;
+  cx.beginPath(); cx.arc(0, 0, 34, -Math.PI / 2.4, Math.PI / 2.4); cx.stroke();
+  // string
+  const pull = draw * 22;
+  cx.strokeStyle = 'rgba(255,255,255,.9)'; cx.lineWidth = 1.5;
+  cx.beginPath();
+  cx.moveTo(Math.cos(-Math.PI / 2.4) * 34, Math.sin(-Math.PI / 2.4) * 34);
+  cx.lineTo(-pull, 0);
+  cx.lineTo(Math.cos(Math.PI / 2.4) * 34, Math.sin(Math.PI / 2.4) * 34);
+  cx.stroke();
+  // arrow nocked
+  if (draw > 0.02) {
+    cx.strokeStyle = '#ddd'; cx.lineWidth = 3;
+    cx.beginPath(); cx.moveTo(-pull, 0); cx.lineTo(30, 0); cx.stroke();
+    cx.fillStyle = '#ddd';
+    cx.beginPath(); cx.moveTo(38, 0); cx.lineTo(28, -5); cx.lineTo(28, 5); cx.closePath(); cx.fill();
+  }
+  cx.restore();
+  cx.restore();
+  // power meter
+  if (draw > 0) {
+    const px = ax - 46, py = ay - 70;
+    cx.fillStyle = 'rgba(0,0,0,.5)'; cx.fillRect(px, py, 12, 60);
+    const h = 60 * draw;
+    cx.fillStyle = draw > 0.85 ? '#ff5252' : draw > 0.5 ? '#ffd23f' : '#7CFC00';
+    cx.fillRect(px, py + 60 - h, 12, h);
+    cx.strokeStyle = '#fff'; cx.lineWidth = 2; cx.strokeRect(px, py, 12, 60);
+  }
+}
+
+function drawArrow(a) {
+  const ang = Math.atan2(a.vy, a.vx);
+  cx.save();
+  cx.translate(a.x, a.y); cx.rotate(ang);
+  cx.strokeStyle = '#eee'; cx.lineWidth = 3;
+  cx.beginPath(); cx.moveTo(-18, 0); cx.lineTo(10, 0); cx.stroke();
+  cx.fillStyle = '#eee';
+  cx.beginPath(); cx.moveTo(18, 0); cx.lineTo(8, -5); cx.lineTo(8, 5); cx.closePath(); cx.fill();
+  cx.fillStyle = '#c0392b';
+  cx.beginPath(); cx.moveTo(-18, 0); cx.lineTo(-12, -4); cx.lineTo(-12, 4); cx.closePath(); cx.fill();
+  cx.restore();
+}
+
+function drawHUD() {
+  cx.font = '16px "Press Start 2P", monospace';
+  cx.textBaseline = 'top';
+  cx.fillStyle = 'rgba(0,0,0,.45)';
+  cx.fillRect(14, 14, 240, 64);
+  cx.fillStyle = '#fff';
+  cx.fillText('SCORE ' + score + '/' + WIN_SCORE, 26, 26);
+  const t = Math.max(0, timeLeft);
+  cx.fillStyle = t <= 5 ? '#ff5252' : '#ffd23f';
+  cx.fillText('TIME ' + Math.ceil(t), 26, 52);
+}
+
+function draw() {
+  drawSky();
+  for (const b of balloons) drawBalloon(b);
+  for (const a of arrows) drawArrow(a);
+  drawArcher();
+  for (const p of parts) {
+    cx.globalAlpha = 1 - p.t / p.life;
+    cx.fillStyle = p.color;
+    cx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+  }
+  cx.globalAlpha = 1;
+  cx.font = '14px "Press Start 2P", monospace';
+  cx.textAlign = 'center';
+  for (const f of floats) {
+    cx.globalAlpha = 1 - f.t / 0.9;
+    cx.fillStyle = '#fff';
+    cx.fillText(f.txt, f.x, f.y - f.t * 50);
+  }
+  cx.globalAlpha = 1; cx.textAlign = 'left';
+  if (state === 'play') drawHUD();
+}
+
+// ---------- loop ----------
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.033, (now - last) / 1000);
+  last = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,63 @@
+{
+ "task_id": "web-archery-game",
+ "prompts": [
+  "Remember the little archery games of the Windows 95 days? We want the first level of one, our own, in {WS}/game/index.html, a single file. An archer you aim with the mouse, pulling the bow back for power, balloons to pop, a score on screen, a way to start and a way to lose. How it looks, plays and sounds is your call, and that is what we care about most: a minute of play should be fun, and every shot and hit should feel and sound good. It is reviewed by opening the file, with no build step, in a browser that reaches only Google Fonts, and by playing it."
+ ],
+ "answers": [
+  "[goal] Win95-style archery level 1 in a single file at ./game/index.html.\n\n[action] Wrote the whole game in one HTML file: canvas rendering, mouse aim, hold-to-draw power (0.9s full draw), release to shoot with gravity, rising balloons to pop, on-screen score + 30s timer, start panel, win at 15 pops, lose on timeout, WebAudio SFX (draw, shoot, pop, win/lose jingles, last-5s ticks), pixel font from Google Fonts (the only network dependency).\n\n[result] Verified live in the browser: start screen rendered; after START the HUD showed \"SCORE 0/15 / TIME 27\"; a shot fired and flew (arrow visible mid-air); a second shot hit a balloon — score went to \"SCORE 1/15\" with a \"+1\" float and confetti particles. Browser tab closed.\n\n[assumptions] \"First level\" = one self-contained round (15 pops in 30s), not a level system. Balloons drift down (falling targets) rather than float up, so the archer on the left shoots up-right. Power scales with hold time; no wind.\n\n[evidence] Two gameplay screenshots: HUD + arrow in flight, then score increment + pop particles. No build step; file opens directly."
+ ],
+ "diff": "A game/index.html\n\n--- game/index.html ---\n<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<meta charset=\"UTF-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n<title>Balloon Bow — Win95 Archery</title>\n<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n<link href=\"https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap\" rel=\"stylesheet\">\n<style>\n  * { margin:0; padding:0; box-sizing:border-box; }\n  html,body { width:100%; height:100%; overflow:hidden; background:#000; }\n  canvas { display:block; width:100vw; height:100vh; cursor:crosshair; image-rendering:pixelated; }\n  #ui {\n    position:fixed; inset:0; display:flex; align-items:center; justify-content:center;\n    font-family:'Press Start 2P', monospace; color:#fff; pointer-events:none; z-index:10;\n  }\n  .panel {\n    pointer-events:auto; text-align:center; background:rgba(20,24,40,.92);\n    border:4px solid #fff; box-shadow:8px 8px 0 rgba(0,0,0,.5); padding:36px 44px;\n  }\n  .panel h1 { font-size:28px; margin-bottom:18px; color:#ffd23f; text-shadow:3px 3px 0 #b3541e; }\n  .panel p { font-size:10px; line-height:1.9; margin-bottom:8px; }\n  .panel .big { font-size:14px; color:#7CFC00; margin:14px 0; }\n  .btn {\n    font-family:inherit; font-size:12px; color:#000; background:#ffd23f; border:none;\n    padding:14px 26px; margin-top:14px; cursor:pointer; box-shadow:4px 4px 0 #b3541e;\n  }\n  .btn:active { transform:translate(4px,4px); box-shadow:none; }\n  .hidden { display:none !important; }\n</style>\n</head>\n<body>\n<canvas id=\"c\"></canvas>\n<div id=\"ui\">\n  <div class=\"panel\" id=\"startPanel\">\n    <h1>BALLOON BOW</h1>\n    <p>AIM WITH MOUSE &middot; HOLD TO DRAW &middot; RELEASE TO SHOOT</p>\n    <p>POP 15 BALLOONS TO WIN &middot; 30 SECONDS ON THE CLOCK</p>\n    <button class=\"btn\" id=\"startBtn\">START</button>\n  </div>\n  <div class=\"panel hidden\" id=\"endPanel\">\n    <h1 id=\"endTitle\">YOU WIN!</h1>\n    <p class=\"big\" id=\"endScore\">SCORE 0</p>\n    <p id=\"endMsg\"></p>\n    <button class=\"btn\" id=\"againBtn\">PLAY AGAIN</button>\n  </div>\n</div>\n<script>\n(() => {\n\"use strict\";\nconst cv = document.getElementById('c');\nconst cx = cv.getContext('2d');\nlet W = 0, H = 0, DPR = 1;\nfunction resize() {\n  DPR = Math.min(window.devicePixelRatio || 1, 2);\n  W = window.innerWidth; H = window.innerHeight;\n  cv.width = W * DPR; cv.height = H * DPR;\n  cx.setTransform(DPR, 0, 0, DPR, 0, 0);\n}\nwindow.addEventListener('resize', resize);\nresize();\n\n// ---------- audio ----------\nlet AC = null;\nfunction audio() { if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === 'suspended') AC.resume(); return AC; }\nfunction tone(freq, dur, type, vol, slideTo) {\n  const a = audio(); const t = a.currentTime;\n  const o = a.createOscillator(), g = a.createGain();\n  o.type = type; o.frequency.setValueAtTime(freq, t);\n  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);\n  g.gain.setValueAtTime(vol, t);\n  g.gain.exponentialRampToValueAtTime(0.001, t + dur);\n  o.connect(g); g.connect(a.destination);\n  o.start(t); o.stop(t + dur + 0.02);\n}\nfunction noise(dur, vol, lp) {\n  const a = audio(); const t = a.currentTime;\n  const n = Math.floor(a.sampleRate * dur);\n  const buf = a.createBuffer(1, n, a.sampleRate);\n  const d = buf.getChannelData(0);\n  for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);\n  const s = a.createBufferSource(); s.buffer = buf;\n  const f = a.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = lp;\n  const g = a.createGain(); g.gain.value = vol;\n  s.connect(f); f.connect(g); g.connect(a.destination);\n  s.start(t);\n}\nconst sfx = {\n  draw() { tone(180, 0.08, 'sawtooth', 0.05, 120); },\n  shoot() { noise(0.12, 0.35, 3000); tone(320, 0.1, 'square', 0.12, 90); },\n  pop() { noise(0.06, 0.5, 5000); tone(600 + Math.random() * 400, 0.09, 'square', 0.25, 150); },\n  win() { [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.18, 'square', 0.2), i * 130)); },\n  lose() { \n[... 10435 chars cut by the benchmark]",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"<WORKSPACE>\\\\game\\\\index.html\" ok -> \"Created file successfully: <WORKSPACE>/game/index.html\"\n[step 1] browser \"{\\\"action\\\": \\\"launch\\\"}\" ok -> \"browser ready\"\n[step 1] browser \"{\\\"action\\\": \\\"navigate\\\", \\\"url\\\": \\\"<WORKSPACE>/game/index.html\\\"}\" ok -> \"navigated to <WORKSPACE>/game/index.html | Balloon Bow — Win95 Archery | load confirmed\"\n[step 1] browser \"{\\\"action\\\": \\\"click\\\", \\\"target\\\": \\\"startBtn\\\"}\" failed -> \"\"\n[step 1] browser \"{\\\"action\\\": \\\"snapshot\\\"}\" ok -> \"# <WORKSPACE>/game/index.html | Balloon Bow — Win95 Archery\\n- heading \\\"BALLOON BOW\\\" level=1 [ref=e17]\\n- button \\\"START\\\" [ref=e7]\"\n[step 1] browser \"{\\\"action\\\": \\\"click\\\", \\\"ref\\\": \\\"e7\\\"}\" ok -> \"clicked e7 at (640,457) | <WORKSPACE>/game/index.html | Balloon Bow — Win95 Archery\"\n[step 1] browser \"{\\\"action\\\": \\\"exec\\\", \\\"js\\\": \\\"(() => {\\\\n  const cv = document.getElementById('c');\\\\n  const r = cv.getBoundingClientRect();\\\\n  const cx = r.left + r.width * 0.6, cy = r.top + r.height * 0.35;\\\\n  cv.dispatchEvent(new MouseEvent('mousemove', {clientX: cx, clientY: cy, bubbles: true}));\\\\n  cv.dispatchEvent(new MouseEvent('mousedown', {clientX: cx, clientY: cy, bubbles: true}));\\\\n  return new Promise(res => setTimeout(() => {\\\\n    window.dispatchEvent(new MouseEvent('mouseup', {clientX: cx, clientY: cy, bubbles: true}));\\\\n    setTimeout(() => res('shot fired'), 300);\\\\n  }, 600));\\\\n})()\\\"}\" ok -> \"\\\"shot fired\\\"\"\n[step 1] browser \"{\\\"action\\\": \\\"screenshot\\\"}\" ok -> \"screenshot | <WORKSPACE>/game/index.html | Balloon Bow — Win95 Archery\"\n[step 1] browser \"{\\\"action\\\": \\\"exec\\\", \\\"js\\\": \\\"(() => {\\\\n  const cv = document.getElementById('c');\\\\n  const r = cv.getBoundingClientRect();\\\\n  // aim at the blue balloon around (725, 310) on screen\\\\n  const cx = r.left + 725, cy = r.top + 310;\\\\n  cv.dispatchEvent(new MouseEvent('mousemove', {clientX: cx, clientY: cy, bubbles: true}));\\\\n  cv.dispatchEvent(new MouseEvent('mousedown', {clientX: cx, clientY: cy, bubbles: true}));\\\\n  return new Promise(res => setTimeout(() => {\\\\n    window.dispatchEvent(new MouseEvent('mouseup', {clientX: cx, clientY: cy, bubbles: true}));\\\\n    setTimeout(() => res('fired at balloon'), 400);\\\\n  }, 700));\\\\n})()\\\"}\" ok -> \"\\\"fired at balloon\\\"\"\n[step 1] browser \"{\\\"action\\\": \\\"screenshot\\\"}\" ok -> \"screenshot | <WORKSPACE>/game/index.html | Balloon Bow — Win95 Archery\"\n[step 1] browser \"{\\\"action\\\": \\\"close_tab\\\"}\" ok -> \"closed tab D8993B76 | now on about:blank |\"",
+ "checks": [
+  [
+   "index.html exists with content",
+   true
+  ],
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "takes the mouse: press and release",
+   true
+  ],
+  [
+   "makes its own sound",
+   true
+  ],
+  [
+   "needs nothing beside the page",
+   true
+  ],
+  [
+   "a scripted basic play raises the score",
+   true
+  ],
+  [
+   "page runs without script errors",
+   true
+  ],
+  [
+   "page draws something (screenshot not blank)",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 12,
+  "tool_calls": 11,
+  "tool_errors": 1,
+  "shell_commands": 0,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 6954,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 5713
+ },
+ "deliverables": [
+  "game/index.html"
+ ],
+ "render": "game/index.html"
+}

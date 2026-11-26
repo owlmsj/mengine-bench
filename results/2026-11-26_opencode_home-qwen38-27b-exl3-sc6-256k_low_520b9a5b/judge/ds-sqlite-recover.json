@@ -1,0 +1,51 @@
+{
+ "task_id": "ds-sqlite-recover",
+ "prompts": [
+  "Our camping shop's price list lived in a SQLite database, and {WS}/prices.db is all that is left: the file was corrupted by binary truncation. Recover as many of its rows as you can into {WS}/recovered.json, a JSON list like [{\"item\": \"...\", \"price\": N}, ...]. Only rows really read from the file belong there."
+ ],
+ "answers": [],
+ "diff": "A recover.py\nA recovered.json\n\n--- recover.py ---\nimport json, struct\n\ndata = open('prices.db','rb').read()\n\n# Leaf table b-tree page (type 0x0D). Cell content area start at offset 5-6.\nidx = int.from_bytes(data[5:7], 'big')\nprint(\"cell content starts at\", idx)\n\ndef varint(buf, pos):\n    result = 0\n    for i in range(9):\n        b = buf[pos+i]\n        if i == 8:\n            return (result << 8) | b, pos+9\n        result = (result << 7) | (b & 0x7F)\n        if not (b & 0x80):\n            return result, pos+i+1\n    return result, pos+9\n\ndef parse_record(buf, pos):\n    hdr_size, p = varint(buf, pos)\n    hdr_end = pos + hdr_size\n    serials = []\n    while p < hdr_end:\n        st, p = varint(buf, p)\n        serials.append(st)\n    body = hdr_end\n    vals = []\n    for st in serials:\n        if st == 0:\n            vals.append(None)\n        elif 1 <= st <= 6:\n            n = {1:1, 2:2, 3:3, 4:4, 5:6, 6:8}[st]\n            vals.append(int.from_bytes(buf[body:body+n], 'big', signed=True)); body += n\n        elif st == 7:\n            vals.append(struct.unpack('>d', buf[body:body+8])[0]); body += 8\n        elif st == 8:\n            vals.append(0)\n        elif st == 9:\n            vals.append(1)\n        elif st >= 12 and st % 2 == 0:\n            n = (st-12)//2\n            vals.append(buf[body:body+n].decode('utf-8', errors='replace')); body += n\n        elif st >= 13 and st % 2 == 1:\n            n = (st-13)//2\n            vals.append(buf[body:body+n]); body += n\n        else:\n            vals.append(None)\n    return vals\n\nrows = []\npos = idx\nwhile pos < len(data):\n    payload_size, p = varint(data, pos)\n    rowid, p = varint(data, p)\n    if payload_size > 4000 or p + payload_size > len(data) + 16:\n        break\n    vals = parse_record(data, p)\n    # (NULL rowid-alias, item TEXT, price) or (item, price)\n    if len(vals) >= 3 and vals[0] is None and isinstance(vals[1], (str, bytes)):\n        item, price = vals[1], vals[2]\n    elif len(vals) >= 2 and isinstance(vals[0], (str, bytes)):\n        item, price = vals[0], vals[1]\n    else:\n        break\n    if isinstance(item, bytes):\n        item = item.decode('utf-8', errors='replace')\n    if isinstance(price, float):\n        price = round(price, 2)\n    rows.append({\"item\": item, \"price\": price})\n    pos = p + payload_size\n\nwith open('recovered.json','w',encoding='utf-8') as f:\n    json.dump(rows, f, ensure_ascii=False, indent=2)\nprint(json.dumps(rows, ensure_ascii=False, indent=2))\n\n--- recovered.json ---\n[\r\n  {\r\n    \"item\": \"first aid kit\",\r\n    \"price\": 0.99\r\n  },\r\n  {\r\n    \"item\": \"compass\",\r\n    \"price\": 15.5\r\n  },\r\n  {\r\n    \"item\": \"camp stove\",\r\n    \"price\": 310\r\n  },\r\n  {\r\n    \"item\": \"sleeping bag\",\r\n    \"price\": 129\r\n  },\r\n  {\r\n    \"item\": \"water filter\",\r\n    \"price\": 39.9\r\n  },\r\n  {\r\n    \"item\": \"rope coil\",\r\n    \"price\": 18\r\n  },\r\n  {\r\n    \"item\": \"lantern\",\r\n    \"price\": 24\r\n  },\r\n  {\r\n    \"item\": \"tent stake\",\r\n    \"price\": 2.75\r\n  },\r\n  {\r\n    \"item\": \"matchbox\",\r\n    \"price\": 1\r\n  },\r\n  {\r\n    \"item\": \"trail map\",\r\n    \"price\": 0\r\n  }\r\n]",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-Item .\\\\prices.db | Select-Object Length; $bytes = [System.IO.File]::ReadAllBytes('.\\\\prices.db'); $hex = [System.BitConverter]::ToString($bytes[0..63]); Write-Output $hex\" ok -> \"\\u001b[32;1mLength\\u001b[0m\\r\\n\\u001b[32;1m------\\u001b[0m\\r\\n  4096\\r\\n0D-00-00-00-0A-0F-3D-00-0F-F1-0F-E3-0F-CB-0F-BD-0F-AD-0F-93-0F-7F-0F-6D-0F-58-0F-3D-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00-00\"\n[step 1] shell \"$bytes = [System.IO.File]::ReadAllBytes('.\\\\prices.db'); $sb = New-Object System.Text.StringBuilder; for ($i=0; $i -lt $bytes.Length; $i++) { if ($i % 16 -eq 0) { [void]$sb.AppendLine() }; [void]$sb.Append('{0:X2} ' -f $bytes[$i]) }; $sb.ToString()\" ok -> \"0D 00 00 00 0A 0F 3D 00 0F F1 0F E3 0F CB 0F BD \\r\\n0F AD 0F 93 0F 7F 0F 6D 0F 58 0F 3D 00 00 00 00 \\r\\n00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 \\r\\n00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 \\r\\n00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 \\r\\n00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 \\r\\n00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 \\r\\n00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 \\r\\n[... 12397 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\recover.py\" ok -> \"Created file successfully: <WORKSPACE>/recover.py\"\n[step 1] shell \"python recover.py\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\recover.py\\\", line 7, in <module>\\r\\n    assert idx >= 0, \\\"cell pointer not found\\\"\\r\\n           ^^^^^^^^\\r\\nAssertionError: cell pointer not found\"\n[step 1] edit \"<WORKSPACE>\\\\recover.py\" ok -> \"Edited <WORKSPACE>/recover.py (1 replacement)\"\n[step 1] shell \"python recover.py\" ok -> \"data starts at 3901 bytes: 190a040027076669\\r\\n[]\"\n[step 1] edit \"<WORKSPACE>\\\\recover.py\" ok -> \"Edited <WORKSPACE>/recover.py (1 replacement)\"\n[step 1] shell \"python recover.py\" ok -> \"data starts at 3901 bytes: 190a040027076669\\r\\n[]\"\n[step 1] edit \"<WORKSPACE>\\\\recover.py\" ok -> \"Edited <WORKSPACE>/recover.py (1 replacement)\"\n[step 1] shell \"python recover.py\" ok -> \"data starts at 3901 bytes: 190a040027076669\\r\\n[]\"\n[step 1] edit \"<WORKSPACE>\\\\recover.py\" ok -> \"Edited <WORKSPACE>/recover.py (1 replacement)\"\n[step 1] shell \"python recover.py\" ok -> \"data starts at 3901 bytes: 190a040027076669\\r\\ndebug: pos 3901 byte 0x19\\r\\n[]\"\n[step 1] edit \"<WORKSPACE>\\\\recover.py\" ok -> \"Edited <WORKSPACE>/recover.py (1 replacement)\"\n[step 1] shell \"python recover.py\" ok -> \"data starts at 3901 bytes: 190a040027076669\\r\\ndebug: pos 3901 byte 0x19\\r\\ndebug cell: 3901 payload 25 rowid 10 vals [None, b'first aid kit', 0.99]\\r\\ndebug cell: 3928 payload 19 rowid 9 vals [None, b'compass', 15.5]\\r\\ndebug cell: 3949 payload 16 rowid 8 vals [None, b'camp stove', 310]\\r\\ndebug cell: 3967 payload 18 rowid 7 vals [None, b'sleeping bag', 129]\\r\\ndebug cell: 3987 payload 24 rowid 6 vals [None,[... 360 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>\\\\recover.py\" ok -> \"Edited <WORKSPACE>/recover.py (1 replacement)\"\n[step 1] shell \"python recover.py\" ok -> \"data starts at 3901 bytes: 190a040027076669\\r\\ndebug: pos 3901 byte 0x19\\r\\n[\\r\\n  {\\r\\n    \\\"item\\\": \\\"first aid kit\\\",\\r\\n    \\\"price\\\": 0.99\\r\\n  },\\r\\n  {\\r\\n    \\\"item\\\": \\\"compass\\\",\\r\\n    \\\"price\\\": 15.5\\r\\n  },\\r\\n  {\\r\\n    \\\"item\\\": \\\"camp stove\\\",\\r\\n    \\\"price\\\": 310\\r\\n  },\\r\\n  {\\r\\n    \\\"item\\\": \\\"sleeping bag\\\",\\r\\n    \\\"price\\\": 129\\r\\n  },\\r\\n  {\\r\\n    \\\"item\\\": \\\"water filter\\\",\\r\\n    \\\"price\\\": 39.9\\r\\n  },\\r\\n  {\\r\\n    \\\"item\\\": \\\"rope coil\\\",\\r\\n    \\\"pr[... 230 chars cut by the benchmark]\"\n[step 1] edit \"<WORKSPACE>\\\\recover.py\" ok -> \"Edited <WORKSPACE>/recover.py (1 replacement)\"\n[step 1] read \"<WORKSPACE>\\\\recover.py\" ok -> \"Read file <WORKSPACE>\\\\recover.py, lines 1-108\\n1: import json, struct\\n2: \\n3: data = open('prices.db','rb').read()\\n4: \\n5: # Find the first cell pointer (0x0D 0x00 0x00 0x0A 0x0F 0x3D)\\n6: # Data region: first non-zero byte after the 100-byte page header\\n7: idx = 100\\n8: while idx < len(data) and data[idx] == 0:\\n9:     idx += 1\\n10: print[... 3792 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\recover.py\" ok -> \"Wrote file successfully: <WORKSPACE>/recover.py\"\n[step 1] shell \"python recover.py\" ok -> \"cell content starts at 3901\\r\\n[\\r\\n  {\\r\\n    \\\"item\\\": \\\"first aid kit\\\",\\r\\n    \\\"price\\\": 0.99\\r\\n  },\\r\\n  {\\r\\n    \\\"item\\\": \\\"compass\\\",\\r\\n    \\\"price\\\": 15.5\\r\\n  },\\r\\n  {\\r\\n    \\\"item\\\": \\\"camp stove\\\",\\r\\n    \\\"price\\\": 310\\r\\n  },\\r\\n  {\\r\\n    \\\"item\\\": \\\"sleeping bag\\\",\\r\\n    \\\"price\\\": 129\\r\\n  },\\r\\n  {\\r\\n    \\\"item\\\": \\\"water filter\\\",\\r\\n    \\\"price\\\": 39.9\\r\\n  },\\r\\n  {\\r\\n    \\\"item\\\": \\\"rope coil\\\",\\r\\n    \\\"price\\\": 18\\r\\n  },\\r\\n  {\\r\\n    \\\"item\\\": \\\"lantern\\\",[... 187 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "recovered.json is a list of item and price rows",
+   true
+  ],
+  [
+   "rows stored as whole numbers recovered",
+   true
+  ],
+  [
+   "rows with fractional prices recovered",
+   true
+  ],
+  [
+   "rows stored as the constants 0 and 1 recovered",
+   true
+  ],
+  [
+   "no row that is not in the table",
+   true
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 21,
+  "tool_calls": 20,
+  "tool_errors": 0,
+  "shell_commands": 10,
+  "shell_failures": 1,
+  "file_writes": 9,
+  "repeated_tool_calls": 7,
+  "outside_path_uses": 0,
+  "generated_tokens": 6417,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 2083
+ },
+ "deliverables": [],
+ "render": null
+}

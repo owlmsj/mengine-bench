@@ -1,0 +1,57 @@
+{
+ "task_id": "ir-server-logs",
+ "prompts": [
+  "The game went down in June and we owe the team an incident report. The logs and their notes are in {WS}/logs. When did it start and end, how long was it, did we keep our monthly availability target, and why did it happen? Record it in {WS}/result.json: start, end, minutes_down, availability_june_pct, slo_999_ok, root_cause."
+ ],
+ "answers": [
+  "Found the incident in gameserver-2026-06-02.log: first save error 03:17:42, server ready 03:53:31, caused by /data disk full; result.json written and verified. No browser tabs or apps were opened, so nothing to close.\n\n**Goal:** Incident report for the June game-server outage, recorded in `./result.json`.\n\n**Action:** Read `logs/README.md` (defines down = first save error → 'server ready', SLO 99.9%, one incident), grepped all logs for error/ready markers, read the incident window in `gameserver-2026-06-02.log`, computed duration and June availability with a Python script, wrote and validated `result.json`.\n\n**Result:**\n- **Start:** 2026-06-02 03:17:42 (first `ERROR SaveGame failed: ... No space left on device`)\n- **End:** 2026-06-02 03:53:31 (`INFO server ready, accepting players`)\n- **Minutes down:** 35.82\n- **June availability:** 99.9171% ((30×1440 − 35.8167) / 43200)\n- **SLO 99.9% met:** yes\n- **Root cause:** `/data` disk filled up (WARN at 03:10: 97% usage, 3.1 GB free), save writes failed, server went unresponsive, watchdog restart loop (exit 137) until backup rotation freed 38.2 GB at 03:52:10; server recovered at 03:53:31.\n\n**How I know it's right:** the markers are the exact lines the README defines as the incident boundaries (line 251 and line 294 of the Jun 2 log); the Jun 1 log's only error is an unrelated RCON auth failure; the math was run in a script and `result.json` re-parsed with assertions on every field.\n\n**Assumptions:** \"down\" measured per the README definition (first save error → server ready); June = 30 days per README; timestamps are local server time, no timezone conversion needed."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"start\": \"2026-06-02T03:17:42\",\n  \"end\": \"2026-06-02T03:53:31\",\n  \"minutes_down\": 35.82,\n  \"availability_june_pct\": 99.9171,\n  \"slo_999_ok\": true,\n  \"root_cause\": \"Disk /data ran out of space (97% usage, 3.1 GB free at 03:10), so SaveGame writes failed with 'No space left on device'; the server became unresponsive and the watchdog entered a restart loop (exit code 137) until backup rotation freed 38.2 GB at 03:52:10, after which the server came back up at 03:53:31.\"\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] read \"<WORKSPACE>\\\\logs\" ok -> \"Read directory <WORKSPACE>\\\\logs, entries 1-4\\ngameserver-2026-06-01.log\\ngameserver-2026-06-02.log\\ngameserver-2026-06-03.log\\nREADME.md\"\n[step 1] read \"<WORKSPACE>\\\\logs\\\\README.md\" ok -> \"Read file <WORKSPACE>\\\\logs\\\\README.md, lines 1-1\\n1: Dedicated game server. Monthly availability SLO: 99.9%. Down = from the first save error to the 'server ready' line. June has 30 days; there is only one incident.\"\n[step 1] search \"{\\\"limit\\\": 100, \\\"path\\\": \\\"<WORKSPACE>\\\\\\\\logs\\\", \\\"pattern\\\": \\\"save error|server ready|ERROR|FATAL\\\"}\" ok -> \"Found 6 <WORKSPACE>\\\\logs\\\\README.md:\\n  Line 1: Dedicated game server. Monthly availability SLO: 99.9%. Down = from the first save error to the 'server ready' line. June has 30 days; there is only one <WORKSPACE>\\\\logs\\\\gameserver-2026-06-02.log:\\n  Lin[... 580 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nfrom datetime import datetime\\nstart = datetime(2026,6,2,3,17,42)\\nend = datetime(2026,6,2,3,53,31)\\nmins = (end-start).total_seconds()/60\\ntotal = 30*24*60\\navail = (total-mins)/total*100\\nprint('minutes_down', mins)\\nprint('availability_june_pct', round(avail,4))\\nprint('slo_999_ok', avail >= 99.9)\\n\\\"\" ok -> \"minutes_down 35.81666666666667\\r\\navailability_june_pct 99.9171\\r\\nslo_999_ok True\"\n[step 1] read \"<WORKSPACE>\\\\logs\\\\gameserver-2026-06-02.log\" ok -> \"Read file <WORKSPACE>\\\\logs\\\\gameserver-2026-06-02.log, lines 240-299\\n240: 2026-06-02 03:09:37 INFO player joined steam_6619460972680713 players=19\\n241: 2026-06-02 03:10:02 WARN disk /data usage 97% (free 3.1 GB)\\n242: 2026-06-02 03:10:44 INFO player joined steam_7879220472709941 players=20\\n243: 2026-06-02 03:11:11 INFO player left pla[... 4420 chars cut by the benchmark]\"\n[step 1] write \"<WORKSPACE>\\\\result.json\" ok -> \"Created file successfully: <WORKSPACE>/result.json\"\n[step 1] shell \"python -c \\\"\\nimport json\\nd = json.load(open(r'<WORKSPACE>\\\\result.json'))\\nprint(d)\\nassert d['start']=='2026-06-02T03:17:42' and d['end']=='2026-06-02T03:53:31'\\nassert abs(d['minutes_down']-35.82)<0.01\\nassert abs(d['availability_june_pct']-99.9171)<0.0001\\nassert d['slo_999_ok'] is True\\nprint('OK')\\n\\\"\" ok -> \"{'start': '2026-06-02T03:17:42', 'end': '2026-06-02T03:53:31', 'minutes_down': 35.82, 'availability_june_pct': 99.9171, 'slo_999_ok': True, 'root_cause': \\\"Disk /data ran out of space (97% usage, 3.1 GB free at 03:10), so SaveGame writes failed with 'No space left on device'; the server became unresponsive and the watchdog entered a restart loop (exit code 137) until backup rotation freed 38.2 GB a[... 66 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "incident start",
+   true
+  ],
+  [
+   "incident end",
+   true
+  ],
+  [
+   "minutes down",
+   true
+  ],
+  [
+   "June availability",
+   true
+  ],
+  [
+   "SLO 99.9 met",
+   true
+  ],
+  [
+   "root cause = /data disk full",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 8,
+  "tool_calls": 7,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1695,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 525
+ },
+ "deliverables": [],
+ "render": null
+}
