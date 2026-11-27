@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "[goal] find hitch cause and fixes\n[action] analyzed capture + sensors\n[result] wrote result.json\n[next] done\n\nFound: every ~4 s the rig drops PCIe to L1 (sensors show L1 entries at seconds 2,6,10,14,...,50, along with RP0/RP1 L1 in BIOS); each L1 event stalls 12-13 frames (~22 ms vs ~6.9 ms baseline), exactly matching the 13-14 clusters seen in the frame log. Defender window at 43-45 s (DPC 420-455 µs, disk ~90%, MsMpEng.exe) produces no present stalls, so it is not the cause. Average 137.29 fps, 1% low 45.35 fps (p99 22.05 ms). Changes: pcie_aspm_rp0_nvme L1→disabled, pcie_aspm_rp1_gpu L1→disabled (link speed Gen5 x4 untouched, no BIOS overclock).\n\nAssumptions: L1→disabled chosen over L0s to be unambiguous; RP2 chipset left as-is."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\r\n  \"avg_fps\": 137.29,\r\n  \"low_1pct_fps\": 45.35,\r\n  \"cause\": \"PCIe ASPM L1 entry/exit on RP0 (NVMe) and RP1 (GPU): every ~4 s the link drops to L1, stalling presents for ~14 ms (12-13 frames at ~22 ms instead of ~6.9 ms)\",\r\n  \"changes\": [\r\n    {\r\n      \"setting\": \"pcie_aspm_rp0_nvme\",\r\n      \"from\": \"L1\",\r\n      \"to\": \"disabled\"\r\n    },\r\n    {\r\n      \"setting\": \"pcie_aspm_rp1_gpu\",\r\n      \"from\": \"L1\",\r\n      \"to\": \"disabled\"\r\n    }\r\n  ]\r\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"ls -la ..; ls -la\" failed -> \"\\u001b[31;1mGet-ChildItem: \\u001b[31;1mA parameter cannot be found that matches parameter name 'la'.\\u001b[0m\\r\\n\\u001b[31;1mGet-ChildItem: \\u001b[31;1mA parameter cannot be found that matches parameter name 'la'.\\u001b[0m\"\n[step 1] shell \"Get-ChildItem ..; Get-ChildItem .\" ok -> \"Directory: <HOME>\\\\AppData\\\\Local\\\\Temp\\\\mengine-bench-fresh-kcnvreef\\r\\n\\r\\n\\u001b[32;1mMode   \\u001b[0m\\u001b[32;1m              LastWriteTime\\u001b[0m \\u001b[32;1;3m        Length\\u001b[0m\\u001b[32;1m Name\\u001b[0m\\r\\n\\u001b[32;1m----   \\u001b[0m \\u001b[32;1m             -------------\\u001b[0m \\u001b[32;1m        ------\\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\nd----          27/11/2026    14:23                \\u001b[44;1mworkspace\\u001b[0m\\r\\n\\r\\n    Directory: <HOME>\\\\AppData[... 510 chars cut by the benchmark]\"\n[step 1] shell \"Get-ChildItem -R capture; cat NOTES.md; cat settings.json\" ok -> \"Directory: <WORKSPACE>\\\\capture\\r\\n\\r\\n\\u001b[32;1mMode   \\u001b[0m\\u001b[32;1m              LastWriteTime\\u001b[0m\\u001b[32;1m         Length\\u001b[0m\\u001b[32;1m Name\\u001b[0m\\r\\n\\u001b[32;1m----   \\u001b[0m \\u001b[32;1m             -------------\\u001b[0m \\u001b[32;1m        ------\\u001b[0m \\u001b[32;1m----\\u001b[0m\\r\\n-a---          27/11/2026    14:23         715870 presentmon.csv\\r\\n-a---          27/11/2026    14:23[... 3370 chars cut by the benchmark]\"\n[step 1] shell \"head -5 capture\\\\presentmon.csv; wc -l capture\\\\presentmon.csv; cat capture\\\\sensors.csv\" ok -> \"Application,ProcessID,SwapChainAddress,Runtime,SyncInterval,PresentFlags,Dropped,TimeInSeconds,MsBetweenPresents,MsBetweenDisplayChange,MsInPresentAPI,MsUntilRenderComplete,MsUntilDisplayed\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.000000,6.861,6.847,0.294,4.901,5.568\\nArena.exe,7316,0x000001F2A8C40000,DXGI,0,512,0,0.006861,6.773,6.812,0.387,4.013,6.252\\nArena.exe,7316,0x000001F2A8C40000,DXGI[... 2881 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\nimport statistics\\ntimes=[float(r['MsBetweenPresents']) for r in rows]\\nprint('frames',len(times),'mean ms',statistics.mean(times),'avg fps',1000/statistics.mean(times))\\nprint('time span', float(rows[-1]['TimeInSeconds']))\\ntimes_sorted=sorted(times)\\nimport numpy as np\\np=lambda q: times_sorted[int(q*(len(times)-1))]\\nfor q in [0.5,0.9,0.95,0.99]: print(q, p(q), 'fps',1000/p(q))\\n# spikes > 30ms\\nspikes=[r for r in rows if float(r['MsBetweenPresents'])>30]\\nprint('spikes',len(spikes))\\nfor r in spikes[:50]: print(r['TimeInSeconds'], r['MsBetweenPresents'], r['MsUntilRenderComplete'], r['MsInPresentAPI'])\\n\\\"\" ok -> \"frames 8238 mean ms 7.284078781257587 avg fps 137.28571999702498\\r\\ntime span 59.999207\\r\\n0.5 6.962 fps 143.63688595231255\\r\\n0.9 7.379 fps 135.51971811898633\\r\\n0.95 7.522 fps 132.9433661260303\\r\\n0.99 22.048 fps 45.355587808418\\r\\nspikes 0\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\ntimes=[float(r['MsBetweenPresents']) for r in rows]\\nfor th in [10,12,15,18,20]:\\n    sel=[r for r in rows if float(r['MsBetweenPresents'])>th]\\n    print(th, len(sel), [round(float(r['TimeInSeconds']),1) for r in sel][:40])\\n\\\"\" ok -> \"10 180 [2.4, 2.4, 2.4, 2.5, 2.5, 2.5, 2.5, 2.6, 2.6, 2.6, 2.6, 2.6, 6.4, 6.4, 6.4, 6.5, 6.5, 6.5, 6.5, 6.6, 6.6, 6.6, 6.6, 6.6, 10.4, 10.4, 10.4, 10.5, 10.5, 10.5, 10.5, 10.6, 10.6, 10.6, 10.6, 10.6, 14.4, 14.4, 14.4, 14.5]\\r\\n12 180 [2.4, 2.4, 2.4, 2.5, 2.5, 2.5, 2.5, 2.6, 2.6, 2.6, 2.6, 2.6, 6.4, 6.4, 6.4, 6.5, 6.5, 6.5, 6.5, 6.6, 6.6, 6.6, 6.6, 6.6, 10.4, 10.4, 10.4, 10.5, 10.5, 10.5, 10.5, 10.6,[... 723 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\nfor r in rows:\\n    t=float(r['TimeInSeconds']); m=float(r['MsBetweenPresents'])\\n    if m>10 and (t<20 or t>40): print(t,m)\\n\\\" | head -80\" ok -> \"2.400643 21.863\\r\\n2.422506 22.853\\r\\n2.445359 22.078\\r\\n2.467437 21.606\\r\\n2.489043 22.669\\r\\n2.511712 21.025\\r\\n2.532737 22.123\\r\\n2.55486 21.902\\r\\n2.576762 21.966\\r\\n2.598728 22.495\\r\\n2.621223 21.199\\r\\n2.642422 20.636\\r\\n6.405129 21.786\\r\\n6.426915 21.556\\r\\n6.448471 22.54\\r\\n6.471011 21.24\\r\\n6.492251 22.988\\r\\n6.515239 21.784\\r\\n6.537023 22.383\\r\\n6.559406 22.844\\r\\n6.58225 21.136\\r\\n6.603386 21.648\\r\\n6.625034 21.825\\r\\n6.646859 22.4[... 985 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\nfor r in rows:\\n    t=float(r['TimeInSeconds'])\\n    if 42.5<t<46 and float(r['MsBetweenPresents'])>12: print(t, float(r['MsBetweenPresents']))\\nprint('---')\\nfor r in rows:\\n    t=float(r['TimeInSeconds'])\\n    if t>=12.5 and t<13.5: print(t, float(r['MsBetweenPresents']))\\n\\\" | head -60\" ok -> \"42.51752 22.541\\r\\n42.540061 21.599\\r\\n42.56166 22.064\\r\\n42.583724 21.96\\r\\n42.605684 22.05\\r\\n42.627734 21.626\\r\\n42.64936 22.53\\r\\n---\\r\\n12.505669 7.465\\r\\n12.513134 7.294\\r\\n12.520428 6.842\\r\\n12.52727 7.126\\r\\n12.534396 6.674\\r\\n12.54107 7.232\\r\\n12.548302 7.241\\r\\n12.555543 7.199\\r\\n12.562742 7.201\\r\\n12.569943 7.241\\r\\n12.577184 6.796\\r\\n12.58398 6.806\\r\\n12.590786 7.298\\r\\n12.598084 7.433\\r\\n12.605517 6.927\\r\\n12.612444 6.605\\r\\n12.619[... 595 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\nfor r in rows:\\n    t=float(r['TimeInSeconds']); m=float(r['MsBetweenPresents'])\\n    if (50<t<54 and m>10) or (26<t<28.5 and m>10): print(t,m)\\n\\\" | head -40\" ok -> \"26.403726 21.847\\r\\n26.425573 21.532\\r\\n26.447105 21.874\\r\\n26.468979 22.148\\r\\n26.491127 21.947\\r\\n26.513074 22.244\\r\\n26.535318 21.909\\r\\n26.557227 21.315\\r\\n26.578542 22.175\\r\\n26.600717 21.543\\r\\n26.62226 22.145\\r\\n26.644405 21.81\\r\\n50.406701 21.422\\r\\n50.428123 22.654\\r\\n50.450777 21.6\\r\\n50.472377 21.196\\r\\n50.493573 22.237\\r\\n50.51581 21.709\\r\\n50.537519 21.721\\r\\n50.55924 21.625\\r\\n50.580865 21.701\\r\\n50.602566 22.206\\r\\n50.624772 [... 24 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv,statistics\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\ntimes=[float(r['MsBetweenPresents']) for r in rows]\\ntimes_sorted=sorted(times)\\nimport bisect\\nn=len(times_sorted)\\np99=times_sorted[min(n-1,int(0.99*n))]\\nspan=float(rows[-1]['TimeInSeconds'])\\nprint('avg',1000/statistics.mean(times))\\nprint('p99ms',p99,'low',1000/p99)\\nprint('frames',n,'span',span)\\n\\\"\" ok -> \"avg 137.28571999702498\\r\\np99ms 22.049 low 45.35353077237063\\r\\nframes 8238 span 59.999207\"\n[step 1] shell \"python -c \\\"\\nimport json\\nres={'avg_fps':round(137.29,2),'low_1pct_fps':round(45.35,2),'cause':'PCIe ASPM L1 entry/exit on RP0 (NVMe) and RP1 (GPU): every ~4 s the link drops to L1, stalling presents for ~14 ms (12-13 frames at ~22 ms instead of ~6.9 ms)','changes':[{'setting':'pcie_aspm_rp0_nvme','from':'L1','to':'disabled'},{'setting':'pcie_aspm_rp1_gpu','from':'L1','to':'disabled'}]}\\nopen('result.json','w').write(json.dumps(res,indent=2))\\nprint(open('result.json').read())\\n\\\"\" ok -> \"{\\r\\n  \\\"avg_fps\\\": 137.29,\\r\\n  \\\"low_1pct_fps\\\": 45.35,\\r\\n  \\\"cause\\\": \\\"PCIe ASPM L1 entry/exit on RP0 (NVMe) and RP1 (GPU): every ~4 s the link drops to L1, stalling presents for ~14 ms (12-13 frames at ~22 ms instead of ~6.9 ms)\\\",\\r\\n  \\\"changes\\\": [\\r\\n    {\\r\\n      \\\"setting\\\": \\\"pcie_aspm_rp0_nvme\\\",\\r\\n      \\\"from\\\": \\\"L1\\\",\\r\\n      \\\"to\\\": \\\"disabled\\\"\\r\\n    },\\r\\n    {\\r\\n      \\\"setting\\\": \\\"pcie_aspm_rp1_gpu\\\",\\r\\n      \\\"from\\\":[... 45 chars cut by the benchmark]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 12,
+  "tool_calls": 11,
+  "tool_errors": 0,
+  "shell_commands": 11,
+  "shell_failures": 1,
+  "file_writes": 0,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 2628,
+  "reasoning_tokens": 1130,
+  "largest_turn_tokens": 405
+ },
+ "deliverables": [],
+ "render": null
+}
