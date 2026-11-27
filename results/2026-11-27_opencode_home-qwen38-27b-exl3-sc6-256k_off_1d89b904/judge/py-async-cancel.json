@@ -1,0 +1,53 @@
+{
+ "task_id": "py-async-cancel",
+ "prompts": [
+  "Our batch scripts need a helper in {WS}/run.py, importable as `from run import run_tasks`: `async def run_tasks(tasks, max_concurrent)`, where each task is a zero-argument callable that returns an awaitable job, and at most max_concurrent jobs may run at once. It returns when every job is done. Sometimes we stop a run with Ctrl+C, and we still want the jobs' cleanup code to run. It runs on Python 3.11 or later, standard library only."
+ ],
+ "answers": [
+  "Test rewritten to inject KeyboardInterrupt into the loop; running it now to verify both paths.\n\n"
+ ],
+ "diff": "A run.py\nA test_run.py\n\n--- run.py ---\n\"\"\"Concurrent task runner with graceful Ctrl+C handling.\"\"\"\nimport asyncio\n\n\nasync def run_tasks(tasks, max_concurrent):\n    \"\"\"Run zero-arg callables (each returning an awaitable) with bounded concurrency.\n\n    Each task is a zero-argument callable returning an awaitable job. At most\n    max_concurrent jobs run at once; the rest wait for a free slot. Returns\n    when every job is done.\n\n    Ctrl+C behavior: the first KeyboardInterrupt cancels every running job and\n    awaits their cleanup (finally blocks, async with __aexit__, ...) before\n    run_tasks re-raises the KeyboardInterrupt. A second Ctrl+C during cleanup\n    propagates immediately.\n    \"\"\"\n    if max_concurrent < 1:\n        raise ValueError(\"max_concurrent must be >= 1\")\n\n    sem = asyncio.Semaphore(max_concurrent)\n    pending = set()\n\n    async def wrap(task):\n        async with sem:\n            return await task()\n\n    for t in tasks:\n        pending.add(asyncio.ensure_future(wrap(t)))\n\n    try:\n        results = await asyncio.gather(*pending)\n    except (KeyboardInterrupt, asyncio.CancelledError) as exc:\n        # Cancel every job that is still running or waiting for a slot, then\n        # await them so their cleanup code runs to completion.\n        for p in pending:\n            p.cancel()\n        await asyncio.gather(*pending, return_exceptions=True)\n        raise exc\n    return results\n\n--- test_run.py ---\nimport asyncio\nimport sys\nfrom run import run_tasks\n\nasync def test_normal():\n    max_seen = [0]\n    cur = [0]\n    lock = asyncio.Lock()\n\n    async def job(i):\n        async with lock:\n            cur[0] += 1\n            max_seen[0] = max(max_seen[0], cur[0])\n        await asyncio.sleep(0.05)\n        async with lock:\n            cur[0] -= 1\n        return i * 10\n\n    results = await run_tasks([lambda i=i: job(i) for i in range(10)], 3)\n    assert sorted(results) == list(range(0, 100, 10)), results\n    assert max_seen[0] == 3, max_seen\n    print(\"normal OK, max concurrent seen:\", max_seen[0])\n\nasync def test_ctrl_c():\n    cleaned = []\n\n    def make(i):\n        async def job():\n            try:\n                await asyncio.sleep(30)\n            finally:\n                cleaned.append(i)\n        return job\n\n    # Inject a real KeyboardInterrupt into the loop while run_tasks is running\n    async def main():\n        t = asyncio.ensure_future(run_tasks([make(i) for i in range(4)], 2))\n        await asyncio.sleep(0.1)\n        loop = asyncio.get_running_loop()\n        loop.call_soon(KeyboardInterrupt)\n        try:\n            await t\n            print(\"ERROR: KI not raised\")\n            sys.exit(1)\n        except KeyboardInterrupt:\n            pass\n\n    await main()\n    assert sorted(cleaned) == [0, 1, 2, 3], cleaned\n    print(\"ctrl+c OK, cleaned:\", cleaned)\n\nasyncio.run(test_normal())\nasyncio.run(test_ctrl_c())\nprint(\"ALL OK\")",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] write \"run.py\" ok -> \"Created file successfully: run.py\"\n[step 1] write \"run.py\" ok -> \"Wrote file successfully: run.py\"\n[step 1] write \"test_run.py\" ok -> \"Created file successfully: test_run.py\"\n[step 1] shell \"python test_run.py\" failed -> \"Traceback (most recent call last):\\r\\n  File \\\"<WORKSPACE>\\\\test_run.py\\\", line 72, in <module>\\r\\n    asyncio.run(test_normal())\\r\\n    ~~~~~~~~~~~^^^^^^^^^^^^^^^\\r\\n  File \\\"<HOME>\\\\AppData\\\\Roaming\\\\uv\\\\python\\\\cpython-3.13.14-windows-x86_64-none\\\\Lib\\\\asyncio\\\\runners.py\\\", line 196, in run\\r\\n    return runner.run(main)\\r\\n           ~~~~~[... 711 chars cut by the benchmark]\"\n[step 1] edit \"run.py\" ok -> \"Edited run.py (1 replacement)\"\n[step 1] edit \"run.py\" ok -> \"Edited run.py (1 replacement)\"\n[step 1] shell \"python test_run.py\" failed -> \"(no output)\"\n[step 1] write \"test_run.py\" ok -> \"Wrote file successfully: test_run.py\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "jobs run side by side up to the limit",
+   true
+  ],
+  [
+   "never more jobs at once than the limit",
+   true
+  ],
+  [
+   "Ctrl+C below the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C at the limit cleans up every started job",
+   true
+  ],
+  [
+   "Ctrl+C with jobs queued starts none and cleans up the rest",
+   false
+  ]
+ ],
+ "status": "timeout",
+ "stats": {
+  "model_turns": 9,
+  "tool_calls": 8,
+  "tool_errors": 0,
+  "shell_commands": 2,
+  "shell_failures": 2,
+  "file_writes": 6,
+  "repeated_tool_calls": 1,
+  "outside_path_uses": 0,
+  "generated_tokens": 2223,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 676
+ },
+ "deliverables": [],
+ "render": null
+}
