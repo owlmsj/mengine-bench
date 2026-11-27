@@ -1,0 +1,57 @@
+{
+ "task_id": "hw-stutter-tuning",
+ "prompts": [
+  "The owner's gaming rig hitches every few seconds even though the average frame rate looks fine, and the 1% lows are poor. A one-minute frame capture, a sensor log, a dump of the rig's settings and the owner's notes are in {WS}. That rig is not this machine: everything about it is in these files, and nothing is to be applied to this host. Find what causes the hitches and which setting changes fix them within the owner's constraints. Record in {WS}/result.json: avg_fps, low_1pct_fps, cause and changes (a list of {setting, from, to})."
+ ],
+ "answers": [
+  "**[goal]** Find what causes the periodic hitches on rig \"arena-01\" and which setting changes fix them within the owner's constraints.\n\n**[action]** Computed FPS stats from `capture/presentmon.csv` (1000/mean and 1000/p99 of MsBetweenPresents, per the owner's method), cross-referenced the 1 s sensor log, and checked the settings dump against the constraints.\n\n**[result]**\n- `avg_fps`: **137.29**, `low_1pct_fps`: **45.36** (p99 frame time 22.05 ms; no frame above 30 ms — the hitches are a burst of ~22 ms frames, not one-off stalls).\n- **Cause:** the GPU's PCIe link drops to **ASPM L1 every 4 seconds** — `gpu_pcie_link_state=L1` at seconds 2, 6, 10 … 58 in `sensors.csv`, and frame-time spikes (>15 ms) occur in exactly those 15 seconds. Waking the link from L1 stalls presents, so the average looks fine but the 1% lows are poor. The setting is `pcie_aspm_rp1_gpu = L1` in the BIOS.\n- **Change:** `pcie_aspm_rp1_gpu`: **L1 → disabled**. This respects both constraints: the link stays Gen5 x4 (only the power-state entry is disabled, not the negotiated speed/width) and no BIOS overclock is touched (XMP/PBO/ratio unchanged).\n- Assumptions: \"disabled\" is the correct target value (the dump already uses \"disabled\" for `pcie_aspm_rp2_chipset`); the NVMe root port's L1 (`pcie_aspm_rp0_nvme`) is left alone since disk activity doesn't correlate with the spikes (the disk bursts at s13/27/43–45/52 don't line up with the 4 s cadence).\n\n**[next]** None — `result.json` is written and validated (keys: avg_fps, low_1pct_fps, cause, changes). No browser tabs, windows or apps were opened on this host, so nothing to close.\n\n**How I know it's right:** the L1 seconds and the spike seconds are the identical set {2,6,…,58} — a 15/15 match with zero spikes outside those seconds — and the only setting that controls that behavior is `pcie_aspm_rp1_gpu`."
+ ],
+ "diff": "A result.json\n\n--- result.json ---\n{\n  \"avg_fps\": 137.29,\n  \"low_1pct_fps\": 45.36,\n  \"cause\": \"The GPU's PCIe link drops to ASPM L1 every 4 seconds (sensors: gpu_pcie_link_state=L1 at seconds 2,6,...,58; frame-time spikes >15 ms occur in exactly those seconds). Waking from L1 stalls presents, producing the periodic hitches and poor 1% lows. pcie_aspm_rp1_gpu is set to L1 in the BIOS.\",\n  \"changes\": [\n    {\n      \"setting\": \"pcie_aspm_rp1_gpu\",\n      \"from\": \"L1\",\n      \"to\": \"disabled\"\n    }\n  ]\n}",
+ "transcript_tail": "Tool calls the agent made:\n[step 1] shell \"Get-ChildItem -Path .. -Recurse | Select-Object FullName, Length | Format-Table -AutoSize\" ok -> \"\\u001b[32;1mFullName                                                                                            \\u001b[0m\\u001b[32;1m Length\\u001b[0m\\r\\n\\u001b[32;1m--------                                                                                            \\u001b[0m \\u001b[32;<WORKSPACE>                        \\r\\nC:\\\\Users\\\\<USER>\\\\AppData\\\\Local\\\\T[... 601 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\NOTES.md\" ok -> \"Read file <WORKSPACE>\\\\NOTES.md, lines 1-15\\n1: # Owner notes - rig \\\"arena-01\\\"\\n2: \\n3: The game hitches every few seconds even though the average frame rate looks fine.\\n4: Capture: PresentMon on Arena.exe for one minute in the same replay, plus a 1 s sensor log\\n5: taken at the same time (same clock: second 0 of both files is the same i[... 533 chars cut by the benchmark]\"\n[step 1] read \"<WORKSPACE>\\\\settings.json\" ok -> \"Read file <WORKSPACE>\\\\settings.json, lines 1-125\\n1: {\\n2:   \\\"rig\\\": \\\"arena-01\\\",\\n3:   \\\"settings\\\": [\\n4:     {\\n5:       \\\"setting\\\": \\\"power_plan\\\",\\n6:       \\\"value\\\": \\\"Balanced\\\",\\n7:       \\\"where\\\": \\\"Windows\\\"\\n8:     },\\n9:     {\\n10:       \\\"setting\\\": \\\"hardware_accelerated_gpu_scheduling\\\",\\n11:       \\\"value\\\": \\\"on\\\",\\n12:       \\\"where\\\": \\\"Windows\\\"\\n13:[... 2660 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv, statistics\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\nprint(len(rows), rows[0].keys())\\nms=[float(r['MsBetweenPresents']) for r in rows if r.get('MsBetweenPresents')]\\nms.sort()\\nn=len(ms)\\navg=1000/(sum(ms)/n)\\np99=ms[int(0.99*(n-1))]\\nprint('avg_fps=%.2f p99_ms=%.3f low1=%.2f'%(avg,p99,1000/p99))\\nprint('max_ms=%.3f'%ms[-1])\\nbig=[m for m in ms if m>30]\\nprint('frames>30ms:',len(big))\\n\\\"\" ok -> \"8238 dict_keys(['Application', 'ProcessID', 'SwapChainAddress', 'Runtime', 'SyncInterval', 'PresentFlags', 'Dropped', 'TimeInSeconds', 'MsBetweenPresents', 'MsBetweenDisplayChange', 'MsInPresentAPI', 'MsUntilRenderComplete', 'MsUntilDisplayed'])\\r\\navg_fps=137.29 p99_ms=22.048 low1=45.36\\r\\nmax_ms=23.675\\r\\nframes>30ms: 0\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nrows=list(csv.DictReader(open('capture/sensors.csv')))\\nprint(len(rows), list(rows[0].keys()))\\nfor r in rows[:5]: print(r)\\n\\\"\" ok -> \"60 ['time_s', 'cpu_clock_mhz', 'cpu_util_pct', 'gpu_clock_mhz', 'gpu_pcie_link_state', 'gpu_pcie_link_speed', 'dpc_latency_us', 'disk_active_pct', 'top_cpu_process']\\r\\n{'time_s': '0', 'cpu_clock_mhz': '5354', 'cpu_util_pct': '35', 'gpu_clock_mhz': '2724', 'gpu_pcie_link_state': 'L0', 'gpu_pcie_link_speed': 'Gen5 x4', 'dpc_latency_us': '52', 'disk_active_pct': '1', 'top_cpu_process': 'Arena.exe'}\\r\\n{[... 925 chars cut by the benchmark]\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nrows=list(csv.DictReader(open('capture/sensors.csv')))\\nl1=[r for r in rows if r['gpu_pcie_link_state']=='L1']\\nprint('L1 seconds:',[r['time_s'] for r in l1])\\nprint('L1 count:',len(l1))\\nprint('link speeds:',set(r['gpu_pcie_link_speed'] for r in rows))\\nprint('dpc>1000:',[(r['time_s'],r['dpc_latency_us']) for r in rows if int(r['dpc_latency_us'])>1000])\\nprint('disk>20:',[(r['time_s'],r['disk_active_pct']) for r in rows if int(r['disk_active_pct'])>20])\\n\\\"\" ok -> \"L1 seconds: ['2', '6', '10', '14', '18', '22', '26', '30', '34', '38', '42', '46', '50', '54', '58']\\r\\nL1 count: 15\\r\\nlink speeds: {'Gen5 x4'}\\r\\ndpc>1000: []\\r\\ndisk>20: [('13', '92'), ('27', '86'), ('43', '94'), ('44', '83'), ('45', '80'), ('52', '85')]\"\n[step 1] shell \"python -c \\\"\\nimport csv\\nrows=list(csv.DictReader(open('capture/presentmon.csv')))\\nspikes=[float(r['TimeInSeconds']) for r in rows if float(r['MsBetweenPresents'])>15]\\nprint('spike count:',len(spikes))\\nprint('spike seconds (rounded):',sorted(set(int(s) for s in spikes)))\\n\\\"\" ok -> \"spike count: 180\\r\\nspike seconds (rounded): [2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58]\"\n[step 1] write \"<WORKSPACE>\\\\result.json\" ok -> \"Created file successfully: <WORKSPACE>/result.json\"\n[step 1] shell \"python -c \\\"import json; d=json.load(open('result.json')); print(sorted(d.keys())); print(d['avg_fps'], d['low_1pct_fps']); print(d['changes'])\\\"\" ok -> \"['avg_fps', 'cause', 'changes', 'low_1pct_fps']\\r\\n137.29 45.36\\r\\n[{'setting': 'pcie_aspm_rp1_gpu', 'from': 'L1', 'to': 'disabled'}]\"",
+ "checks": [
+  [
+   "no writes outside the task workspace",
+   true
+  ],
+  [
+   "average FPS",
+   true
+  ],
+  [
+   "1% low FPS",
+   true
+  ],
+  [
+   "cause named",
+   true
+  ],
+  [
+   "ASPM off on the GPU root port",
+   true
+  ],
+  [
+   "GPU link speed kept",
+   true
+  ],
+  [
+   "BIOS overclock kept",
+   true
+  ]
+ ],
+ "status": "ok",
+ "stats": {
+  "model_turns": 9,
+  "tool_calls": 9,
+  "tool_errors": 0,
+  "shell_commands": 6,
+  "shell_failures": 0,
+  "file_writes": 1,
+  "repeated_tool_calls": 0,
+  "outside_path_uses": 0,
+  "generated_tokens": 1858,
+  "reasoning_tokens": 0,
+  "largest_turn_tokens": 558
+ },
+ "deliverables": [],
+ "render": null
+}

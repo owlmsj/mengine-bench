@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Balloon Pop '95</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;padding:0;height:100%;overflow:hidden;background:#000;
+    font-family:'Press Start 2P',monospace;user-select:none;-webkit-user-select:none;}
+  #wrap{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#223;}
+  canvas{image-rendering:pixelated;cursor:crosshair;box-shadow:0 0 0 4px #111,0 0 40px #000;}
+</style>
+</head>
+<body>
+<div id="wrap"><canvas id="c"></canvas></div>
+<script>
+"use strict";
+/* Balloon Pop '95 - single-file archery. Aim with mouse, hold to draw, release to shoot. */
+
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const W = 960, H = 540;
+cv.width = W; cv.height = H;
+
+/* ---------- audio (WebAudio, no assets) ---------- */
+let AC = null;
+function audio(){ if(!AC){ try{ AC = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } if(AC && AC.state==='suspended') AC.resume(); return AC; }
+function beep(freq, dur, type, vol, slideTo){
+  const ac = audio(); if(!ac) return;
+  const t = ac.currentTime;
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = type||'square';
+  o.frequency.setValueAtTime(freq, t);
+  if(slideTo) o.frequency.exponentialRampToValueAtTime(Math.max(30,slideTo), t+dur);
+  g.gain.setValueAtTime(vol||0.15, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+  o.connect(g); g.connect(ac.destination);
+  o.start(t); o.stop(t+dur+0.02);
+}
+function noise(dur, vol, hp){
+  const ac = audio(); if(!ac) return;
+  const t = ac.currentTime;
+  const len = Math.floor(ac.sampleRate*dur);
+  const buf = ac.createBuffer(1, len, ac.sampleRate);
+  const d = buf.getChannelData(0);
+  for(let i=0;i<len;i++) d[i] = (Math.random()*2-1)*(1-i/len);
+  const s = ac.createBufferSource(); s.buffer = buf;
+  const f = ac.createBiquadFilter(); f.type='highpass'; f.frequency.value = hp||800;
+  const g = ac.createGain(); g.gain.value = vol||0.2;
+  s.connect(f); f.connect(g); g.connect(ac.destination);
+  s.start(t);
+}
+const sfx = {
+  draw(){ beep(180,0.08,'sawtooth',0.05,320); },
+  shoot(){ noise(0.12,0.25,1500); beep(220,0.1,'square',0.12,60); },
+  pop(){ noise(0.09,0.3,600); beep(660,0.09,'square',0.18,1400); },
+  miss(){ beep(140,0.15,'triangle',0.1,80); },
+  win(){ [523,659,784,1046].forEach((f,i)=>setTimeout(()=>beep(f,0.18,'square',0.15),i*110)); },
+  lose(){ [392,330,262,196].forEach((f,i)=>setTimeout(()=>beep(f,0.22,'sawtooth',0.12),i*160)); }
+};
+
+/* ---------- state ---------- */
+const STATE = { MENU:0, PLAY:1, WIN:2, LOSE:3 };
+let state = STATE.MENU;
+let score = 0, shots = 0, maxShots = 15, target = 12;
+let balloons = [], arrows = [], parts = [], floats = [];
+let mouse = {x:W/2, y:H/3, down:false};
+let drawT = 0;           // 0..1 bow draw while holding
+let shake = 0;
+let time = 0;
+
+const archer = { x:110, y:H-70 };
+
+function rand(a,b){ return a + Math.random()*(b-a); }
+
+function spawnBalloon(){
+  const r = rand(20,30);
+  balloons.push({
+    x: rand(320, W-60),
+    y: H + r + 10,
+    r,
+    vy: -rand(40, 75),
+    sway: rand(0, Math.PI*2),
+    swaySpd: rand(0.8,1.6),
+    hue: [0,35,55,120,200,260,320][Math.floor(Math.random()*7)],
+    alive: true
+  });
+}
+
+function reset(){
+  score = 0; shots = 0;
+  balloons = []; arrows = []; parts = []; floats = [];
+  for(let i=0;i<5;i++){ spawnBalloon(); balloons[i].y = rand(80, H-140); }
+  state = STATE.PLAY;
+}
+
+/* ---------- input ---------- */
+function canvasPos(e){
+  const r = cv.getBoundingClientRect();
+  return { x:(e.clientX-r.left)*W/r.width, y:(e.clientY-r.top)*H/r.height };
+}
+cv.addEventListener('mousemove', e=>{ const p=canvasPos(e); mouse.x=p.x; mouse.y=p.y; });
+cv.addEventListener('mousedown', e=>{
+  audio();
+  const p = canvasPos(e); mouse.x=p.x; mouse.y=p.y;
+  if(state===STATE.PLAY){ mouse.down = true; }
+  else { reset(); }
+});
+window.addEventListener('mouseup', ()=>{
+  if(state===STATE.PLAY && mouse.down){
+    mouse.down = false;
+    shoot();
+  }
+  drawT = 0;
+});
+cv.addEventListener('contextmenu', e=>e.preventDefault());
+
+function shoot(){
+  if(drawT < 0.15) return; // too weak, no shot
+  const power = 260 + drawT*540;
+  const dx = mouse.x - archer.x, dy = mouse.y - archer.y;
+  const d = Math.hypot(dx,dy) || 1;
+  arrows.push({ x:archer.x+dx/d*24, y:archer.y-30+dy/d*24, vx:dx/d*power, vy:dy/d*power, dead:false });
+  shots++;
+  sfx.shoot();
+  shake = 4;
+}
+
+/* ---------- particles / floaters ---------- */
+function burst(x,y,hue,n){
+  for(let i=0;i<n;i++){
+    const a = Math.random()*Math.PI*2, sp = rand(60,260);
+    parts.push({x,y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:rand(0.3,0.7),t:0,hue,sz:rand(2,5)});
+  }
+}
+function floatText(x,y,txt,col){ floats.push({x,y,txt,col,t:0}); }
+
+/* ---------- update ---------- */
+function update(dt){
+  time += dt;
+  if(shake>0) shake = Math.max(0, shake - dt*30);
+
+  if(state===STATE.PLAY){
+    if(mouse.down) drawT = Math.min(1, drawT + dt*1.6);
+    // spawn
+    if(balloons.length < 8 && Math.random() < dt*1.2) spawnBalloon();
+  }
+
+  // balloons
+  for(const b of balloons){
+    if(!b.alive) continue;
+    b.y += b.vy*dt;
+    b.sway += b.swaySpd*dt;
+    b.x += Math.sin(b.sway)*14*dt;
+    if(b.y < -b.r-20){ b.alive=false; }
+  }
+  balloons = balloons.filter(b=>b.alive || b.y>-b.r-40);
+
+  // arrows
+  for(const a of arrows){
+    if(a.dead) continue;
+    a.vy += 140*dt; // light gravity (arc feels fair)
+    a.x += a.vx*dt; a.y += a.vy*dt;
+    if(a.x<-40||a.x>W+40||a.y>H+40||a.y<-60){ a.dead=true; sfx.miss(); }
+    for(const b of balloons){
+      if(!b.alive) continue;
+      const dx=a.x-b.x, dy=a.y-b.y;
+      if(dx*dx+dy*dy < (b.r+4)*(b.r+4)){
+        b.alive=false; a.dead=true;
+        score += 10;
+        sfx.pop();
+        burst(b.x,b.y,b.hue,18);
+        floatText(b.x,b.y,'+10','#fff');
+        shake = 5;
+        if(score >= target){ state=STATE.WIN; sfx.win(); }
+        break;
+      }
+    }
+  }
+  arrows = arrows.filter(a=>!a.dead);
+
+  // lose check: out of shots and no arrows in flight
+  if(state===STATE.PLAY && shots>=maxShots && arrows.length===0 && score<target){
+    state = STATE.LOSE; sfx.lose();
+  }
+
+  // particles
+  for(const p of parts){ p.t+=dt; p.x+=p.vx*dt; p.y+=p.vy*dt; p.vy+=200*dt; }
+  parts = parts.filter(p=>p.t<p.life);
+  for(const f of floats){ f.t+=dt; f.y-=40*dt; }
+  floats = floats.filter(f=>f.t<1);
+}
+
+/* ---------- draw ---------- */
+function drawSky(){
+  const g = ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,'#7ec8f7'); g.addColorStop(0.7,'#bfe6ff'); g.addColorStop(1,'#e8f7ff');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  // sun
+  ctx.fillStyle='#fff3b0'; ctx.beginPath(); ctx.arc(W-90,80,34,0,7); ctx.fill();
+  // clouds
+  ctx.fillStyle='rgba(255,255,255,0.9)';
+  for(let i=0;i<4;i++){
+    const cx = ((time*12 + i*260) % (W+200)) - 100;
+    const cy = 60 + i*40;
+    ctx.beginPath();
+    ctx.arc(cx,cy,18,0,7); ctx.arc(cx+22,cy-8,22,0,7); ctx.arc(cx+46,cy,18,0,7);
+    ctx.fill();
+  }
+  // hills
+  ctx.fillStyle='#79c267';
+  ctx.beginPath(); ctx.moveTo(0,H);
+  ctx.quadraticCurveTo(W*0.25,H-110,W*0.5,H-40);
+  ctx.quadraticCurveTo(W*0.75,H-130,W,H-50);
+  ctx.lineTo(W,H); ctx.fill();
+  ctx.fillStyle='#5aa84e';
+  ctx.fillRect(0,H-46,W,46);
+}
+
+function drawBalloon(b){
+  const x=b.x, y=b.y, r=b.r;
+  // string
+  ctx.strokeStyle='rgba(0,0,0,0.35)'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.moveTo(x,y+r);
+  ctx.quadraticCurveTo(x+Math.sin(b.sway*2)*6, y+r+16, x, y+r+28);
+  ctx.stroke();
+  // body
+  const g = ctx.createRadialGradient(x-r*0.35,y-r*0.4,r*0.2,x,y,r);
+  g.addColorStop(0,`hsl(${b.hue},90%,80%)`);
+  g.addColorStop(1,`hsl(${b.hue},85%,52%)`);
+  ctx.fillStyle=g;
+  ctx.beginPath(); ctx.ellipse(x,y,r*0.88,r,0,0,7); ctx.fill();
+  // knot
+  ctx.fillStyle=`hsl(${b.hue},85%,45%)`;
+  ctx.beginPath(); ctx.moveTo(x-5,y+r-2); ctx.lineTo(x+5,y+r-2); ctx.lineTo(x,y+r+8); ctx.fill();
+  // shine
+  ctx.fillStyle='rgba(255,255,255,0.55)';
+  ctx.beginPath(); ctx.ellipse(x-r*0.3,y-r*0.35,r*0.22,r*0.32,-0.5,0,7); ctx.fill();
+}
+
+function drawArcher(){
+  const a = archer;
+  const ang = Math.atan2(mouse.y-(a.y-30), mouse.x-a.x);
+  // body
+  ctx.fillStyle='#6b4226';
+  ctx.fillRect(a.x-8,a.y-24,16,34); // torso
+  ctx.fillStyle='#f0c8a0';
+  ctx.beginPath(); ctx.arc(a.x,a.y-34,10,0,7); ctx.fill(); // head
+  ctx.fillStyle='#3a2a1a';
+  ctx.fillRect(a.x-10,a.y-40,20,6); // hat
+  // legs
+  ctx.fillStyle='#4a3520';
+  ctx.fillRect(a.x-8,a.y+8,7,14); ctx.fillRect(a.x+1,a.y+8,7,14);
+  // bow
+  ctx.save();
+  ctx.translate(a.x, a.y-30);
+  ctx.rotate(ang);
+  const pull = drawT*18;
+  ctx.strokeStyle='#8a5a2b'; ctx.lineWidth=4;
+  ctx.beginPath(); ctx.arc(0,0,26,-1.1+pull*0.02,1.1-pull*0.02); ctx.stroke();
+  // string
+  ctx.strokeStyle='#eee'; ctx.lineWidth=1.5;
+  const bx = 26*Math.cos(1.1), by=26*Math.sin(1.1);
+  ctx.beginPath(); ctx.moveTo(bx,-by); ctx.lineTo(-pull,0); ctx.lineTo(bx,by); ctx.stroke();
+  // nocked arrow
+  if(mouse.down && state===STATE.PLAY){
+    ctx.strokeStyle='#333'; ctx.lineWidth=3;
+    ctx.beginPath(); ctx.moveTo(-pull,0); ctx.lineTo(30,0); ctx.stroke();
+    ctx.fillStyle='#ccc';
+    ctx.beginPath(); ctx.moveTo(30,0); ctx.lineTo(24,-4); ctx.lineTo(24,4); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawArrow(a){
+  const ang = Math.atan2(a.vy,a.vx);
+  ctx.save(); ctx.translate(a.x,a.y); ctx.rotate(ang);
+  ctx.strokeStyle='#333'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.moveTo(-16,0); ctx.lineTo(10,0); ctx.stroke();
+  ctx.fillStyle='#ccc';
+  ctx.beginPath(); ctx.moveTo(14,0); ctx.lineTo(7,-4); ctx.lineTo(7,4); ctx.fill();
+  ctx.fillStyle='#c0392b';
+  ctx.beginPath(); ctx.moveTo(-16,0); ctx.lineTo(-12,-3); ctx.lineTo(-12,3); ctx.fill();
+  ctx.restore();
+}
+
+function drawHUD(){
+  ctx.font='14px "Press Start 2P", monospace';
+  ctx.textBaseline='top';
+  // panel
+  ctx.fillStyle='rgba(0,0,0,0.45)';
+  ctx.fillRect(12,12,250,58);
+  ctx.fillStyle='#fff';
+  ctx.fillText('SCORE '+score, 24, 22);
+  ctx.fillText('SHOTS '+(maxShots-shots), 24, 46);
+  // power bar
+  if(state===STATE.PLAY){
+    ctx.fillStyle='rgba(0,0,0,0.45)';
+    ctx.fillRect(W-172,12,160,26);
+    ctx.fillStyle='#444'; ctx.fillRect(W-164,20,144,10);
+    const pw = 144*drawT;
+    const pg = ctx.createLinearGradient(W-164,0,W-164+144,0);
+    pg.addColorStop(0,'#5ad25a'); pg.addColorStop(0.6,'#f5d33d'); pg.addColorStop(1,'#e74c3c');
+    ctx.fillStyle=pg; ctx.fillRect(W-164,20,pw,10);
+    ctx.fillStyle='#fff'; ctx.font='10px "Press Start 2P", monospace';
+    ctx.fillText('POWER', W-164, 34);
+  }
+  // target hint
+  ctx.fillStyle='rgba(0,0,0,0.45)';
+  ctx.fillRect(W/2-110,12,220,26);
+  ctx.fillStyle='#ffd76a'; ctx.font='12px "Press Start 2P", monospace';
+  ctx.textAlign='center';
+  ctx.fillText('POP '+target+'  ( '+score+'/'+target+' )', W/2, 18);
+  ctx.textAlign='left';
+}
+
+function panel(w,h){
+  ctx.fillStyle='rgba(0,0,0,0.6)';
+  ctx.fillRect(W/2-w/2, H/2-h/2, w, h);
+  ctx.strokeStyle='#ffd76a'; ctx.lineWidth=3;
+  ctx.strokeRect(W/2-w/2, H/2-h/2, w, h);
+}
+function centerText(txt,y,size,col){
+  ctx.fillStyle=col||'#fff';
+  ctx.font=size+'px "Press Start 2P", monospace';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(txt, W/2, y);
+  ctx.textAlign='left';
+}
+
+function draw(){
+  ctx.save();
+  if(shake>0) ctx.translate(rand(-shake,shake), rand(-shake,shake));
+  drawSky();
+  for(const b of balloons) if(b.alive) drawBalloon(b);
+  for(const a of arrows) if(!a.dead) drawArrow(a);
+  drawArcher();
+  // particles
+  for(const p of parts){
+    ctx.globalAlpha = 1 - p.t/p.life;
+    ctx.fillStyle=`hsl(${p.hue},90%,60%)`;
+    ctx.fillRect(p.x-p.sz/2,p.y-p.sz/2,p.sz,p.sz);
+  }
+  ctx.globalAlpha=1;
+  for(const f of floats){
+    ctx.globalAlpha = 1-f.t;
+    centerText(f.txt, f.y, 12, f.col);
+  }
+  ctx.globalAlpha=1;
+  ctx.restore();
+
+  drawHUD();
+
+  if(state===STATE.MENU){
+    panel(520,240);
+    centerText('BALLOON POP \'95', H/2-70, 26, '#ffd76a');
+    centerText('AIM WITH MOUSE', H/2-20, 13);
+    centerText('HOLD TO DRAW, RELEASE TO SHOOT', H/2+8, 11);
+    centerText('POP '+target+' BALLOONS BEFORE YOU RUN OUT OF ARROWS', H/2+36, 10, '#9fd8ff');
+    centerText('CLICK TO START', H/2+80, 14, '#5ad25a');
+  } else if(state===STATE.WIN){
+    panel(460,200);
+    centerText('LEVEL CLEAR!', H/2-40, 24, '#5ad25a');
+    centerText('SCORE '+score+'  ARROWS LEFT '+(maxShots-shots), H/2+4, 12);
+    centerText('CLICK TO PLAY AGAIN', H/2+60, 13, '#ffd76a');
+  } else if(state===STATE.LOSE){
+    panel(460,200);
+    centerText('OUT OF ARROWS', H/2-40, 22, '#e74c3c');
+    centerText('SCORE '+score+' / '+target, H/2+4, 12);
+    centerText('CLICK TO RETRY', H/2+60, 13, '#ffd76a');
+  }
+}
+
+/* ---------- loop ---------- */
+let last = performance.now();
+function frame(now){
+  const dt = Math.min(0.033, (now-last)/1000); last = now;
+  update(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
