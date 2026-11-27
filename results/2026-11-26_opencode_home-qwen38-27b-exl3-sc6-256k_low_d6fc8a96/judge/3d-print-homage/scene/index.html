@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Great Wave off Kanagawa — low poly 3D</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #e8dcc0; }
+  canvas { display: block; }
+  #label {
+    position: fixed; left: 16px; bottom: 14px; z-index: 2;
+    font-family: Georgia, 'Times New Roman', serif;
+    color: #1b3a6b; font-size: 14px; letter-spacing: .04em;
+    background: rgba(232, 220, 192, .78); padding: 6px 10px; border-radius: 4px;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<div id="label">The Great Wave off Kanagawa · after Hokusai · low poly rebuild</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+// ---- palette taken from the print ----
+const C = {
+  deep:  0x142c56,   // darkest prussian blue (wave body)
+  mid:   0x2a568e,   // mid blue
+  pale:  0xa9c9de,   // pale blue foam shading
+  foam:  0xf3eee1,   // foam white
+  paper: 0xe8dcc0,   // cream paper sky
+  wood:  0xc9a06a,   // boat hull
+  woodDk:0x8a6a42,
+  snow:  0xf7f3ea,
+  rock:  0x64748a,
+};
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(C.paper);
+scene.fog = new THREE.Fog(C.paper, 80, 220);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 600);
+camera.position.set(0, 8, 55);
+camera.lookAt(0, 6, 0);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+scene.add(new THREE.HemisphereLight(0xf6eeda, 0x2a568e, 0.95));
+const key = new THREE.DirectionalLight(0xfff6e0, 1.15);
+key.position.set(-20, 34, 26);
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xbcd4e8, 0.3);
+fill.position.set(24, 12, -12);
+scene.add(fill);
+
+const flat = (color) => new THREE.MeshLambertMaterial({ color, flatShading: true, side: THREE.DoubleSide });
+
+// =====================================================================
+// MOUNT FUJI — snow-capped, small, distant, right of center, raised so
+// it shows clearly in the gap between the waves
+// =====================================================================
+const fuji = new THREE.Group();
+{
+  const body = new THREE.Mesh(new THREE.ConeGeometry(12, 15, 8, 1), flat(C.rock));
+  body.position.y = 7.5;
+  fuji.add(body);
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(5.4, 6.0, 8, 1), flat(C.snow));
+  cap.position.y = 12.0;
+  fuji.add(cap);
+}
+fuji.position.set(16, 2, -46);
+scene.add(fuji);
+
+// cream paper sky wash: a large pale plane far behind, so the scene reads
+// on the print's paper ground rather than a flat color
+const sky = new THREE.Mesh(
+  new THREE.PlaneGeometry(400, 200),
+  new THREE.MeshBasicMaterial({ color: C.paper, fog: false })
+);
+sky.position.set(0, 30, -120);
+scene.add(sky);
+
+// =====================================================================
+// WAVE BUILDER — a curling wave built as an extruded profile:
+// rising back, overhanging hooked crest, claw-like white foam along
+// the lip and falling edge (the print's signature)
+// =====================================================================
+function waveProfile(curl) {
+  // 2D outline of the wave cross-section (x = horizontal, y = height).
+  // Starts at the trough, rises the back face, hooks over the crest,
+  // falls the front face back to the water.
+  const pts = [];
+  const N = 22;
+  // back rising face: from (0,0) up to crest top
+  for (let i = 0; i <= N; i++) {
+    const t = i / N;
+    const x = t * 7.0 * curl;
+    const y = Math.sin(t * Math.PI * 0.5) * 9.5 * curl;
+    pts.push(new THREE.Vector2(x, y));
+  }
+  // crest hook: a strong overhanging lip that curls forward and down,
+  // like the print's claw
+  const hook = 8;
+  for (let i = 1; i <= hook; i++) {
+    const t = i / hook;
+    const a = Math.PI * 0.75 * t;              // 135deg over the top and forward
+    const x = 7.0 * curl + Math.sin(a) * 3.4 * curl;
+    const y = 9.5 * curl - (1 - Math.cos(a)) * 3.0 * curl;
+    pts.push(new THREE.Vector2(x, y));
+  }
+  // front falling face: down to the water
+  for (let i = 1; i <= N; i++) {
+    const t = i / N;
+    const x = 7.0 * curl + 3.4 * curl - t * 3.6 * curl;
+    const y = (9.5 * curl - 3.0 * curl) * (1 - t);
+    pts.push(new THREE.Vector2(x, y));
+  }
+  // close along the water line back to the start
+  pts.push(new THREE.Vector2(0, 0));
+  return pts;
+}
+
+function makeWave({ x, z, scale = 1, rotY = 0, curl = 1.0, seed = 1, depth = 6 }) {
+  const g = new THREE.Group();
+  const bodyMat = flat(C.deep);
+  const foamMat = flat(C.foam);
+  const paleMat = flat(C.pale);
+  const rng = (s => () => (s = (s * 9301 + 49297) % 233280) / 233280)(seed * 131 + 7);
+
+  // Wave body: extrude the profile
+  const shape = new THREE.Shape(waveProfile(curl));
+  const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 4 });
+  geo.translate(0, 0, -depth / 2);
+  const body = new THREE.Mesh(geo, bodyMat);
+  g.add(body);
+
+  // A lighter mid-blue inner face to suggest the wave's lit side
+  const inner = new THREE.Mesh(
+    new THREE.ExtrudeGeometry(new THREE.Shape(waveProfile(curl * 0.82)), { depth: depth * 0.9, bevelEnabled: false, curveSegments: 4 }),
+    flat(C.mid)
+  );
+  inner.geometry.translate(0, 0, -depth * 0.45);
+  inner.position.set(0.4 * curl, 0.2, 0);
+  g.add(inner);
+
+  // Claw foam: white icosahedron "claws" along the crest lip and falling edge
+  const crestX = 7.0 * curl, crestY = 9.5 * curl;
+  const claws = 18;
+  for (let i = 0; i < claws; i++) {
+    const t = i / (claws - 1);
+    // follow the crest hook then down the front face
+    let fx, fy;
+    if (t < 0.4) {
+      const u = t / 0.4;
+      fx = crestX - 1.5 * curl + u * 4.0 * curl;
+      fy = crestY - u * 1.5 * curl;
+    } else {
+      const u = (t - 0.4) / 0.6;
+      fx = crestX + 2.5 * curl - u * 3.0 * curl;
+      fy = crestY - 1.5 * curl - u * 6.5 * curl;
+    }
+    const s = 0.5 + rng() * 0.95;
+    const f = new THREE.Mesh(new THREE.IcosahedronGeometry(s, 0), foamMat);
+    f.position.set(fx, fy, (rng() - 0.5) * depth * 0.8);
+    g.add(f);
+    if (i % 2 === 0) {
+      const p = new THREE.Mesh(new THREE.IcosahedronGeometry(s * 0.6, 0), foamMat);
+      p.position.set(fx - 0.6, fy - 1.3, (rng() - 0.5) * depth * 0.7);
+      g.add(p);
+    }
+    if (i % 3 === 0) {
+      const q = new THREE.Mesh(new THREE.IcosahedronGeometry(s * 0.5, 0), paleMat);
+      q.position.set(fx + 0.5, fy - 0.7, (rng() - 0.5) * depth * 0.8);
+      g.add(q);
+    }
+  }
+  // pale-blue foam band under the crest
+  for (let i = 0; i < 8; i++) {
+    const t = i / 7;
+    const f = new THREE.Mesh(new THREE.IcosahedronGeometry(0.8 + rng() * 0.6, 0), paleMat);
+    f.position.set(crestX - 1 + t * 4.5 * curl, crestY - 2 - t * 4.5 * curl, (rng() - 0.5) * depth * 0.8);
+    g.add(f);
+  }
+  // foam at the breaking foot
+  for (let i = 0; i < 9; i++) {
+    const f = new THREE.Mesh(new THREE.IcosahedronGeometry(0.6 + rng() * 0.7, 0), foamMat);
+    f.position.set(-1 + rng() * 6, 0.5 + rng() * 1.4, (rng() - 0.5) * depth * 0.9);
+    g.add(f);
+  }
+
+  g.position.set(x, 0, z);
+  g.rotation.y = rotY;
+  g.scale.setScalar(scale);
+  scene.add(g);
+  return g;
+}
+
+// The great wave: big, left, curling toward center (the print's hero)
+const greatWave = makeWave({ x: -16, z: -2, scale: 1.6, curl: 1.15, seed: 3, depth: 8 });
+// Secondary wave on the right, facing left
+const rightWave = makeWave({ x: 22, z: -14, scale: 1.1, rotY: Math.PI, curl: 0.9, seed: 5, depth: 6 });
+// Foreground rolling wave, bottom center
+const frontWave = makeWave({ x: 2, z: 16, scale: 1.2, rotY: Math.PI * 0.1, curl: 0.8, seed: 8, depth: 7 });
+
+// =====================================================================
+// BOATS — three low funaya with crouching crews, in the troughs
+// =====================================================================
+function makeBoat(x, y, z, rotY, scale = 1) {
+  const b = new THREE.Group();
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(7, 1.1, 2.2), flat(C.wood));
+  b.add(hull);
+  const bow = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.4, 2.0), flat(C.woodDk));
+  bow.position.set(3.7, 0.55, 0); bow.rotation.z = 0.7; b.add(bow);
+  const stern = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.4, 2.0), flat(C.woodDk));
+  stern.position.set(-3.7, 0.55, 0); stern.rotation.z = -0.7; b.add(stern);
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(7.3, 0.25, 2.4), flat(C.woodDk));
+  rail.position.y = 0.62; b.add(rail);
+  const crewMat = flat(0x26262e);
+  const headMat = flat(C.foam);
+  for (let i = 0; i < 5; i++) {
+    const cx = -2.6 + i * 1.3;
+    const body = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.9, 0.7), crewMat);
+    body.position.set(cx, 1.0, 0); b.add(body);
+    const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.3, 0), headMat);
+    head.position.set(cx, 1.75, 0); b.add(head);
+  }
+  b.position.set(x, y, z);
+  b.rotation.y = rotY;
+  b.scale.setScalar(scale);
+  scene.add(b);
+  return b;
+}
+
+const boat1 = makeBoat(-8, 1.8, 8, 0.5, 1.0);     // left, under the great wave
+const boat2 = makeBoat(4, 1.4, 12, -0.3, 0.95);   // center-front
+const boat3 = makeBoat(17, 1.6, -4, 2.6, 0.9);    // right, in the right wave trough
+
+// =====================================================================
+// GENTLE MOTION — waves sway and bob, boats rock with the swell
+// =====================================================================
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+
+  greatWave.position.y = Math.sin(t * 0.6) * 0.4;
+  greatWave.rotation.z = Math.sin(t * 0.5) * 0.02;
+  rightWave.position.y = Math.sin(t * 0.6 + 1.3) * 0.32;
+  rightWave.rotation.z = Math.sin(t * 0.5 + 1.3) * 0.02;
+  frontWave.position.y = Math.sin(t * 0.7 + 2.1) * 0.28;
+
+  boat1.position.y = 1.8 + Math.sin(t * 0.9) * 0.32;
+  boat1.rotation.z = Math.sin(t * 0.9) * 0.09;
+  boat1.rotation.x = Math.cos(t * 0.7) * 0.05;
+  boat2.position.y = 1.4 + Math.sin(t * 0.9 + 1.1) * 0.32;
+  boat2.rotation.z = Math.sin(t * 0.9 + 1.1) * 0.09;
+  boat3.position.y = 1.6 + Math.sin(t * 0.9 + 2.2) * 0.32;
+  boat3.rotation.z = Math.sin(t * 0.9 + 2.2) * 0.09;
+
+  renderer.render(scene, camera);
+}
+animate();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
