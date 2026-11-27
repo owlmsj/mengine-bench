@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Great Wave off Kanagawa - low poly</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#e8dcc0}
+  canvas{display:block}
+  #cap{position:fixed;left:14px;bottom:10px;font:12px/1.4 Georgia,serif;color:#22304a;opacity:.75;pointer-events:none}
+</style>
+</head>
+<body>
+<div id="cap">The Great Wave off Kanagawa &mdash; low-poly rebuild</div>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js';
+
+// ---- Palette sampled from the print ----
+const C = {
+  sky:    0xe9dcbf, cloud: 0xf2ead4,
+  deep:   0x10365a, blue:  0x1d5c8f, blueLt: 0x417fa8,
+  foam:   0xf7f3e6,
+  hull:   0xc96a3a, hullDk: 0x8a3f22, deck: 0xe8d9b0,
+  fuji:   0x2a4a6b, snow: 0xf5f1e4, mist: 0xcfc9b6,
+};
+const flat = (c,o={}) => new THREE.MeshLambertMaterial({color:c, flatShading:true, ...o});
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(C.sky);
+scene.fog = new THREE.Fog(C.sky, 70, 170);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, .1, 400);
+camera.position.set(0, 8, 36);
+camera.lookAt(2, 4, 0);
+
+scene.add(new THREE.HemisphereLight(0xf2e8d0, C.deep, 1.0));
+const sun = new THREE.DirectionalLight(0xfff4dc, .75);
+sun.position.set(-20, 28, 20); scene.add(sun);
+
+// =====================================================================
+// THE GREAT WAVE - a curling wall with a foam claw at the crest.
+// The wall is a bent ribbon (curved plane) so it reads as a breaking
+// wave, not a fan of spikes. Foam claws hang from the curling lip.
+// =====================================================================
+function buildGreatWave(){
+  const g = new THREE.Group();
+  // curved wall: profile in X-Y, a quarter-arc that rises then curls over
+  const pts = [];
+  const N = 26;
+  for(let i=0;i<N;i++){
+    const t = i/(N-1);
+    // start low-left, rise steeply, then curl right and down at the lip
+    const x = -18 + t*26;
+    let y;
+    if(t < 0.7){ y = 1 + (t/0.7)*15; }            // rising face
+    else { const u=(t-0.7)/0.3; y = 16 - u*u*10; } // curling over
+    pts.push(new THREE.Vector2(x,y));
+  }
+  // build a ribbon (two rows of vertices) with thickness
+  const shape = new THREE.Shape();
+  shape.moveTo(pts[0].x, pts[0].y-3);
+  for(const p of pts) shape.lineTo(p.x, p.y);
+  for(let i=pts.length-1;i>=0;i--) shape.lineTo(pts[i].x, pts[i].y-3);
+  shape.closePath();
+  const wall = new THREE.Mesh(new THREE.ExtrudeGeometry(shape,{depth:5,bevelEnabled:false}), flat(C.blue));
+  wall.position.z = -2.5;
+  g.add(wall);
+  // darker base
+  const base = new THREE.Mesh(new THREE.ExtrudeGeometry(shape,{depth:5,bevelEnabled:false}), flat(C.deep));
+  base.scale.set(1,0.55,1); base.position.set(0,-2.2,0); base.position.z=-2.5;
+  g.add(base);
+  // foam lip: white band along the top edge of the wall
+  const lipPts = pts.map(p=>new THREE.Vector3(p.x, p.y, 0));
+  const lipGeo = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(lipPts), 40, 0.9, 5);
+  g.add(new THREE.Mesh(lipGeo, flat(C.foam)));
+  // foam claws: cones hanging from the lip, pointing down-outward
+  for(let i=0;i<12;i++){
+    const t = 0.35 + i/12*0.6;
+    const idx = Math.min(N-1, Math.floor(t*N));
+    const p = pts[idx];
+    const claw = new THREE.Mesh(new THREE.ConeGeometry(0.55, 2.4, 5), flat(C.foam));
+    claw.position.set(p.x+0.4, p.y-1.2, (i%2?1.5:-1.5));
+    claw.rotation.z = 0.5 + t*0.8;
+    g.add(claw);
+  }
+  // scattered foam dots on the face
+  for(let i=0;i<26;i++){
+    const t=Math.random();
+    const idx=Math.floor(t*N);
+    const d=new THREE.Mesh(new THREE.SphereGeometry(0.28,5,4), flat(C.foam));
+    d.position.set(pts[idx].x+ (Math.random()-0.5)*3, pts[idx].y-2-Math.random()*3, (Math.random()-0.5)*4);
+    g.add(d);
+  }
+  return g;
+}
+const greatWave = buildGreatWave();
+greatWave.position.set(-2,0,0);
+scene.add(greatWave);
+
+// =====================================================================
+// FOREGROUND SWELLS - rounded rolling waves (spheres squashed), not cones
+// =====================================================================
+const swells=[];
+function buildSwell(x,z,s,c){
+  const g=new THREE.Group();
+  const body=new THREE.Mesh(new THREE.SphereGeometry(5*s,7,5), flat(c));
+  body.scale.set(1.4,0.7,0.8); g.add(body);
+  const lip=new THREE.Mesh(new THREE.SphereGeometry(3.4*s,7,5), flat(C.foam));
+  lip.position.y=2.6*s; lip.scale.set(1.2,0.5,0.7); g.add(lip);
+  g.position.set(x,0,z); scene.add(g);
+  swells.push({g,phase:Math.random()*6.28});
+}
+buildSwell(-16,7,1.0,C.blue);
+buildSwell(-4,10,1.3,C.blueLt);
+buildSwell(9,8,1.15,C.blue);
+buildSwell(20,11,0.9,C.deep);
+buildSwell(-25,11,0.8,C.blueLt);
+
+// =====================================================================
+// MOUNT FUJI - right of center, snow cap, in front of the mist band
+// =====================================================================
+const fuji=new THREE.Group();
+const fb=new THREE.Mesh(new THREE.ConeGeometry(8,11,8), flat(C.fuji)); fb.position.y=5.5; fuji.add(fb);
+const cap=new THREE.Mesh(new THREE.ConeGeometry(3.6,4.6,8), flat(C.snow)); cap.position.y=8.7; fuji.add(cap);
+// zig-zag snow edge
+for(let i=0;i<8;i++){const a=i/8*Math.PI*2;
+  const t=new THREE.Mesh(new THREE.ConeGeometry(1.0,1.4,4), flat(C.snow));
+  t.position.set(Math.cos(a)*3.0,7.0,Math.sin(a)*3.0); fuji.add(t);}
+fuji.position.set(15,-1,-16);
+scene.add(fuji);
+// mist band behind Fuji base (thin, low, not a floating bar)
+const mist=new THREE.Mesh(new THREE.BoxGeometry(46,2.2,1.5), flat(C.mist,{transparent:true,opacity:.5}));
+mist.position.set(14,0.5,-14); scene.add(mist);
+
+// =====================================================================
+// BOATS - three, low poly, with crew
+// =====================================================================
+function buildBoat(hue,len){
+  const b=new THREE.Group();
+  b.add(new THREE.Mesh(new THREE.BoxGeometry(len,1.0,1.5), flat(hue)));
+  const bow=new THREE.Mesh(new THREE.ConeGeometry(0.75,1.5,4), flat(hue));
+  bow.rotation.z=-Math.PI/2; bow.position.x=len/2+0.7; bow.scale.y=0.5; b.add(bow);
+  const stern=bow.clone(); stern.rotation.z=Math.PI/2; stern.position.x=-len/2-0.7; b.add(stern);
+  const deck=new THREE.Mesh(new THREE.BoxGeometry(len*0.88,0.12,1.1), flat(C.deck)); deck.position.y=0.55; b.add(deck);
+  for(let i=0;i<6;i++){const f=new THREE.Mesh(new THREE.SphereGeometry(0.2,5,4), flat(0x22304a));
+    f.position.set(-len/2+0.7+i*(len-1.4)/5, 0.8, (i%2?0.22:-0.22)); b.add(f);}
+  return b;
+}
+const boats=[];
+function addBoat(x,z,rot,s,hue){
+  const b=buildBoat(hue,5*s); b.position.set(x,0,z); b.rotation.y=rot; scene.add(b);
+  boats.push({g:b,phase:Math.random()*6.28});
+}
+addBoat(-14,13,0.5,1.0,C.hull);
+addBoat(0,15,-0.2,1.2,C.hull);
+addBoat(15,13,2.6,1.0,C.hullDk);
+
+// =====================================================================
+// CLOUDS - soft beige puffs upper right
+// =====================================================================
+const clouds=[];
+function buildCloud(x,y,z,s){
+  const c=new THREE.Group();
+  for(let i=0;i<5;i++){
+    const p=new THREE.Mesh(new THREE.SphereGeometry(1.3+Math.random()*1.1,6,5), flat(C.cloud));
+    p.position.set(i*1.5-3, Math.random()*0.7, Math.random()*0.7); p.scale.y=0.55; c.add(p);
+  }
+  c.position.set(x,y,z); c.scale.setScalar(s); scene.add(c);
+  clouds.push({g:c,x,speed:0.12+Math.random()*0.1});
+}
+buildCloud(18,17,-22,1.4);
+buildCloud(26,14,-24,1.1);
+buildCloud(10,20,-26,1.2);
+
+// =====================================================================
+// ANIMATION
+// =====================================================================
+const clock=new THREE.Clock();
+function animate(){
+  requestAnimationFrame(animate);
+  const t=clock.getElapsedTime();
+  greatWave.position.y=Math.sin(t*0.6)*0.5;
+  greatWave.rotation.z=Math.sin(t*0.4)*0.02;
+  for(const s of swells){ s.g.position.y=Math.sin(t*0.8+s.phase)*0.4; s.g.rotation.z=Math.sin(t*0.6+s.phase)*0.04; }
+  for(const b of boats){ b.g.position.y=Math.sin(t*1.1+b.phase)*0.35; b.g.rotation.z=Math.sin(t*0.9+b.phase)*0.07; b.g.rotation.x=Math.cos(t*0.7+b.phase)*0.04; }
+  for(const c of clouds){ c.g.position.x=c.x+Math.sin(t*c.speed)*1.5; }
+  mist.material.opacity=0.45+Math.sin(t*0.5)*0.08;
+  renderer.render(scene,camera);
+}
+animate();
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+</script>
+</body>
+</html>
